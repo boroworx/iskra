@@ -7,7 +7,9 @@
  * @module ProjectionSnapshotQuery
  */
 import type {
+  AgentId,
   AgentSessionImportSource,
+  ChannelId,
   ApprovalRequestId,
   CheckpointRef,
   MessageId,
@@ -16,6 +18,8 @@ import type {
   OrchestrationProject,
   OrchestrationProjectShell,
   OrchestrationReadModel,
+  OrchestrationAgentShell,
+  OrchestrationChannelShell,
   OrchestrationRun,
   OrchestrationSearchThreadsInput,
   OrchestrationSearchThreadsResult,
@@ -217,6 +221,16 @@ export interface ProjectionSnapshotQueryShape {
   readonly getRunByThreadId: (
     threadId: ThreadId,
   ) => Effect.Effect<Option.Option<OrchestrationRun>, ProjectionRepositoryError>;
+
+  /** Read one active agent as clients list it, presence included. */
+  readonly getAgentShellById: (
+    agentId: AgentId,
+  ) => Effect.Effect<Option.Option<OrchestrationAgentShell>, ProjectionRepositoryError>;
+
+  /** Read one active channel as clients list it. */
+  readonly getChannelShellById: (
+    channelId: ChannelId,
+  ) => Effect.Effect<Option.Option<OrchestrationChannelShell>, ProjectionRepositoryError>;
 
   /** Read the active thread and session facts used to ingest provider events. */
   readonly getThreadRuntimeContext: (

@@ -115,6 +115,7 @@ async function createOrchestrationSystem(
     engine,
     readModel: () => runtime.runPromise(snapshotQuery.getSnapshot()),
     commandReadModel: () => runtime.runPromise(snapshotQuery.getCommandReadModel()),
+    shellSnapshot: () => runtime.runPromise(snapshotQuery.getShellSnapshot()),
     channelRepository: () => runtime.runPromise(Effect.service(ProjectionChannelRepository)),
     readThread: (threadId: ThreadId) =>
       runtime.runPromise(snapshotQuery.getThreadDetailById(threadId)),
@@ -430,6 +431,8 @@ describe("OrchestrationEngine", () => {
         Layer.succeed(ProjectionSnapshotQuery, {
           getUserInputActivity: () => Effect.die("unused"),
           getRunByThreadId: () => Effect.die("unused"),
+          getAgentShellById: () => Effect.die("unused"),
+          getChannelShellById: () => Effect.die("unused"),
           getCommandReadModel: () => Effect.succeed(commandReadModel),
           getSnapshot: () =>
             Effect.sync(() => {
@@ -1003,6 +1006,157 @@ describe("OrchestrationEngine", () => {
       expect(bodies(await system.run(channels.listWakeHistory({ channelId })))).toEqual([
         "message 5",
       ]);
+    } finally {
+      await system.dispose();
+    }
+  });
+
+  it("lists agents and channels in the shell with presence from their live runs", async () => {
+    const system = await createOrchestrationSystem();
+    const projectId = asProjectId("presence-project");
+    const agentId = AgentId.make("agent-presence");
+    const channelId = ChannelId.make("channel-presence");
+    const threadId = ThreadId.make("run-presence");
+    const modelSelection = {
+      instanceId: ProviderInstanceId.make("claudeAgent"),
+      model: "claude-haiku-4-5",
+    };
+    const presence = async () =>
+      (await system.shellSnapshot()).agents?.find((agent) => agent.id === agentId)?.presence;
+    const setSession = (status: "running" | "stopped") =>
+      system.run(
+        system.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.make(`cmd-presence-session-${status}`),
+          threadId,
+          session: {
+            threadId,
+            status,
+            providerName: "claudeAgent",
+            runtimeMode: "approval-required",
+            activeTurnId: status === "running" ? TurnId.make("turn-presence") : null,
+            lastError: null,
+            updatedAt: now(),
+          },
+          createdAt: now(),
+        }),
+      );
+    try {
+      await system.run(
+        system.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.make("cmd-presence-project"),
+          projectId,
+          title: "Presence",
+          workspaceRoot: "/tmp/presence-project",
+          createdAt: now(),
+        }),
+      );
+      await system.run(
+        system.engine.dispatch({
+          type: "agent.create",
+          commandId: CommandId.make("cmd-presence-agent"),
+          agentId,
+          projectId,
+          name: "backend",
+          roleTags: [],
+          rolePrompt: "",
+          modelSelection,
+          capabilities: ["read"],
+          createdAt: now(),
+        }),
+      );
+      await system.run(
+        system.engine.dispatch({
+          type: "channel.create",
+          commandId: CommandId.make("cmd-presence-channel"),
+          channelId,
+          projectId,
+          kind: "channel",
+          name: "general",
+          memberAgentIds: [agentId],
+          createdAt: now(),
+        }),
+      );
+
+      expect((await system.shellSnapshot()).channels).toMatchObject([
+        { id: channelId, name: "general", memberAgentIds: [agentId] },
+      ]);
+      expect(await presence()).toBe("idle");
+
+      await system.run(
+        system.engine.dispatch({
+          type: "channel.run.start",
+          commandId: CommandId.make("cmd-presence-run"),
+          threadId,
+          channelId,
+          agentId,
+          triggerMessageId: asMessageId("presence-trigger"),
+          capabilities: ["read"],
+          context: {
+            agent: { id: agentId, name: "backend", rolePrompt: "" },
+            channel: { id: channelId, kind: "channel", name: "general", topic: "" },
+            pinnedSpec: "",
+            wakeDepth: 30,
+            history: [],
+            trigger: {
+              messageId: asMessageId("presence-trigger"),
+              authorKind: "human",
+              authorName: "user",
+              body: "hi",
+              createdAt: now(),
+            },
+          },
+          rendered: { systemPrompt: "", firstMessage: "hi" },
+          startedAt: now(),
+        }),
+      );
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make("cmd-presence-thread"),
+          threadId,
+          projectId,
+          title: "@backend in #general",
+          modelSelection,
+          runtimeMode: "approval-required",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          branch: null,
+          worktreePath: null,
+          createdAt: now(),
+        }),
+      );
+      await setSession("running");
+      expect(await presence()).toBe("running");
+
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.activity.append",
+          commandId: CommandId.make("cmd-presence-question"),
+          threadId,
+          createdAt: now(),
+          activity: {
+            id: EventId.make("presence-question"),
+            kind: "user-input.requested",
+            summary: "User input requested",
+            tone: "info",
+            turnId: TurnId.make("turn-presence"),
+            createdAt: now(),
+            payload: {
+              requestId: ApprovalRequestId.make("presence-request"),
+              responseMode: "message",
+              questions: [
+                { id: "0", header: "Question", question: "Which API style?", options: [] },
+              ],
+            },
+          },
+        }),
+      );
+      expect(await presence()).toBe("blocked");
+
+      // The run ends with its session, even with the question still open.
+      await setSession("stopped");
+      expect(await presence()).toBe("idle");
     } finally {
       await system.dispose();
     }

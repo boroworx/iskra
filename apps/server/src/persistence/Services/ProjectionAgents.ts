@@ -10,8 +10,10 @@ import {
   AgentId,
   IsoDateTime,
   ModelSelection,
+  OrchestrationAgentShell,
   ProjectId,
   RunCapabilities,
+  TrimmedNonEmptyString,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
@@ -42,6 +44,13 @@ export const ProjectionAgentDbRow = ProjectionAgent.mapFields(
     roleTags: Schema.fromJsonString(Schema.Array(Schema.String)),
     modelSelection: Schema.fromJsonString(ModelSelection),
     capabilities: Schema.fromJsonString(RunCapabilities),
+  }),
+);
+
+/** An active agent as clients list it, with presence derived from its live run. */
+export const ProjectionAgentShellDbRow = OrchestrationAgentShell.mapFields(
+  Struct.assign({
+    roleTags: Schema.fromJsonString(Schema.Array(TrimmedNonEmptyString)),
   }),
 );
 

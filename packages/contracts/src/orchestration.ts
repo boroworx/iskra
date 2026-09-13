@@ -1002,10 +1002,39 @@ export const OrchestrationThreadShell = Schema.Struct({
 });
 export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;
 
+export const AgentPresence = Schema.Literals(["idle", "running", "blocked"]);
+export type AgentPresence = typeof AgentPresence.Type;
+
+/** What a client needs to list an agent; its role prompt and model settings stay on the server. */
+export const OrchestrationAgentShell = Schema.Struct({
+  id: AgentId,
+  projectId: ProjectId,
+  name: AgentName,
+  avatar: Schema.NullOr(TrimmedNonEmptyString),
+  roleTags: Schema.Array(TrimmedNonEmptyString),
+  // Derived from the agent's live run: running while it has one, blocked while that run waits on the user.
+  presence: AgentPresence,
+});
+export type OrchestrationAgentShell = typeof OrchestrationAgentShell.Type;
+
+/** What a client needs to list a channel; its pinned spec and history stay on the server. */
+export const OrchestrationChannelShell = Schema.Struct({
+  id: ChannelId,
+  projectId: ProjectId,
+  kind: ChannelKind,
+  name: TrimmedNonEmptyString,
+  topic: Schema.String,
+  memberAgentIds: Schema.Array(AgentId),
+});
+export type OrchestrationChannelShell = typeof OrchestrationChannelShell.Type;
+
 export const OrchestrationShellSnapshot = Schema.Struct({
   snapshotSequence: NonNegativeInt,
   projects: Schema.Array(OrchestrationProjectShell),
   threads: Schema.Array(OrchestrationThreadShell),
+  // Optional so cached snapshots and servers without agents still decode. Active entries only.
+  agents: Schema.optional(Schema.Array(OrchestrationAgentShell)),
+  channels: Schema.optional(Schema.Array(OrchestrationChannelShell)),
   updatedAt: IsoDateTime,
 });
 export type OrchestrationShellSnapshot = typeof OrchestrationShellSnapshot.Type;
@@ -1030,6 +1059,27 @@ export const OrchestrationShellStreamEvent = Schema.Union([
     kind: Schema.Literal("thread-removed"),
     sequence: NonNegativeInt,
     threadId: ThreadId,
+  }),
+  // Sent only to subscribers that set `includeAgentChannels`; older clients reject unknown kinds.
+  Schema.Struct({
+    kind: Schema.Literal("agent-upserted"),
+    sequence: NonNegativeInt,
+    agent: OrchestrationAgentShell,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("agent-removed"),
+    sequence: NonNegativeInt,
+    agentId: AgentId,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("channel-upserted"),
+    sequence: NonNegativeInt,
+    channel: OrchestrationChannelShell,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("channel-removed"),
+    sequence: NonNegativeInt,
+    channelId: ChannelId,
   }),
 ]);
 export type OrchestrationShellStreamEvent = typeof OrchestrationShellStreamEvent.Type;
@@ -1061,6 +1111,11 @@ export const OrchestrationSubscribeShellInput = Schema.Struct({
    * snapshot or catch-up replay and before it begins emitting live events.
    */
   requestCompletionMarker: Schema.optionalKey(Schema.Boolean),
+  /**
+   * Requests agent and channel shell events. The server sends those kinds only
+   * to subscribers that ask, because older clients reject unknown kinds.
+   */
+  includeAgentChannels: Schema.optionalKey(Schema.Boolean),
 });
 export type OrchestrationSubscribeShellInput = typeof OrchestrationSubscribeShellInput.Type;
 

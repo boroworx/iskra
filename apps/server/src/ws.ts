@@ -73,6 +73,8 @@ import {
   type PullRequestRef,
   WS_METHODS,
   WsRpcGroup,
+  AgentId,
+  ChannelId,
 } from "@t3tools/contracts";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
@@ -805,10 +807,17 @@ const makeWsRpcLayer = (
           case "thread.unarchived":
             return threadUpsertOrRemove(ThreadId.make(event.aggregateId), event.sequence);
           default:
-            if (event.aggregateKind !== "thread") {
-              return Effect.succeed(Option.none());
+            switch (event.aggregateKind) {
+              // Every agent or channel event refetches, so coalescing to the latest loses nothing.
+              case "agent":
+                return agentUpsertOrRemove(AgentId.make(event.aggregateId), event.sequence);
+              case "channel":
+                return channelUpsertOrRemove(ChannelId.make(event.aggregateId), event.sequence);
+              case "thread":
+                return threadOrRunPresence(ThreadId.make(event.aggregateId), event.sequence);
+              default:
+                return Effect.succeed(Option.none());
             }
-            return threadUpsertOrRemove(ThreadId.make(event.aggregateId), event.sequence);
         }
       };
 
@@ -818,7 +827,7 @@ const makeWsRpcLayer = (
       // If both attempts fail, log and drop the stream item; treating an error as
       // a missing row would incorrectly remove a still-active aggregate.
       const retryShellProjectionRead = <A, E>(
-        aggregateKind: "project" | "thread",
+        aggregateKind: OrchestrationEvent["aggregateKind"],
         aggregateId: string,
         read: Effect.Effect<A, E>,
       ): Effect.Effect<Option.Option<A>, never, never> =>
@@ -861,6 +870,77 @@ const makeWsRpcLayer = (
                   }),
               }),
             ),
+          ),
+        );
+
+      const agentUpsertOrRemove = (
+        agentId: AgentId,
+        sequence: number,
+      ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> =>
+        retryShellProjectionRead(
+          "agent",
+          agentId,
+          projectionSnapshotQuery.getAgentShellById(agentId),
+        ).pipe(
+          Effect.map(
+            Option.map((agent) =>
+              Option.match(agent, {
+                onNone: (): OrchestrationShellStreamEvent => ({
+                  kind: "agent-removed",
+                  sequence,
+                  agentId,
+                }),
+                onSome: (nextAgent): OrchestrationShellStreamEvent => ({
+                  kind: "agent-upserted",
+                  sequence,
+                  agent: nextAgent,
+                }),
+              }),
+            ),
+          ),
+        );
+
+      const channelUpsertOrRemove = (
+        channelId: ChannelId,
+        sequence: number,
+      ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> =>
+        retryShellProjectionRead(
+          "channel",
+          channelId,
+          projectionSnapshotQuery.getChannelShellById(channelId),
+        ).pipe(
+          Effect.map(
+            Option.map((channel) =>
+              Option.match(channel, {
+                onNone: (): OrchestrationShellStreamEvent => ({
+                  kind: "channel-removed",
+                  sequence,
+                  channelId,
+                }),
+                onSome: (nextChannel): OrchestrationShellStreamEvent => ({
+                  kind: "channel-upserted",
+                  sequence,
+                  channel: nextChannel,
+                }),
+              }),
+            ),
+          ),
+        );
+
+      // A run thread never reaches the thread list; its activity changes its agent's presence.
+      const threadOrRunPresence = (
+        threadId: ThreadId,
+        sequence: number,
+      ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> =>
+        retryShellProjectionRead(
+          "thread",
+          threadId,
+          projectionSnapshotQuery.getRunByThreadId(threadId),
+        ).pipe(
+          Effect.flatMap((run) =>
+            Option.isSome(run) && Option.isSome(run.value)
+              ? agentUpsertOrRemove(run.value.value.agentId, sequence)
+              : threadUpsertOrRemove(threadId, sequence),
           ),
         );
 
@@ -1315,6 +1395,7 @@ const makeWsRpcLayer = (
             },
             settings,
             shellResumeCompletionMarker: true,
+            shellAgentChannels: true,
             ...(fileManagerRevealKind === undefined
               ? {}
               : {
@@ -1477,6 +1558,21 @@ const makeWsRpcLayer = (
               // sequence but the live subscription is not attached yet). Every
               // path below emits from this same buffered live tail. Overlapping
               // events are deduped by sequence on the client.
+              // Agent and channel kinds reach only subscribers that asked for them:
+              // older clients reject stream kinds they do not know.
+              const agentChannelKinds = new Set([
+                "agent-upserted",
+                "agent-removed",
+                "channel-upserted",
+                "channel-removed",
+              ]);
+              const withoutUnrequestedKinds = <A extends { readonly kind: string }, E, R>(
+                stream: Stream.Stream<A, E, R>,
+              ): Stream.Stream<A, E, R> =>
+                input.includeAgentChannels === true
+                  ? stream
+                  : stream.pipe(Stream.filter((item) => !agentChannelKinds.has(item.kind)));
+
               const liveBudget = yield* makeLiveStreamBudget();
               const liveBuffer = yield* Queue.unbounded<
                 RetainedLiveItem<ShellLiveInput>,
@@ -1544,21 +1640,23 @@ const makeWsRpcLayer = (
               // Offer the completion marker into the same queue as live events.
               // Anything buffered while snapshot/replay work was in flight is
               // therefore delivered before the client is told it is synchronized.
-              const synchronizedThenLive = liveBudget.deliver(
-                input.requestCompletionMarker === true
-                  ? Stream.concat(
-                      Stream.fromEffect(
-                        liveBudget.retain({ kind: "synchronized" as const }).pipe(
-                          Effect.flatMap((item) => Queue.offer(liveBuffer, item)),
-                          Effect.uninterruptible,
-                          Effect.andThen(Queue.takeAll(liveBuffer)),
-                          Effect.flatMap(coalesceRetainedInputs),
-                        ),
-                      ).pipe(Stream.flatMap((items) => Stream.fromIterable(items))),
-                      bufferedLiveStream,
-                    )
-                  : bufferedLiveStream,
-              );
+              const synchronizedThenLive = liveBudget
+                .deliver(
+                  input.requestCompletionMarker === true
+                    ? Stream.concat(
+                        Stream.fromEffect(
+                          liveBudget.retain({ kind: "synchronized" as const }).pipe(
+                            Effect.flatMap((item) => Queue.offer(liveBuffer, item)),
+                            Effect.uninterruptible,
+                            Effect.andThen(Queue.takeAll(liveBuffer)),
+                            Effect.flatMap(coalesceRetainedInputs),
+                          ),
+                        ).pipe(Stream.flatMap((items) => Stream.fromIterable(items))),
+                        bufferedLiveStream,
+                      )
+                    : bufferedLiveStream,
+                )
+                .pipe(withoutUnrequestedKinds);
 
               // When the client already holds a shell snapshot (cached, or loaded
               // over HTTP) it passes that snapshot's sequence, and we resume by
@@ -1596,6 +1694,7 @@ const makeWsRpcLayer = (
                   // buffer indefinitely while waiting for an empty page.
                   orchestrationEngine.readEvents(afterSequence, replayGap),
                 ).pipe(
+                  withoutUnrequestedKinds,
                   Stream.mapError(
                     (cause) =>
                       new OrchestrationGetSnapshotError({

@@ -29,6 +29,8 @@ const makeProjectionSnapshotQueryLayer = (project: OrchestrationProject) =>
   Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
     getUserInputActivity: () => Effect.die("unused"),
     getRunByThreadId: () => Effect.die("unused"),
+    getAgentShellById: () => Effect.die("unused"),
+    getChannelShellById: () => Effect.die("unused"),
     getCommandReadModel: () => Effect.die("unused"),
     getSnapshot: () => Effect.die("unused"),
     getShellSnapshot: () => Effect.die("unused"),

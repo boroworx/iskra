@@ -54,9 +54,13 @@ import {
 import { ProjectionCheckpoint } from "../../persistence/Services/ProjectionCheckpoints.ts";
 import { ThreadBackgroundLivenessService } from "../ThreadBackgroundLiveness.ts";
 import { ThreadPlanProgressService } from "../ThreadPlanProgress.ts";
-import { ProjectionAgentDbRow } from "../../persistence/Services/ProjectionAgents.ts";
+import {
+  ProjectionAgentDbRow,
+  ProjectionAgentShellDbRow,
+} from "../../persistence/Services/ProjectionAgents.ts";
 import {
   ProjectionChannelDbRow,
+  ProjectionChannelShellDbRow,
   ProjectionLiveRunDbRow,
   ProjectionRunDbRow,
 } from "../../persistence/Services/ProjectionChannels.ts";
@@ -613,6 +617,62 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         FROM projection_runs
         WHERE ended_at IS NULL
         ORDER BY started_at ASC, thread_id ASC
+      `,
+  });
+
+  // Presence comes from the agent's live run: blocked while it waits on the user.
+  const listAgentShellRows = SqlSchema.findAll({
+    Request: Schema.UndefinedOr(Schema.Struct({ agentId: Schema.String })),
+    Result: ProjectionAgentShellDbRow,
+    execute: (filter) =>
+      sql`
+        SELECT
+          agents.agent_id AS "id",
+          agents.project_id AS "projectId",
+          agents.name,
+          agents.avatar,
+          agents.role_tags_json AS "roleTags",
+          CASE
+            WHEN EXISTS (
+              SELECT 1
+              FROM projection_runs AS runs
+              INNER JOIN projection_threads AS threads
+                ON threads.thread_id = runs.thread_id
+              WHERE runs.agent_id = agents.agent_id
+                AND runs.ended_at IS NULL
+                AND (threads.pending_approval_count > 0 OR threads.pending_user_input_count > 0)
+            ) THEN 'blocked'
+            WHEN EXISTS (
+              SELECT 1
+              FROM projection_runs AS runs
+              WHERE runs.agent_id = agents.agent_id
+                AND runs.ended_at IS NULL
+            ) THEN 'running'
+            ELSE 'idle'
+          END AS "presence"
+        FROM projection_agents AS agents
+        WHERE agents.archived_at IS NULL
+          AND ${filter === undefined ? sql`1 = 1` : sql`agents.agent_id = ${filter.agentId}`}
+        ORDER BY agents.created_at ASC, agents.agent_id ASC
+      `,
+  });
+
+  const listChannelShellRows = SqlSchema.findAll({
+    Request: Schema.UndefinedOr(Schema.Struct({ channelId: Schema.String })),
+    Result: ProjectionChannelShellDbRow,
+    execute: (filter) =>
+      sql`
+        SELECT
+          channel_id AS "id",
+          project_id AS "projectId",
+          kind,
+          name,
+          topic,
+          member_agent_ids_json AS "memberAgentIds"
+        FROM projection_channels
+        WHERE archived_at IS NULL
+          AND ${filter === undefined ? sql`1 = 1` : sql`channel_id = ${filter.channelId}`}
+        ORDER BY created_at ASC, channel_id ASC
       `,
   });
 
@@ -2673,7 +2733,7 @@ pending_approval_requests AS (
         }),
       );
 
-  const getShellSnapshot: ProjectionSnapshotQueryShape["getShellSnapshot"] = () =>
+  const getProjectThreadShellSnapshot = () =>
     sql
       .withTransaction(
         Effect.all([
@@ -2833,6 +2893,38 @@ pending_approval_requests AS (
           }
           return toPersistenceSqlError("ProjectionSnapshotQuery.getShellSnapshot:query")(error);
         }),
+      );
+
+  const getShellSnapshot: ProjectionSnapshotQueryShape["getShellSnapshot"] = () =>
+    sql
+      .withTransaction(
+        Effect.all([
+          getProjectThreadShellSnapshot(),
+          listAgentShellRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getShellSnapshot:listAgents:query",
+                "ProjectionSnapshotQuery.getShellSnapshot:listAgents:decodeRows",
+              ),
+            ),
+          ),
+          listChannelShellRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getShellSnapshot:listChannels:query",
+                "ProjectionSnapshotQuery.getShellSnapshot:listChannels:decodeRows",
+              ),
+            ),
+          ),
+        ]),
+      )
+      .pipe(
+        Effect.map(([snapshot, agents, channels]) => ({ ...snapshot, agents, channels })),
+        Effect.mapError((error) =>
+          isPersistenceError(error)
+            ? error
+            : toPersistenceSqlError("ProjectionSnapshotQuery.getShellSnapshot:transaction")(error),
+        ),
       );
 
   const getArchivedShellSnapshot: ProjectionSnapshotQueryShape["getArchivedShellSnapshot"] = () =>
@@ -3817,6 +3909,28 @@ pending_approval_requests AS (
         ),
       );
 
+  const getAgentShellById: ProjectionSnapshotQueryShape["getAgentShellById"] = (agentId) =>
+    listAgentShellRows({ agentId }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.getAgentShellById:query",
+          "ProjectionSnapshotQuery.getAgentShellById:decodeRows",
+        ),
+      ),
+      Effect.map(Arr.head),
+    );
+
+  const getChannelShellById: ProjectionSnapshotQueryShape["getChannelShellById"] = (channelId) =>
+    listChannelShellRows({ channelId }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.getChannelShellById:query",
+          "ProjectionSnapshotQuery.getChannelShellById:decodeRows",
+        ),
+      ),
+      Effect.map(Arr.head),
+    );
+
   const getRunByThreadId: ProjectionSnapshotQueryShape["getRunByThreadId"] = (threadId) =>
     getRunRowByThreadId({ threadId }).pipe(
       Effect.mapError(
@@ -3846,6 +3960,8 @@ pending_approval_requests AS (
     getFullThreadDiffContext,
     getThreadShellById,
     getRunByThreadId,
+    getAgentShellById,
+    getChannelShellById,
     getThreadRuntimeContext,
     getTurnStartMessage,
     getThreadDetailById,

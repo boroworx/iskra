@@ -1,5 +1,7 @@
 import type {
   EnvironmentId,
+  OrchestrationAgentShell,
+  OrchestrationChannelShell,
   OrchestrationProjectShell,
   OrchestrationShellSnapshot,
   ProjectId,
@@ -102,4 +104,30 @@ export function createEnvironmentProjectAtoms(input: {
     projectsAtom,
     projectAtom: (ref: ScopedProjectRef) => projectAtomFamily(projectKey(ref)),
   };
+}
+
+const EMPTY_AGENTS: ReadonlyArray<OrchestrationAgentShell> = Object.freeze([]);
+const EMPTY_CHANNELS: ReadonlyArray<OrchestrationChannelShell> = Object.freeze([]);
+
+/** An environment's active agents and channels; empty for servers that do not send them. */
+export function createEnvironmentAgentChannelAtoms(input: {
+  readonly snapshotAtom: (
+    environmentId: EnvironmentId,
+  ) => Atom.Atom<OrchestrationShellSnapshot | null>;
+}) {
+  const environmentAgentsAtom = Atom.family((environmentId: EnvironmentId) =>
+    Atom.make(
+      (get): ReadonlyArray<OrchestrationAgentShell> =>
+        get(input.snapshotAtom(environmentId))?.agents ?? EMPTY_AGENTS,
+    ).pipe(Atom.withLabel(`environment-agents:${environmentId}`)),
+  );
+
+  const environmentChannelsAtom = Atom.family((environmentId: EnvironmentId) =>
+    Atom.make(
+      (get): ReadonlyArray<OrchestrationChannelShell> =>
+        get(input.snapshotAtom(environmentId))?.channels ?? EMPTY_CHANNELS,
+    ).pipe(Atom.withLabel(`environment-channels:${environmentId}`)),
+  );
+
+  return { environmentAgentsAtom, environmentChannelsAtom };
 }

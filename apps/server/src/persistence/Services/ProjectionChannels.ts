@@ -12,6 +12,7 @@ import {
   IsoDateTime,
   MessageId,
   NonNegativeInt,
+  OrchestrationChannelShell,
   OrchestrationLiveRun,
   OrchestrationRun,
   ProjectId,
@@ -45,6 +46,13 @@ export type ProjectionChannel = typeof ProjectionChannel.Type;
 
 /** A `projection_channels` row as selected, with its JSON columns decoded. */
 export const ProjectionChannelDbRow = ProjectionChannel.mapFields(
+  Struct.assign({
+    memberAgentIds: Schema.fromJsonString(Schema.Array(AgentId)),
+  }),
+);
+
+/** An active channel as clients list it. */
+export const ProjectionChannelShellDbRow = OrchestrationChannelShell.mapFields(
   Struct.assign({
     memberAgentIds: Schema.fromJsonString(Schema.Array(AgentId)),
   }),
