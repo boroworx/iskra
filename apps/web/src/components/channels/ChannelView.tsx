@@ -7,7 +7,7 @@ import {
   type OrchestrationChannelShell,
 } from "@t3tools/contracts";
 import { AtSignIcon, HashIcon } from "lucide-react";
-import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 
 import { cn, randomUUID } from "~/lib/utils";
 import { channelEnvironment } from "~/state/channels";
@@ -15,8 +15,11 @@ import { useEnvironmentAgents, useEnvironmentChannels, useProjects } from "~/sta
 import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
 import ChatMarkdown from "../ChatMarkdown";
+import { ComposerPrimaryActions } from "../chat/ComposerPrimaryActions";
+import { ComposerSurface } from "../chat/ComposerSurface";
+import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
+import { EMPTY_COMPOSER_CONTEXT_RECORDS } from "../composerContextPresentation";
 import { SidebarInset, SidebarTrigger } from "../ui/sidebar";
-import { Textarea } from "../ui/textarea";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import {
   channelMemberEntries,
@@ -278,17 +281,23 @@ function MessageRow(props: {
   );
 }
 
+/**
+ * The thread composer's surface, editor and send button without its session
+ * controls: channel runs are read-only, so there is no model or access to pick.
+ */
 function ChannelComposer(props: {
   readonly environmentId: EnvironmentId;
   readonly channelId: ChannelId;
   readonly placeholder: string;
 }) {
+  const editorRef = useRef<ComposerPromptEditorHandle>(null);
   const [body, setBody] = useState("");
+  const [cursor, setCursor] = useState(0);
   const [sending, setSending] = useState(false);
   const postMessage = useAtomCommand(channelEnvironment.postMessage);
+  const trimmed = body.trim();
 
   const send = async () => {
-    const trimmed = body.trim();
     if (trimmed.length === 0 || sending) {
       return;
     }
@@ -300,13 +309,8 @@ function ChannelComposer(props: {
     setSending(false);
     if (result._tag === "Success") {
       setBody("");
-    }
-  };
-
-  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-      event.preventDefault();
-      void send();
+      setCursor(0);
+      editorRef.current?.focus();
     }
   };
 
@@ -318,18 +322,62 @@ function ChannelComposer(props: {
         void send();
       }}
     >
-      <Textarea
-        aria-label={props.placeholder}
-        placeholder={props.placeholder}
-        rows={1}
-        size="sm"
-        value={body}
-        onChange={(event) => setBody(event.target.value)}
-        onKeyDown={onKeyDown}
-      />
+      <ComposerSurface.Shell className="max-w-none">
+        <ComposerSurface.Host>
+          <ComposerSurface.Main>
+            <div className="rounded-[20px]">
+              <div className="px-3 pt-3.5 sm:px-4 sm:pt-4">
+                <ComposerPromptEditor
+                  editorRef={editorRef}
+                  value={body}
+                  cursor={cursor}
+                  contextRecords={EMPTY_COMPOSER_CONTEXT_RECORDS}
+                  skills={EMPTY_SKILLS}
+                  disabled={false}
+                  placeholder={props.placeholder}
+                  onChange={(nextValue, nextCursor) => {
+                    setBody(nextValue);
+                    setCursor(nextCursor);
+                  }}
+                  onCommandKeyDown={(key, event) => {
+                    if (key !== "Enter" || event.shiftKey) {
+                      return false;
+                    }
+                    void send();
+                    return true;
+                  }}
+                  onPaste={noop}
+                />
+              </div>
+              <div className="flex items-center justify-end px-3 pb-3 sm:px-4 sm:pb-4">
+                <ComposerPrimaryActions
+                  compact={false}
+                  pendingAction={null}
+                  isRunning={false}
+                  showPlanFollowUpPrompt={false}
+                  promptHasText={trimmed.length > 0}
+                  isSendBusy={sending}
+                  sendDisabledReason={null}
+                  isConnecting={false}
+                  isEnvironmentUnavailable={false}
+                  isPreparingWorktree={false}
+                  hasSendableContent={trimmed.length > 0}
+                  onPreviousPendingQuestion={noop}
+                  onInterrupt={noop}
+                  onImplementPlanInNewThread={noop}
+                />
+              </div>
+            </div>
+          </ComposerSurface.Main>
+        </ComposerSurface.Host>
+      </ComposerSurface.Shell>
     </form>
   );
 }
+
+const EMPTY_SKILLS: ReadonlyArray<never> = [];
+
+function noop() {}
 
 const ChannelMemberList = memo(function ChannelMemberList(props: {
   readonly members: ReadonlyArray<ChannelMemberEntry>;
