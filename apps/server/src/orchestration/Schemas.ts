@@ -6,6 +6,13 @@ import {
   AgentUpdatedPayload as ContractsAgentUpdatedPayloadSchema,
   AgentArchivedPayload as ContractsAgentArchivedPayloadSchema,
   AgentUnarchivedPayload as ContractsAgentUnarchivedPayloadSchema,
+  CardCreatedPayload as ContractsCardCreatedPayloadSchema,
+  CardUpdatedPayload as ContractsCardUpdatedPayloadSchema,
+  CardStatusChangedPayload as ContractsCardStatusChangedPayloadSchema,
+  CardDelegateChangedPayload as ContractsCardDelegateChangedPayloadSchema,
+  CardRelationAddedPayload as ContractsCardRelationAddedPayloadSchema,
+  CardRelationRemovedPayload as ContractsCardRelationRemovedPayloadSchema,
+  CardDecisionRecordedPayload as ContractsCardDecisionRecordedPayloadSchema,
   ChannelCreatedPayload as ContractsChannelCreatedPayloadSchema,
   ChannelUpdatedPayload as ContractsChannelUpdatedPayloadSchema,
   ChannelArchivedPayload as ContractsChannelArchivedPayloadSchema,
@@ -50,6 +57,14 @@ export const AgentCreatedPayload = ContractsAgentCreatedPayloadSchema;
 export const AgentUpdatedPayload = ContractsAgentUpdatedPayloadSchema;
 export const AgentArchivedPayload = ContractsAgentArchivedPayloadSchema;
 export const AgentUnarchivedPayload = ContractsAgentUnarchivedPayloadSchema;
+
+export const CardCreatedPayload = ContractsCardCreatedPayloadSchema;
+export const CardUpdatedPayload = ContractsCardUpdatedPayloadSchema;
+export const CardStatusChangedPayload = ContractsCardStatusChangedPayloadSchema;
+export const CardDelegateChangedPayload = ContractsCardDelegateChangedPayloadSchema;
+export const CardRelationAddedPayload = ContractsCardRelationAddedPayloadSchema;
+export const CardRelationRemovedPayload = ContractsCardRelationRemovedPayloadSchema;
+export const CardDecisionRecordedPayload = ContractsCardDecisionRecordedPayloadSchema;
 
 export const ChannelCreatedPayload = ContractsChannelCreatedPayloadSchema;
 export const ChannelUpdatedPayload = ContractsChannelUpdatedPayloadSchema;

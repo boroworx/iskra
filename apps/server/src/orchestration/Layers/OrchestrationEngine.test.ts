@@ -5,6 +5,7 @@ import * as NodePath from "node:path";
 
 import {
   AgentId,
+  CardId,
   ApprovalRequestId,
   ChannelId,
   EventId,
@@ -865,6 +866,96 @@ describe("OrchestrationEngine", () => {
     ).toBe("Archive me");
 
     await system.dispose();
+  });
+
+  it("keeps cards across a restart, matching a replay of the event log", async () => {
+    const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "iskra-cards-"));
+    const databasePath = NodePath.join(directory, "state.sqlite");
+    const projectId = asProjectId("cards-project");
+    const cardId = CardId.make("card-rate-limiting");
+    const blockerId = CardId.make("card-auth");
+    let system = await createOrchestrationSystem(databasePath);
+    try {
+      const dispatch = (command: OrchestrationCommand) =>
+        system.run(system.engine.dispatch(command));
+      await dispatch({
+        type: "project.create",
+        commandId: CommandId.make("cmd-cards-project"),
+        projectId,
+        title: "Cards",
+        workspaceRoot: "/tmp/cards-project",
+        createdAt: now(),
+      });
+      for (const [id, title] of [
+        [cardId, "Rate limiting"],
+        [blockerId, "Auth refactor"],
+      ] as const) {
+        await dispatch({
+          type: "card.create",
+          commandId: CommandId.make(`cmd-create-${id}`),
+          cardId: id,
+          projectId,
+          title,
+          spec: "",
+          tags: [],
+          createdAt: now(),
+        });
+      }
+      await dispatch({ type: "card.approve", commandId: CommandId.make("cmd-approve"), cardId });
+      await dispatch({
+        type: "card.relation.add",
+        commandId: CommandId.make("cmd-blocked-by"),
+        cardId,
+        kind: "blockedBy",
+        otherCardId: blockerId,
+      });
+      await dispatch({
+        type: "card.decision.record",
+        commandId: CommandId.make("cmd-decision"),
+        cardId,
+        decisionId: "decision-store",
+        text: "Use Redis for the counters.",
+        createdAt: now(),
+      });
+      await system.dispose();
+
+      system = await createOrchestrationSystem(databasePath);
+      const restored = await system.commandReadModel();
+      const events = await system.run(
+        Stream.runCollect(system.engine.readEvents(0)).pipe(
+          Effect.map((chunk): OrchestrationEvent[] => Array.from(chunk)),
+        ),
+      );
+      const replayed = await system.run(
+        Effect.gen(function* () {
+          let model = createEmptyReadModel(now());
+          for (const event of events) {
+            model = yield* projectEvent(model, event);
+          }
+          return model;
+        }),
+      );
+
+      expect(restored.cards).toEqual(replayed.cards);
+      expect(restored.cards).toMatchObject([
+        { id: cardId, status: "ready", relations: [{ kind: "blockedBy", cardId: blockerId }] },
+        { id: blockerId, status: "triage", relations: [{ kind: "blocks", cardId }] },
+      ]);
+
+      // The restarted decider still derives status from the persisted cards.
+      const merge = await system.run(
+        Effect.exit(
+          system.engine.dispatch({
+            type: "card.merge.approve",
+            commandId: CommandId.make("cmd-merge-too-early"),
+            cardId,
+          }),
+        ),
+      );
+      expect(Exit.isFailure(merge)).toBe(true);
+    } finally {
+      await system.dispose();
+    }
   });
 
   it("keeps agents across a restart, matching a replay of the event log", async () => {

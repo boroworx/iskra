@@ -68,6 +68,7 @@ import {
   ProjectionRunDbRow,
   toOrchestrationChannelMessage,
 } from "../../persistence/Services/ProjectionChannels.ts";
+import { ProjectionCardDbRow } from "../../persistence/Services/ProjectionCards.ts";
 import { ProjectionProject } from "../../persistence/Services/ProjectionProjects.ts";
 import { ProjectionState } from "../../persistence/Services/ProjectionState.ts";
 import { ProjectionThreadActivity } from "../../persistence/Services/ProjectionThreadActivities.ts";
@@ -605,6 +606,34 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           archived_at AS "archivedAt"
         FROM projection_channels
         ORDER BY created_at ASC, channel_id ASC
+      `,
+  });
+
+  // Creation order, with insertion order breaking ties, so the list matches a replay of the event log.
+  const listCardRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionCardDbRow,
+    execute: () =>
+      sql`
+        SELECT
+          card_id AS "cardId",
+          project_id AS "projectId",
+          channel_id AS "channelId",
+          parent_card_id AS "parentCardId",
+          title,
+          spec,
+          spec_state AS "specState",
+          tags_json AS "tags",
+          status,
+          owner_human_id AS "ownerHumanId",
+          delegate_agent_id AS "delegateAgentId",
+          base_branch AS "baseBranch",
+          relations_json AS "relations",
+          created_by_json AS "createdBy",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM projection_cards
+        ORDER BY created_at ASC, rowid ASC
       `,
   });
 
@@ -2521,6 +2550,14 @@ pending_approval_requests AS (
               ),
             ),
           ),
+          listCardRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getCommandReadModel:listCards:query",
+                "ProjectionSnapshotQuery.getCommandReadModel:listCards:decodeRows",
+              ),
+            ),
+          ),
           listLiveRunRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -2543,6 +2580,7 @@ pending_approval_requests AS (
             stateRows,
             agentRows,
             channelRows,
+            cardRows,
             liveRunRows,
           ]) =>
             Effect.gen(function* () {
@@ -2724,6 +2762,24 @@ pending_approval_requests AS (
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
                   archivedAt: row.archivedAt,
+                })),
+                cards: cardRows.map((row) => ({
+                  id: row.cardId,
+                  projectId: row.projectId,
+                  channelId: row.channelId,
+                  parentCardId: row.parentCardId,
+                  title: row.title,
+                  spec: row.spec,
+                  specState: row.specState,
+                  tags: row.tags,
+                  status: row.status,
+                  ownerHumanId: row.ownerHumanId,
+                  delegateAgentId: row.delegateAgentId,
+                  baseBranch: row.baseBranch,
+                  relations: row.relations,
+                  createdBy: row.createdBy,
+                  createdAt: row.createdAt,
+                  updatedAt: row.updatedAt,
                 })),
                 liveRuns: liveRunRows,
                 updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",

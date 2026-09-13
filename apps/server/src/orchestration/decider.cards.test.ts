@@ -1,0 +1,368 @@
+import {
+  AgentId,
+  CardId,
+  ClientOrchestrationCommand,
+  CommandId,
+  ProjectId,
+  ProviderInstanceId,
+  type OrchestrationCommand,
+  type OrchestrationReadModel,
+} from "@iskra/contracts";
+import { expect, it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Schema from "effect/Schema";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+
+import { decideOrchestrationCommand } from "./decider.ts";
+import { createEmptyReadModel, projectEvent } from "./projector.ts";
+
+const now = "2026-01-01T00:00:00.000Z";
+const projectId = ProjectId.make("project-cards");
+const otherProjectId = ProjectId.make("project-other");
+
+let commandCount = 0;
+const nextCommandId = () => CommandId.make(`cmd-card-${(commandCount += 1)}`);
+
+const createProject = (id: ProjectId): OrchestrationCommand => ({
+  type: "project.create",
+  commandId: nextCommandId(),
+  projectId: id,
+  title: id,
+  workspaceRoot: `/tmp/${id}`,
+  createdAt: now,
+});
+
+const createAgent = (id: string, inProject: ProjectId = projectId): OrchestrationCommand => ({
+  type: "agent.create",
+  commandId: nextCommandId(),
+  agentId: AgentId.make(id),
+  projectId: inProject,
+  name: id,
+  roleTags: [],
+  rolePrompt: "",
+  modelSelection: { instanceId: ProviderInstanceId.make("claudeAgent"), model: "claude-haiku-4-5" },
+  capabilities: ["read"],
+  createdAt: now,
+});
+
+const createCard = (
+  id: string,
+  overrides: { readonly parentCardId?: string; readonly projectId?: ProjectId } = {},
+): OrchestrationCommand => ({
+  type: "card.create",
+  commandId: nextCommandId(),
+  cardId: CardId.make(id),
+  projectId: overrides.projectId ?? projectId,
+  ...(overrides.parentCardId !== undefined
+    ? { parentCardId: CardId.make(overrides.parentCardId) }
+    : {}),
+  title: `Card ${id}`,
+  spec: "",
+  tags: [],
+  createdAt: now,
+});
+
+type CardOnlyCommandType =
+  | "card.approve"
+  | "card.unapprove"
+  | "card.merge.approve"
+  | "card.merge.cancel"
+  | "card.abandon"
+  | "card.reopen"
+  | "card.unassign"
+  | "card.work.start"
+  | "card.review.request"
+  | "card.land";
+
+const onCard = (type: CardOnlyCommandType, id: string) =>
+  ({ type, commandId: nextCommandId(), cardId: CardId.make(id) }) as OrchestrationCommand;
+
+const assign = (cardId: string, agentId: string): OrchestrationCommand => ({
+  type: "card.assign",
+  commandId: nextCommandId(),
+  cardId: CardId.make(cardId),
+  agentId: AgentId.make(agentId),
+});
+
+const relate = (
+  type: "card.relation.add" | "card.relation.remove",
+  cardId: string,
+  kind: "blocks" | "blockedBy" | "related" | "overlaps" | "duplicateOf",
+  otherCardId: string,
+) =>
+  ({
+    type,
+    commandId: nextCommandId(),
+    cardId: CardId.make(cardId),
+    kind,
+    otherCardId: CardId.make(otherCardId),
+  }) as OrchestrationCommand;
+
+// Decides and projects each command in order, like the engine does for one batch.
+const applyCommands = Effect.fn("applyCommands")(function* (
+  commands: ReadonlyArray<OrchestrationCommand>,
+) {
+  let readModel = createEmptyReadModel(now);
+  for (const command of commands) {
+    const decided = yield* decideOrchestrationCommand({ command, readModel });
+    for (const event of Array.isArray(decided) ? decided : [decided]) {
+      readModel = yield* projectEvent(readModel, {
+        ...event,
+        sequence: readModel.snapshotSequence + 1,
+      });
+    }
+  }
+  return readModel;
+});
+
+const cardIn = (readModel: OrchestrationReadModel, id: string) =>
+  (readModel.cards ?? []).find((card) => card.id === id);
+
+/** A card taken through approval, assignment and work into review. */
+const cardInReview = (id: string): ReadonlyArray<OrchestrationCommand> => [
+  createCard(id),
+  onCard("card.approve", id),
+  assign(id, "agent-backend"),
+  onCard("card.work.start", id),
+  onCard("card.review.request", id),
+];
+
+const setup = [createProject(projectId), createAgent("agent-backend")];
+
+it.layer(NodeServices.layer)("decider cards", (it) => {
+  it.effect("creates every card as a triage proposal owned by the local human", () =>
+    Effect.gen(function* () {
+      const readModel = yield* applyCommands([...setup, createCard("rate-limiting")]);
+
+      expect(cardIn(readModel, "rate-limiting")).toMatchObject({
+        projectId,
+        status: "triage",
+        specState: "draft",
+        ownerHumanId: "human",
+        createdBy: { kind: "human", id: "human" },
+        delegateAgentId: null,
+        baseBranch: null,
+        relations: [],
+      });
+    }),
+  );
+
+  it.effect("walks a card from approval to landed, reversing each human decision on the way", () =>
+    Effect.gen(function* () {
+      const readModel = yield* applyCommands([
+        ...setup,
+        createCard("card"),
+        onCard("card.approve", "card"),
+        onCard("card.unapprove", "card"),
+        onCard("card.approve", "card"),
+        assign("card", "agent-backend"),
+        onCard("card.work.start", "card"),
+        onCard("card.review.request", "card"),
+        onCard("card.merge.approve", "card"),
+        onCard("card.merge.cancel", "card"),
+        onCard("card.merge.approve", "card"),
+        onCard("card.land", "card"),
+      ]);
+
+      expect(cardIn(readModel, "card")).toMatchObject({
+        status: "landed",
+        delegateAgentId: "agent-backend",
+      });
+
+      const reopened = yield* applyCommands([
+        ...setup,
+        createCard("dropped"),
+        onCard("card.abandon", "dropped"),
+        onCard("card.reopen", "dropped"),
+      ]);
+      expect(cardIn(reopened, "dropped")?.status).toBe("triage");
+    }),
+  );
+
+  it.effect("rejects a move the status rules forbid, with the rule's reason", () =>
+    Effect.gen(function* () {
+      const early = yield* Effect.flip(
+        applyCommands([...setup, createCard("card"), onCard("card.merge.approve", "card")]),
+      );
+      expect(early.message).toContain("Only a card in review can be approved to merge.");
+
+      const unassigned = yield* Effect.flip(
+        applyCommands([
+          ...setup,
+          createCard("card"),
+          onCard("card.approve", "card"),
+          onCard("card.work.start", "card"),
+        ]),
+      );
+      expect(unassigned.message).toContain("Assign an agent before work starts.");
+    }),
+  );
+
+  it.effect("holds a merge while a sub-card is open, and allows it once the sub-card is abandoned", () =>
+    Effect.gen(function* () {
+      const withChild = [...setup, ...cardInReview("parent"), createCard("child", { parentCardId: "parent" })];
+
+      const held = yield* Effect.flip(
+        applyCommands([...withChild, onCard("card.merge.approve", "parent")]),
+      );
+      expect(held.message).toContain("Land or abandon its sub-cards first.");
+
+      const readModel = yield* applyCommands([
+        ...withChild,
+        onCard("card.abandon", "child"),
+        onCard("card.merge.approve", "parent"),
+      ]);
+      expect(cardIn(readModel, "parent")?.status).toBe("landing");
+    }),
+  );
+
+  it.effect("holds a merge while a blocker has not landed", () =>
+    Effect.gen(function* () {
+      const held = yield* Effect.flip(
+        applyCommands([
+          ...setup,
+          createCard("blocker"),
+          ...cardInReview("card"),
+          relate("card.relation.add", "card", "blockedBy", "blocker"),
+          onCard("card.merge.approve", "card"),
+        ]),
+      );
+      expect(held.message).toContain("It is blocked by a card that has not landed.");
+    }),
+  );
+
+  it.effect("assigns only an active agent of the card's project, and not before approval", () =>
+    Effect.gen(function* () {
+      const inTriage = yield* Effect.flip(
+        applyCommands([...setup, createCard("card"), assign("card", "agent-backend")]),
+      );
+      expect(inTriage.message).toContain("Approve the card before assigning an agent.");
+
+      const foreign = yield* Effect.flip(
+        applyCommands([
+          ...setup,
+          createProject(otherProjectId),
+          createAgent("agent-elsewhere", otherProjectId),
+          createCard("card"),
+          onCard("card.approve", "card"),
+          assign("card", "agent-elsewhere"),
+        ]),
+      );
+      expect(foreign.message).toContain("is not an active agent of this card's project");
+
+      const unassigned = yield* applyCommands([
+        ...setup,
+        createCard("card"),
+        onCard("card.approve", "card"),
+        assign("card", "agent-backend"),
+        onCard("card.unassign", "card"),
+      ]);
+      expect(cardIn(unassigned, "card")?.delegateAgentId).toBeNull();
+    }),
+  );
+
+  it.effect("keeps relations symmetric, within one project, and leaves overlaps to the server", () =>
+    Effect.gen(function* () {
+      const cards = [...setup, createCard("api"), createCard("auth")];
+
+      const related = yield* applyCommands([
+        ...cards,
+        relate("card.relation.add", "api", "blockedBy", "auth"),
+      ]);
+      expect(cardIn(related, "api")?.relations).toEqual([{ kind: "blockedBy", cardId: "auth" }]);
+      expect(cardIn(related, "auth")?.relations).toEqual([{ kind: "blocks", cardId: "api" }]);
+
+      const removed = yield* applyCommands([
+        ...cards,
+        relate("card.relation.add", "api", "blockedBy", "auth"),
+        relate("card.relation.remove", "api", "blockedBy", "auth"),
+      ]);
+      expect(cardIn(removed, "api")?.relations).toEqual([]);
+      expect(cardIn(removed, "auth")?.relations).toEqual([]);
+
+      const overlaps = yield* Effect.flip(
+        applyCommands([...cards, relate("card.relation.add", "api", "overlaps", "auth")]),
+      );
+      expect(overlaps.message).toContain("Overlaps are flagged by the server");
+
+      const self = yield* Effect.flip(
+        applyCommands([...cards, relate("card.relation.add", "api", "related", "api")]),
+      );
+      expect(self.message).toContain("A card cannot relate to itself.");
+
+      const crossProject = yield* Effect.flip(
+        applyCommands([
+          ...cards,
+          createProject(otherProjectId),
+          createCard("elsewhere", { projectId: otherProjectId }),
+          relate("card.relation.add", "api", "related", "elsewhere"),
+        ]),
+      );
+      expect(crossProject.message).toContain("Related cards must be in the same project.");
+    }),
+  );
+
+  it.effect("records decisions as events without adding them to the read model", () =>
+    Effect.gen(function* () {
+      const readModel = yield* applyCommands([...setup, createCard("card")]);
+
+      const decided = yield* decideOrchestrationCommand({
+        readModel,
+        command: {
+          type: "card.decision.record",
+          commandId: nextCommandId(),
+          cardId: CardId.make("card"),
+          decisionId: "decision-store",
+          text: "Use Redis for the counters.",
+          createdAt: now,
+        },
+      });
+      const event = Array.isArray(decided) ? decided[0] : decided;
+      expect(event).toMatchObject({
+        type: "card.decision-recorded",
+        payload: { author: { kind: "human", id: "human" }, text: "Use Redis for the counters." },
+      });
+
+      const projected = yield* projectEvent(readModel, {
+        ...event!,
+        sequence: readModel.snapshotSequence + 1,
+      });
+      expect(projected.cards).toEqual(readModel.cards);
+    }),
+  );
+
+  it.effect("refuses edits once a card is finished", () =>
+    Effect.gen(function* () {
+      const edited = yield* Effect.flip(
+        applyCommands([
+          ...setup,
+          createCard("card"),
+          onCard("card.abandon", "card"),
+          {
+            type: "card.update",
+            commandId: nextCommandId(),
+            cardId: CardId.make("card"),
+            title: "Too late",
+          },
+        ]),
+      );
+      expect(edited.message).toContain("cannot be edited");
+    }),
+  );
+
+  it("does not accept server-only card commands from clients", () => {
+    const decode = Schema.decodeUnknownExit(ClientOrchestrationCommand);
+    for (const type of ["card.work.start", "card.review.request", "card.land"]) {
+      expect(Exit.isFailure(decode({ type, commandId: "cmd", cardId: "card" }))).toBe(true);
+    }
+    expect(
+      Exit.isFailure(
+        decode({ type: "card.work.return", commandId: "cmd", cardId: "card", reason: "checks failed" }),
+      ),
+    ).toBe(true);
+    expect(Exit.isSuccess(decode({ type: "card.approve", commandId: "cmd", cardId: "card" }))).toBe(
+      true,
+    );
+  });
+});

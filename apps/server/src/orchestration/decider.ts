@@ -10,6 +10,9 @@ import {
   UserInputRequestedPayload,
   agentIdOfDmThread,
   isImportedAgentSessionMessageId,
+  type AgentId,
+  type CardId,
+  type CardMove,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
@@ -43,6 +46,8 @@ import {
   requireAgent,
   requireAgentAbsent,
   requireAgentNameAvailable,
+  requireCard,
+  requireCardAbsent,
   requireChannel,
   requireChannelAbsent,
   requireValidChannelMembers,
@@ -54,6 +59,12 @@ import {
   requireThreadAbsent,
   requireThreadNotArchived,
 } from "./commandInvariants.ts";
+import {
+  canChangeDelegate,
+  cardFactsOf,
+  isFinishedCardStatus,
+  nextCardStatus,
+} from "./cardRules.ts";
 import { parseMentions } from "./mentions.ts";
 import { projectEvent } from "./projector.ts";
 import { decideWake } from "./wakeRouting.ts";
@@ -183,6 +194,49 @@ type PlannedOrchestrationEvent = Omit<OrchestrationEvent, "sequence">;
 type DecideOrchestrationCommandResult =
   | PlannedOrchestrationEvent
   | ReadonlyArray<PlannedOrchestrationEvent>;
+
+/** A card status command: the rules derive the target status, never the client. */
+const decideCardMove = Effect.fn("decideCardMove")(function* (input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: Extract<OrchestrationCommand, { readonly cardId: CardId }>;
+  readonly move: CardMove;
+  readonly reason?: string;
+}): Effect.fn.Return<
+  PlannedOrchestrationEvent,
+  OrchestrationCommandInvariantError | PlatformError.PlatformError,
+  Crypto.Crypto
+> {
+  const card = yield* requireCard({
+    readModel: input.readModel,
+    command: input.command,
+    cardId: input.command.cardId,
+  });
+  const result = nextCardStatus(cardFactsOf(input.readModel.cards ?? [], card), input.move);
+  if (!result.ok) {
+    return yield* new OrchestrationCommandInvariantError({
+      commandType: input.command.type,
+      detail: result.reason,
+    });
+  }
+  const occurredAt = yield* nowIso;
+  return {
+    ...(yield* withEventBase({
+      aggregateKind: "card",
+      aggregateId: card.id,
+      occurredAt,
+      commandId: input.command.commandId,
+    })),
+    type: "card.status-changed",
+    payload: {
+      cardId: card.id,
+      from: card.status,
+      to: result.status,
+      move: input.move,
+      ...(input.reason !== undefined ? { reason: input.reason } : {}),
+      updatedAt: occurredAt,
+    },
+  };
+});
 
 const decideCommandSequence = Effect.fn("decideCommandSequence")(function* ({
   commands,
@@ -2174,6 +2228,244 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           agentId: command.agentId,
           updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "card.create": {
+      yield* requireProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      yield* requireCardAbsent({
+        readModel,
+        command,
+        cardId: command.cardId,
+      });
+      const channelId = command.channelId ?? null;
+      if (
+        channelId !== null &&
+        !(readModel.channels ?? []).some(
+          (channel) => channel.id === channelId && channel.projectId === command.projectId,
+        )
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Channel '${channelId}' is not in project '${command.projectId}'.`,
+        });
+      }
+      const parentCardId = command.parentCardId ?? null;
+      if (parentCardId !== null) {
+        const parent = yield* requireCard({ readModel, command, cardId: parentCardId });
+        if (parent.projectId !== command.projectId) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Parent card '${parentCardId}' is in another project.`,
+          });
+        }
+        if (isFinishedCardStatus(parent.status)) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "A sub-card cannot be added to a card that has landed or been abandoned.",
+          });
+        }
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "card",
+          aggregateId: command.cardId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "card.created",
+        payload: {
+          cardId: command.cardId,
+          projectId: command.projectId,
+          channelId,
+          parentCardId,
+          title: command.title,
+          spec: command.spec,
+          specState: "draft",
+          tags: command.tags,
+          // Every card starts as a proposal; only a human approves it into work.
+          status: "triage",
+          ownerHumanId: CHANNEL_HUMAN_AUTHOR_ID,
+          baseBranch: command.baseBranch ?? null,
+          createdBy: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "card.update": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      if (isFinishedCardStatus(card.status)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A card that has landed or been abandoned cannot be edited.",
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "card",
+          aggregateId: command.cardId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "card.updated",
+        payload: {
+          cardId: command.cardId,
+          ...(command.title !== undefined ? { title: command.title } : {}),
+          ...(command.spec !== undefined ? { spec: command.spec } : {}),
+          ...(command.tags !== undefined ? { tags: command.tags } : {}),
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "card.approve":
+      return yield* decideCardMove({ readModel, command, move: "approve" });
+    case "card.unapprove":
+      return yield* decideCardMove({ readModel, command, move: "unapprove" });
+    case "card.merge.approve":
+      return yield* decideCardMove({ readModel, command, move: "approveMerge" });
+    case "card.merge.cancel":
+      return yield* decideCardMove({ readModel, command, move: "cancelLanding" });
+    case "card.abandon":
+      return yield* decideCardMove({ readModel, command, move: "abandon" });
+    case "card.reopen":
+      return yield* decideCardMove({ readModel, command, move: "reopen" });
+    case "card.work.start":
+      return yield* decideCardMove({ readModel, command, move: "workStarted" });
+    case "card.review.request":
+      return yield* decideCardMove({ readModel, command, move: "requestReview" });
+    case "card.work.return":
+      return yield* decideCardMove({
+        readModel,
+        command,
+        move: "returnToWork",
+        reason: command.reason,
+      });
+    case "card.land":
+      return yield* decideCardMove({ readModel, command, move: "landed" });
+
+    case "card.assign":
+    case "card.unassign": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      let delegateAgentId: AgentId | null = null;
+      if (command.type === "card.assign") {
+        const agent = yield* requireAgent({ readModel, command, agentId: command.agentId });
+        if (agent.projectId !== card.projectId || agent.archivedAt !== null) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Agent '${agent.id}' is not an active agent of this card's project.`,
+          });
+        }
+        if (card.delegateAgentId === agent.id) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `@${agent.name} is already assigned to this card.`,
+          });
+        }
+        delegateAgentId = agent.id;
+      } else if (card.delegateAgentId === null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "No agent is assigned to this card.",
+        });
+      }
+      // Card sessions arrive in M2.3; until then no card has a live write session.
+      const allowed = canChangeDelegate(card, false);
+      if (!allowed.ok) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: allowed.reason,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "card",
+          aggregateId: command.cardId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "card.delegate-changed",
+        payload: {
+          cardId: command.cardId,
+          delegateAgentId,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "card.relation.add":
+    case "card.relation.remove": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      const exists = card.relations.some(
+        (relation) => relation.kind === command.kind && relation.cardId === command.otherCardId,
+      );
+      if (command.type === "card.relation.add") {
+        const other = yield* requireCard({ readModel, command, cardId: command.otherCardId });
+        const problem =
+          other.id === card.id
+            ? "A card cannot relate to itself."
+            : other.projectId !== card.projectId
+              ? "Related cards must be in the same project."
+              : command.kind === "overlaps"
+                ? "Overlaps are flagged by the server when a card lands."
+                : exists
+                  ? "These cards already have that relation."
+                  : null;
+        if (problem !== null) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: problem,
+          });
+        }
+      } else if (!exists) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "These cards do not have that relation.",
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "card",
+          aggregateId: command.cardId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: command.type === "card.relation.add" ? "card.relation-added" : "card.relation-removed",
+        payload: {
+          cardId: command.cardId,
+          kind: command.kind,
+          otherCardId: command.otherCardId,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "card.decision.record": {
+      yield* requireCard({ readModel, command, cardId: command.cardId });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "card",
+          aggregateId: command.cardId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "card.decision-recorded",
+        payload: {
+          cardId: command.cardId,
+          decisionId: command.decisionId,
+          author: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
+          text: command.text,
+          createdAt: command.createdAt,
         },
       };
     }

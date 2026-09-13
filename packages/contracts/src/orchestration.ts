@@ -9,6 +9,7 @@ import { RepositoryIdentity, ThreadEnvMode } from "./environment.ts";
 import {
   AgentId,
   ApprovalRequestId,
+  CardId,
   ChannelId,
   CheckpointRef,
   ClientSurface,
@@ -547,6 +548,98 @@ export const OrchestrationChannel = Schema.Struct({
 });
 export type OrchestrationChannel = typeof OrchestrationChannel.Type;
 
+/**
+ * A card is a feature: one unit of work with its own branch. Its status is
+ * derived from what happened to it; humans only approve, assign, approve the
+ * merge and abandon, plus the reverse of each.
+ */
+export const CardStatus = Schema.Literals([
+  "triage",
+  "ready",
+  "inProgress",
+  "inReview",
+  "landing",
+  "landed",
+  "abandoned",
+]);
+export type CardStatus = typeof CardStatus.Type;
+
+export const CardSpecState = Schema.Literals(["draft", "approved", "skipped"]);
+export type CardSpecState = typeof CardSpecState.Type;
+
+export const CardRelationKind = Schema.Literals([
+  "blocks",
+  "blockedBy",
+  "duplicateOf",
+  "related",
+  "overlaps",
+]);
+export type CardRelationKind = typeof CardRelationKind.Type;
+
+export const CardRelation = Schema.Struct({
+  kind: CardRelationKind,
+  cardId: CardId,
+});
+export type CardRelation = typeof CardRelation.Type;
+
+export const CardAuthorKind = Schema.Literals(["human", "agent", "lead", "linear"]);
+export type CardAuthorKind = typeof CardAuthorKind.Type;
+
+export const CardAuthor = Schema.Struct({
+  kind: CardAuthorKind,
+  id: TrimmedNonEmptyString,
+});
+export type CardAuthor = typeof CardAuthor.Type;
+
+/** Why a card's status changed: a human decision, its reverse, or something that happened. */
+export const CardMove = Schema.Literals([
+  "approve",
+  "unapprove",
+  "workStarted",
+  "requestReview",
+  "returnToWork",
+  "approveMerge",
+  "cancelLanding",
+  "landed",
+  "abandon",
+  "reopen",
+]);
+export type CardMove = typeof CardMove.Type;
+
+export const OrchestrationCard = Schema.Struct({
+  id: CardId,
+  projectId: ProjectId,
+  // The channel it was proposed in, if any.
+  channelId: Schema.NullOr(ChannelId),
+  parentCardId: Schema.NullOr(CardId),
+  title: TrimmedNonEmptyString,
+  spec: Schema.String,
+  specState: CardSpecState,
+  tags: Schema.Array(TrimmedNonEmptyString),
+  status: CardStatus,
+  // The accountable person; the single local human until multiplayer.
+  ownerHumanId: TrimmedNonEmptyString,
+  // The only agent that writes on the card.
+  delegateAgentId: Schema.NullOr(AgentId),
+  // Null means the repository's default branch, resolved when the card's worktree is created.
+  baseBranch: Schema.NullOr(TrimmedNonEmptyString),
+  relations: Schema.Array(CardRelation),
+  createdBy: CardAuthor,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationCard = typeof OrchestrationCard.Type;
+
+/** One entry of a card's decision log. Paged from its projection, never in the read model. */
+export const OrchestrationCardDecision = Schema.Struct({
+  decisionId: TrimmedNonEmptyString,
+  cardId: CardId,
+  author: CardAuthor,
+  text: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+export type OrchestrationCardDecision = typeof OrchestrationCardDecision.Type;
+
 export const ChannelMessageAuthorKind = Schema.Literals(["human", "agent", "system", "webhook"]);
 export type ChannelMessageAuthorKind = typeof ChannelMessageAuthorKind.Type;
 
@@ -958,6 +1051,8 @@ export const OrchestrationReadModel = Schema.Struct({
   agents: Schema.optional(Schema.Array(OrchestrationAgent)),
   // Channel messages are not part of the read model; they are paged from the projection.
   channels: Schema.optional(Schema.Array(OrchestrationChannel)),
+  // A card's decision log is not part of the read model; it is paged from the projection.
+  cards: Schema.optional(Schema.Array(OrchestrationCard)),
   liveRuns: Schema.optional(Schema.Array(OrchestrationLiveRun)),
   updatedAt: IsoDateTime,
 });
@@ -1304,6 +1399,89 @@ const AgentUnarchiveCommand = Schema.Struct({
   type: Schema.Literal("agent.unarchive"),
   commandId: CommandId,
   agentId: AgentId,
+});
+
+const CardCreateCommand = Schema.Struct({
+  type: Schema.Literal("card.create"),
+  commandId: CommandId,
+  cardId: CardId,
+  projectId: ProjectId,
+  channelId: Schema.optional(Schema.NullOr(ChannelId)),
+  parentCardId: Schema.optional(Schema.NullOr(CardId)),
+  title: TrimmedNonEmptyString,
+  spec: Schema.String,
+  tags: Schema.Array(TrimmedNonEmptyString),
+  baseBranch: Schema.optional(TrimmedNonEmptyString),
+  createdAt: IsoDateTime,
+});
+
+const CardUpdateCommand = Schema.Struct({
+  type: Schema.Literal("card.update"),
+  commandId: CommandId,
+  cardId: CardId,
+  title: Schema.optional(TrimmedNonEmptyString),
+  spec: Schema.optional(Schema.String),
+  tags: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+});
+
+/** A status command names only the card: the decider derives where it goes. */
+const cardStatusCommand = <const Type extends string>(type: Type) =>
+  Schema.Struct({
+    type: Schema.Literal(type),
+    commandId: CommandId,
+    cardId: CardId,
+  });
+
+const CardApproveCommand = cardStatusCommand("card.approve");
+const CardUnapproveCommand = cardStatusCommand("card.unapprove");
+const CardMergeApproveCommand = cardStatusCommand("card.merge.approve");
+const CardMergeCancelCommand = cardStatusCommand("card.merge.cancel");
+const CardAbandonCommand = cardStatusCommand("card.abandon");
+const CardReopenCommand = cardStatusCommand("card.reopen");
+const CardUnassignCommand = cardStatusCommand("card.unassign");
+
+const CardAssignCommand = Schema.Struct({
+  type: Schema.Literal("card.assign"),
+  commandId: CommandId,
+  cardId: CardId,
+  agentId: AgentId,
+});
+
+const CardRelationAddCommand = Schema.Struct({
+  type: Schema.Literal("card.relation.add"),
+  commandId: CommandId,
+  cardId: CardId,
+  kind: CardRelationKind,
+  otherCardId: CardId,
+});
+
+const CardRelationRemoveCommand = Schema.Struct({
+  type: Schema.Literal("card.relation.remove"),
+  commandId: CommandId,
+  cardId: CardId,
+  kind: CardRelationKind,
+  otherCardId: CardId,
+});
+
+const CardDecisionRecordCommand = Schema.Struct({
+  type: Schema.Literal("card.decision.record"),
+  commandId: CommandId,
+  cardId: CardId,
+  decisionId: TrimmedNonEmptyString,
+  text: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
+// Server-only: dispatched by the session reactor, agent tools, checks and the merge queue.
+const CardWorkStartCommand = cardStatusCommand("card.work.start");
+const CardReviewRequestCommand = cardStatusCommand("card.review.request");
+const CardLandCommand = cardStatusCommand("card.land");
+
+const CardWorkReturnCommand = Schema.Struct({
+  type: Schema.Literal("card.work.return"),
+  commandId: CommandId,
+  cardId: CardId,
+  reason: TrimmedNonEmptyString,
 });
 
 const ChannelCreateCommand = Schema.Struct({
@@ -1693,6 +1871,19 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   AgentUpdateCommand,
   AgentArchiveCommand,
   AgentUnarchiveCommand,
+  CardCreateCommand,
+  CardUpdateCommand,
+  CardApproveCommand,
+  CardUnapproveCommand,
+  CardAssignCommand,
+  CardUnassignCommand,
+  CardMergeApproveCommand,
+  CardMergeCancelCommand,
+  CardAbandonCommand,
+  CardReopenCommand,
+  CardRelationAddCommand,
+  CardRelationRemoveCommand,
+  CardDecisionRecordCommand,
   ChannelCreateCommand,
   ChannelUpdateCommand,
   ChannelArchiveCommand,
@@ -1735,6 +1926,19 @@ export const ClientOrchestrationCommand = Schema.Union([
   AgentUpdateCommand,
   AgentArchiveCommand,
   AgentUnarchiveCommand,
+  CardCreateCommand,
+  CardUpdateCommand,
+  CardApproveCommand,
+  CardUnapproveCommand,
+  CardAssignCommand,
+  CardUnassignCommand,
+  CardMergeApproveCommand,
+  CardMergeCancelCommand,
+  CardAbandonCommand,
+  CardReopenCommand,
+  CardRelationAddCommand,
+  CardRelationRemoveCommand,
+  CardDecisionRecordCommand,
   ChannelCreateCommand,
   ChannelUpdateCommand,
   ChannelArchiveCommand,
@@ -1885,6 +2089,10 @@ const ThreadPullRequestLinkSyncCommand = Schema.Struct({
 });
 
 const InternalOrchestrationCommand = Schema.Union([
+  CardWorkStartCommand,
+  CardReviewRequestCommand,
+  CardWorkReturnCommand,
+  CardLandCommand,
   ChannelAgentWakeCommand,
   ChannelRunStartCommand,
   ChannelMessageAgentPostCommand,
@@ -1920,6 +2128,13 @@ export const OrchestrationEventType = Schema.Literals([
   "agent.updated",
   "agent.archived",
   "agent.unarchived",
+  "card.created",
+  "card.updated",
+  "card.status-changed",
+  "card.delegate-changed",
+  "card.relation-added",
+  "card.relation-removed",
+  "card.decision-recorded",
   "channel.created",
   "channel.updated",
   "channel.archived",
@@ -1965,6 +2180,7 @@ export const OrchestrationAggregateKind = Schema.Literals([
   "thread",
   "agent",
   "channel",
+  "card",
 ]);
 export type OrchestrationAggregateKind = typeof OrchestrationAggregateKind.Type;
 export const OrchestrationActorKind = Schema.Literals(["client", "server", "provider"]);
@@ -2034,6 +2250,71 @@ export const AgentArchivedPayload = Schema.Struct({
 export const AgentUnarchivedPayload = Schema.Struct({
   agentId: AgentId,
   updatedAt: IsoDateTime,
+});
+
+export const CardCreatedPayload = Schema.Struct({
+  cardId: CardId,
+  projectId: ProjectId,
+  channelId: Schema.NullOr(ChannelId),
+  parentCardId: Schema.NullOr(CardId),
+  title: TrimmedNonEmptyString,
+  spec: Schema.String,
+  specState: CardSpecState,
+  tags: Schema.Array(TrimmedNonEmptyString),
+  status: CardStatus,
+  ownerHumanId: TrimmedNonEmptyString,
+  baseBranch: Schema.NullOr(TrimmedNonEmptyString),
+  createdBy: CardAuthor,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const CardUpdatedPayload = Schema.Struct({
+  cardId: CardId,
+  title: Schema.optional(TrimmedNonEmptyString),
+  spec: Schema.optional(Schema.String),
+  specState: Schema.optional(CardSpecState),
+  tags: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  updatedAt: IsoDateTime,
+});
+
+export const CardStatusChangedPayload = Schema.Struct({
+  cardId: CardId,
+  from: CardStatus,
+  to: CardStatus,
+  move: CardMove,
+  // Set when something returned the card to work: failed checks, a review comment, a conflict.
+  reason: Schema.optional(TrimmedNonEmptyString),
+  updatedAt: IsoDateTime,
+});
+
+export const CardDelegateChangedPayload = Schema.Struct({
+  cardId: CardId,
+  delegateAgentId: Schema.NullOr(AgentId),
+  updatedAt: IsoDateTime,
+});
+
+/** Recorded once on the card that named it; projections also apply the inverse to the other card. */
+export const CardRelationAddedPayload = Schema.Struct({
+  cardId: CardId,
+  kind: CardRelationKind,
+  otherCardId: CardId,
+  updatedAt: IsoDateTime,
+});
+
+export const CardRelationRemovedPayload = Schema.Struct({
+  cardId: CardId,
+  kind: CardRelationKind,
+  otherCardId: CardId,
+  updatedAt: IsoDateTime,
+});
+
+export const CardDecisionRecordedPayload = Schema.Struct({
+  cardId: CardId,
+  decisionId: TrimmedNonEmptyString,
+  author: CardAuthor,
+  text: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
 });
 
 export const ChannelCreatedPayload = Schema.Struct({
@@ -2358,7 +2639,7 @@ const EventBaseFields = {
   sequence: NonNegativeInt,
   eventId: EventId,
   aggregateKind: OrchestrationAggregateKind,
-  aggregateId: Schema.Union([ProjectId, ThreadId, AgentId, ChannelId]),
+  aggregateId: Schema.Union([ProjectId, ThreadId, AgentId, ChannelId, CardId]),
   occurredAt: IsoDateTime,
   commandId: Schema.NullOr(CommandId),
   causationEventId: Schema.NullOr(EventId),
@@ -2401,6 +2682,41 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("agent.unarchived"),
     payload: AgentUnarchivedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.created"),
+    payload: CardCreatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.updated"),
+    payload: CardUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.status-changed"),
+    payload: CardStatusChangedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.delegate-changed"),
+    payload: CardDelegateChangedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.relation-added"),
+    payload: CardRelationAddedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.relation-removed"),
+    payload: CardRelationRemovedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.decision-recorded"),
+    payload: CardDecisionRecordedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

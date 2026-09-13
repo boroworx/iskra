@@ -72,6 +72,27 @@ function commandToAggregateRef(command: OrchestrationCommand): {
         aggregateKind: "agent",
         aggregateId: command.agentId,
       };
+    case "card.create":
+    case "card.update":
+    case "card.approve":
+    case "card.unapprove":
+    case "card.assign":
+    case "card.unassign":
+    case "card.merge.approve":
+    case "card.merge.cancel":
+    case "card.abandon":
+    case "card.reopen":
+    case "card.relation.add":
+    case "card.relation.remove":
+    case "card.decision.record":
+    case "card.work.start":
+    case "card.review.request":
+    case "card.work.return":
+    case "card.land":
+      return {
+        aggregateKind: "card",
+        aggregateId: command.cardId,
+      };
     case "channel.create":
     case "channel.update":
     case "channel.archive":
