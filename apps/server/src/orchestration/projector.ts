@@ -1,5 +1,6 @@
 import type {
   OrchestrationAgent,
+  OrchestrationChannel,
   OrchestrationEvent,
   OrchestrationProject,
   OrchestrationReadModel,
@@ -31,6 +32,10 @@ import {
   AgentCreatedPayload,
   AgentUnarchivedPayload,
   AgentUpdatedPayload,
+  ChannelArchivedPayload,
+  ChannelCreatedPayload,
+  ChannelUnarchivedPayload,
+  ChannelUpdatedPayload,
   MessageSentPayloadSchema,
   ProjectCreatedPayload,
   ProjectDeletedPayload,
@@ -318,12 +323,21 @@ function updateAgent(
   return agents.map((agent) => (agent.id === agentId ? { ...agent, ...patch } : agent));
 }
 
+function updateChannel(
+  channels: ReadonlyArray<OrchestrationChannel>,
+  channelId: string,
+  patch: Partial<Omit<OrchestrationChannel, "id" | "projectId" | "kind">>,
+): ReadonlyArray<OrchestrationChannel> {
+  return channels.map((channel) => (channel.id === channelId ? { ...channel, ...patch } : channel));
+}
+
 export function createEmptyReadModel(nowIso: string): OrchestrationReadModel {
   return {
     snapshotSequence: 0,
     projects: [],
     threads: [],
     agents: [],
+    channels: [],
     updatedAt: nowIso,
   };
 }
@@ -1135,6 +1149,77 @@ export function projectEvent(
           }),
         })),
       );
+
+    case "channel.created":
+      return decodeForEvent(ChannelCreatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const channels = nextBase.channels ?? [];
+          const nextChannel: OrchestrationChannel = {
+            id: payload.channelId,
+            projectId: payload.projectId,
+            kind: payload.kind,
+            name: payload.name,
+            topic: payload.topic,
+            pinnedSpec: payload.pinnedSpec,
+            wakeDepth: payload.wakeDepth,
+            memberAgentIds: payload.memberAgentIds,
+            createdAt: payload.createdAt,
+            updatedAt: payload.updatedAt,
+            archivedAt: null,
+          };
+          return {
+            ...nextBase,
+            channels: channels.some((channel) => channel.id === payload.channelId)
+              ? channels.map((channel) =>
+                  channel.id === payload.channelId ? nextChannel : channel,
+                )
+              : [...channels, nextChannel],
+          };
+        }),
+      );
+
+    case "channel.updated":
+      return decodeForEvent(ChannelUpdatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          channels: updateChannel(nextBase.channels ?? [], payload.channelId, {
+            ...(payload.name !== undefined ? { name: payload.name } : {}),
+            ...(payload.topic !== undefined ? { topic: payload.topic } : {}),
+            ...(payload.pinnedSpec !== undefined ? { pinnedSpec: payload.pinnedSpec } : {}),
+            ...(payload.wakeDepth !== undefined ? { wakeDepth: payload.wakeDepth } : {}),
+            ...(payload.memberAgentIds !== undefined
+              ? { memberAgentIds: payload.memberAgentIds }
+              : {}),
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "channel.archived":
+      return decodeForEvent(ChannelArchivedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          channels: updateChannel(nextBase.channels ?? [], payload.channelId, {
+            archivedAt: payload.archivedAt,
+            updatedAt: payload.archivedAt,
+          }),
+        })),
+      );
+
+    case "channel.unarchived":
+      return decodeForEvent(ChannelUnarchivedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          channels: updateChannel(nextBase.channels ?? [], payload.channelId, {
+            archivedAt: null,
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    // Channel messages are paged from their projection, never held in the read model.
+    case "channel.message-posted":
+      return Effect.succeed(nextBase);
 
     default:
       return Effect.succeed(nextBase);

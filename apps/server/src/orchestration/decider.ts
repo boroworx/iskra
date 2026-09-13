@@ -1,4 +1,6 @@
 import {
+  CHANNEL_HUMAN_AUTHOR_ID,
+  DEFAULT_CHANNEL_WAKE_DEPTH,
   EventId,
   MAX_SCRIPT_ID_LENGTH,
   SCRIPT_RUN_COMMAND_PATTERN,
@@ -39,6 +41,9 @@ import {
   requireAgent,
   requireAgentAbsent,
   requireAgentNameAvailable,
+  requireChannel,
+  requireChannelAbsent,
+  requireValidChannelMembers,
   requireActiveProjectWorkspaceRootAbsent,
   requireProject,
   requireProjectAbsent,
@@ -2154,6 +2159,182 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           agentId: command.agentId,
           updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "channel.create": {
+      yield* requireProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      yield* requireChannelAbsent({
+        readModel,
+        command,
+        channelId: command.channelId,
+      });
+      yield* requireValidChannelMembers({
+        readModel,
+        command,
+        projectId: command.projectId,
+        kind: command.kind,
+        memberAgentIds: command.memberAgentIds,
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "channel",
+          aggregateId: command.channelId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "channel.created",
+        payload: {
+          channelId: command.channelId,
+          projectId: command.projectId,
+          kind: command.kind,
+          name: command.name,
+          topic: command.topic ?? "",
+          pinnedSpec: command.pinnedSpec ?? "",
+          wakeDepth: command.wakeDepth ?? DEFAULT_CHANNEL_WAKE_DEPTH,
+          memberAgentIds: command.memberAgentIds,
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "channel.update": {
+      const channel = yield* requireChannel({
+        readModel,
+        command,
+        channelId: command.channelId,
+      });
+      if (command.memberAgentIds !== undefined) {
+        yield* requireValidChannelMembers({
+          readModel,
+          command,
+          projectId: channel.projectId,
+          kind: channel.kind,
+          memberAgentIds: command.memberAgentIds,
+          exceptChannelId: channel.id,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "channel",
+          aggregateId: command.channelId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "channel.updated",
+        payload: {
+          channelId: command.channelId,
+          ...(command.name !== undefined ? { name: command.name } : {}),
+          ...(command.topic !== undefined ? { topic: command.topic } : {}),
+          ...(command.pinnedSpec !== undefined ? { pinnedSpec: command.pinnedSpec } : {}),
+          ...(command.wakeDepth !== undefined ? { wakeDepth: command.wakeDepth } : {}),
+          ...(command.memberAgentIds !== undefined
+            ? { memberAgentIds: command.memberAgentIds }
+            : {}),
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "channel.archive": {
+      const channel = yield* requireChannel({
+        readModel,
+        command,
+        channelId: command.channelId,
+      });
+      if (channel.archivedAt !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Channel '${command.channelId}' is already archived.`,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "channel",
+          aggregateId: command.channelId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "channel.archived",
+        payload: {
+          channelId: command.channelId,
+          archivedAt: occurredAt,
+        },
+      };
+    }
+
+    case "channel.unarchive": {
+      const channel = yield* requireChannel({
+        readModel,
+        command,
+        channelId: command.channelId,
+      });
+      if (channel.archivedAt === null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Channel '${command.channelId}' is not archived.`,
+        });
+      }
+      // Members may have been archived, or gained another DM, while this channel was archived.
+      yield* requireValidChannelMembers({
+        readModel,
+        command,
+        projectId: channel.projectId,
+        kind: channel.kind,
+        memberAgentIds: channel.memberAgentIds,
+        exceptChannelId: channel.id,
+      });
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "channel",
+          aggregateId: command.channelId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "channel.unarchived",
+        payload: {
+          channelId: command.channelId,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "channel.message.post": {
+      const channel = yield* requireChannel({
+        readModel,
+        command,
+        channelId: command.channelId,
+      });
+      if (channel.archivedAt !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Channel '${command.channelId}' is archived and cannot receive messages.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "channel",
+          aggregateId: command.channelId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "channel.message-posted",
+        payload: {
+          channelId: command.channelId,
+          messageId: command.messageId,
+          authorKind: "human",
+          authorId: CHANNEL_HUMAN_AUTHOR_ID,
+          body: command.body,
+          createdAt: command.createdAt,
         },
       };
     }

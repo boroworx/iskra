@@ -9,6 +9,7 @@ import { RepositoryIdentity, ThreadEnvMode } from "./environment.ts";
 import {
   AgentId,
   ApprovalRequestId,
+  ChannelId,
   CheckpointRef,
   ClientSurface,
   CommandId,
@@ -520,6 +521,44 @@ export const OrchestrationAgent = Schema.Struct({
 });
 export type OrchestrationAgent = typeof OrchestrationAgent.Type;
 
+export const ChannelKind = Schema.Literals(["channel", "dm"]);
+export type ChannelKind = typeof ChannelKind.Type;
+
+/** Messages of channel history handed to an agent when it wakes. */
+export const DEFAULT_CHANNEL_WAKE_DEPTH = 30;
+
+export const OrchestrationChannel = Schema.Struct({
+  id: ChannelId,
+  projectId: ProjectId,
+  kind: ChannelKind,
+  name: TrimmedNonEmptyString,
+  topic: Schema.String,
+  pinnedSpec: Schema.String,
+  wakeDepth: NonNegativeInt,
+  // A `dm` has exactly one agent; its human is implicit until there is more than one.
+  memberAgentIds: Schema.Array(AgentId),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  archivedAt: Schema.NullOr(IsoDateTime),
+});
+export type OrchestrationChannel = typeof OrchestrationChannel.Type;
+
+export const ChannelMessageAuthorKind = Schema.Literals(["human", "agent", "system", "webhook"]);
+export type ChannelMessageAuthorKind = typeof ChannelMessageAuthorKind.Type;
+
+/** Author id of every human message until multiplayer adds identities. */
+export const CHANNEL_HUMAN_AUTHOR_ID = "human";
+
+export const OrchestrationChannelMessage = Schema.Struct({
+  id: MessageId,
+  channelId: ChannelId,
+  authorKind: ChannelMessageAuthorKind,
+  authorId: TrimmedNonEmptyString,
+  body: Schema.String,
+  createdAt: IsoDateTime,
+});
+export type OrchestrationChannelMessage = typeof OrchestrationChannelMessage.Type;
+
 export const OrchestrationMessageRole = Schema.Literals(["user", "assistant", "system"]);
 export type OrchestrationMessageRole = typeof OrchestrationMessageRole.Type;
 
@@ -801,6 +840,8 @@ export const OrchestrationReadModel = Schema.Struct({
   threads: Schema.Array(OrchestrationThread),
   // Optional on the wire so read models from servers without agents still decode.
   agents: Schema.optional(Schema.Array(OrchestrationAgent)),
+  // Channel messages are not part of the read model; they are paged from the projection.
+  channels: Schema.optional(Schema.Array(OrchestrationChannel)),
   updatedAt: IsoDateTime,
 });
 export type OrchestrationReadModel = typeof OrchestrationReadModel.Type;
@@ -1089,6 +1130,52 @@ const AgentUnarchiveCommand = Schema.Struct({
   type: Schema.Literal("agent.unarchive"),
   commandId: CommandId,
   agentId: AgentId,
+});
+
+const ChannelCreateCommand = Schema.Struct({
+  type: Schema.Literal("channel.create"),
+  commandId: CommandId,
+  channelId: ChannelId,
+  projectId: ProjectId,
+  kind: ChannelKind,
+  name: TrimmedNonEmptyString,
+  topic: Schema.optional(Schema.String),
+  pinnedSpec: Schema.optional(Schema.String),
+  wakeDepth: Schema.optional(NonNegativeInt),
+  memberAgentIds: Schema.Array(AgentId),
+  createdAt: IsoDateTime,
+});
+
+const ChannelUpdateCommand = Schema.Struct({
+  type: Schema.Literal("channel.update"),
+  commandId: CommandId,
+  channelId: ChannelId,
+  name: Schema.optional(TrimmedNonEmptyString),
+  topic: Schema.optional(Schema.String),
+  pinnedSpec: Schema.optional(Schema.String),
+  wakeDepth: Schema.optional(NonNegativeInt),
+  memberAgentIds: Schema.optional(Schema.Array(AgentId)),
+});
+
+const ChannelArchiveCommand = Schema.Struct({
+  type: Schema.Literal("channel.archive"),
+  commandId: CommandId,
+  channelId: ChannelId,
+});
+
+const ChannelUnarchiveCommand = Schema.Struct({
+  type: Schema.Literal("channel.unarchive"),
+  commandId: CommandId,
+  channelId: ChannelId,
+});
+
+const ChannelMessagePostCommand = Schema.Struct({
+  type: Schema.Literal("channel.message.post"),
+  commandId: CommandId,
+  channelId: ChannelId,
+  messageId: MessageId,
+  body: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
 });
 
 const ThreadCreateCommand = Schema.Struct({
@@ -1395,6 +1482,11 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   AgentUpdateCommand,
   AgentArchiveCommand,
   AgentUnarchiveCommand,
+  ChannelCreateCommand,
+  ChannelUpdateCommand,
+  ChannelArchiveCommand,
+  ChannelUnarchiveCommand,
+  ChannelMessagePostCommand,
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
@@ -1432,6 +1524,11 @@ export const ClientOrchestrationCommand = Schema.Union([
   AgentUpdateCommand,
   AgentArchiveCommand,
   AgentUnarchiveCommand,
+  ChannelCreateCommand,
+  ChannelUpdateCommand,
+  ChannelArchiveCommand,
+  ChannelUnarchiveCommand,
+  ChannelMessagePostCommand,
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
@@ -1608,6 +1705,11 @@ export const OrchestrationEventType = Schema.Literals([
   "agent.updated",
   "agent.archived",
   "agent.unarchived",
+  "channel.created",
+  "channel.updated",
+  "channel.archived",
+  "channel.unarchived",
+  "channel.message-posted",
   "thread.created",
   "thread.deleted",
   "thread.archived",
@@ -1640,7 +1742,12 @@ export const OrchestrationEventType = Schema.Literals([
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
-export const OrchestrationAggregateKind = Schema.Literals(["project", "thread", "agent"]);
+export const OrchestrationAggregateKind = Schema.Literals([
+  "project",
+  "thread",
+  "agent",
+  "channel",
+]);
 export type OrchestrationAggregateKind = typeof OrchestrationAggregateKind.Type;
 export const OrchestrationActorKind = Schema.Literals(["client", "server", "provider"]);
 
@@ -1709,6 +1816,48 @@ export const AgentArchivedPayload = Schema.Struct({
 export const AgentUnarchivedPayload = Schema.Struct({
   agentId: AgentId,
   updatedAt: IsoDateTime,
+});
+
+export const ChannelCreatedPayload = Schema.Struct({
+  channelId: ChannelId,
+  projectId: ProjectId,
+  kind: ChannelKind,
+  name: TrimmedNonEmptyString,
+  topic: Schema.String,
+  pinnedSpec: Schema.String,
+  wakeDepth: NonNegativeInt,
+  memberAgentIds: Schema.Array(AgentId),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const ChannelUpdatedPayload = Schema.Struct({
+  channelId: ChannelId,
+  name: Schema.optional(TrimmedNonEmptyString),
+  topic: Schema.optional(Schema.String),
+  pinnedSpec: Schema.optional(Schema.String),
+  wakeDepth: Schema.optional(NonNegativeInt),
+  memberAgentIds: Schema.optional(Schema.Array(AgentId)),
+  updatedAt: IsoDateTime,
+});
+
+export const ChannelArchivedPayload = Schema.Struct({
+  channelId: ChannelId,
+  archivedAt: IsoDateTime,
+});
+
+export const ChannelUnarchivedPayload = Schema.Struct({
+  channelId: ChannelId,
+  updatedAt: IsoDateTime,
+});
+
+export const ChannelMessagePostedPayload = Schema.Struct({
+  channelId: ChannelId,
+  messageId: MessageId,
+  authorKind: ChannelMessageAuthorKind,
+  authorId: TrimmedNonEmptyString,
+  body: Schema.String,
+  createdAt: IsoDateTime,
 });
 
 export const ThreadCreatedPayload = Schema.Struct({
@@ -1968,7 +2117,7 @@ const EventBaseFields = {
   sequence: NonNegativeInt,
   eventId: EventId,
   aggregateKind: OrchestrationAggregateKind,
-  aggregateId: Schema.Union([ProjectId, ThreadId, AgentId]),
+  aggregateId: Schema.Union([ProjectId, ThreadId, AgentId, ChannelId]),
   occurredAt: IsoDateTime,
   commandId: Schema.NullOr(CommandId),
   causationEventId: Schema.NullOr(EventId),
@@ -2011,6 +2160,31 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("agent.unarchived"),
     payload: AgentUnarchivedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("channel.created"),
+    payload: ChannelCreatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("channel.updated"),
+    payload: ChannelUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("channel.archived"),
+    payload: ChannelArchivedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("channel.unarchived"),
+    payload: ChannelUnarchivedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("channel.message-posted"),
+    payload: ChannelMessagePostedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

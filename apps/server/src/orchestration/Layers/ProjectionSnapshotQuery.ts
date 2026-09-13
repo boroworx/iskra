@@ -55,6 +55,7 @@ import { ProjectionCheckpoint } from "../../persistence/Services/ProjectionCheck
 import { ThreadBackgroundLivenessService } from "../ThreadBackgroundLiveness.ts";
 import { ThreadPlanProgressService } from "../ThreadPlanProgress.ts";
 import { ProjectionAgentDbRow } from "../../persistence/Services/ProjectionAgents.ts";
+import { ProjectionChannelDbRow } from "../../persistence/Services/ProjectionChannels.ts";
 import { ProjectionProject } from "../../persistence/Services/ProjectionProjects.ts";
 import { ProjectionState } from "../../persistence/Services/ProjectionState.ts";
 import { ProjectionThreadActivity } from "../../persistence/Services/ProjectionThreadActivities.ts";
@@ -570,6 +571,28 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           archived_at AS "archivedAt"
         FROM projection_agents
         ORDER BY created_at ASC, agent_id ASC
+      `,
+  });
+
+  const listChannelRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionChannelDbRow,
+    execute: () =>
+      sql`
+        SELECT
+          channel_id AS "channelId",
+          project_id AS "projectId",
+          kind,
+          name,
+          topic,
+          pinned_spec AS "pinnedSpec",
+          wake_depth AS "wakeDepth",
+          member_agent_ids_json AS "memberAgentIds",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt",
+          archived_at AS "archivedAt"
+        FROM projection_channels
+        ORDER BY created_at ASC, channel_id ASC
       `,
   });
 
@@ -2381,6 +2404,14 @@ pending_approval_requests AS (
               ),
             ),
           ),
+          listChannelRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getCommandReadModel:listChannels:query",
+                "ProjectionSnapshotQuery.getCommandReadModel:listChannels:decodeRows",
+              ),
+            ),
+          ),
         ]),
       )
       .pipe(
@@ -2394,6 +2425,7 @@ pending_approval_requests AS (
             latestTurnRows,
             stateRows,
             agentRows,
+            channelRows,
           ]) =>
             Effect.gen(function* () {
               const linkedThreadIds = new Set(pullRequestRows.map((row) => row.threadId));
@@ -2558,6 +2590,19 @@ pending_approval_requests AS (
                   rolePrompt: row.rolePrompt,
                   modelSelection: row.modelSelection,
                   capabilities: row.capabilities,
+                  createdAt: row.createdAt,
+                  updatedAt: row.updatedAt,
+                  archivedAt: row.archivedAt,
+                })),
+                channels: channelRows.map((row) => ({
+                  id: row.channelId,
+                  projectId: row.projectId,
+                  kind: row.kind,
+                  name: row.name,
+                  topic: row.topic,
+                  pinnedSpec: row.pinnedSpec,
+                  wakeDepth: row.wakeDepth,
+                  memberAgentIds: row.memberAgentIds,
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
                   archivedAt: row.archivedAt,

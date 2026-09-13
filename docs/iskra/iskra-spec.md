@@ -133,15 +133,20 @@ Define all of these in `packages/contracts` with Effect/Schema, following the ex
 files. Field lists are the contract; naming and encoding follow local convention.
 
 **Agent** — durable. `id`, `projectId`, `name` (`[a-z0-9-]+`, unique per project), `avatar`,
-`roleTags[]`, `rolePrompt`, `providerId`, `model`, `reasoningLevel`, `capabilities` (the ceiling
-for card-scoped runs; see permission model), `channelIds[]`, `scratchpadRef`, `archivedAt?`.
+`roleTags[]`, `rolePrompt`, `modelSelection` (upstream's provider instance + model + options,
+including reasoning effort), `capabilities` (the ceiling for card-scoped runs; see permission
+model), `archivedAt?`. Channel membership lives only on the channel. `scratchpadRef` is added in
+M3.
 
 **Channel** — durable. `id`, `projectId`, `kind` (`channel` | `dm`), `name`, `topic`,
-`pinnedSpecRef`, `wakeDepth` (messages of history given to an agent on wake, default 30),
-`memberAgentIds[]`. A `dm` channel has exactly one human and one agent member.
+`pinnedSpec` (plain text in M1; M3 decides whether agents write it), `wakeDepth` (messages of
+history given to an agent on wake, default 30), `memberAgentIds[]`. A `dm` channel has exactly
+one agent member; its human is implicit until M5 adds more than one.
 
 **Message** — durable, append-only. `id`, `channelId`, `authorKind` (`human` | `agent` |
-`system` | `webhook`), `authorId`, `body`, `mentions[]`, `createdAt`, `runId?`.
+`system` | `webhook`), `authorId`, `body`, `mentions[]` (added with M1.5), `createdAt`, `runId?`
+(added with M1.4). Messages are never part of the command read model; history is ordered and paged
+by event sequence.
 
 **Card** — durable. `id`, `projectId`, `channelId`, `title`, `body`, `tags[]`,
 `status` (`triage` | `ready` | `claimed` | `inProgress` | `inReview` | `landed` | `abandoned`),

@@ -6,6 +6,10 @@ import {
   AgentUpdatedPayload as ContractsAgentUpdatedPayloadSchema,
   AgentArchivedPayload as ContractsAgentArchivedPayloadSchema,
   AgentUnarchivedPayload as ContractsAgentUnarchivedPayloadSchema,
+  ChannelCreatedPayload as ContractsChannelCreatedPayloadSchema,
+  ChannelUpdatedPayload as ContractsChannelUpdatedPayloadSchema,
+  ChannelArchivedPayload as ContractsChannelArchivedPayloadSchema,
+  ChannelUnarchivedPayload as ContractsChannelUnarchivedPayloadSchema,
   ThreadCreatedPayload as ContractsThreadCreatedPayloadSchema,
   ThreadArchivedPayload as ContractsThreadArchivedPayloadSchema,
   ThreadSettledPayload as ContractsThreadSettledPayloadSchema,
@@ -45,6 +49,11 @@ export const AgentCreatedPayload = ContractsAgentCreatedPayloadSchema;
 export const AgentUpdatedPayload = ContractsAgentUpdatedPayloadSchema;
 export const AgentArchivedPayload = ContractsAgentArchivedPayloadSchema;
 export const AgentUnarchivedPayload = ContractsAgentUnarchivedPayloadSchema;
+
+export const ChannelCreatedPayload = ContractsChannelCreatedPayloadSchema;
+export const ChannelUpdatedPayload = ContractsChannelUpdatedPayloadSchema;
+export const ChannelArchivedPayload = ContractsChannelArchivedPayloadSchema;
+export const ChannelUnarchivedPayload = ContractsChannelUnarchivedPayloadSchema;
 
 export const ThreadCreatedPayload = ContractsThreadCreatedPayloadSchema;
 export const ThreadArchivedPayload = ContractsThreadArchivedPayloadSchema;

@@ -6,6 +6,7 @@ import * as NodePath from "node:path";
 import {
   AgentId,
   ApprovalRequestId,
+  ChannelId,
   EventId,
   CheckpointRef,
   CommandId,
@@ -35,6 +36,8 @@ import { PersistenceSqlError } from "../../persistence/Errors.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
 import * as OrchestrationCommandReceipts from "../../persistence/Services/OrchestrationCommandReceipts.ts";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
+import { ProjectionChannelRepositoryLive } from "../../persistence/Layers/ProjectionChannels.ts";
+import { ProjectionChannelRepository } from "../../persistence/Services/ProjectionChannels.ts";
 import {
   makeSqlitePersistenceLive,
   SqlitePersistenceMemory,
@@ -79,6 +82,7 @@ function makeOrchestrationLayer(
       Layer.provide(OrchestrationProjectionPipelineLive),
     ),
     OrchestrationProjectionSnapshotQueryLive,
+    ProjectionChannelRepositoryLive,
   ).pipe(
     Layer.provideMerge(ThreadBackgroundLiveness.layer),
     Layer.provide(ThreadPlanProgress.layer),
@@ -111,6 +115,7 @@ async function createOrchestrationSystem(
     engine,
     readModel: () => runtime.runPromise(snapshotQuery.getSnapshot()),
     commandReadModel: () => runtime.runPromise(snapshotQuery.getCommandReadModel()),
+    channelRepository: () => runtime.runPromise(Effect.service(ProjectionChannelRepository)),
     readThread: (threadId: ThreadId) =>
       runtime.runPromise(snapshotQuery.getThreadDetailById(threadId)),
     run: <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect),
@@ -927,6 +932,78 @@ describe("OrchestrationEngine", () => {
     } finally {
       await system.dispose();
       await NodeFSP.rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("pages channel messages and hands agents only the newest wake-depth of them", async () => {
+    const system = await createOrchestrationSystem();
+    const projectId = asProjectId("channels-project");
+    const channelId = ChannelId.make("channel-general");
+    const bodies = (messages: ReadonlyArray<{ readonly body: string }>) =>
+      messages.map((message) => message.body);
+    try {
+      await system.run(
+        system.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.make("cmd-channels-project"),
+          projectId,
+          title: "Channels",
+          workspaceRoot: "/tmp/channels-project",
+          createdAt: now(),
+        }),
+      );
+      await system.run(
+        system.engine.dispatch({
+          type: "channel.create",
+          commandId: CommandId.make("cmd-channel-general"),
+          channelId,
+          projectId,
+          kind: "channel",
+          name: "general",
+          wakeDepth: 3,
+          memberAgentIds: [],
+          createdAt: now(),
+        }),
+      );
+      for (const index of [1, 2, 3, 4, 5]) {
+        await system.run(
+          system.engine.dispatch({
+            type: "channel.message.post",
+            commandId: CommandId.make(`cmd-message-${index}`),
+            channelId,
+            messageId: MessageId.make(`message-${index}`),
+            body: `message ${index}`,
+            createdAt: now(),
+          }),
+        );
+      }
+      const channels = await system.channelRepository();
+
+      const newest = await system.run(channels.listMessages({ channelId, limit: 2 }));
+      expect(bodies(newest)).toEqual(["message 4", "message 5"]);
+      const older = await system.run(
+        channels.listMessages({ channelId, beforeSequence: newest[0]?.sequence ?? 0, limit: 2 }),
+      );
+      expect(bodies(older)).toEqual(["message 2", "message 3"]);
+
+      expect(bodies(await system.run(channels.listWakeHistory({ channelId })))).toEqual([
+        "message 3",
+        "message 4",
+        "message 5",
+      ]);
+      await system.run(
+        system.engine.dispatch({
+          type: "channel.update",
+          commandId: CommandId.make("cmd-channel-general-depth"),
+          channelId,
+          wakeDepth: 1,
+        }),
+      );
+      expect(bodies(await system.run(channels.listWakeHistory({ channelId })))).toEqual([
+        "message 5",
+      ]);
+    } finally {
+      await system.dispose();
     }
   });
 

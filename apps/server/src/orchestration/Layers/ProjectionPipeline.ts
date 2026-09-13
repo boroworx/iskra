@@ -25,6 +25,7 @@ import { toPersistenceSqlError, type ProjectionRepositoryError } from "../../per
 import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
 import { ProjectionPendingApprovalRepository } from "../../persistence/Services/ProjectionPendingApprovals.ts";
 import { ProjectionAgentRepository } from "../../persistence/Services/ProjectionAgents.ts";
+import { ProjectionChannelRepository } from "../../persistence/Services/ProjectionChannels.ts";
 import { ProjectionProjectRepository } from "../../persistence/Services/ProjectionProjects.ts";
 import { ProjectionStateRepository } from "../../persistence/Services/ProjectionState.ts";
 import { ProjectionThreadActivityRepository } from "../../persistence/Services/ProjectionThreadActivities.ts";
@@ -46,6 +47,7 @@ import {
 import { ProjectionThreadRepository } from "../../persistence/Services/ProjectionThreads.ts";
 import { ProjectionPendingApprovalRepositoryLive } from "../../persistence/Layers/ProjectionPendingApprovals.ts";
 import { ProjectionAgentRepositoryLive } from "../../persistence/Layers/ProjectionAgents.ts";
+import { ProjectionChannelRepositoryLive } from "../../persistence/Layers/ProjectionChannels.ts";
 import { ProjectionProjectRepositoryLive } from "../../persistence/Layers/ProjectionProjects.ts";
 import { ProjectionStateRepositoryLive } from "../../persistence/Layers/ProjectionState.ts";
 import { ProjectionThreadActivityRepositoryLive } from "../../persistence/Layers/ProjectionThreadActivities.ts";
@@ -69,6 +71,7 @@ import {
 export const ORCHESTRATION_PROJECTOR_NAMES = {
   projects: "projection.projects",
   agents: "projection.agents",
+  channels: "projection.channels",
   threads: "projection.threads",
   threadMessages: "projection.thread-messages",
   threadProposedPlans: "projection.thread-proposed-plans",
@@ -495,6 +498,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const projectionTurnRepository = yield* ProjectionTurnRepository;
     const projectionPendingApprovalRepository = yield* ProjectionPendingApprovalRepository;
     const projectionAgentRepository = yield* ProjectionAgentRepository;
+    const projectionChannelRepository = yield* ProjectionChannelRepository;
 
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -640,6 +644,85 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         }
       },
     );
+
+    const applyChannelsProjection: ProjectorDefinition["apply"] = Effect.fn(
+      "applyChannelsProjection",
+    )(function* (event, _attachmentSideEffects) {
+      switch (event.type) {
+        case "channel.created":
+          yield* projectionChannelRepository.upsertChannel({
+            channelId: event.payload.channelId,
+            projectId: event.payload.projectId,
+            kind: event.payload.kind,
+            name: event.payload.name,
+            topic: event.payload.topic,
+            pinnedSpec: event.payload.pinnedSpec,
+            wakeDepth: event.payload.wakeDepth,
+            memberAgentIds: event.payload.memberAgentIds,
+            createdAt: event.payload.createdAt,
+            updatedAt: event.payload.updatedAt,
+            archivedAt: null,
+          });
+          return;
+
+        case "channel.updated": {
+          const existingRow = yield* projectionChannelRepository.getChannelById({
+            channelId: event.payload.channelId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionChannelRepository.upsertChannel({
+            ...existingRow.value,
+            ...(event.payload.name !== undefined ? { name: event.payload.name } : {}),
+            ...(event.payload.topic !== undefined ? { topic: event.payload.topic } : {}),
+            ...(event.payload.pinnedSpec !== undefined
+              ? { pinnedSpec: event.payload.pinnedSpec }
+              : {}),
+            ...(event.payload.wakeDepth !== undefined
+              ? { wakeDepth: event.payload.wakeDepth }
+              : {}),
+            ...(event.payload.memberAgentIds !== undefined
+              ? { memberAgentIds: event.payload.memberAgentIds }
+              : {}),
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "channel.archived":
+        case "channel.unarchived": {
+          const existingRow = yield* projectionChannelRepository.getChannelById({
+            channelId: event.payload.channelId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionChannelRepository.upsertChannel({
+            ...existingRow.value,
+            ...(event.type === "channel.archived"
+              ? { archivedAt: event.payload.archivedAt, updatedAt: event.payload.archivedAt }
+              : { archivedAt: null, updatedAt: event.payload.updatedAt }),
+          });
+          return;
+        }
+
+        case "channel.message-posted":
+          yield* projectionChannelRepository.appendMessage({
+            messageId: event.payload.messageId,
+            channelId: event.payload.channelId,
+            sequence: event.sequence,
+            authorKind: event.payload.authorKind,
+            authorId: event.payload.authorId,
+            body: event.payload.body,
+            createdAt: event.payload.createdAt,
+          });
+          return;
+
+        default:
+          return;
+      }
+    });
 
     const refreshThreadShellSummary = Effect.fn("refreshThreadShellSummary")(function* (
       threadId: ThreadId,
@@ -2001,6 +2084,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         apply: applyAgentsProjection,
       },
       {
+        name: ORCHESTRATION_PROJECTOR_NAMES.channels,
+        apply: applyChannelsProjection,
+      },
+      {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadMessages,
         apply: applyThreadMessagesProjection,
       },
@@ -2257,6 +2344,7 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
 ).pipe(
   Layer.provideMerge(ProjectionProjectRepositoryLive),
   Layer.provideMerge(ProjectionAgentRepositoryLive),
+  Layer.provideMerge(ProjectionChannelRepositoryLive),
   Layer.provideMerge(ProjectionThreadRepositoryLive),
   Layer.provideMerge(ProjectionThreadMessageRepositoryLive),
   Layer.provideMerge(ProjectionThreadProposedPlanRepositoryLive),
