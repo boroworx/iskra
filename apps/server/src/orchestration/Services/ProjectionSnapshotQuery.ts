@@ -16,6 +16,7 @@ import type {
   OrchestrationProject,
   OrchestrationProjectShell,
   OrchestrationReadModel,
+  OrchestrationRun,
   OrchestrationSearchThreadsInput,
   OrchestrationSearchThreadsResult,
   OrchestrationShellSnapshot,
@@ -208,6 +209,14 @@ export interface ProjectionSnapshotQueryShape {
   readonly getThreadShellById: (
     threadId: ThreadId,
   ) => Effect.Effect<Option.Option<OrchestrationThreadShell>, ProjectionRepositoryError>;
+
+  /**
+   * Read the run a thread backs, if it is one. Run threads are left out of the
+   * thread list; they surface through their channel instead.
+   */
+  readonly getRunByThreadId: (
+    threadId: ThreadId,
+  ) => Effect.Effect<Option.Option<OrchestrationRun>, ProjectionRepositoryError>;
 
   /** Read the active thread and session facts used to ingest provider events. */
   readonly getThreadRuntimeContext: (

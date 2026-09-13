@@ -5,7 +5,9 @@ import {
   MessageId,
   ProjectId,
   ProviderInstanceId,
+  ThreadId,
   type OrchestrationCommand,
+  type RunCapability,
 } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -158,6 +160,103 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
           channelCommand("dm-backend", "channel.unarchive"),
         ]),
       );
+    }),
+  );
+
+  it.effect("wakes only an active member agent of an active channel", () =>
+    Effect.gen(function* () {
+      const wake = (agentId: AgentId): OrchestrationCommand => ({
+        type: "channel.agent.wake",
+        commandId: CommandId.make(`cmd-wake-${agentId}`),
+        channelId: ChannelId.make("general"),
+        agentId,
+        triggerMessageId: MessageId.make("message-general-hello"),
+        createdAt: now,
+      });
+      const base = [...setup, createChannel("general", "channel", [backend])];
+
+      const readModel = yield* applyCommands(base);
+      const woken = yield* decideOrchestrationCommand({ command: wake(backend), readModel });
+      expect(woken).toMatchObject({
+        type: "channel.agent-wake-requested",
+        payload: { agentId: backend },
+      });
+
+      yield* Effect.flip(applyCommands([...base, wake(frontend)]));
+      yield* Effect.flip(
+        applyCommands([...base, channelCommand("general", "channel.archive"), wake(backend)]),
+      );
+    }),
+  );
+
+  it.effect("keeps channel conversation runs read-only", () =>
+    Effect.gen(function* () {
+      const readModel = yield* applyCommands([
+        ...setup,
+        createChannel("general", "channel", [backend]),
+      ]);
+      const trigger = {
+        messageId: MessageId.make("message-general-hello"),
+        authorKind: "human" as const,
+        authorName: "user",
+        body: "hello",
+        createdAt: now,
+      };
+      const startRun = (capabilities: ReadonlyArray<RunCapability>): OrchestrationCommand => ({
+        type: "channel.run.start",
+        commandId: CommandId.make("cmd-run-start"),
+        threadId: ThreadId.make("run-thread"),
+        channelId: ChannelId.make("general"),
+        agentId: backend,
+        triggerMessageId: trigger.messageId,
+        capabilities,
+        context: {
+          agent: { id: backend, name: "backend", rolePrompt: "" },
+          channel: { id: ChannelId.make("general"), kind: "channel", name: "general", topic: "" },
+          pinnedSpec: "",
+          wakeDepth: 30,
+          history: [],
+          trigger,
+        },
+        rendered: { systemPrompt: "You are @backend.", firstMessage: "hello" },
+        startedAt: now,
+      });
+
+      const started = yield* decideOrchestrationCommand({ command: startRun(["read"]), readModel });
+      expect(started).toMatchObject({ type: "channel.run-started" });
+
+      const refused = yield* Effect.flip(
+        decideOrchestrationCommand({ command: startRun(["read", "write"]), readModel }),
+      );
+      expect(refused.message).toContain("read-only");
+    }),
+  );
+
+  it.effect("posts an agent reply that names the run it came from", () =>
+    Effect.gen(function* () {
+      const readModel = yield* applyCommands([
+        ...setup,
+        createChannel("general", "channel", [backend]),
+      ]);
+
+      const posted = yield* decideOrchestrationCommand({
+        command: {
+          type: "channel.message.agent.post",
+          commandId: CommandId.make("cmd-reply"),
+          channelId: ChannelId.make("general"),
+          messageId: MessageId.make("reply-1"),
+          agentId: backend,
+          runThreadId: ThreadId.make("run-thread"),
+          body: "It is REST.",
+          createdAt: now,
+        },
+        readModel,
+      });
+
+      expect(posted).toMatchObject({
+        type: "channel.message-posted",
+        payload: { authorKind: "agent", authorId: backend, runThreadId: "run-thread" },
+      });
     }),
   );
 

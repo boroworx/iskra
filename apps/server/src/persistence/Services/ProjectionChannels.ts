@@ -12,7 +12,12 @@ import {
   IsoDateTime,
   MessageId,
   NonNegativeInt,
+  OrchestrationRun,
   ProjectId,
+  RenderedRunContext,
+  RunCapabilities,
+  RunContextPayload,
+  ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
@@ -52,8 +57,23 @@ export const ProjectionChannelMessage = Schema.Struct({
   authorId: Schema.String,
   body: Schema.String,
   createdAt: IsoDateTime,
+  runThreadId: Schema.NullOr(ThreadId),
 });
 export type ProjectionChannelMessage = typeof ProjectionChannelMessage.Type;
+
+/** A `projection_runs` row as selected, with its JSON columns decoded. */
+export const ProjectionRunDbRow = OrchestrationRun.mapFields(
+  Struct.assign({
+    capabilities: Schema.fromJsonString(RunCapabilities),
+    context: Schema.fromJsonString(RunContextPayload),
+    rendered: Schema.fromJsonString(RenderedRunContext),
+  }),
+);
+
+export const GetProjectionChannelMessageInput = Schema.Struct({
+  messageId: MessageId,
+});
+export type GetProjectionChannelMessageInput = typeof GetProjectionChannelMessageInput.Type;
 
 export const GetProjectionChannelInput = Schema.Struct({
   channelId: ChannelId,
@@ -87,6 +107,14 @@ export interface ProjectionChannelRepositoryShape {
   readonly listMessages: (
     input: ListProjectionChannelMessagesInput,
   ) => Effect.Effect<ReadonlyArray<ProjectionChannelMessage>, ProjectionRepositoryError>;
+
+  /** Read one channel message by id. */
+  readonly getMessageById: (
+    input: GetProjectionChannelMessageInput,
+  ) => Effect.Effect<Option.Option<ProjectionChannelMessage>, ProjectionRepositoryError>;
+
+  /** Record a started run. Replaying an already-projected run is a no-op. */
+  readonly insertRun: (row: OrchestrationRun) => Effect.Effect<void, ProjectionRepositoryError>;
 
   /** What an agent is handed on wake: the channel's newest `wakeDepth` messages, oldest first. */
   readonly listWakeHistory: (

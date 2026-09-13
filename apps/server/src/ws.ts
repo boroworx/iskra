@@ -881,7 +881,15 @@ const makeWsRpcLayer = (
         retryShellProjectionRead(
           "thread",
           threadId,
-          projectionSnapshotQuery.getThreadShellById(threadId),
+          // Run threads are hidden from the thread list; they surface through their channel.
+          Effect.gen(function* () {
+            const thread = yield* projectionSnapshotQuery.getThreadShellById(threadId);
+            if (Option.isNone(thread)) {
+              return thread;
+            }
+            const run = yield* projectionSnapshotQuery.getRunByThreadId(threadId);
+            return Option.isSome(run) ? Option.none<typeof thread.value>() : thread;
+          }),
         ).pipe(
           Effect.map(
             Option.flatMap((thread) =>

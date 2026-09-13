@@ -55,7 +55,10 @@ import { ProjectionCheckpoint } from "../../persistence/Services/ProjectionCheck
 import { ThreadBackgroundLivenessService } from "../ThreadBackgroundLiveness.ts";
 import { ThreadPlanProgressService } from "../ThreadPlanProgress.ts";
 import { ProjectionAgentDbRow } from "../../persistence/Services/ProjectionAgents.ts";
-import { ProjectionChannelDbRow } from "../../persistence/Services/ProjectionChannels.ts";
+import {
+  ProjectionChannelDbRow,
+  ProjectionRunDbRow,
+} from "../../persistence/Services/ProjectionChannels.ts";
 import { ProjectionProject } from "../../persistence/Services/ProjectionProjects.ts";
 import { ProjectionState } from "../../persistence/Services/ProjectionState.ts";
 import { ProjectionThreadActivity } from "../../persistence/Services/ProjectionThreadActivities.ts";
@@ -596,6 +599,25 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       `,
   });
 
+  const getRunRowByThreadId = SqlSchema.findOneOption({
+    Request: Schema.Struct({ threadId: ThreadId }),
+    Result: ProjectionRunDbRow,
+    execute: ({ threadId }) =>
+      sql`
+        SELECT
+          thread_id AS "threadId",
+          channel_id AS "channelId",
+          agent_id AS "agentId",
+          trigger_message_id AS "triggerMessageId",
+          capabilities_json AS "capabilities",
+          context_json AS "context",
+          rendered_json AS "rendered",
+          started_at AS "startedAt"
+        FROM projection_runs
+        WHERE thread_id = ${threadId}
+      `,
+  });
+
   const listThreadRows = SqlSchema.findAll({
     Request: Schema.Void,
     Result: ProjectionThreadDbRowSchema,
@@ -674,6 +696,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         FROM projection_threads
         WHERE deleted_at IS NULL
           AND archived_at IS NULL
+          -- Run threads surface through their channel, not the thread list.
+          AND NOT EXISTS (
+            SELECT 1 FROM projection_runs AS runs
+            WHERE runs.thread_id = projection_threads.thread_id
+          )
         ORDER BY project_id ASC, created_at ASC, thread_id ASC
       `,
   });
@@ -3763,6 +3790,16 @@ pending_approval_requests AS (
         ),
       );
 
+  const getRunByThreadId: ProjectionSnapshotQueryShape["getRunByThreadId"] = (threadId) =>
+    getRunRowByThreadId({ threadId }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.getRunByThreadId:query",
+          "ProjectionSnapshotQuery.getRunByThreadId:decodeRow",
+        ),
+      ),
+    );
+
   return {
     getCommandReadModel,
     getUserInputActivity,
@@ -3781,6 +3818,7 @@ pending_approval_requests AS (
     getThreadCheckpointContext,
     getFullThreadDiffContext,
     getThreadShellById,
+    getRunByThreadId,
     getThreadRuntimeContext,
     getTurnStartMessage,
     getThreadDetailById,

@@ -677,6 +677,10 @@ const make = Effect.gen(function* () {
     if (!thread) {
       return yield* Effect.die(new Error(`Thread '${threadId}' was not found in read model.`));
     }
+    // A run thread's restrictions come from its run record, never from thread settings.
+    const run = yield* projectionSnapshotQuery
+      .getRunByThreadId(threadId)
+      .pipe(Effect.map(Option.getOrUndefined));
 
     const desiredRuntimeMode = thread.runtimeMode;
     const requestedModelSelection = options?.modelSelection;
@@ -822,6 +826,11 @@ const make = Effect.gen(function* () {
           ...(thread.title ? { title: thread.title } : {}),
           modelSelection: desiredModelSelection,
           ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
+          ...(run
+            ? {
+                run: { systemPrompt: run.rendered.systemPrompt, capabilities: run.capabilities },
+              }
+            : {}),
           runtimeMode: desiredRuntimeMode,
         })
         .pipe(Effect.tap(() => refreshWorkspaceSnapshot));

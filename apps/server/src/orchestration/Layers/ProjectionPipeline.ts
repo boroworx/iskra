@@ -716,7 +716,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             authorId: event.payload.authorId,
             body: event.payload.body,
             createdAt: event.payload.createdAt,
+            runThreadId: event.payload.runThreadId ?? null,
           });
+          return;
+
+        case "channel.run-started":
+          yield* projectionChannelRepository.insertRun(event.payload);
           return;
 
         default:

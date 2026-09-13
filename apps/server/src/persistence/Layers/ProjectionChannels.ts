@@ -4,8 +4,11 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import { toPersistenceSqlError } from "../Errors.ts";
+import { OrchestrationRun } from "@t3tools/contracts";
+
 import {
   GetProjectionChannelInput,
+  GetProjectionChannelMessageInput,
   ListProjectionChannelMessagesInput,
   ProjectionChannel,
   ProjectionChannelDbRow,
@@ -95,7 +98,8 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
           author_kind,
           author_id,
           body,
-          created_at
+          created_at,
+          run_thread_id
         )
         VALUES (
           ${row.messageId},
@@ -104,9 +108,57 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
           ${row.authorKind},
           ${row.authorId},
           ${row.body},
-          ${row.createdAt}
+          ${row.createdAt},
+          ${row.runThreadId}
         )
         ON CONFLICT (message_id) DO NOTHING
+      `,
+  });
+
+  const getMessageRow = SqlSchema.findOneOption({
+    Request: GetProjectionChannelMessageInput,
+    Result: ProjectionChannelMessage,
+    execute: ({ messageId }) =>
+      sql`
+        SELECT
+          message_id AS "messageId",
+          channel_id AS "channelId",
+          sequence,
+          author_kind AS "authorKind",
+          author_id AS "authorId",
+          body,
+          created_at AS "createdAt",
+          run_thread_id AS "runThreadId"
+        FROM projection_channel_messages
+        WHERE message_id = ${messageId}
+      `,
+  });
+
+  const insertRunRow = SqlSchema.void({
+    Request: OrchestrationRun,
+    execute: (row) =>
+      sql`
+        INSERT INTO projection_runs (
+          thread_id,
+          channel_id,
+          agent_id,
+          trigger_message_id,
+          capabilities_json,
+          context_json,
+          rendered_json,
+          started_at
+        )
+        VALUES (
+          ${row.threadId},
+          ${row.channelId},
+          ${row.agentId},
+          ${row.triggerMessageId},
+          ${JSON.stringify(row.capabilities)},
+          ${JSON.stringify(row.context)},
+          ${JSON.stringify(row.rendered)},
+          ${row.startedAt}
+        )
+        ON CONFLICT (thread_id) DO NOTHING
       `,
   });
 
@@ -122,7 +174,8 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
           author_kind AS "authorKind",
           author_id AS "authorId",
           body,
-          created_at AS "createdAt"
+          created_at AS "createdAt",
+          run_thread_id AS "runThreadId"
         FROM projection_channel_messages
         WHERE channel_id = ${channelId}
           AND ${beforeSequence === undefined ? sql`1 = 1` : sql`sequence < ${beforeSequence}`}
@@ -143,7 +196,8 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
           author_kind AS "authorKind",
           author_id AS "authorId",
           body,
-          created_at AS "createdAt"
+          created_at AS "createdAt",
+          run_thread_id AS "runThreadId"
         FROM projection_channel_messages
         WHERE channel_id = ${channelId}
         ORDER BY sequence DESC
@@ -169,6 +223,16 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
       Effect.mapError(toPersistenceSqlError("ProjectionChannelRepository.appendMessage:query")),
     );
 
+  const getMessageById: ProjectionChannelRepositoryShape["getMessageById"] = (input) =>
+    getMessageRow(input).pipe(
+      Effect.mapError(toPersistenceSqlError("ProjectionChannelRepository.getMessageById:query")),
+    );
+
+  const insertRun: ProjectionChannelRepositoryShape["insertRun"] = (row) =>
+    insertRunRow(row).pipe(
+      Effect.mapError(toPersistenceSqlError("ProjectionChannelRepository.insertRun:query")),
+    );
+
   const listMessages: ProjectionChannelRepositoryShape["listMessages"] = (input) =>
     listMessageRows(input).pipe(
       Effect.map((rows) => rows.toReversed()),
@@ -185,6 +249,8 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
     upsertChannel,
     getChannelById,
     appendMessage,
+    getMessageById,
+    insertRun,
     listMessages,
     listWakeHistory,
   } satisfies ProjectionChannelRepositoryShape;

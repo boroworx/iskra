@@ -2339,6 +2339,120 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "channel.agent.wake": {
+      const channel = yield* requireChannel({
+        readModel,
+        command,
+        channelId: command.channelId,
+      });
+      const agent = yield* requireAgent({
+        readModel,
+        command,
+        agentId: command.agentId,
+      });
+      if (
+        channel.archivedAt !== null ||
+        agent.archivedAt !== null ||
+        !channel.memberAgentIds.includes(agent.id)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Agent '${agent.id}' is not an active member of active channel '${channel.id}'.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "channel",
+          aggregateId: command.channelId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "channel.agent-wake-requested",
+        payload: {
+          channelId: command.channelId,
+          agentId: command.agentId,
+          triggerMessageId: command.triggerMessageId,
+          requestedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "channel.run.start": {
+      yield* requireChannel({
+        readModel,
+        command,
+        channelId: command.channelId,
+      });
+      yield* requireAgent({
+        readModel,
+        command,
+        agentId: command.agentId,
+      });
+      // Invariant 1: a conversation run never writes. Writing needs a card.
+      if (command.capabilities.some((capability) => capability !== "read")) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A channel conversation run is read-only; writing requires a card.",
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "channel",
+          aggregateId: command.channelId,
+          occurredAt: command.startedAt,
+          commandId: command.commandId,
+        })),
+        type: "channel.run-started",
+        payload: {
+          threadId: command.threadId,
+          channelId: command.channelId,
+          agentId: command.agentId,
+          triggerMessageId: command.triggerMessageId,
+          capabilities: command.capabilities,
+          context: command.context,
+          rendered: command.rendered,
+          startedAt: command.startedAt,
+        },
+      };
+    }
+
+    case "channel.message.agent.post": {
+      const channel = yield* requireChannel({
+        readModel,
+        command,
+        channelId: command.channelId,
+      });
+      yield* requireAgent({
+        readModel,
+        command,
+        agentId: command.agentId,
+      });
+      if (channel.archivedAt !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Channel '${command.channelId}' is archived and cannot receive messages.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "channel",
+          aggregateId: command.channelId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "channel.message-posted",
+        payload: {
+          channelId: command.channelId,
+          messageId: command.messageId,
+          authorKind: "agent",
+          authorId: command.agentId,
+          body: command.body,
+          createdAt: command.createdAt,
+          runThreadId: command.runThreadId,
+        },
+      };
+    }
+
     default: {
       command satisfies never;
       const fallback = command as never as { type: string };

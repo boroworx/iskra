@@ -77,6 +77,9 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "channel.archive":
     case "channel.unarchive":
     case "channel.message.post":
+    case "channel.agent.wake":
+    case "channel.run.start":
+    case "channel.message.agent.post":
       return {
         aggregateKind: "channel",
         aggregateId: command.channelId,

@@ -556,8 +556,67 @@ export const OrchestrationChannelMessage = Schema.Struct({
   authorId: TrimmedNonEmptyString,
   body: Schema.String,
   createdAt: IsoDateTime,
+  // Set on an agent's reply: the run whose final answer it is.
+  runThreadId: Schema.optional(ThreadId),
 });
 export type OrchestrationChannelMessage = typeof OrchestrationChannelMessage.Type;
+
+/** One channel message as an agent sees it, with its author resolved to a display name. */
+export const RunContextMessage = Schema.Struct({
+  messageId: MessageId,
+  authorKind: ChannelMessageAuthorKind,
+  authorName: TrimmedNonEmptyString,
+  body: Schema.String,
+  createdAt: IsoDateTime,
+});
+export type RunContextMessage = typeof RunContextMessage.Type;
+
+/**
+ * Everything an agent is handed when it wakes, before rendering to prompt text.
+ * Stored with the run so the context inspector shows exactly what the run saw.
+ */
+export const RunContextPayload = Schema.Struct({
+  agent: Schema.Struct({
+    id: AgentId,
+    name: AgentName,
+    rolePrompt: Schema.String,
+  }),
+  channel: Schema.Struct({
+    id: ChannelId,
+    kind: ChannelKind,
+    name: TrimmedNonEmptyString,
+    topic: Schema.String,
+  }),
+  pinnedSpec: Schema.String,
+  wakeDepth: NonNegativeInt,
+  // The newest `wakeDepth` messages before the trigger, oldest first.
+  history: Schema.Array(RunContextMessage),
+  trigger: RunContextMessage,
+});
+export type RunContextPayload = typeof RunContextPayload.Type;
+
+/** The exact text a run sends its provider, rendered from a `RunContextPayload`. */
+export const RenderedRunContext = Schema.Struct({
+  systemPrompt: Schema.String,
+  firstMessage: Schema.String,
+});
+export type RenderedRunContext = typeof RenderedRunContext.Type;
+
+/**
+ * A run: one provider session backing a single agent wake. It lives in a
+ * hidden thread and records exactly what the agent was handed.
+ */
+export const OrchestrationRun = Schema.Struct({
+  threadId: ThreadId,
+  channelId: ChannelId,
+  agentId: AgentId,
+  triggerMessageId: MessageId,
+  capabilities: RunCapabilities,
+  context: RunContextPayload,
+  rendered: RenderedRunContext,
+  startedAt: IsoDateTime,
+});
+export type OrchestrationRun = typeof OrchestrationRun.Type;
 
 export const OrchestrationMessageRole = Schema.Literals(["user", "assistant", "system"]);
 export type OrchestrationMessageRole = typeof OrchestrationMessageRole.Type;
@@ -1178,6 +1237,32 @@ const ChannelMessagePostCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ChannelAgentWakeCommand = Schema.Struct({
+  type: Schema.Literal("channel.agent.wake"),
+  commandId: CommandId,
+  channelId: ChannelId,
+  agentId: AgentId,
+  triggerMessageId: MessageId,
+  createdAt: IsoDateTime,
+});
+
+const ChannelRunStartCommand = Schema.Struct({
+  type: Schema.Literal("channel.run.start"),
+  commandId: CommandId,
+  ...OrchestrationRun.fields,
+});
+
+const ChannelMessageAgentPostCommand = Schema.Struct({
+  type: Schema.Literal("channel.message.agent.post"),
+  commandId: CommandId,
+  channelId: ChannelId,
+  messageId: MessageId,
+  agentId: AgentId,
+  runThreadId: ThreadId,
+  body: Schema.String,
+  createdAt: IsoDateTime,
+});
+
 const ThreadCreateCommand = Schema.Struct({
   type: Schema.Literal("thread.create"),
   commandId: CommandId,
@@ -1674,6 +1759,9 @@ const ThreadPullRequestLinkSyncCommand = Schema.Struct({
 });
 
 const InternalOrchestrationCommand = Schema.Union([
+  ChannelAgentWakeCommand,
+  ChannelRunStartCommand,
+  ChannelMessageAgentPostCommand,
   ThreadAutoSettleCommand,
   ThreadPullRequestSyncCommand,
   ThreadPullRequestLinkSyncCommand,
@@ -1710,6 +1798,8 @@ export const OrchestrationEventType = Schema.Literals([
   "channel.archived",
   "channel.unarchived",
   "channel.message-posted",
+  "channel.agent-wake-requested",
+  "channel.run-started",
   "thread.created",
   "thread.deleted",
   "thread.archived",
@@ -1858,7 +1948,17 @@ export const ChannelMessagePostedPayload = Schema.Struct({
   authorId: TrimmedNonEmptyString,
   body: Schema.String,
   createdAt: IsoDateTime,
+  runThreadId: Schema.optional(ThreadId),
 });
+
+export const ChannelAgentWakeRequestedPayload = Schema.Struct({
+  channelId: ChannelId,
+  agentId: AgentId,
+  triggerMessageId: MessageId,
+  requestedAt: IsoDateTime,
+});
+
+export const ChannelRunStartedPayload = OrchestrationRun;
 
 export const ThreadCreatedPayload = Schema.Struct({
   threadId: ThreadId,
@@ -2185,6 +2285,16 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("channel.message-posted"),
     payload: ChannelMessagePostedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("channel.agent-wake-requested"),
+    payload: ChannelAgentWakeRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("channel.run-started"),
+    payload: ChannelRunStartedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,
