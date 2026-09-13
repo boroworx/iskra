@@ -75,6 +75,8 @@ import {
   WsRpcGroup,
   AgentId,
   ChannelId,
+  CHANNEL_SUBSCRIBE_MESSAGE_LIMIT,
+  type OrchestrationChannelMessage,
 } from "@t3tools/contracts";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
@@ -1891,6 +1893,54 @@ const makeWsRpcLayer = (
                   snapshot: projectThreadDetailSnapshot(snapshot.value),
                 }),
                 afterSnapshot,
+              );
+            }),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.subscribeChannel]: (input) =>
+          observeRpcStreamEffect(
+            ORCHESTRATION_WS_METHODS.subscribeChannel,
+            Effect.gen(function* () {
+              // Attach live delivery before reading the snapshot so a message posted
+              // meanwhile is not lost; it can then arrive twice, and clients keep one.
+              const live = yield* Queue.unbounded<OrchestrationChannelMessage>();
+              yield* Effect.forkScoped(
+                orchestrationEngine.streamDomainEvents.pipe(
+                  Stream.runForEach((event) =>
+                    event.type === "channel.message-posted" &&
+                    event.payload.channelId === input.channelId
+                      ? Queue.offer(live, {
+                          id: event.payload.messageId,
+                          channelId: event.payload.channelId,
+                          authorKind: event.payload.authorKind,
+                          authorId: event.payload.authorId,
+                          body: event.payload.body,
+                          createdAt: event.payload.createdAt,
+                          ...(event.payload.runThreadId === undefined
+                            ? {}
+                            : { runThreadId: event.payload.runThreadId }),
+                        })
+                      : Effect.void,
+                  ),
+                ),
+                { startImmediately: true },
+              );
+              const messages = yield* projectionSnapshotQuery
+                .listChannelMessages(input.channelId, CHANNEL_SUBSCRIBE_MESSAGE_LIMIT)
+                .pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new OrchestrationGetSnapshotError({
+                        message: `Failed to load channel ${input.channelId}`,
+                        cause,
+                      }),
+                  ),
+                );
+              return Stream.concat(
+                Stream.make({ kind: "snapshot" as const, messages }),
+                Stream.fromQueue(live).pipe(
+                  Stream.map((message) => ({ kind: "message" as const, message })),
+                ),
               );
             }),
             { "rpc.aggregate": "orchestration" },

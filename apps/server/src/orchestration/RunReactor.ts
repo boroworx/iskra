@@ -1,10 +1,4 @@
-import {
-  CommandId,
-  MessageId,
-  ThreadId,
-  type OrchestrationChannelMessage,
-  type OrchestrationEvent,
-} from "@t3tools/contracts";
+import { CommandId, MessageId, ThreadId, type OrchestrationEvent } from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -18,7 +12,7 @@ import * as Stream from "effect/Stream";
 import { ProjectionChannelRepositoryLive } from "../persistence/Layers/ProjectionChannels.ts";
 import {
   ProjectionChannelRepository,
-  type ProjectionChannelMessage,
+  toOrchestrationChannelMessage,
 } from "../persistence/Services/ProjectionChannels.ts";
 import { forkParked } from "../serverActivation.ts";
 import {
@@ -49,18 +43,6 @@ type WakeRequestedEvent = Extract<OrchestrationEvent, { type: "channel.agent-wak
 type RunRequest =
   | { readonly kind: "wake"; readonly event: WakeRequestedEvent }
   | { readonly kind: "settled"; readonly threadId: ThreadId };
-
-function toChannelMessage(row: ProjectionChannelMessage): OrchestrationChannelMessage {
-  return {
-    id: row.messageId,
-    channelId: row.channelId,
-    authorKind: row.authorKind,
-    authorId: row.authorId,
-    body: row.body,
-    createdAt: row.createdAt,
-    ...(row.runThreadId !== null ? { runThreadId: row.runThreadId } : {}),
-  };
-}
 
 const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngine.OrchestrationEngineService;
@@ -99,7 +81,7 @@ const make = Effect.gen(function* () {
           messageId: MessageId.make(`run-follow-up:${event.eventId}`),
           role: "user",
           text: renderNewMessage(
-            toRunContextMessage(toChannelMessage(trigger.value), projectAgents),
+            toRunContextMessage(toOrchestrationChannelMessage(trigger.value), projectAgents),
           ),
           attachments: [],
         },
@@ -115,8 +97,8 @@ const make = Effect.gen(function* () {
       agent,
       channel,
       agents: projectAgents,
-      messages: history.map(toChannelMessage),
-      trigger: toChannelMessage(trigger.value),
+      messages: history.map(toOrchestrationChannelMessage),
+      trigger: toOrchestrationChannelMessage(trigger.value),
     });
     const rendered = renderRunContext(context);
     // Ids derive from the wake event, so a retried wake cannot start a second run.

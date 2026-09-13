@@ -43,6 +43,7 @@ export const ORCHESTRATION_WS_METHODS = {
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
+  subscribeChannel: "orchestration.subscribeChannel",
 } as const;
 
 export const ProviderApprovalPolicy = Schema.Literals([
@@ -2697,6 +2698,30 @@ export class OrchestrationGetWorkflowScriptError extends Schema.TaggedError<Orch
   }
 }
 
+/** How many of a channel's newest messages a channel subscription starts with. */
+export const CHANNEL_SUBSCRIBE_MESSAGE_LIMIT = 200;
+
+export const OrchestrationSubscribeChannelInput = Schema.Struct({
+  channelId: ChannelId,
+});
+export type OrchestrationSubscribeChannelInput = typeof OrchestrationSubscribeChannelInput.Type;
+
+/**
+ * A channel subscription: the newest messages, then each message as it is
+ * posted. A message can arrive in both; clients keep one per id.
+ */
+export const OrchestrationChannelStreamItem = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("snapshot"),
+    messages: Schema.Array(OrchestrationChannelMessage),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("message"),
+    message: OrchestrationChannelMessage,
+  }),
+]);
+export type OrchestrationChannelStreamItem = typeof OrchestrationChannelStreamItem.Type;
+
 export const OrchestrationRpcSchemas = {
   dispatchCommand: {
     input: ClientOrchestrationCommand,
@@ -2729,6 +2754,10 @@ export const OrchestrationRpcSchemas = {
   subscribeShell: {
     input: OrchestrationSubscribeShellInput,
     output: OrchestrationShellStreamItem,
+  },
+  subscribeChannel: {
+    input: OrchestrationSubscribeChannelInput,
+    output: OrchestrationChannelStreamItem,
   },
 } as const;
 

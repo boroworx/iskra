@@ -9787,6 +9787,87 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("subscribeChannel sends a channel's recent messages, then messages posted to it", () =>
+    Effect.gen(function* () {
+      const now = "2026-01-01T00:00:00.000Z";
+      const channelId = ChannelId.make("channel-general");
+      const liveEvents = yield* PubSub.unbounded<OrchestrationEvent>();
+      const posted = (sequence: number, postedTo: ChannelId, body: string) =>
+        ({
+          sequence,
+          eventId: EventId.make(`event-posted-${sequence}`),
+          aggregateKind: "channel",
+          aggregateId: postedTo,
+          occurredAt: now,
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          type: "channel.message-posted",
+          payload: {
+            channelId: postedTo,
+            messageId: MessageId.make(`message-${sequence}`),
+            authorKind: "human",
+            authorId: "human",
+            body,
+            createdAt: now,
+          },
+        }) satisfies OrchestrationEvent;
+
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            streamDomainEvents: Stream.fromPubSub(liveEvents),
+          },
+          projectionSnapshotQuery: {
+            listChannelMessages: () =>
+              Effect.succeed([
+                {
+                  id: MessageId.make("message-earlier"),
+                  channelId,
+                  authorKind: "human" as const,
+                  authorId: "human",
+                  body: "earlier",
+                  createdAt: now,
+                },
+              ]),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const items = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.subscribeChannel]({ channelId }).pipe(
+            // Post only once the snapshot is out, so the message must arrive live.
+            Stream.tap((item) =>
+              item.kind === "snapshot"
+                ? Effect.forEach(
+                    [
+                      posted(1, ChannelId.make("channel-other"), "elsewhere"),
+                      posted(2, channelId, "later"),
+                    ],
+                    (event) => PubSub.publish(liveEvents, event),
+                  )
+                : Effect.void,
+            ),
+            Stream.take(2),
+            Stream.runCollect,
+          ),
+        ),
+      ).pipe(Effect.timeout("2 seconds"));
+
+      assert.deepEqual(
+        Array.from(items, (item) =>
+          item.kind === "snapshot"
+            ? item.messages.map((message) => message.body)
+            : [item.message.body],
+        ),
+        [["earlier"], ["later"]],
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("subscribeShell coalesces live bursts after the synchronization marker", () =>
     Effect.gen(function* () {
       const busyThreadId = ThreadId.make("thread-live-busy");

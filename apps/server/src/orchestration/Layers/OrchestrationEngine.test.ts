@@ -433,6 +433,7 @@ describe("OrchestrationEngine", () => {
           getRunByThreadId: () => Effect.die("unused"),
           getAgentShellById: () => Effect.die("unused"),
           getChannelShellById: () => Effect.die("unused"),
+          listChannelMessages: () => Effect.die("unused"),
           getCommandReadModel: () => Effect.succeed(commandReadModel),
           getSnapshot: () =>
             Effect.sync(() => {

@@ -12,6 +12,7 @@ import {
   IsoDateTime,
   MessageId,
   NonNegativeInt,
+  type OrchestrationChannelMessage,
   OrchestrationChannelShell,
   OrchestrationLiveRun,
   OrchestrationRun,
@@ -69,6 +70,21 @@ export const ProjectionChannelMessage = Schema.Struct({
   runThreadId: Schema.NullOr(ThreadId),
 });
 export type ProjectionChannelMessage = typeof ProjectionChannelMessage.Type;
+
+/** A stored message as clients and agents see it. */
+export function toOrchestrationChannelMessage(
+  row: ProjectionChannelMessage,
+): OrchestrationChannelMessage {
+  return {
+    id: row.messageId,
+    channelId: row.channelId,
+    authorKind: row.authorKind,
+    authorId: row.authorId,
+    body: row.body,
+    createdAt: row.createdAt,
+    ...(row.runThreadId !== null ? { runThreadId: row.runThreadId } : {}),
+  };
+}
 
 /** A `projection_runs` row as selected, with its JSON columns decoded. */
 export const ProjectionRunDbRow = OrchestrationRun.mapFields(

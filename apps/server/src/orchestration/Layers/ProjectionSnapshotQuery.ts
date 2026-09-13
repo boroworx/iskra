@@ -60,9 +60,11 @@ import {
 } from "../../persistence/Services/ProjectionAgents.ts";
 import {
   ProjectionChannelDbRow,
+  ProjectionChannelMessage,
   ProjectionChannelShellDbRow,
   ProjectionLiveRunDbRow,
   ProjectionRunDbRow,
+  toOrchestrationChannelMessage,
 } from "../../persistence/Services/ProjectionChannels.ts";
 import { ProjectionProject } from "../../persistence/Services/ProjectionProjects.ts";
 import { ProjectionState } from "../../persistence/Services/ProjectionState.ts";
@@ -3931,6 +3933,41 @@ pending_approval_requests AS (
       Effect.map(Arr.head),
     );
 
+  const listChannelMessageRows = SqlSchema.findAll({
+    Request: Schema.Struct({ channelId: Schema.String, limit: Schema.Number }),
+    Result: ProjectionChannelMessage,
+    execute: ({ channelId, limit }) =>
+      sql`
+        SELECT
+          message_id AS "messageId",
+          channel_id AS "channelId",
+          sequence,
+          author_kind AS "authorKind",
+          author_id AS "authorId",
+          body,
+          created_at AS "createdAt",
+          run_thread_id AS "runThreadId"
+        FROM projection_channel_messages
+        WHERE channel_id = ${channelId}
+        ORDER BY sequence DESC
+        LIMIT ${limit}
+      `,
+  });
+
+  const listChannelMessages: ProjectionSnapshotQueryShape["listChannelMessages"] = (
+    channelId,
+    limit,
+  ) =>
+    listChannelMessageRows({ channelId, limit }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.listChannelMessages:query",
+          "ProjectionSnapshotQuery.listChannelMessages:decodeRows",
+        ),
+      ),
+      Effect.map((rows) => rows.toReversed().map(toOrchestrationChannelMessage)),
+    );
+
   const getRunByThreadId: ProjectionSnapshotQueryShape["getRunByThreadId"] = (threadId) =>
     getRunRowByThreadId({ threadId }).pipe(
       Effect.mapError(
@@ -3962,6 +3999,7 @@ pending_approval_requests AS (
     getRunByThreadId,
     getAgentShellById,
     getChannelShellById,
+    listChannelMessages,
     getThreadRuntimeContext,
     getTurnStartMessage,
     getThreadDetailById,
