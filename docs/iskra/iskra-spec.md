@@ -373,10 +373,15 @@ tests cover each case, and the run reactor test turns a wake into exactly one ru
 **M1.6 — Server shell UI.** `apps/web`: project sidebar, channel list, member list showing
 agents with presence (idle / running / blocked). Reads the projection; no new state.
 _Accept when:_ the shell renders live agent state and presence updates without a refresh.
-_Accepted:_ in a paired browser, a project scope lists its channels and agents; an `@mention`
-posted from outside added the new agent and channel and showed the agent Working, then Idle when
-its run ended, with no reload. An engine test covers idle, running, blocked and back to idle.
-Agents and channels reach the shell only for subscribers that opt in, so older clients are unaffected.
+The shell is Iskra-first: a project rail, then the project's channels and agents; a channel opens
+its messages, a composer and its members. `/` opens a channel, and T3's thread view stays reachable
+from the sidebar. A channel's messages arrive over `subscribeChannel` (recent messages, then each
+new one). Agents run on Claude only: the server refuses a run on any provider that cannot enforce
+run restrictions.
+_Accepted:_ in a paired browser, an `@mention` sent from the composer showed the agent Working,
+its reply arrived in the channel and the agent went back to Idle, with no reload. Server tests
+cover the channel subscription and the non-Claude run refusal; an engine test covers idle, running,
+blocked and back to idle.
 
 **M1.7 — DM view.** The agent's DM channel, interleaved with the output of all of that agent's
 runs (each labelled with its originating channel), rendering `addressedToUser: false` as grey
