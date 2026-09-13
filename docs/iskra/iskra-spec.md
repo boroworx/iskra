@@ -144,17 +144,20 @@ history given to an agent on wake, default 30), `memberAgentIds[]`. A `dm` chann
 one agent member; its human is implicit until M5 adds more than one.
 
 **Message** — durable, append-only. `id`, `channelId`, `authorKind` (`human` | `agent` |
-`system` | `webhook`), `authorId`, `body`, `mentions[]` (added with M1.5), `createdAt`, `runId?`
-(added with M1.4). Messages are never part of the command read model; history is ordered and paged
-by event sequence.
+`system` | `webhook`), `authorId`, `body`, `mentions[]`, `createdAt`, `runThreadId?` (set on an
+agent's reply to the run it came from). `mentions` are resolved to agent ids when the message is
+posted and recorded on the event; the message projection does not store them yet. Messages are
+never part of the command read model; history is ordered and paged by event sequence.
 
 **Card** — durable. `id`, `projectId`, `channelId`, `title`, `body`, `tags[]`,
 `status` (`triage` | `ready` | `claimed` | `inProgress` | `inReview` | `landed` | `abandoned`),
 `assigneeAgentId?`, `worktreePath?`, `branch?`, `createdBy`, `claimedAt?`.
 
-**Run** — ephemeral, but its events are persisted. `id`, `threadId` (the hidden upstream thread
-backing it), `agentId`, `providerId`, `scope` (`card` | `conversation`), `cardId?`, `channelId`,
-`capabilities`, `contextPayload`, `startedAt`, `endedAt?`, `costTokens`.
+**Run** — ephemeral, but its events are persisted. `threadId` (the hidden upstream thread backing
+it; also the run's id), `channelId`, `agentId`, `triggerMessageId`, `capabilities`, `context` (the
+structured payload) and `rendered` (the exact prompt text), `startedAt`, `endedAt?`. The provider
+comes from the agent's `modelSelection`. `scope` and `cardId` arrive with cards in M2; every M1
+run is a conversation run. `costTokens` arrives in M3.
 
 ### Message flag: `addressedToUser`
 
@@ -208,11 +211,13 @@ by running them, not by reading.
 ### Runs, context and channels — decided
 
 **A run is a hidden upstream thread.** Every provider contract upstream is keyed by `threadId`
-(sessions, turns, runtime events, ingestion). Iskra does not rebuild that machinery. Starting a
-run creates a thread flagged as an Iskra run and excluded from the upstream thread list, and
-emits `RunStarted` binding it to the agent, scope, capabilities and context payload. Run output
-is that thread's upstream messages and activities; a run ends when its session stops. There is
-no separate run output or run end event.
+(sessions, turns, runtime events, ingestion). Iskra does not rebuild that machinery. A wake is a
+`channel.agent-wake-requested` event from the decider; `RunReactor` then records
+`channel.run-started` (agent, capabilities, context and rendered text) before creating the thread,
+so the thread is never listed. A thread with a run row is excluded from the thread list and its
+live updates, and its provider session always starts with the run's restrictions. Run output is
+that thread's upstream messages and activities. A run is live until its session stops or fails;
+there is no separate run output or run end event.
 
 **`addressedToUser` maps onto upstream's existing split.** Assistant messages are `true`.
 Activities — reasoning, tool lifecycle, `tool.denied` — are `false`. The Iskra projection exposes
@@ -221,37 +226,46 @@ the flag; the adapter needs no change for Claude.
 **Context injection.** The context builder (M1.3) returns a structured record. A pure renderer
 turns it into two strings: the **system prompt** (role prompt, scratchpad, pinned spec) and the
 **first message** (the last `wakeDepth` channel messages, then the triggering message; the card
-in M2). `RunStarted` stores the record and both rendered strings as `contextPayload`. The
-adapter sends exactly those strings.
+in M2). `channel.run-started` stores the record as `context` and both strings as `rendered`. The
+Claude adapter appends the system prompt to Claude Code's own preset, which keeps its tool
+instructions, and sends the first message unchanged. The scratchpad joins the system prompt in M3.
 
 **Every run is a fresh session.** Never pass a resume cursor to a run. Durable memory is the
-channel and the scratchpad, not the provider's session. A run ends when its turn completes with
-no pending messages; the next wake starts a new run.
+channel and the scratchpad, not the provider's session. When a run's turn settles, `RunReactor`
+posts the reply and stops the session, which ends the run; the next wake starts a new run. Session
+recovery refuses run threads rather than reviving them without their restrictions.
 
 **One live run per agent.** A message that wakes an agent with a live run in the same channel is
-delivered into that run as mid-turn input and shows as `pending` (invariant 10). A wake from a
-different channel is rejected with a system message saying the agent is busy — contexts are
-never mixed across channels. Waking past the project's concurrent-run cap (default 3) is
-rejected the same way.
+delivered into that run as a new turn; showing it as `pending` until read is M1.7 (invariant 10).
+A wake from a different channel is rejected with a system message saying the agent is busy —
+contexts are never mixed across channels. Waking past the project's concurrent-run cap (3, a
+constant until a project needs another value) is rejected the same way.
 
 **DMs are channels.** A DM is a `kind: dm` channel with one human and one agent. Every human
 message in a DM wakes its agent; no mention needed. Wake depth and history work as in any
 channel.
 
-**What is posted back.** When a run's turn completes, its final assistant message is posted to
-the run's channel as a `Message` (`authorKind: agent`, `runId` set). Reasoning, tool calls and
+**What is posted back.** When a run's session is ready again with no active turn, the latest
+turn's final assistant message is posted to the run's channel as a `Message` (`authorKind: agent`,
+`runThreadId` set). Reasoning, tool calls and
 intermediate assistant text stay in the DM view. White rendering means any assistant text; an
 agent `@mention`ing a human is a notification concern for M4, not a rendering rule.
 
 **Mentions.** `@name`, matched case-insensitively against agent names in the project, parsed in
-the decider. A mention of an unknown name is plain text. A mention of an agent that isn't a
-member of the channel wakes nothing and posts a system message saying so.
+the decider and recorded on `channel.message-posted`. A mention of an unknown name is plain text. A
+mention of an agent that isn't a member of the channel wakes nothing and posts a system message
+saying so.
 
 ### New event types (minimum)
 
 `AgentCreated`, `AgentUpdated`, `AgentArchived`, `ChannelCreated`, `ChannelUpdated`,
 `MessagePosted`, `AgentMentioned`, `RunStarted`, `ScratchpadWritten`, `CardCreated`,
 `CardPromoted`, `CardClaimed`, `CardStatusChanged`, `CardLanded`, `CardAbandoned`.
+
+Implemented under local naming so far: `agent.created` / `updated` / `archived` / `unarchived`,
+`channel.created` / `updated` / `archived` / `unarchived`, `channel.message-posted` (mentions on
+the payload; there is no separate `AgentMentioned`), `channel.agent-wake-requested` and
+`channel.run-started`.
 
 ---
 
@@ -268,9 +282,9 @@ removed.
 3. **Agents are silent by default.** A run starts only on an explicit `@mention`, a human message
    in the agent's DM, a card assignment, or a routed webhook event. A channel message with no
    mentions wakes nobody.
-4. **One live run per agent, one in-progress card per agent**, and a configurable cap on
-   concurrent runs per project (default 3). Wakes beyond either limit are rejected with a system
-   message, never dropped silently.
+4. **One live run per agent, one in-progress card per agent**, and a cap on concurrent runs per
+   project (3; a constant until a project needs another value). Wakes beyond either limit are
+   rejected with a system message, never dropped silently.
 5. **Agent-created cards enter `triage`.** Only a human promotes `triage → ready`. Agents may
    claim only `ready` cards.
 6. **Claims are atomic.** Single writer; a losing claim is rejected and the agent is told.
