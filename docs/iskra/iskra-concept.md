@@ -7,8 +7,9 @@ _Local-first, Discord-shaped orchestrator for AI coding agents._
 ## One-liner
 
 You open a local project and it looks like a Discord server. Agents are users. Channels group
-them by concern. You DM an individual agent to watch it work, or talk to the whole room.
-Everything runs on your machine; you pay only for the agent subscriptions you already have.
+them by concern. Work is a board of features, each on its own branch with one agent writing it,
+and one list tells you everything that is waiting on you. Everything runs on your machine; you
+pay only for the agent subscriptions you already have.
 
 ---
 
@@ -31,9 +32,9 @@ model underneath.
 
 |              | T3 Code                 | Iskra                                      |
 | ------------ | ----------------------- | ------------------------------------------ |
-| Unit         | Thread = task           | Agent = entity, card = task, run = session |
+| Unit         | Thread = task           | Agent = entity, card = feature, run = session |
 | Lifetime     | Disposable, isolated    | Durable identity, disposable context       |
-| Coordination | None                    | Channels + shared board + merge queue      |
+| Coordination | None                    | Channels + derived board + merge queue + Linear |
 | Memory       | In the thread           | In the channel and the agent's scratchpad  |
 | Audience     | Single player by design | Multiplayer by design                      |
 
@@ -53,27 +54,29 @@ memory of the project.
 tool and filesystem permissions, channel membership, scratchpad, cost ledger. **Owns no
 worktree.**
 
-**Card** — the unit of work. Owns a worktree and a branch for its lifetime. Status: `triage →
-ready → claimed → in progress → in review → landed | abandoned`.
+**Card** — the unit of work, shown as a **feature**. Owns a worktree and a branch for its
+lifetime. One accountable human and one writing agent at a time; many sessions over time sharing
+the card's spec and decision log; any number of read-only helpers; sub-cards and best-of-N
+attempts for parallel writing. Status: `triage → ready → in progress → in review → landing →
+landed | abandoned`, derived from what happened rather than set by hand.
 
 **Run** — one CLI session. Belongs to an agent, scoped to either a card or a conversation.
 Ephemeral, disposable, reconstructed from scratch on every wake. This is what actually maps
 onto a Claude Code or Codex session.
 
-### The core rule: DMs code, channels talk
+### The core rule: features code, channels talk
 
 A channel message spawns a **read-only run**: the agent reads the repo, reasons and answers,
-but cannot write. An agent's **DM is its coding session**, one continuous conversation with the
-full controls of a coding thread (model, effort, access mode, attachments), and it replaces
-free-standing threads entirely. Shared, parallel changes still go through cards, each with a
-worktree branched from current main.
+but cannot write. Writing happens on a **feature**: its own branch and worktree, one writing
+agent at a time, the full controls of a coding thread. An agent's DM is also a coding session
+today, in the project checkout; whether DMs remain alongside features is still open.
 
 This resolves several things at once:
 
 - A room full of agents can never write over each other: channels only talk.
-- Pairing with one agent on real work has one obvious home, its DM.
-- Long-lived agent branches can't drift, because card branches are task-scoped and short.
-- "Spin this into a task" stays the central gesture for work that needs coordinating.
+- Many features in parallel never collide: each has its own worktree and exactly one writer.
+- Long-lived agent branches can't drift, because feature branches are task-scoped and short.
+- "Spin this into a feature" stays the central gesture for work that needs coordinating.
 
 ### Context reconstruction
 
@@ -139,12 +142,29 @@ which must be re-delivered or surfaced, never silently dropped.
 
 ## Board and landing
 
-A per-project board. Agents and humans create cards, claim them, move them.
+A per-project board of features, and the project's home page.
 
 **Why it matters structurally:** agents coordinate through state, not conversation. A card
 with an owner and a status is unambiguous in a way six agents talking never is. Most serious
-orchestrators converged here independently, pulling work from GitHub Issues or Linear. Native
-is better.
+orchestrators converged here independently, pulling work from GitHub Issues or Linear.
+
+**Columns are derived, not dragged.** A card moves because something happened: a session
+started, review was requested, the queue merged it. A human drags only to decide: approve a
+proposal, assign an agent, approve a merge. The board therefore never disagrees with the code.
+
+**Needs you.** The scarce resource with many agents is your attention. One list across projects
+holds everything waiting on you — approvals, questions, specs, reviews, exhausted fixes, budgets,
+conflicts — and can be snoozed until something new happens.
+
+**Guardrails built into the flow.** A feature needs an approved plan before any code is written
+(a cheap critic reviews it first; small fixes can skip). Review runs the project's checks and
+sends failures back to the agent a few times before asking you. Every feature has a spend cap.
+Best-of-N attempts run several agents on the same spec and keep the best diff.
+
+**Linear, both ways.** Linear now runs coding agents on issues itself, so Iskra does not rebuild
+a tracker: issues flow in as proposals or delegated work, features flow out as issues, and the
+agent's questions can be answered from either side. Iskra owns the status, because only Iskra
+knows what actually happened in the worktree.
 
 ### Auto-claim, with guardrails
 
@@ -157,15 +177,15 @@ Agents get notified on new cards and grab ones matching their role.
   lock, loser backs off. Cheap if designed for, nasty otherwise.
 - **Runaway loops.** Agents creating _and_ claiming cards is a machine that generates and
   executes its own work overnight with your card attached. Agent-created cards land in
-  `triage`, which only a human can promote to `ready`. Hard WIP limits: one in-progress card
-  per agent, N concurrent runs per project.
+  `triage`, which only a human can promote to `ready`. Hard limits: N concurrent sessions per
+  project and a spend cap per feature.
 
 ### Landing (the part every parallel agent system dies on)
 
 Claiming is easy. Landing is where N branches against one main goes wrong.
 
-- Each card branches from main at claim time.
-- `in review` presents a diff. Approve by reaction.
+- Each card branches from its base (main, or its parent feature's branch) when work starts.
+- `in review` runs the project's checks, then presents the diff. Approving the merge is one click.
 - Landing is serialized through a **single merge queue per project**. One card lands at a
   time: rebase onto main, run the project's verify command (build/test/lint) inside the
   worktree, merge on green.
@@ -187,9 +207,9 @@ legible as a server setting rather than a config file.
 **Reactions as feedback.** Approving a diff, rejecting a plan, "continue" — one click, no
 sentence. Better fit for supervised mode than a modal.
 
-**Threads as forked attempts.** A Discord thread branches off a message; a worktree branches
-off a commit. Three threads off one card = three branches, three diffs side by side, keep one.
-Parallel attempts are the real superpower of agent work and nobody has good UI for it.
+**Forked attempts.** A Discord thread branches off a message; a worktree branches off a commit.
+Three attempts on one feature = three branches, three diffs side by side, keep one. Parallel
+attempts are the real superpower of agent work; they ship with the board in M2.
 
 **Webhooks into channels.** Point Sentry, CI and Railway at `#alerts` and the agents in it have
 a live event feed with no ingestion layer to build. An agent that wakes because a deploy
@@ -210,8 +230,10 @@ spiral. **Agents are silent by default and wake only on `@mention` or explicit r
 **Agent-to-agent DMs.** Where coordination goes to die — invisible token burn, no audit trail,
 failures surface three steps downstream. Agents talk in channels or through cards.
 
-**Orchestrator agent (v1).** Standard fix for group chat; degrades past small N. You are the
-orchestrator until the rest works.
+**Manager agent.** An agent that directs other agents or merges their work degrades past small
+N and breaks one writer per branch. The channel lead is not that: it only turns a request into
+proposed features, which you approve. You stay the orchestrator; the board and Needs you make
+that cheap.
 
 **Hosted compute.** See below.
 
@@ -284,13 +306,15 @@ were read from code, not run, so M1 targets Claude only.
 routing, read-only runs, grey/white DM view, context-builder inspector. No cards, no writes.
 This alone should feel better than a terminal. If it doesn't, stop.
 
-**M2 — work.** Cards, worktrees, claim, diff review by reaction, serialized merge queue,
-overlap flagging.
+**M2 — the board.** Features with worktrees and derived status, the plan gate, the review loop,
+the serialized merge queue with overlap flagging, Needs you, budgets, best-of-N attempts,
+board tools for agents, two-way Linear sync, and the channel lead proposing features.
 
-**M3 — memory.** Scratchpads, pinned specs, per-channel wake depth, cost display per wake.
+**M3 — memory.** Scratchpads, pinned specs, per-channel wake depth, cost reporting across
+projects.
 
-**M4 — server furniture.** Roles and permissions, webhooks into channels, threads as forked
-attempts, auto-claim with guardrails.
+**M4 — server furniture.** Roles and permissions, webhooks and scheduled triggers into triage,
+auto-claim with guardrails.
 
 **M5 — multiplayer.** Second human, shared board, audit trail, spend caps.
 
@@ -320,4 +344,8 @@ attempts, auto-claim with guardrails.
    Plausible angles: be the thing people fork; the DM view is inherently demoable in a
    15-second clip; teams are an underserved segment nobody in the category serves.
 4. **Cost legibility.** Nobody answers "what did agent work cost this month, by project." Wake
-   depth, per-agent budgets and per-channel caps are a differentiator hiding in plain sight.
+   depth, per-feature budgets and per-channel caps are a differentiator hiding in plain sight.
+5. **Linear moved into the space.** Since 2026 Linear runs Claude Code and Codex sessions on
+   issues, reviews their diffs and schedules agent jobs. Iskra's answer is what an issue tracker
+   cannot be: local, any provider, worktrees that actually run the app, and live rooms — synced
+   with Linear rather than competing with it as a tracker.

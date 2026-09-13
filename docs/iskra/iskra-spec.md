@@ -24,7 +24,7 @@ comments, commits, UI copy, event names.
 | turn          | **turn**                             | Unchanged: one user-to-agent cycle inside a run                                               |
 | project       | **server** (UI) / **project** (code) | A git repo plus its Iskra state. "Server" is user-facing only                                 |
 | — (new)       | **channel**                          | A context partition with durable history and a pinned spec                                    |
-| — (new)       | **card**                             | A unit of work. Owns a worktree and branch for its lifetime                                   |
+| — (new)       | **card**                             | A unit of work, called a **feature** in the UI. Owns a worktree and branch for its lifetime   |
 | environment   | environment                          | Unchanged                                                                                     |
 
 The upstream rename is a documentation and new-code rule. **Do not mass-rename existing
@@ -149,9 +149,15 @@ agent's reply to the run it came from). `mentions` are resolved to agent ids whe
 posted and recorded on the event; the message projection does not store them yet. Messages are
 never part of the command read model; history is ordered and paged by event sequence.
 
-**Card** — durable. `id`, `projectId`, `channelId`, `title`, `body`, `tags[]`,
-`status` (`triage` | `ready` | `claimed` | `inProgress` | `inReview` | `landed` | `abandoned`),
-`assigneeAgentId?`, `worktreePath?`, `branch?`, `createdBy`, `claimedAt?`.
+**Card** — durable. `id`, `projectId`, `channelId?` (where it was proposed), `parentCardId?`,
+`attemptGroupId?` (set on best-of-N attempts), `title`, `spec` (plain text), `specState`
+(`draft` | `approved` | `skipped`), `tags[]`, `status` (`triage` | `ready` | `inProgress` |
+`inReview` | `landing` | `landed` | `abandoned`), `ownerHumanId` (the accountable person; the
+single local human until M5), `delegateAgentId?` (the writing agent), `baseBranch` (main, or the
+parent card's branch), `branch?`, `worktreePath?`, `budgetCapUsd`, `spentUsd`, `plan[]` (the
+owner's checklist), `relations[]` (`blocks` | `blockedBy` | `duplicateOf` | `related` |
+`overlaps`, each with a card id), `linearIssueId?`, `createdBy`, `createdAt`. The decision log is
+the card's append-only events, not a field.
 
 **Run** — ephemeral, but its events are persisted. `threadId` (the hidden upstream thread backing
 it; also the run's id), `channelId`, `agentId`, `triggerMessageId`, `capabilities`, `context` (the
@@ -184,8 +190,8 @@ Resolved at run start from agent config plus run scope, expressed once in
 `packages/contracts`, translated per adapter.
 
 Channel runs get `read` only. An agent's DM is not a run: it is a coding session with the full
-thread controls, including the access mode (full access or approval required). Card-scoped runs
-get whatever the agent's config allows.
+thread controls, including the access mode (full access or approval required). A card's owner
+session gets whatever the agent's config allows; a card's helper runs get `read` only.
 
 **Claude translation (verified).** `permissionMode: "dontAsk"`, an explicit tool allowlist
 (`Read`, `Glob`, `Grep` for a read-only run), and `settingSources: []`. Write and Bash are
@@ -271,6 +277,105 @@ the decider and recorded on `channel.message-posted`. A mention of an unknown na
 mention of an agent that isn't a member of the channel wakes nothing and posts a system message
 saying so.
 
+### Cards, board and integrations — decided (M2 brief)
+
+**A card is a feature.** One branch, one worktree, created from its `baseBranch` when its first
+write session starts. The card, not the agent, is the unit of work: an agent can be the delegate on
+several cards, each in its own session and worktree.
+
+**Owner and delegate.** `ownerHumanId` is accountable and receives the card's "Needs you" items.
+`delegateAgentId` is the only agent that writes. Reassigning the delegate swaps the agent; the
+owner does not change.
+
+**One writer, many sessions.** A card has at most one live write session. Planning, building and
+fixing CI may each be a fresh session; each new session, and every delegate change, starts from a
+**handoff brief** rendered from the spec, the decision log and the diff against `baseBranch`, the
+way M1.3 renders run context. **Helpers** are read-only runs scoped to the card (spec, log, diff);
+their replies go to the card's activity and are delivered to the owner session's next turn with the
+channel delivery statuses. Parallel writing is a **sub-card** with its own branch cut from the
+parent's branch, landing into that branch.
+
+**Session states** (from Linear's agent sessions), derived from the upstream thread: `pending`
+(starting), `active` (a turn is running), `awaitingInput` (a pending approval or user-input
+request), `error` (the session or turn failed), `complete` (settled, waiting for instructions),
+`stale` (the session was lost without reaching a terminal state, e.g. across a restart without
+recovery). Silence during a long tool call is `active`, not stale.
+
+**Status is derived.** Columns move on events, not drags:
+
+| Status | Entered when | By |
+| --- | --- | --- |
+| `triage` | Created by an agent, the channel lead, Linear intake, or a human | Event |
+| `ready` | A human approves it | **Human** |
+| `inProgress` | The delegate's first write session starts | Assigning (human, or the lead's suggestion accepted) |
+| `inReview` | The owner calls `request_review` | Agent |
+| `landing` | A human approves the merge; the card joins the queue | **Human** |
+| `landed` | The queue merged it into `baseBranch` | Event |
+| `abandoned` | A human abandons it | **Human** |
+
+Every human decision has its reverse: unapprove, unassign, cancel landing, reopen. A failed check
+or merge returns the card to `inProgress` with the failure attached for its delegate.
+
+**Plan gate.** A write session cannot start until `specState` is `approved` or `skipped`. When a
+spec is submitted, a cheap read-only **critic** run reviews it and posts findings to the card; a
+human approves. Skipping is a human action, recorded with who skipped. Editing an approved spec
+returns it to `draft`.
+
+**Review loop.** Entering `inReview` runs the project's checks (tests, lint, verify command) in the
+worktree, identically for every provider. A failure, or a human review comment, goes to the
+delegate as its next turn. After 3 failed autofix attempts the card raises a "Needs you" item
+instead of trying again.
+
+**Budgets.** `spentUsd` is the sum of the card's session and run costs, priced by the existing usage
+pricing (`providerReported`, else `modelPriced`). Default `budgetCapUsd` is 10, a constant until a
+project needs another value. A turn does not start once `spentUsd` reaches the cap; raising it is a
+human command. A model whose cost is `unpriced` needs a human to accept running it uncapped.
+Attempts spend from their parent card's budget.
+
+**Best-of-N attempts.** On a `ready` card a human starts 2–4 attempts: sibling sub-cards sharing
+the spec and an `attemptGroupId`, each with its own branch, worktree and chosen agent or model.
+Review shows their diffs side by side. Promoting one makes its branch the card's branch; the other
+attempts are abandoned and their worktrees and branches removed. An attempt never lands on its own.
+
+**Relations and landing.** `blockedBy` holds a card out of `landing` until the blocker lands; the
+blocker's relation then becomes `related`. A parent card cannot enter `landing` while a child is
+unlanded. When a card lands, any `inProgress` card whose changed files intersect gets an `overlaps`
+relation and its delegate is told to rebase.
+
+**Needs you.** One list across projects, derived, never stored: triage cards to approve, specs to
+approve, `awaitingInput` and `error` sessions, cards in review with passing checks, exhausted
+autofix, reached budgets, merge conflicts. An item can be snoozed until a time or until the card
+has new activity. Items show how long they have waited.
+
+**Board tools for agents.** Extend the existing MCP server (which already exposes
+`link_pull_request`) with typed tools: `propose_card` (enters `triage`), `record_decision`,
+`update_plan`, `request_review`, `ask_owner` (raises `awaitingInput`). Tools create commands; they
+never approve, assign or land.
+
+**Channel lead.** An optional agent per channel, on a cheap model, woken by channel messages with no
+mentions. It reads the message, the channel's members and open cards, and either proposes cards
+into `triage` (with its reasoning and likely duplicates) or does nothing. It never answers, assigns,
+approves or wakes other agents. An `@mention` bypasses it.
+
+**Linear, two-way.** Iskra is a Linear OAuth agent app; the token lives in server secrets.
+
+- *Linking.* A card has at most one Linear issue. Issues delegated to Iskra, or matching a project's
+  configured team and label, create cards: in `triage`, or `ready` when a human delegated it in
+  Linear. Cards approved in Iskra create issues when the project has a linked team.
+- *Fields both ways:* title, description ↔ spec, priority, comments. Last write per field wins by
+  update time. A description change from Linear edits the spec, and so clears its approval.
+- *Status:* Iskra pushes its derived status to the team's mapped workflow states. A status change
+  made in Linear is accepted only when it maps to a human decision (backlog/triage → todo approves,
+  canceled abandons). Any other change is overwritten on the next sync with a comment explaining
+  why.
+- *Agent sessions:* the delegate's session posts to the issue as Linear agent activity (thought,
+  action, elicitation, response). Answering an elicitation in Linear answers the session.
+- *Transport:* a local server usually has no public URL for Linear's webhooks. Sync polls the API
+  on an interval and on client focus; webhooks are used only when the server is reachable.
+
+**DMs.** An agent's DM stays a coding session in the project checkout until it is decided whether
+DMs remain alongside cards.
+
 ### New event types (minimum)
 
 `AgentCreated`, `AgentUpdated`, `AgentArchived`, `ChannelCreated`, `ChannelUpdated`,
@@ -293,22 +398,23 @@ removed.
    writes and shell commands at the adapter boundary, and the server refuses a run on any provider
    that cannot enforce that. Writing happens in an agent's DM, under that session's access mode,
    or on a card.
-2. **One worktree per card, never per agent.** Created from current main at claim time,
-   destroyed on land or abandon. Agents own no workspace.
+2. **One worktree per card, never per agent.** Created from the card's `baseBranch` when its first
+   write session starts, removed when it lands or is abandoned. Agents own no workspace.
 3. **Agents are silent by default.** A run starts only on an explicit `@mention`, a human message
-   in the agent's DM, a card assignment, or a routed webhook event. A channel message with no
-   mentions wakes nobody.
-4. **One live run per agent, one in-progress card per agent**, and a cap on concurrent runs per
-   project (3; a constant until a project needs another value). Wakes beyond either limit are
-   rejected with a system message, never dropped silently.
-5. **Agent-created cards enter `triage`.** Only a human promotes `triage → ready`. Agents may
-   claim only `ready` cards.
-6. **Claims are atomic.** Single writer; a losing claim is rejected and the agent is told.
+   in the agent's DM, a card assignment, a card's helper or critic request, or a routed webhook
+   event. A channel message with no mentions wakes only the channel's lead, if it has one.
+4. **One live run per agent per channel**, and a cap on concurrent live sessions per project,
+   counting channel runs and card sessions (3 by default, a project setting). Wakes beyond either
+   limit are rejected with a system message, never dropped silently.
+5. **Agent-created cards enter `triage`.** Only a human promotes `triage → ready`. Agents,
+   the channel lead and Linear intake never create a `ready` card.
+6. **Assignment is atomic.** A card has at most one delegate; a losing assignment is rejected.
 7. **Landing is serialized.** One merge queue per project, one card landing at a time: rebase
-   onto main, run the project verify command in the worktree, merge on green. On conflict or
-   failure the card returns to `inProgress` with the failure as context for its agent.
+   onto `baseBranch`, run the project checks in the worktree, merge on green. On conflict or
+   failure the card returns to `inProgress` with the failure as context for its delegate. A card
+   with an unlanded child or an open `blockedBy` cannot enter the queue.
 8. **Overlap flagging.** When a card lands, any `inProgress` card whose changed file set
-   intersects it is flagged and its agent told to rebase before review.
+   intersects it gets an `overlaps` relation and its delegate is told to rebase before review.
 9. **No agent-to-agent DMs.** Agents communicate in channels or through cards. A `dm` channel
    always has exactly one human and one agent; the decider rejects any other membership.
 10. **No message is silently dropped.** A message sent to a running agent is held in a `pending`
@@ -317,6 +423,18 @@ removed.
     unanswered. It is never marked delivered on the strength of having been sent. Test the
     turn-ends-without-consuming path explicitly — it was traced in upstream code but not
     observed, so assume it happens.
+11. **One writer per card.** A write-capable session cannot start on a card that already has a
+    live one. Helpers and the critic are read-only.
+12. **No writing before the plan gate.** A write session starts only when the card's spec is
+    `approved` or `skipped` by a human. Editing the spec returns it to `draft`.
+13. **Budgets hold.** No turn starts on a card whose `spentUsd` has reached `budgetCapUsd`; only a
+    human raises the cap. An `unpriced` model runs only after a human accepts it uncapped.
+14. **Status is derived.** The decider rejects any status command other than the human decisions
+    (approve, assign, approve merge, abandon) and their reverses.
+15. **Sync cannot move derived status.** A Linear change that does not map to a human decision is
+    overwritten and explained; it never changes a card's status.
+16. **Attempts do not land alone.** Only the promoted attempt's branch becomes the card's branch;
+    promoting abandons the rest.
 
 ---
 
@@ -428,10 +546,71 @@ context record. For every run in the test database, the stored first message equ
 thread's first user message and the stored system prompt equals the one its provider session was
 started with.
 
-### M2–M5 (not yet briefed)
+### M2 — the board
 
-M2 cards, worktrees, merge queue. M3 scratchpads and cost display. M4 roles, webhooks, forked
-attempts, auto-claim. M5 multiplayer. Brief these when M1 is accepted, not before.
+Cards as features on a derived board, with worktrees, a plan gate, a review loop, a merge queue,
+budgets, best-of-N attempts and two-way Linear sync. See "Cards, board and integrations". Build in
+order; M2.1–M2.6 is the first usable board, and M2.7 lands before anything starts agent work
+without a human in the loop.
+
+**M2.1 — Card entity and derived status.** Contracts, events, decider rules, projection for cards,
+relations and the decision log; the human decisions and their reverses. _Accept when:_ decider
+tests cover every transition in the status table and each reverse; non-decision status commands
+are rejected; agent-created cards land in `triage`; a restart restores cards equal to a replay.
+
+**M2.2 — Worktrees and project scripts.** Create and remove card worktrees; extend the existing
+project setup script with `run` and `archive` scripts, an `ISKRA_PORT` range per card, and a
+non-concurrent run mode for scripts that share a port or database. _Accept when:_ two cards run
+the app at the same time on different ports; abandoning a card runs `archive` and removes its
+worktree and branch.
+
+**M2.3 — Card sessions.** Owner write sessions in the card worktree, session states, the handoff
+brief, delegate reassignment, helper runs. _Accept when:_ a second write session is refused;
+reassigning starts a session whose first message is the brief (spec, decisions, diff), checked
+byte for byte in the inspector; a helper's write is denied and its reply reaches the owner's next
+turn; a session lost across a restart shows `stale`.
+
+**M2.4 — Plan gate.** Spec states, the critic run, approval and skip. _Accept when:_ a write
+session is refused on a `draft` spec; the critic's findings appear on the card; a skip is recorded
+with who skipped; editing an approved spec returns it to `draft`.
+
+**M2.5 — Board and Needs you.** Web: the board by status with card faces (owner, delegate, branch,
+badges, diff size, plan progress, spend, children); drag only for human decisions, snapping back
+with a reason otherwise; the cross-project Needs you list with snooze and waiting time.
+_Accept when:_ statuses and badges update live without a refresh; an illegal drag shows its reason;
+a snoozed item returns on new card activity; no continuously repainting animation.
+
+**M2.6 — Review loop and merge queue.** Checks on `inReview`, autofix up to 3 attempts, diff
+review with comments to the delegate, approve merge, serialized landing, sub-cards into parents,
+`blockedBy` holds, overlap relations. _Accept when:_ a failing check is fixed by the delegate with
+no human action; a third failure raises Needs you; two approved cards land one after the other; a
+conflicting card returns to `inProgress` with the conflict in its next turn; an overlap is flagged.
+
+**M2.7 — Budgets.** Spend per card from usage pricing, the default cap, stopping at the cap,
+raising it, accepting unpriced models. _Accept when:_ a turn is refused at the cap and resumes after
+a raise; spend on the card matches the priced usage of its sessions and runs.
+
+**M2.8 — Best-of-N attempts.** _Accept when:_ three attempts run in parallel on separate branches;
+review shows their diffs side by side; promoting one removes the others' worktrees and branches;
+attempt spend counts against the parent's budget.
+
+**M2.9 — Board tools for agents.** The MCP tools. _Accept when:_ a delegate's `propose_card`
+creates a `triage` card; `record_decision` appears in the log and in the next handoff brief;
+`update_plan` shows on the card face; no tool can approve, assign or land.
+
+**M2.10 — Linear, two-way.** _Accept when:_ an issue delegated to Iskra in Linear becomes a `ready`
+card; a card approved in Iskra creates an issue; title, description and comments round-trip; a
+Linear status change that is not a decision is overwritten with a comment; a question from the
+delegate is answered from Linear; all of it works by polling with no public URL.
+
+**M2.11 — Channel lead.** _Accept when:_ an unmentioned request in a channel produces a `triage`
+card linked to the message, with reasoning and likely duplicates; an `@mention` bypasses the lead;
+the lead cannot answer, assign, approve or wake another agent.
+
+### M3–M5 (not yet briefed)
+
+M3 scratchpads and cost reporting across projects. M4 roles, webhooks and scheduled triggers into
+triage, auto-claim. M5 multiplayer. Brief each when the previous milestone is accepted.
 
 ---
 
@@ -450,10 +629,12 @@ Follow upstream rules. In particular:
 
 ## 8. Do not
 
-- Do not build cards, worktrees, or any write path before M2.
+- Do not build M3 or later features (scratchpads, roles, webhooks, scheduled triggers,
+  auto-claim, multiplayer) during M2.
 - Do not add Iskra UI to `apps/mobile` before M4.
-- Do not implement free-flowing agent-to-agent conversation, agent DMs, or an orchestrator
-  agent. See `docs/iskra/iskra-concept.md` for why; they are not deferred, they are rejected.
+- Do not implement free-flowing agent-to-agent conversation, agent-to-agent DMs, or a manager
+  agent that directs other agents or merges their work. The channel lead only proposes `triage`
+  cards. See `docs/iskra/iskra-concept.md` for why; these are rejected, not deferred.
 - Do not add a second state store, ORM, or bus. SQLite and the event log are the state.
 - Do not mass-rename upstream identifiers.
 - Do not open a pull request unless explicitly asked.
