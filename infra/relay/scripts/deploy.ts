@@ -487,7 +487,7 @@ export const relayDeployCommand = Command.make(
     ),
   },
   deploy,
-).pipe(Command.withDescription("Deploy the T3 Code relay through Alchemy."));
+).pipe(Command.withDescription("Deploy the Iskra relay through Alchemy."));
 
 if (import.meta.main) {
   Command.run(relayDeployCommand, { version: "0.0.0" }).pipe(

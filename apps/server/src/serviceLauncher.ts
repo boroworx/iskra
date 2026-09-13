@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
 // @effect-diagnostics globalTimers:off
 // This file is shipped as a standalone bundle and copied to a stable path by
-// `t3 service update`. Keep runtime imports limited to Node built-ins.
+// `iskra service update`. Keep runtime imports limited to Node built-ins.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
@@ -605,7 +605,7 @@ export class Launcher {
 async function main(): Promise<void> {
   const baseDir = process.env.ISKRA_HOME?.trim();
   if (baseDir === undefined || baseDir === "") {
-    throw new Error("ISKRA_HOME is required by the T3 Code service launcher.");
+    throw new Error("ISKRA_HOME is required by the Iskra service launcher.");
   }
   const statePath = NodePath.join(baseDir, "runtime", SERVICE_STATE_FILE);
   const state = await readServiceState(statePath);

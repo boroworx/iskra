@@ -3753,7 +3753,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         // by a different model.
         yield* emitRuntimeWarning(context, message.content, message);
         return;
-      // Inner protocol/UX details with no T3 surface today — consumed
+      // Inner protocol/UX details with no Iskra surface today — consumed
       // deliberately so they don't masquerade as unknown-subtype warnings.
       // `background_tasks_changed` is a roster snapshot ({tasks: [...]}); the
       // task_* lifecycle events carry the authoritative per-agent data and
@@ -3962,7 +3962,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     yield* logNativeSdkMessage(context, message);
     yield* ensureThreadId(context, message);
 
-    // Wire-only command bookkeeping has no user-facing T3 lifecycle.
+    // Wire-only command bookkeeping has no user-facing Iskra lifecycle.
     if (sdkMessageType(message) === "command_lifecycle") {
       return;
     }
@@ -3989,9 +3989,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       case "rate_limit_event":
         yield* handleSdkTelemetryMessage(context, message);
         return;
-      // Composer prompt suggestions have no T3 surface; consumed deliberately.
+      // Composer prompt suggestions have no Iskra surface; consumed deliberately.
       // `conversation_reset` announces a CLI-side conversation id swap
-      // (e.g. /clear); T3 keeps its own thread identity and resume cursor.
+      // (e.g. /clear); Iskra keeps its own thread identity and resume cursor.
       case "prompt_suggestion":
       case "conversation_reset":
         return;
@@ -4700,7 +4700,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         auto: "auto",
         "full-access": "bypassPermissions",
       };
-      // A permission launch arg is folded into the mode T3 sends rather than
+      // A permission launch arg is folded into the mode Iskra sends rather than
       // passed through: the CLI resolves both inputs together, so argv order
       // never let the user's flag win.
       // A run ignores launch args entirely, since any of them could widen what it may do.
@@ -5247,7 +5247,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       }
       const boundaries = [...context.turnStartMessageIds];
       // Older cursors did not record native boundaries. Infer them only when
-      // their T3 turn count agrees; steers must never be treated as extra turns.
+      // their Iskra turn count agrees; steers must never be treated as extra turns.
       if (
         boundaries.every((id): boolean => id === null) &&
         boundaries.length === turnStarts.length

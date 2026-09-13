@@ -40,7 +40,7 @@ export function GitHubRoutingSettings({
         <SettingsRow
           key={environment.environmentId}
           title={environment.label}
-          description={environment.displayUrl ?? "T3 Connect"}
+          description={environment.displayUrl ?? "Iskra Connect"}
           control={
             <Select
               items={options}

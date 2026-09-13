@@ -22,7 +22,7 @@ export function NotificationSettings() {
       {...searchableSetting("thread-notifications")}
       description={
         permissionMessage ??
-        "Alert when a thread finishes or needs input. Applies to this device while T3 Code is open."
+        "Alert when a thread finishes or needs input. Applies to this device while Iskra is open."
       }
       control={
         <Select

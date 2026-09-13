@@ -130,7 +130,7 @@ describe("resolveMediaSource", () => {
     );
   });
 
-  it("serves T3 attachment files in place like any other host path", () => {
+  it("serves Iskra attachment files in place like any other host path", () => {
     const path = `/home/demo/.t3/userdata/attachments/${attachmentId}.mp4`;
     expect(resolveMediaSource(path, { threadId, workspaceRoot: "/repo" })).toMatchObject({
       kind: "video",

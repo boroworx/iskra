@@ -35,7 +35,7 @@ const normalizeCommitHash = (value: string): Option.Option<string> => {
 
 /**
  * Iskra always uses its own userData directory, with deliberately no fallback
- * to a T3 Code directory: adopting one would share T3 Code's Chromium profile.
+ * to an IskraCode directory: adopting one would share Iskra's Chromium profile.
  */
 export const resolveUserDataPath = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;

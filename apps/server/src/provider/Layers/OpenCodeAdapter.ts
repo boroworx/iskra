@@ -1282,7 +1282,7 @@ export function makeOpenCodeAdapter(
         return;
       }
       const detail =
-        "OpenCode accepted the prompt, but T3 Code could not confirm its message or session status.";
+        "OpenCode accepted the prompt, but Iskra could not confirm its message or session status.";
       const abortExit = yield* Effect.exit(
         runOpenCodeSdk("session.abort", (signal) =>
           context.client.session.abort({ sessionID: context.openCodeSessionId }, { signal }),
@@ -3830,7 +3830,7 @@ export function makeOpenCodeAdapter(
               .slice(0, targetMessageIndex + 1)
               .findLast((entry) => entry.info.role === "user") ?? entries[targetMessageIndex]!;
           // Native revert also rewrites workspace files. Fork only the retained
-          // conversation so T3 alone decides whether filesystem changes survive.
+          // conversation so Iskra alone decides whether filesystem changes survive.
           const fork = yield* runOpenCodeSdk("session.fork", () =>
             context.client.session.fork({
               sessionID: context.openCodeSessionId,

@@ -1,6 +1,6 @@
 /**
  * Where development state lives, and how to keep it away from the shared
- * `~/.iskra` that a user's installed T3 Code runs against.
+ * `~/.iskra` that a user's installed Iskra runs against.
  *
  * A linked git worktree gets its own (gitignored) `.t3`: feature work in a
  * throwaway branch must not share a database with the real app, and an ambient

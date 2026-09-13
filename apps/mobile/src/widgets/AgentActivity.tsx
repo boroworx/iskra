@@ -223,7 +223,7 @@ export function AgentActivity(
     </HStack>
   );
 
-  // The branded T3 mark. `assetName` resolves the template image set bundled in
+  // The branded Iskra mark. `assetName` resolves the template image set bundled in
   // the widget extension's asset catalog. Image views only honor `resizable`
   // directly (frame/foregroundStyle are dropped), so we size it via a container
   // frame the resizable image fills and tint it through the container's

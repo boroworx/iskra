@@ -46,7 +46,7 @@ const boldTerminalText = (value: string): string => `\u001b[1m${value}\u001b[22m
 
 function formatLoopbackAuthorizationPrompt(authorizationUrl: string): string {
   return [
-    "Open this URL to authorize T3 Connect:",
+    "Open this URL to authorize Iskra Connect:",
     `  ${authorizationUrl}`,
     "",
     `Press ${boldTerminalText("Enter")} to open it in your browser.`,
@@ -169,7 +169,7 @@ export class CloudCliCredentialRemovalError extends Schema.TaggedError<CloudCliC
   { cause: Schema.Defect() },
 ) {
   override get message(): string {
-    return "Could not remove the stored T3 Connect CLI credential.";
+    return "Could not remove the stored Iskra Connect CLI credential.";
   }
 }
 
@@ -178,7 +178,7 @@ export class CloudCliCredentialRefreshError extends Schema.TaggedError<CloudCliC
   { cause: Schema.Defect() },
 ) {
   override get message(): string {
-    return "Could not refresh the T3 Connect CLI credential.";
+    return "Could not refresh the Iskra Connect CLI credential.";
   }
 }
 
@@ -187,7 +187,7 @@ export class CloudCliCredentialReadError extends Schema.TaggedError<CloudCliCred
   { cause: Schema.Defect() },
 ) {
   override get message(): string {
-    return "Could not read the stored T3 Connect CLI credential.";
+    return "Could not read the stored Iskra Connect CLI credential.";
   }
 }
 
@@ -196,7 +196,7 @@ export class CloudCliAuthorizationError extends Schema.TaggedError<CloudCliAutho
   { cause: Schema.Defect() },
 ) {
   override get message(): string {
-    return "Could not authorize the T3 Connect CLI.";
+    return "Could not authorize the Iskra Connect CLI.";
   }
 }
 
@@ -205,7 +205,7 @@ export class CloudCliAuthorizationTimeoutError extends Schema.TaggedError<CloudC
   { cause: Schema.Defect() },
 ) {
   override get message(): string {
-    return "Timed out waiting for T3 Connect authorization.";
+    return "Timed out waiting for Iskra Connect authorization.";
   }
 }
 
@@ -379,7 +379,7 @@ export const make = Effect.gen(function* () {
         const url = new URL(request.originalUrl, metadata.redirectUri);
         const code = url.searchParams.get("code");
         if (url.searchParams.get("state") !== state || !code) {
-          return HttpServerResponse.text("Invalid T3 Connect authorization callback.", {
+          return HttpServerResponse.text("Invalid Iskra Connect authorization callback.", {
             status: 400,
           });
         }

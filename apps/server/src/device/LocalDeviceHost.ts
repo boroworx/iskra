@@ -6,7 +6,7 @@
  * lazy: the device service requires explicit setup consent before it calls
  * ensureReady to install tools or start helper processes.
  *
- * The hub runs in its standalone mode (origin root). The T3 proxy strips its
+ * The hub runs in its standalone mode (origin root). The Iskra proxy strips its
  * own prefix, and the Device panel derives stream and socket URLs from the
  * prefix itself rather than from anything the hub prints.
  */

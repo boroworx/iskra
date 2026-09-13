@@ -1,6 +1,6 @@
 # Claude
 
-T3 Code uses Claude Code's login and configuration. Start with the default provider
+Iskra uses Claude Code's login and configuration. Start with the default provider
 for one account; [provider setup](./install.md#providers) covers installation and
 shared provider settings.
 
@@ -39,7 +39,7 @@ For presets that differ only in API keys or endpoints, use the instance's
 
 Claude Code's verbose mode can stay enabled when you use Claude for text generation, including
 thread titles, branch names, commit messages, and pull request descriptions. On a remote connection,
-T3 Code uses the Claude configuration on the connected server.
+Iskra uses the Claude configuration on the connected server.
 
 ## Compact long conversations
 

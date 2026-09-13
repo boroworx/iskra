@@ -121,15 +121,15 @@ function HostedStaticOnboardingState() {
                 <LinkIcon className="size-5" />
               </div>
               <EmptyTitle className="text-foreground text-xl">
-                Connect to a computer running T3 Code
+                Connect to a computer running Iskra
               </EmptyTitle>
               <EmptyDescription className="mt-2 text-sm leading-relaxed text-muted-foreground/78">
-                This browser connects to T3 Code running on your computer or a server. Start the T3
+                This browser connects to Iskra running on your computer or a server. Start the Iskra
                 Code desktop app or command-line server on that machine and keep it running.
               </EmptyDescription>
               <EmptyDescription className="mt-2 text-sm leading-relaxed text-muted-foreground/78">
                 {cloudEnabled
-                  ? "Enable T3 Connect on that machine, then open Connections here to sign in with the same account. You can also add the machine using a pairing link."
+                  ? "Enable Iskra Connect on that machine, then open Connections here to sign in with the same account. You can also add the machine using a pairing link."
                   : "Open Connections and add that machine using its pairing link. This browser must be able to reach it."}
               </EmptyDescription>
               <div className="mt-6 flex justify-center">

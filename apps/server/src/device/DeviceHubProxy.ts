@@ -4,9 +4,9 @@
  * The hub binds loopback and is never reachable directly: serve-sim exposes a
  * shell-exec route and serve-emu's action routes are unauthenticated, so the
  * only way to a device stream is through this route, which requires an
- * environment session with read scope (operate scope for input and tuning). Reusing the T3
+ * environment session with read scope (operate scope for input and tuning). Reusing the Iskra
  * origin is also what makes remote connections work unchanged — Tailscale and
- * T3 Connect already carry `/api/*` and WebSocket upgrades for the app itself.
+ * Iskra Connect already carry `/api/*` and WebSocket upgrades for the app itself.
  *
  * Only the routes the Device panel needs are forwarded. Anything under the
  * hub's dashboard, exec, or WebRTC surface is rejected here.
@@ -202,7 +202,7 @@ const handler = Effect.gen(function* () {
   }
   // The hub runs in standalone mode at its origin root; the panel builds every
   // stream and socket URL itself, so nothing depends on the hub knowing the
-  // T3 prefix.
+  // Iskra prefix.
   // The ticket authenticates here and must not travel on to the hub.
   const upstreamSearch = new URLSearchParams(url.value.search);
   upstreamSearch.delete("wsTicket");

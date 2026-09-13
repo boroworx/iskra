@@ -1,4 +1,4 @@
-name: Deploy T3 Connect relay
+name: Deploy Iskra Connect relay
 
 on:
   push:

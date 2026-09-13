@@ -410,7 +410,7 @@ if [ -n "$T3_NODE_SCRIPT_PATH" ]; then
   exec node "$T3_NODE_SCRIPT_PATH" "$@"
 fi
 # Iskra is not published to npm. The t3 package there (and any t3 already on
-# PATH) is T3 Code, so refuse instead of installing or running it.
+# PATH) is Iskra, so refuse instead of installing or running it.
 printf 'Iskra is not published to npm yet, so it cannot be installed on the remote host automatically. Start an Iskra server on that host yourself and connect to it as a remote environment instead.\\n' >&2
 exit 1
 `;
@@ -559,7 +559,7 @@ if [ -z "$REMOTE_PORT" ]; then
   printf '%s\\n' "$REMOTE_PORT" >"$PORT_FILE"
   printf 'managed\\n' >"$MANAGED_FILE"
   if ! wait_ready "@@T3_READY_TIMEOUT_MS@@"; then
-    printf 'Remote T3 server did not become ready on 127.0.0.1:%s.\\n' "$REMOTE_PORT" >&2
+    printf 'Remote Iskra server did not become ready on 127.0.0.1:%s.\\n' "$REMOTE_PORT" >&2
     if [ -s "$LOG_FILE" ]; then
       tail -n 80 "$LOG_FILE" >&2 2>/dev/null || true
     else
@@ -602,7 +602,7 @@ if [ "$REMOTE_MANAGED" != "external" ] && [ -n "$REMOTE_PID" ] && kill -0 "$REMO
     sleep 0.1
   done
   if kill -0 "$REMOTE_PID" 2>/dev/null; then
-    printf 'Remote T3 server with PID %s did not stop within 2 seconds. Its ownership files were kept.\\n' "$REMOTE_PID" >&2
+    printf 'Remote Iskra server with PID %s did not stop within 2 seconds. Its ownership files were kept.\\n' "$REMOTE_PID" >&2
     exit 1
   fi
 fi

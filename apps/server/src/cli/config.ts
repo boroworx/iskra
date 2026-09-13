@@ -32,7 +32,7 @@ const hostFlag = Flag.string("host").pipe(
 );
 export const baseDirFlag = Flag.string("base-dir").pipe(
   Flag.withDescription(
-    "Explicit T3 Code data directory; runtime state is stored under userdata (equivalent to ISKRA_HOME).",
+    "Explicit Iskra data directory; runtime state is stored under userdata (equivalent to ISKRA_HOME).",
   ),
   Flag.optional,
 );

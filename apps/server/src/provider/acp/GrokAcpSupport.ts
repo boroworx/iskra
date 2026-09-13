@@ -99,7 +99,7 @@ export const makeGrokAcpRuntime = (
   });
 
 /**
- * T3's built-in Grok slug. It is the CLI's product name, not a model id the ACP accepts,
+ * Iskra's built-in Grok slug. It is the CLI's product name, not a model id the ACP accepts,
  * so selecting it means "use whatever model the Grok session currently runs on".
  */
 export const GROK_DEFAULT_MODEL_SLUG = "grok-build";
