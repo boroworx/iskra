@@ -90,7 +90,7 @@ type WizardStep = "connection" | "agents" | "import";
 const NO_ENVIRONMENTS: readonly EnvironmentId[] = [];
 
 const AGENT_ONBOARDING_THREAD_ID = ThreadId.make("onboarding-agent-setup");
-const ONBOARDING_STAGES = ["Connect", "Agents", "Projects"] as const;
+const ONBOARDING_STAGES = ["Connect", "Providers", "Projects"] as const;
 const SCAN_LIMIT_MESSAGE = "Scan limit reached. Some projects or conversations may be missing.";
 
 export function WelcomeWizard({
@@ -293,7 +293,7 @@ function ConnectionStep({
     <>
       <h1 className="font-display text-xl text-foreground">Connect your computers</h1>
       <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
-        Choose one or more computers. We’ll set up agents and projects on each.
+        Choose one or more computers. We’ll set up providers and projects on each.
       </p>
       {directEnvironments.length > 0 ? (
         <fieldset className="mt-5 space-y-2">
@@ -626,7 +626,10 @@ function AgentsStep({
 }) {
   const { environments } = useEnvironments();
   return (
-    <StepShell title="Your agents" description="Agents available on your selected computers.">
+    <StepShell
+      title="Your providers"
+      description="Coding tools available on your selected computers."
+    >
       <ScrollArea
         scrollFade
         className="mt-5 h-auto max-h-96 [&_[data-slot=scroll-area-scrollbar]]:opacity-100"
