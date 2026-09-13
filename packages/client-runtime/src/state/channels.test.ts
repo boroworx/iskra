@@ -1,4 +1,10 @@
-import { ChannelId, MessageId, type OrchestrationChannelMessage } from "@t3tools/contracts";
+import {
+  AgentId,
+  ChannelId,
+  MessageId,
+  type ChannelMessageDelivery,
+  type OrchestrationChannelMessage,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { applyChannelStreamItem } from "./channels.ts";
@@ -24,6 +30,30 @@ describe("applyChannelStreamItem", () => {
     );
 
     expect(afterLive.map((entry) => entry.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("keeps each agent's latest delivery standing on a message", () => {
+    const backend = AgentId.make("backend");
+    const writer = AgentId.make("writer");
+    const deliveries: ReadonlyArray<ChannelMessageDelivery> = [
+      { agentId: backend, status: "pending" },
+      { agentId: writer, status: "pending" },
+      { agentId: backend, status: "delivered" },
+    ];
+    let next: ReadonlyArray<OrchestrationChannelMessage> = [message("a"), message("b")];
+    for (const delivery of deliveries) {
+      next = applyChannelStreamItem(next, {
+        kind: "delivery",
+        messageId: MessageId.make("b"),
+        delivery,
+      });
+    }
+
+    expect(next[0]?.deliveries).toBeUndefined();
+    expect(next[1]?.deliveries).toEqual([
+      { agentId: "writer", status: "pending" },
+      { agentId: "backend", status: "delivered" },
+    ]);
   });
 
   it("replaces held messages with a resubscription's snapshot", () => {

@@ -1,8 +1,11 @@
-import { AgentId, ChannelId, MessageId, ProjectId } from "@t3tools/contracts";
+import { AgentId, ChannelId, EventId, MessageId, ProjectId, ThreadId } from "@t3tools/contracts";
 import type {
+  OrchestrationAgentRun,
   OrchestrationAgentShell,
   OrchestrationChannelMessage,
   OrchestrationChannelShell,
+  OrchestrationMessage,
+  OrchestrationThreadActivity,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -11,6 +14,9 @@ import {
   channelListEntries,
   channelMemberEntries,
   channelMessageRows,
+  deliveryNotes,
+  dmTimelineEntries,
+  runOutputItems,
   presenceDotClassName,
   presenceLabel,
   toAgentName,
@@ -129,6 +135,116 @@ describe("channelMessageRows", () => {
       ["backend", true],
       ["backend", true],
       ["Iskra", true],
+    ]);
+  });
+});
+
+const run = (threadId: string, startedAt: string): OrchestrationAgentRun =>
+  ({
+    threadId: ThreadId.make(threadId),
+    channelId: ChannelId.make("general"),
+    agentId: AgentId.make("agent-backend"),
+    triggerMessageId: MessageId.make("trigger"),
+    capabilities: ["read"],
+    startedAt,
+    endedAt: null,
+  }) as unknown as OrchestrationAgentRun;
+
+describe("dmTimelineEntries", () => {
+  it("interleaves runs by time, drops replies their run shows, and heads the message after a run", () => {
+    const shownReply = {
+      ...message("reply-shown", "agent", "agent-backend", "2026-01-01T10:02:00.000Z"),
+      runThreadId: ThreadId.make("run-1"),
+    };
+    const entries = dmTimelineEntries(
+      [
+        message("q1", "human", "human", "2026-01-01T10:00:00.000Z"),
+        shownReply,
+        message("q2", "human", "human", "2026-01-01T10:03:00.000Z"),
+      ],
+      [run("run-1", "2026-01-01T10:01:00.000Z")],
+      [agent("agent-backend", "backend")],
+    );
+
+    expect(
+      entries.map((entry) =>
+        entry.kind === "run"
+          ? ["run", entry.run.threadId]
+          : ["message", entry.row.message.id, entry.row.showHeader],
+      ),
+    ).toEqual([
+      ["message", "q1", true],
+      ["run", "run-1"],
+      ["message", "q2", true],
+    ]);
+  });
+});
+
+describe("runOutputItems", () => {
+  it("marks assistant text as addressed to the user and activity as ambient, in order", () => {
+    const activity = (id: string, kind: string, summary: string, createdAt: string) =>
+      ({
+        id: EventId.make(id),
+        tone: "tool",
+        kind,
+        summary,
+        payload: {},
+        turnId: null,
+        createdAt,
+      }) satisfies OrchestrationThreadActivity;
+    const assistant = (
+      id: string,
+      role: OrchestrationMessage["role"],
+      text: string,
+      createdAt: string,
+    ) =>
+      ({
+        id: MessageId.make(id),
+        role,
+        text,
+        turnId: null,
+        createdAt,
+      }) as unknown as OrchestrationMessage;
+
+    const items = runOutputItems({
+      messages: [
+        assistant("prompt", "user", "New message for you", "2026-01-01T10:00:00.000Z"),
+        assistant("answer", "assistant", "It routes mentions.", "2026-01-01T10:00:05.000Z"),
+      ],
+      activities: [
+        activity("read", "tool.started", "Read mentions.ts", "2026-01-01T10:00:01.000Z"),
+        activity("read-progress", "tool.progress", "Reading", "2026-01-01T10:00:02.000Z"),
+        activity("denied", "tool.denied", "Write denied", "2026-01-01T10:00:03.000Z"),
+      ],
+    });
+
+    expect(items.map((item) => [item.text, item.addressedToUser])).toEqual([
+      ["Read mentions.ts", false],
+      ["Write denied", false],
+      ["It routes mentions.", true],
+    ]);
+  });
+});
+
+describe("deliveryNotes", () => {
+  it("says nothing once read, waits while unread, and warns when never read", () => {
+    const question = {
+      ...message("q", "human", "human", "2026-01-01T10:00:00.000Z"),
+      deliveries: [
+        { agentId: AgentId.make("agent-backend"), status: "sent" as const },
+        { agentId: AgentId.make("agent-writer"), status: "undelivered" as const },
+        { agentId: AgentId.make("agent-reader"), status: "delivered" as const },
+      ],
+    };
+
+    expect(
+      deliveryNotes(question, [
+        agent("agent-backend", "backend"),
+        agent("agent-writer", "writer"),
+      ]).map((note) => [note.text, note.undelivered]),
+    ).toEqual([
+      ["Waiting for @backend", false],
+      ["@writer never read this", true],
     ]);
   });
 });

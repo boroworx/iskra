@@ -75,8 +75,9 @@ import {
   WsRpcGroup,
   AgentId,
   ChannelId,
+  AGENT_RUNS_LIMIT,
   CHANNEL_SUBSCRIBE_MESSAGE_LIMIT,
-  type OrchestrationChannelMessage,
+  type OrchestrationChannelStreamItem,
 } from "@t3tools/contracts";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
@@ -1901,27 +1902,55 @@ const makeWsRpcLayer = (
           observeRpcStreamEffect(
             ORCHESTRATION_WS_METHODS.subscribeChannel,
             Effect.gen(function* () {
-              // Attach live delivery before reading the snapshot so a message posted
-              // meanwhile is not lost; it can then arrive twice, and clients keep one.
-              const live = yield* Queue.unbounded<OrchestrationChannelMessage>();
+              // Attach live delivery before reading the snapshot so nothing posted
+              // meanwhile is lost; an item can then arrive twice, and clients keep one.
+              const live = yield* Queue.unbounded<OrchestrationChannelStreamItem>();
               yield* Effect.forkScoped(
                 orchestrationEngine.streamDomainEvents.pipe(
-                  Stream.runForEach((event) =>
-                    event.type === "channel.message-posted" &&
-                    event.payload.channelId === input.channelId
-                      ? Queue.offer(live, {
-                          id: event.payload.messageId,
-                          channelId: event.payload.channelId,
-                          authorKind: event.payload.authorKind,
-                          authorId: event.payload.authorId,
-                          body: event.payload.body,
-                          createdAt: event.payload.createdAt,
-                          ...(event.payload.runThreadId === undefined
-                            ? {}
-                            : { runThreadId: event.payload.runThreadId }),
-                        })
-                      : Effect.void,
-                  ),
+                  Stream.runForEach((event) => {
+                    if (
+                      event.aggregateKind !== "channel" ||
+                      event.aggregateId !== input.channelId
+                    ) {
+                      return Effect.void;
+                    }
+                    switch (event.type) {
+                      case "channel.message-posted":
+                        return Queue.offer(live, {
+                          kind: "message",
+                          message: {
+                            id: event.payload.messageId,
+                            channelId: event.payload.channelId,
+                            authorKind: event.payload.authorKind,
+                            authorId: event.payload.authorId,
+                            body: event.payload.body,
+                            createdAt: event.payload.createdAt,
+                            ...(event.payload.runThreadId === undefined
+                              ? {}
+                              : { runThreadId: event.payload.runThreadId }),
+                          },
+                        });
+                      case "channel.agent-wake-requested":
+                        return Queue.offer(live, {
+                          kind: "delivery",
+                          messageId: event.payload.triggerMessageId,
+                          delivery: { agentId: event.payload.agentId, status: "pending" },
+                        });
+                      case "channel.delivery-updated": {
+                        const { agentId, status } = event.payload;
+                        return Queue.offerAll(
+                          live,
+                          event.payload.messageIds.map((messageId) => ({
+                            kind: "delivery" as const,
+                            messageId,
+                            delivery: { agentId, status },
+                          })),
+                        );
+                      }
+                      default:
+                        return Effect.void;
+                    }
+                  }),
                 ),
                 { startImmediately: true },
               );
@@ -1938,11 +1967,24 @@ const makeWsRpcLayer = (
                 );
               return Stream.concat(
                 Stream.make({ kind: "snapshot" as const, messages }),
-                Stream.fromQueue(live).pipe(
-                  Stream.map((message) => ({ kind: "message" as const, message })),
-                ),
+                Stream.fromQueue(live),
               );
             }),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.listAgentRuns]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.listAgentRuns,
+            projectionSnapshotQuery.listRunsByAgent(input.agentId, AGENT_RUNS_LIMIT).pipe(
+              Effect.map((runs) => ({ runs })),
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationGetSnapshotError({
+                    message: `Failed to load runs for agent ${input.agentId}`,
+                    cause,
+                  }),
+              ),
+            ),
             { "rpc.aggregate": "orchestration" },
           ),
         [WS_METHODS.serverProbe]: (_input) =>

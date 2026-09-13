@@ -19,6 +19,7 @@ import type {
   OrchestrationProjectShell,
   OrchestrationReadModel,
   OrchestrationAgentShell,
+  OrchestrationAgentRun,
   OrchestrationChannelMessage,
   OrchestrationChannelShell,
   OrchestrationRun,
@@ -238,6 +239,12 @@ export interface ProjectionSnapshotQueryShape {
     channelId: ChannelId,
     limit: number,
   ) => Effect.Effect<ReadonlyArray<OrchestrationChannelMessage>, ProjectionRepositoryError>;
+
+  /** An agent's newest `limit` runs, newest first, live or ended. */
+  readonly listRunsByAgent: (
+    agentId: AgentId,
+    limit: number,
+  ) => Effect.Effect<ReadonlyArray<OrchestrationAgentRun>, ProjectionRepositoryError>;
 
   /** Read the active thread and session facts used to ingest provider events. */
   readonly getThreadRuntimeContext: (

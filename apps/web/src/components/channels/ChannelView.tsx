@@ -1,4 +1,11 @@
-import { MessageId, type ChannelId, type EnvironmentId } from "@t3tools/contracts";
+import {
+  MessageId,
+  type ChannelId,
+  type EnvironmentId,
+  type OrchestrationAgentShell,
+  type OrchestrationChannelMessage,
+  type OrchestrationChannelShell,
+} from "@t3tools/contracts";
 import { AtSignIcon, HashIcon } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
@@ -14,13 +21,17 @@ import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import {
   channelMemberEntries,
   channelMessageRows,
+  deliveryNotes,
+  dmTimelineEntries,
   presenceDotClassName,
   presenceLabel,
   type ChannelMemberEntry,
   type ChannelMessageRow,
+  type DmTimelineEntry,
 } from "./channels.logic";
+import { RunBlock } from "./RunBlock";
 
-/** One channel or DM: its messages, a composer, and who is in it. */
+/** One channel or DM: its messages, a composer, and who is in it. A DM also shows the agent's runs. */
 export function ChannelView(props: {
   readonly environmentId: EnvironmentId;
   readonly channelId: ChannelId;
@@ -40,10 +51,6 @@ export function ChannelView(props: {
       environmentId: props.environmentId,
       input: { channelId: props.channelId },
     }),
-  );
-  const rows = useMemo(
-    () => channelMessageRows(messages.data ?? [], agents),
-    [messages.data, agents],
   );
   const members = useMemo(
     () => (channel === null ? [] : channelMemberEntries(channel, agents)),
@@ -83,12 +90,26 @@ export function ChannelView(props: {
         ) : (
           <div className="flex min-h-0 flex-1">
             <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <ChannelMessageList
-                rows={rows}
-                error={messages.error}
-                cwd={project?.workspaceRoot}
-                environmentId={props.environmentId}
-              />
+              {dmAgent !== null ? (
+                <DmTimeline
+                  agent={dmAgent}
+                  messages={messages.data ?? EMPTY_MESSAGES}
+                  error={messages.error}
+                  agents={agents}
+                  channels={channels}
+                  cwd={project?.workspaceRoot}
+                  environmentId={props.environmentId}
+                />
+              ) : (
+                <ChannelTimeline
+                  messages={messages.data ?? EMPTY_MESSAGES}
+                  error={messages.error}
+                  agents={agents}
+                  channels={channels}
+                  cwd={project?.workspaceRoot}
+                  environmentId={props.environmentId}
+                />
+              )}
               <ChannelComposer
                 key={props.channelId}
                 environmentId={props.environmentId}
@@ -104,73 +125,158 @@ export function ChannelView(props: {
   );
 }
 
+const EMPTY_MESSAGES: ReadonlyArray<OrchestrationChannelMessage> = [];
+
+interface TimelineSource {
+  readonly messages: ReadonlyArray<OrchestrationChannelMessage>;
+  readonly error: string | null;
+  readonly agents: ReadonlyArray<OrchestrationAgentShell>;
+  readonly channels: ReadonlyArray<OrchestrationChannelShell>;
+  readonly cwd: string | undefined;
+  readonly environmentId: EnvironmentId;
+}
+
+function ChannelTimeline(props: TimelineSource) {
+  const entries = useMemo(
+    () =>
+      channelMessageRows(props.messages, props.agents).map((row): DmTimelineEntry => ({
+        kind: "message",
+        row,
+      })),
+    [props.messages, props.agents],
+  );
+  return <Timeline {...props} entries={entries} />;
+}
+
+/** A DM: its messages and the agent's runs, wherever they ran. */
+function DmTimeline(props: TimelineSource & { readonly agent: ChannelMemberEntry }) {
+  const runs = useEnvironmentQuery(
+    channelEnvironment.agentRuns({
+      environmentId: props.environmentId,
+      input: { agentId: props.agent.id },
+    }),
+  );
+  const { refresh } = runs;
+  const presence = props.agent.presence;
+  // A run starting or ending moves the agent between idle and running: refetch its runs then.
+  useEffect(() => {
+    if (presence !== "blocked") {
+      refresh();
+    }
+  }, [presence, refresh]);
+
+  const entries = useMemo(
+    () => dmTimelineEntries(props.messages, runs.data?.runs ?? [], props.agents),
+    [props.messages, runs.data, props.agents],
+  );
+  return <Timeline {...props} entries={entries} />;
+}
+
 const messageTimeFormat = new Intl.DateTimeFormat(undefined, {
   hour: "numeric",
   minute: "2-digit",
 });
 
-const ChannelMessageList = memo(function ChannelMessageList(props: {
-  readonly rows: ReadonlyArray<ChannelMessageRow>;
-  readonly error: string | null;
-  readonly cwd: string | undefined;
-  readonly environmentId: EnvironmentId;
-}) {
+const Timeline = memo(function Timeline(
+  props: TimelineSource & { readonly entries: ReadonlyArray<DmTimelineEntry> },
+) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const newestMessageId = props.rows.at(-1)?.message.id;
-  // Keep the newest message in view as messages arrive.
+  const newest = props.entries.at(-1);
+  const newestKey =
+    newest === undefined
+      ? undefined
+      : newest.kind === "run"
+        ? newest.run.threadId
+        : newest.row.message.id;
+  // Keep the newest entry in view as entries arrive.
   useEffect(() => {
     const element = scrollRef.current;
-    if (element !== null && newestMessageId !== undefined) {
+    if (element !== null && newestKey !== undefined) {
       element.scrollTop = element.scrollHeight;
     }
-  }, [newestMessageId]);
+  }, [newestKey]);
 
   return (
     <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
       {props.error !== null ? <p className="text-sm text-destructive">{props.error}</p> : null}
       <ol className="flex flex-col">
-        {props.rows.map((row) => (
-          <li
-            key={row.message.id}
-            className={cn("flex min-w-0 flex-col", row.showHeader ? "mt-4 first:mt-0" : "mt-1")}
-          >
-            {row.showHeader ? (
-              <div className="flex items-baseline gap-2">
-                <span
-                  className={cn(
-                    "text-sm font-semibold",
-                    row.message.authorKind === "system" && "text-muted-foreground",
-                  )}
-                >
-                  {row.authorName}
-                </span>
-                <time dateTime={row.message.createdAt} className="text-xs text-muted-foreground">
-                  {messageTimeFormat.format(new Date(row.message.createdAt))}
-                </time>
-              </div>
-            ) : null}
-            {row.message.authorKind === "agent" ? (
-              <ChatMarkdown
-                text={row.message.body}
+        {props.entries.map((entry) =>
+          entry.kind === "run" ? (
+            <li key={entry.run.threadId} className="mt-4 first:mt-0">
+              <RunBlock
+                run={entry.run}
+                channels={props.channels}
                 cwd={props.cwd}
                 environmentId={props.environmentId}
               />
-            ) : (
-              <p
-                className={cn(
-                  "whitespace-pre-wrap break-words text-sm",
-                  row.message.authorKind === "system" && "text-muted-foreground",
-                )}
-              >
-                {row.message.body}
-              </p>
-            )}
-          </li>
-        ))}
+            </li>
+          ) : (
+            <MessageRow
+              key={entry.row.message.id}
+              row={entry.row}
+              agents={props.agents}
+              cwd={props.cwd}
+              environmentId={props.environmentId}
+            />
+          ),
+        )}
       </ol>
     </div>
   );
 });
+
+function MessageRow(props: {
+  readonly row: ChannelMessageRow;
+  readonly agents: ReadonlyArray<OrchestrationAgentShell>;
+  readonly cwd: string | undefined;
+  readonly environmentId: EnvironmentId;
+}) {
+  const { message, authorName, showHeader } = props.row;
+  const notes = message.authorKind === "human" ? deliveryNotes(message, props.agents) : [];
+  return (
+    <li className={cn("flex min-w-0 flex-col", showHeader ? "mt-4 first:mt-0" : "mt-1")}>
+      {showHeader ? (
+        <div className="flex items-baseline gap-2">
+          <span
+            className={cn(
+              "text-sm font-semibold",
+              message.authorKind === "system" && "text-muted-foreground",
+            )}
+          >
+            {authorName}
+          </span>
+          <time dateTime={message.createdAt} className="text-xs text-muted-foreground">
+            {messageTimeFormat.format(new Date(message.createdAt))}
+          </time>
+        </div>
+      ) : null}
+      {message.authorKind === "agent" ? (
+        <ChatMarkdown text={message.body} cwd={props.cwd} environmentId={props.environmentId} />
+      ) : (
+        <p
+          className={cn(
+            "whitespace-pre-wrap break-words text-sm",
+            message.authorKind === "system" && "text-muted-foreground",
+          )}
+        >
+          {message.body}
+        </p>
+      )}
+      {notes.length > 0 ? (
+        <p className="mt-0.5 flex flex-wrap gap-x-3 text-xs">
+          {notes.map((note) => (
+            <span
+              key={note.agentId}
+              className={note.undelivered ? "text-destructive-foreground" : "text-muted-foreground"}
+            >
+              {note.text}
+            </span>
+          ))}
+        </p>
+      ) : null}
+    </li>
+  );
+}
 
 function ChannelComposer(props: {
   readonly environmentId: EnvironmentId;

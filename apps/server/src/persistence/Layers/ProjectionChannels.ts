@@ -10,11 +10,14 @@ import {
   EndProjectionRunInput,
   GetProjectionChannelInput,
   GetProjectionChannelMessageInput,
+  ListOpenProjectionChannelDeliveriesInput,
   ListProjectionChannelMessagesInput,
   ProjectionChannel,
   ProjectionChannelDbRow,
+  ProjectionChannelDelivery,
   ProjectionChannelMessage,
   ProjectionChannelRepository,
+  ProjectionOpenChannelDelivery,
   type ProjectionChannelRepositoryShape,
 } from "../Services/ProjectionChannels.ts";
 
@@ -220,6 +223,83 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
       `,
   });
 
+  const upsertDeliveryRow = SqlSchema.void({
+    Request: ProjectionChannelDelivery,
+    execute: (row) =>
+      sql`
+        INSERT INTO projection_channel_deliveries (
+          message_id,
+          agent_id,
+          channel_id,
+          run_thread_id,
+          status,
+          updated_at
+        )
+        VALUES (
+          ${row.messageId},
+          ${row.agentId},
+          ${row.channelId},
+          ${row.runThreadId},
+          ${row.status},
+          ${row.updatedAt}
+        )
+        ON CONFLICT (message_id, agent_id)
+        DO UPDATE SET
+          channel_id = excluded.channel_id,
+          run_thread_id = excluded.run_thread_id,
+          status = excluded.status,
+          updated_at = excluded.updated_at
+      `,
+  });
+
+  const listOpenDeliveryRows = SqlSchema.findAll({
+    Request: ListOpenProjectionChannelDeliveriesInput,
+    Result: ProjectionOpenChannelDelivery,
+    execute: ({ agentId, channelId }) =>
+      sql`
+        SELECT
+          messages.message_id AS "messageId",
+          messages.channel_id AS "channelId",
+          messages.sequence,
+          messages.author_kind AS "authorKind",
+          messages.author_id AS "authorId",
+          messages.body,
+          messages.created_at AS "createdAt",
+          messages.run_thread_id AS "runThreadId",
+          deliveries.status,
+          deliveries.run_thread_id AS "deliveryRunThreadId"
+        FROM projection_channel_deliveries AS deliveries
+        INNER JOIN projection_channel_messages AS messages
+          ON messages.message_id = deliveries.message_id
+        WHERE deliveries.agent_id = ${agentId}
+          AND deliveries.channel_id = ${channelId}
+          AND deliveries.status IN ('pending', 'sent')
+        ORDER BY messages.sequence ASC
+      `,
+  });
+
+  const upsertDelivery: ProjectionChannelRepositoryShape["upsertDelivery"] = (row) =>
+    upsertDeliveryRow(row).pipe(
+      Effect.mapError(toPersistenceSqlError("ProjectionChannelRepository.upsertDelivery:query")),
+    );
+
+  const updateDeliveries: ProjectionChannelRepositoryShape["updateDeliveries"] = ({
+    messageIds,
+    ...delivery
+  }) =>
+    Effect.forEach(messageIds, (messageId) => upsertDeliveryRow({ ...delivery, messageId }), {
+      discard: true,
+    }).pipe(
+      Effect.mapError(toPersistenceSqlError("ProjectionChannelRepository.updateDeliveries:query")),
+    );
+
+  const listOpenDeliveries: ProjectionChannelRepositoryShape["listOpenDeliveries"] = (input) =>
+    listOpenDeliveryRows(input).pipe(
+      Effect.mapError(
+        toPersistenceSqlError("ProjectionChannelRepository.listOpenDeliveries:query"),
+      ),
+    );
+
   const upsertChannel: ProjectionChannelRepositoryShape["upsertChannel"] = (row) =>
     upsertChannelRow(row).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionChannelRepository.upsertChannel:query")),
@@ -271,6 +351,9 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
     endRun,
     listMessages,
     listWakeHistory,
+    upsertDelivery,
+    updateDeliveries,
+    listOpenDeliveries,
   } satisfies ProjectionChannelRepositoryShape;
 });
 

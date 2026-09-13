@@ -2,9 +2,12 @@ import type {
   AgentId,
   AgentPresence,
   ChannelId,
+  OrchestrationAgentRun,
   OrchestrationAgentShell,
   OrchestrationChannelMessage,
   OrchestrationChannelShell,
+  OrchestrationMessage,
+  OrchestrationThreadActivity,
   ProjectId,
 } from "@t3tools/contracts";
 
@@ -130,6 +133,108 @@ function channelAuthorName(
     case "webhook":
       return message.authorId;
   }
+}
+
+export type DmTimelineEntry =
+  | { readonly kind: "message"; readonly row: ChannelMessageRow }
+  | { readonly kind: "run"; readonly run: OrchestrationAgentRun };
+
+/**
+ * A DM as its view shows it: the DM's messages interleaved by time with the
+ * agent's runs, wherever they ran. A reply is left out when its run is shown,
+ * since the run already carries that answer, and a message after a run starts
+ * a new header.
+ */
+export function dmTimelineEntries(
+  messages: ReadonlyArray<OrchestrationChannelMessage>,
+  runs: ReadonlyArray<OrchestrationAgentRun>,
+  agents: ReadonlyArray<OrchestrationAgentShell>,
+): ReadonlyArray<DmTimelineEntry> {
+  const shownRunIds = new Set<string>(runs.map((run) => run.threadId));
+  const rows = channelMessageRows(
+    messages.filter(
+      (message) => message.runThreadId === undefined || !shownRunIds.has(message.runThreadId),
+    ),
+    agents,
+  );
+  const sorted = [
+    ...rows.map((row) => ({ entry: { kind: "message" as const, row }, at: row.message.createdAt })),
+    ...runs.map((run) => ({ entry: { kind: "run" as const, run }, at: run.startedAt })),
+  ].toSorted((left, right) => Date.parse(left.at) - Date.parse(right.at));
+
+  return sorted.map(({ entry }, index): DmTimelineEntry => {
+    const previous = sorted[index - 1]?.entry;
+    return entry.kind === "message" && previous?.kind === "run" && !entry.row.showHeader
+      ? { kind: "message", row: { ...entry.row, showHeader: true } }
+      : entry;
+  });
+}
+
+export interface RunOutputItem {
+  readonly id: string;
+  readonly text: string;
+  /** True when the agent speaks to people (full white); false for its ambient work (grey). */
+  readonly addressedToUser: boolean;
+}
+
+// Updates on work already listed; showing them would repeat each tool call.
+const QUIET_ACTIVITY_KINDS = new Set(["tool.updated", "tool.progress", "task.progress"]);
+
+/**
+ * A run's output in order. Assistant text is addressed to the user; tool
+ * lifecycle, denials and other activity are not. The prompts Iskra sent are
+ * left out: the context inspector shows them.
+ */
+export function runOutputItems(thread: {
+  readonly messages: ReadonlyArray<OrchestrationMessage>;
+  readonly activities: ReadonlyArray<OrchestrationThreadActivity>;
+}): ReadonlyArray<RunOutputItem> {
+  return [
+    ...thread.activities
+      .filter((activity) => !QUIET_ACTIVITY_KINDS.has(activity.kind))
+      .map((activity) => ({
+        id: activity.id,
+        text: activity.summary,
+        addressedToUser: false,
+        at: activity.createdAt,
+      })),
+    ...thread.messages
+      .filter((message) => message.role === "assistant" && message.text.trim().length > 0)
+      .map((message) => ({
+        id: message.id,
+        text: message.text,
+        addressedToUser: true,
+        at: message.createdAt,
+      })),
+  ]
+    .toSorted((left, right) => Date.parse(left.at) - Date.parse(right.at))
+    .map(({ id, text, addressedToUser }) => ({ id, text, addressedToUser }));
+}
+
+export interface DeliveryNote {
+  readonly agentId: AgentId;
+  readonly text: string;
+  readonly undelivered: boolean;
+}
+
+/** What a human message says about its deliveries: a wait while unread, a warning if never read. */
+export function deliveryNotes(
+  message: OrchestrationChannelMessage,
+  agents: ReadonlyArray<OrchestrationAgentShell>,
+): ReadonlyArray<DeliveryNote> {
+  const agentNames = new Map<string, string>(agents.map((agent) => [agent.id, agent.name]));
+  return (message.deliveries ?? []).flatMap((delivery): ReadonlyArray<DeliveryNote> => {
+    const name = `@${agentNames.get(delivery.agentId) ?? delivery.agentId}`;
+    switch (delivery.status) {
+      case "pending":
+      case "sent":
+        return [{ agentId: delivery.agentId, text: `Waiting for ${name}`, undelivered: false }];
+      case "undelivered":
+        return [{ agentId: delivery.agentId, text: `${name} never read this`, undelivered: true }];
+      case "delivered":
+        return [];
+    }
+  });
 }
 
 /** Presence dot colour, matching the thread status palette: working is sky, waiting is amber. */

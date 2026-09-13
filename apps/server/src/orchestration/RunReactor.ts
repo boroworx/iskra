@@ -1,4 +1,13 @@
-import { CommandId, MessageId, ThreadId, type OrchestrationEvent } from "@t3tools/contracts";
+import {
+  CommandId,
+  MessageId,
+  ThreadId,
+  isRunEndingSessionStatus,
+  type AgentId,
+  type ChannelDeliveryStatus,
+  type ChannelId,
+  type OrchestrationEvent,
+} from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -13,6 +22,7 @@ import { ProjectionChannelRepositoryLive } from "../persistence/Layers/Projectio
 import {
   ProjectionChannelRepository,
   toOrchestrationChannelMessage,
+  type ProjectionOpenChannelDelivery,
 } from "../persistence/Services/ProjectionChannels.ts";
 import { forkParked } from "../serverActivation.ts";
 import {
@@ -27,8 +37,15 @@ import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts"
 /**
  * Turns agent wakes into runs, and runs' answers into channel messages. A wake
  * builds the agent's context, records the run and starts its hidden thread.
- * When that thread's turn settles, the final assistant text is posted to the
- * channel and the session is stopped: the next wake starts a fresh run.
+ *
+ * A message for an agent already working in the channel waits as `pending`
+ * and goes in as the run's next turn once the current turn ends. It is never
+ * steered into a running turn, which the provider can end without reading it.
+ * A delivery is `delivered` only once the turn carrying it is running. When a
+ * turn ends with nothing waiting, the reply is posted and the session stopped,
+ * so the next wake starts a fresh run. A run that ends with messages still
+ * waiting wakes the agent again for them; a message whose turn never ran is
+ * marked `undelivered` (invariant 10).
  */
 export class RunReactor extends Context.Service<
   RunReactor,
@@ -42,7 +59,9 @@ type WakeRequestedEvent = Extract<OrchestrationEvent, { type: "channel.agent-wak
 
 type RunRequest =
   | { readonly kind: "wake"; readonly event: WakeRequestedEvent }
-  | { readonly kind: "settled"; readonly threadId: ThreadId };
+  | { readonly kind: "settled"; readonly threadId: ThreadId }
+  | { readonly kind: "running"; readonly threadId: ThreadId }
+  | { readonly kind: "ended"; readonly threadId: ThreadId };
 
 const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngine.OrchestrationEngineService;
@@ -50,7 +69,39 @@ const make = Effect.gen(function* () {
   const channels = yield* ProjectionChannelRepository;
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
+  const updateDeliveries = Effect.fn("RunReactor.updateDeliveries")(function* (input: {
+    readonly channelId: ChannelId;
+    readonly agentId: AgentId;
+    readonly deliveries: ReadonlyArray<ProjectionOpenChannelDelivery>;
+    readonly status: ChannelDeliveryStatus;
+    readonly runThreadId: ThreadId | null;
+  }) {
+    if (input.deliveries.length === 0) {
+      return;
+    }
+    const messageIds = input.deliveries.map((delivery) => delivery.messageId);
+    yield* engine.dispatch({
+      type: "channel.delivery.update",
+      // The id names the change, so a retried update is recorded once.
+      commandId: CommandId.make(
+        `run-delivery:${input.status}:${input.runThreadId ?? "none"}:${messageIds.join(",")}`,
+      ),
+      channelId: input.channelId,
+      agentId: input.agentId,
+      messageIds,
+      status: input.status,
+      runThreadId: input.runThreadId,
+      updatedAt: yield* nowIso,
+    });
+  });
+
   const startRun = Effect.fn("RunReactor.startRun")(function* (event: WakeRequestedEvent) {
+    // The agent is already working in this channel: the message stays pending
+    // until the current turn ends, then goes in as the run's next turn.
+    if (event.payload.liveRunThreadId !== undefined) {
+      return;
+    }
+
     const { channelId, agentId, triggerMessageId } = event.payload;
     // ponytail: reads the whole command read model per wake; add a narrow
     // agent/channel query if wakes become frequent enough to show up in profiles.
@@ -69,29 +120,6 @@ const make = Effect.gen(function* () {
     const projectAgents = (readModel.agents ?? []).filter(
       (candidate) => candidate.projectId === channel.projectId,
     );
-
-    const liveRunThreadId = event.payload.liveRunThreadId;
-    if (liveRunThreadId !== undefined) {
-      // The agent is already working in this channel: the message joins its live run.
-      yield* engine.dispatch({
-        type: "thread.turn.start",
-        commandId: CommandId.make(`run-follow-up:${event.eventId}`),
-        threadId: liveRunThreadId,
-        message: {
-          messageId: MessageId.make(`run-follow-up:${event.eventId}`),
-          role: "user",
-          text: renderNewMessage(
-            toRunContextMessage(toOrchestrationChannelMessage(trigger.value), projectAgents),
-          ),
-          attachments: [],
-        },
-        runtimeMode: "approval-required",
-        interactionMode: "default",
-        createdAt: yield* nowIso,
-      });
-      return;
-    }
-
     const history = yield* channels.listWakeHistory({ channelId });
     const context = buildRunContext({
       agent,
@@ -144,48 +172,180 @@ const make = Effect.gen(function* () {
       interactionMode: "default",
       createdAt: startedAt,
     });
+    // Everything waiting on the agent here is in the first turn's context.
+    const waiting = yield* channels.listOpenDeliveries({ agentId, channelId });
+    yield* updateDeliveries({
+      channelId,
+      agentId,
+      deliveries: waiting.filter((delivery) => delivery.status === "pending"),
+      status: "sent",
+      runThreadId: threadId,
+    });
   });
 
-  const postReply = Effect.fn("RunReactor.postReply")(function* (threadId: ThreadId) {
+  const settleTurn = Effect.fn("RunReactor.settleTurn")(function* (threadId: ThreadId) {
     const run = yield* snapshotQuery.getRunByThreadId(threadId);
     if (Option.isNone(run)) {
       return;
     }
+    const { channelId, agentId } = run.value;
     const thread = yield* snapshotQuery.getThreadDetailById(threadId, { activityKinds: [] });
     const turnId = Option.isSome(thread) ? thread.value.latestTurn?.turnId : undefined;
     if (Option.isNone(thread) || turnId === undefined) {
       return;
     }
+
+    const createdAt = yield* nowIso;
     const reply = thread.value.messages.findLast(
       (message) =>
         message.role === "assistant" && message.turnId === turnId && message.text.trim().length > 0,
     );
-    if (reply === undefined) {
+    if (reply !== undefined) {
+      // Ids derive from the turn, so a repeated settle posts the reply once.
+      yield* engine.dispatch({
+        type: "channel.message.agent.post",
+        commandId: CommandId.make(`run-reply:${threadId}:${turnId}`),
+        channelId,
+        messageId: MessageId.make(`run-reply:${threadId}:${turnId}`),
+        agentId,
+        runThreadId: threadId,
+        body: reply.text,
+        createdAt,
+      });
+    }
+
+    const waiting = (yield* channels.listOpenDeliveries({ agentId, channelId })).filter(
+      (delivery) => delivery.status === "pending",
+    );
+    if (waiting.length === 0) {
+      yield* engine.dispatch({
+        type: "thread.session.stop",
+        commandId: CommandId.make(`run-stop:${threadId}:${turnId}`),
+        threadId,
+        createdAt,
+      });
       return;
     }
 
-    const createdAt = yield* nowIso;
-    // Ids derive from the turn, so a repeated settle posts the reply once.
+    // ponytail: reads the whole command read model to name authors; add a narrow
+    // agents query if follow-ups become frequent enough to show up in profiles.
+    const readModel = yield* snapshotQuery.getCommandReadModel();
+    const projectId = readModel.channels?.find(
+      (candidate) => candidate.id === channelId,
+    )?.projectId;
+    const projectAgents = (readModel.agents ?? []).filter(
+      (candidate) => candidate.projectId === projectId,
+    );
     yield* engine.dispatch({
-      type: "channel.message.agent.post",
-      commandId: CommandId.make(`run-reply:${threadId}:${turnId}`),
-      channelId: run.value.channelId,
-      messageId: MessageId.make(`run-reply:${threadId}:${turnId}`),
-      agentId: run.value.agentId,
-      runThreadId: threadId,
-      body: reply.text,
+      type: "thread.turn.start",
+      commandId: CommandId.make(`run-follow-up:${threadId}:${turnId}`),
+      threadId,
+      message: {
+        messageId: MessageId.make(`run-follow-up:${threadId}:${turnId}`),
+        role: "user",
+        text: waiting
+          .map((delivery) =>
+            renderNewMessage(
+              toRunContextMessage(toOrchestrationChannelMessage(delivery), projectAgents),
+            ),
+          )
+          .join("\n\n"),
+        attachments: [],
+      },
+      runtimeMode: "approval-required",
+      interactionMode: "default",
       createdAt,
     });
-    yield* engine.dispatch({
-      type: "thread.session.stop",
-      commandId: CommandId.make(`run-stop:${threadId}:${turnId}`),
-      threadId,
-      createdAt,
+    yield* updateDeliveries({
+      channelId,
+      agentId,
+      deliveries: waiting,
+      status: "sent",
+      runThreadId: threadId,
     });
   });
 
+  const markDelivered = Effect.fn("RunReactor.markDelivered")(function* (threadId: ThreadId) {
+    const run = yield* snapshotQuery.getRunByThreadId(threadId);
+    if (Option.isNone(run)) {
+      return;
+    }
+    const { channelId, agentId } = run.value;
+    // A turn is running in this run: the provider has what was sent into it.
+    const sent = (yield* channels.listOpenDeliveries({ agentId, channelId })).filter(
+      (delivery) => delivery.status === "sent" && delivery.deliveryRunThreadId === threadId,
+    );
+    yield* updateDeliveries({
+      channelId,
+      agentId,
+      deliveries: sent,
+      status: "delivered",
+      runThreadId: threadId,
+    });
+  });
+
+  const endRun = Effect.fn("RunReactor.endRun")(function* (threadId: ThreadId) {
+    const run = yield* snapshotQuery.getRunByThreadId(threadId);
+    if (Option.isNone(run)) {
+      return;
+    }
+    const { channelId, agentId } = run.value;
+    const open = yield* channels.listOpenDeliveries({ agentId, channelId });
+    // Sent into a turn that never ran: the agent did not read them.
+    yield* updateDeliveries({
+      channelId,
+      agentId,
+      deliveries: open.filter(
+        (delivery) => delivery.status === "sent" && delivery.deliveryRunThreadId === threadId,
+      ),
+      status: "undelivered",
+      runThreadId: threadId,
+    });
+
+    const waiting = open.filter((delivery) => delivery.status === "pending");
+    const latest = waiting.at(-1);
+    if (latest === undefined) {
+      return;
+    }
+    // Still waiting when the run ended: wake the agent again in a fresh run,
+    // whose context carries them. If the wake is refused, they go unanswered.
+    yield* engine
+      .dispatch({
+        type: "channel.agent.wake",
+        commandId: CommandId.make(`run-rewake:${threadId}`),
+        channelId,
+        agentId,
+        triggerMessageId: latest.messageId,
+        createdAt: yield* nowIso,
+      })
+      .pipe(
+        Effect.catch(() =>
+          updateDeliveries({
+            channelId,
+            agentId,
+            deliveries: waiting,
+            status: "undelivered",
+            runThreadId: null,
+          }),
+        ),
+      );
+  });
+
+  const handle = (request: RunRequest) => {
+    switch (request.kind) {
+      case "wake":
+        return startRun(request.event);
+      case "settled":
+        return settleTurn(request.threadId);
+      case "running":
+        return markDelivered(request.threadId);
+      case "ended":
+        return endRun(request.threadId);
+    }
+  };
+
   const worker = yield* makeDrainableWorker((request: RunRequest) =>
-    (request.kind === "wake" ? startRun(request.event) : postReply(request.threadId)).pipe(
+    handle(request).pipe(
       Effect.catchCause((cause) =>
         Cause.hasInterruptsOnly(cause)
           ? Effect.failCause(cause)
@@ -201,15 +361,20 @@ const make = Effect.gen(function* () {
     switch (event.type) {
       case "channel.agent-wake-requested":
         return worker.enqueue({ kind: "wake", event });
-      case "thread.session-set":
+      case "thread.session-set": {
+        const { threadId, session } = event.payload;
         // A turn ended: the session is ready again with nothing running.
-        if (
-          event.payload.session.status === "ready" &&
-          event.payload.session.activeTurnId === null
-        ) {
-          return worker.enqueue({ kind: "settled", threadId: event.payload.threadId });
+        if (session.status === "ready" && session.activeTurnId === null) {
+          return worker.enqueue({ kind: "settled", threadId });
+        }
+        if (session.status === "running" && session.activeTurnId !== null) {
+          return worker.enqueue({ kind: "running", threadId });
+        }
+        if (isRunEndingSessionStatus(session.status)) {
+          return worker.enqueue({ kind: "ended", threadId });
         }
         return Effect.void;
+      }
       default:
         return Effect.void;
     }

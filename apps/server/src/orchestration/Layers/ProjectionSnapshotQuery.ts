@@ -59,7 +59,9 @@ import {
   ProjectionAgentShellDbRow,
 } from "../../persistence/Services/ProjectionAgents.ts";
 import {
+  ProjectionAgentRunDbRow,
   ProjectionChannelDbRow,
+  ProjectionChannelDelivery,
   ProjectionChannelMessage,
   ProjectionChannelShellDbRow,
   ProjectionLiveRunDbRow,
@@ -3954,18 +3956,92 @@ pending_approval_requests AS (
       `,
   });
 
+  // The deliveries of those same newest messages.
+  const listChannelDeliveryRows = SqlSchema.findAll({
+    Request: Schema.Struct({ channelId: Schema.String, limit: Schema.Number }),
+    Result: ProjectionChannelDelivery,
+    execute: ({ channelId, limit }) =>
+      sql`
+        SELECT
+          message_id AS "messageId",
+          agent_id AS "agentId",
+          channel_id AS "channelId",
+          run_thread_id AS "runThreadId",
+          status,
+          updated_at AS "updatedAt"
+        FROM projection_channel_deliveries
+        WHERE message_id IN (
+          SELECT message_id
+          FROM projection_channel_messages
+          WHERE channel_id = ${channelId}
+          ORDER BY sequence DESC
+          LIMIT ${limit}
+        )
+      `,
+  });
+
   const listChannelMessages: ProjectionSnapshotQueryShape["listChannelMessages"] = (
     channelId,
     limit,
   ) =>
-    listChannelMessageRows({ channelId, limit }).pipe(
+    Effect.all([
+      listChannelMessageRows({ channelId, limit }),
+      listChannelDeliveryRows({ channelId, limit }),
+    ]).pipe(
       Effect.mapError(
         toPersistenceSqlOrDecodeError(
           "ProjectionSnapshotQuery.listChannelMessages:query",
           "ProjectionSnapshotQuery.listChannelMessages:decodeRows",
         ),
       ),
-      Effect.map((rows) => rows.toReversed().map(toOrchestrationChannelMessage)),
+      Effect.map(([rows, deliveryRows]) => {
+        const deliveriesByMessage = new Map<
+          string,
+          Array<Pick<ProjectionChannelDelivery, "agentId" | "status">>
+        >();
+        for (const { messageId, agentId, status } of deliveryRows) {
+          const deliveries = deliveriesByMessage.get(messageId) ?? [];
+          deliveries.push({ agentId, status });
+          deliveriesByMessage.set(messageId, deliveries);
+        }
+        return rows.toReversed().map((row) => {
+          const message = toOrchestrationChannelMessage(row);
+          const deliveries = deliveriesByMessage.get(row.messageId);
+          return deliveries === undefined ? message : { ...message, deliveries };
+        });
+      }),
+    );
+
+  const listRunRowsByAgent = SqlSchema.findAll({
+    Request: Schema.Struct({ agentId: Schema.String, limit: Schema.Number }),
+    Result: ProjectionAgentRunDbRow,
+    execute: ({ agentId, limit }) =>
+      sql`
+        SELECT
+          thread_id AS "threadId",
+          channel_id AS "channelId",
+          agent_id AS "agentId",
+          trigger_message_id AS "triggerMessageId",
+          capabilities_json AS "capabilities",
+          context_json AS "context",
+          rendered_json AS "rendered",
+          started_at AS "startedAt",
+          ended_at AS "endedAt"
+        FROM projection_runs
+        WHERE agent_id = ${agentId}
+        ORDER BY started_at DESC, rowid DESC
+        LIMIT ${limit}
+      `,
+  });
+
+  const listRunsByAgent: ProjectionSnapshotQueryShape["listRunsByAgent"] = (agentId, limit) =>
+    listRunRowsByAgent({ agentId, limit }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.listRunsByAgent:query",
+          "ProjectionSnapshotQuery.listRunsByAgent:decodeRows",
+        ),
+      ),
     );
 
   const getRunByThreadId: ProjectionSnapshotQueryShape["getRunByThreadId"] = (threadId) =>
@@ -4000,6 +4076,7 @@ pending_approval_requests AS (
     getAgentShellById,
     getChannelShellById,
     listChannelMessages,
+    listRunsByAgent,
     getThreadRuntimeContext,
     getTurnStartMessage,
     getThreadDetailById,

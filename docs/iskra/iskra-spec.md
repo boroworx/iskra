@@ -236,7 +236,12 @@ posts the reply and stops the session, which ends the run; the next wake starts 
 recovery refuses run threads rather than reviving them without their restrictions.
 
 **One live run per agent.** A message that wakes an agent with a live run in the same channel is
-delivered into that run as a new turn; showing it as `pending` until read is M1.7 (invariant 10).
+held as `pending` and delivered into that run as its next turn once the current turn ends. It is
+never steered into a running turn: the provider can end that turn without reading it. Each
+(message, agent) has a delivery status — `pending`, `sent` (in a turn not yet running),
+`delivered` (in a running turn) or `undelivered` — recorded by `channel.delivery-updated` and
+shown under the message. A run that ends with messages still pending wakes the agent again in a
+fresh run; a message sent into a turn that never ran is `undelivered` (invariant 10).
 A wake from a different channel is rejected with a system message saying the agent is busy —
 contexts are never mixed across channels. Waking past the project's concurrent-run cap (3, a
 constant until a project needs another value) is rejected the same way.

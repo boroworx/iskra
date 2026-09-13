@@ -2477,6 +2477,31 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "channel.delivery.update": {
+      yield* requireChannel({
+        readModel,
+        command,
+        channelId: command.channelId,
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "channel",
+          aggregateId: command.channelId,
+          occurredAt: command.updatedAt,
+          commandId: command.commandId,
+        })),
+        type: "channel.delivery-updated",
+        payload: {
+          channelId: command.channelId,
+          agentId: command.agentId,
+          messageIds: command.messageIds,
+          status: command.status,
+          runThreadId: command.runThreadId,
+          updatedAt: command.updatedAt,
+        },
+      };
+    }
+
     case "channel.message.agent.post": {
       const channel = yield* requireChannel({
         readModel,

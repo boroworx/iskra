@@ -6,6 +6,7 @@
  */
 import {
   AgentId,
+  ChannelDeliveryStatus,
   ChannelId,
   ChannelKind,
   ChannelMessageAuthorKind,
@@ -14,6 +15,7 @@ import {
   NonNegativeInt,
   type OrchestrationChannelMessage,
   OrchestrationChannelShell,
+  OrchestrationAgentRun,
   OrchestrationLiveRun,
   OrchestrationRun,
   ProjectId,
@@ -95,6 +97,15 @@ export const ProjectionRunDbRow = OrchestrationRun.mapFields(
   }),
 );
 
+/** A `projection_runs` row with its end time, JSON columns decoded. */
+export const ProjectionAgentRunDbRow = OrchestrationAgentRun.mapFields(
+  Struct.assign({
+    capabilities: Schema.fromJsonString(RunCapabilities),
+    context: Schema.fromJsonString(RunContextPayload),
+    rendered: Schema.fromJsonString(RenderedRunContext),
+  }),
+);
+
 export const GetProjectionChannelMessageInput = Schema.Struct({
   messageId: MessageId,
 });
@@ -108,6 +119,43 @@ export const EndProjectionRunInput = Schema.Struct({
   endedAt: IsoDateTime,
 });
 export type EndProjectionRunInput = typeof EndProjectionRunInput.Type;
+
+/** A message's standing with one agent it woke. */
+export const ProjectionChannelDelivery = Schema.Struct({
+  messageId: MessageId,
+  agentId: AgentId,
+  channelId: ChannelId,
+  runThreadId: Schema.NullOr(ThreadId),
+  status: ChannelDeliveryStatus,
+  updatedAt: IsoDateTime,
+});
+export type ProjectionChannelDelivery = typeof ProjectionChannelDelivery.Type;
+
+export const UpdateProjectionChannelDeliveriesInput = Schema.Struct({
+  messageIds: Schema.Array(MessageId),
+  agentId: AgentId,
+  channelId: ChannelId,
+  runThreadId: Schema.NullOr(ThreadId),
+  status: ChannelDeliveryStatus,
+  updatedAt: IsoDateTime,
+});
+export type UpdateProjectionChannelDeliveriesInput =
+  typeof UpdateProjectionChannelDeliveriesInput.Type;
+
+export const ListOpenProjectionChannelDeliveriesInput = Schema.Struct({
+  agentId: AgentId,
+  channelId: ChannelId,
+});
+export type ListOpenProjectionChannelDeliveriesInput =
+  typeof ListOpenProjectionChannelDeliveriesInput.Type;
+
+/** A message still waiting on an agent: its delivery status and run, with the message itself. */
+export const ProjectionOpenChannelDelivery = Schema.Struct({
+  ...ProjectionChannelMessage.fields,
+  status: ChannelDeliveryStatus,
+  deliveryRunThreadId: Schema.NullOr(ThreadId),
+});
+export type ProjectionOpenChannelDelivery = typeof ProjectionOpenChannelDelivery.Type;
 
 export const GetProjectionChannelInput = Schema.Struct({
   channelId: ChannelId,
@@ -152,6 +200,21 @@ export interface ProjectionChannelRepositoryShape {
 
   /** Mark a run ended. Ending a thread that is not a live run is a no-op. */
   readonly endRun: (input: EndProjectionRunInput) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /** Record a message's standing with an agent, replacing any earlier one. */
+  readonly upsertDelivery: (
+    row: ProjectionChannelDelivery,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /** Give an agent's deliveries of these messages a new status and run. */
+  readonly updateDeliveries: (
+    input: UpdateProjectionChannelDeliveriesInput,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /** An agent's pending and sent deliveries in a channel, oldest message first. */
+  readonly listOpenDeliveries: (
+    input: ListOpenProjectionChannelDeliveriesInput,
+  ) => Effect.Effect<ReadonlyArray<ProjectionOpenChannelDelivery>, ProjectionRepositoryError>;
 
   /** What an agent is handed on wake: the channel's newest `wakeDepth` messages, oldest first. */
   readonly listWakeHistory: (

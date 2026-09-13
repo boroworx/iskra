@@ -44,6 +44,7 @@ export const ORCHESTRATION_WS_METHODS = {
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
   subscribeChannel: "orchestration.subscribeChannel",
+  listAgentRuns: "orchestration.listAgentRuns",
 } as const;
 
 export const ProviderApprovalPolicy = Schema.Literals([
@@ -553,6 +554,26 @@ export const CHANNEL_HUMAN_AUTHOR_ID = "human";
 /** Author id of messages the server posts itself, such as a refused wake. */
 export const CHANNEL_SYSTEM_AUTHOR_ID = "system";
 
+/**
+ * Where a message stands with an agent it woke. `pending` waits for the agent's
+ * next turn, `sent` rides a turn that has not started yet, `delivered` is in a
+ * running turn, and `undelivered` never reached one and shows as unanswered.
+ * A message is never `delivered` merely because it was sent (invariant 10).
+ */
+export const ChannelDeliveryStatus = Schema.Literals([
+  "pending",
+  "sent",
+  "delivered",
+  "undelivered",
+]);
+export type ChannelDeliveryStatus = typeof ChannelDeliveryStatus.Type;
+
+export const ChannelMessageDelivery = Schema.Struct({
+  agentId: AgentId,
+  status: ChannelDeliveryStatus,
+});
+export type ChannelMessageDelivery = typeof ChannelMessageDelivery.Type;
+
 export const OrchestrationChannelMessage = Schema.Struct({
   id: MessageId,
   channelId: ChannelId,
@@ -562,6 +583,8 @@ export const OrchestrationChannelMessage = Schema.Struct({
   createdAt: IsoDateTime,
   // Set on an agent's reply: the run whose final answer it is.
   runThreadId: Schema.optional(ThreadId),
+  // A human message's standing with each agent it woke.
+  deliveries: Schema.optional(Schema.Array(ChannelMessageDelivery)),
 });
 export type OrchestrationChannelMessage = typeof OrchestrationChannelMessage.Type;
 
@@ -1339,6 +1362,17 @@ const ChannelMessageAgentPostCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ChannelDeliveryUpdateCommand = Schema.Struct({
+  type: Schema.Literal("channel.delivery.update"),
+  commandId: CommandId,
+  channelId: ChannelId,
+  agentId: AgentId,
+  messageIds: Schema.Array(MessageId),
+  status: ChannelDeliveryStatus,
+  runThreadId: Schema.NullOr(ThreadId),
+  updatedAt: IsoDateTime,
+});
+
 const ThreadCreateCommand = Schema.Struct({
   type: Schema.Literal("thread.create"),
   commandId: CommandId,
@@ -1838,6 +1872,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ChannelAgentWakeCommand,
   ChannelRunStartCommand,
   ChannelMessageAgentPostCommand,
+  ChannelDeliveryUpdateCommand,
   ThreadAutoSettleCommand,
   ThreadPullRequestSyncCommand,
   ThreadPullRequestLinkSyncCommand,
@@ -1876,6 +1911,7 @@ export const OrchestrationEventType = Schema.Literals([
   "channel.message-posted",
   "channel.agent-wake-requested",
   "channel.run-started",
+  "channel.delivery-updated",
   "thread.created",
   "thread.deleted",
   "thread.archived",
@@ -2039,6 +2075,15 @@ export const ChannelAgentWakeRequestedPayload = Schema.Struct({
 });
 
 export const ChannelRunStartedPayload = OrchestrationRun;
+
+export const ChannelDeliveryUpdatedPayload = Schema.Struct({
+  channelId: ChannelId,
+  agentId: AgentId,
+  messageIds: Schema.Array(MessageId),
+  status: ChannelDeliveryStatus,
+  runThreadId: Schema.NullOr(ThreadId),
+  updatedAt: IsoDateTime,
+});
 
 export const ThreadCreatedPayload = Schema.Struct({
   threadId: ThreadId,
@@ -2378,6 +2423,11 @@ export const OrchestrationEvent = Schema.Union([
   }),
   Schema.Struct({
     ...EventBaseFields,
+    type: Schema.Literal("channel.delivery-updated"),
+    payload: ChannelDeliveryUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
     type: Schema.Literal("thread.created"),
     payload: ThreadCreatedPayload,
   }),
@@ -2698,6 +2748,26 @@ export class OrchestrationGetWorkflowScriptError extends Schema.TaggedError<Orch
   }
 }
 
+/** How many of an agent's newest runs a DM shows. */
+export const AGENT_RUNS_LIMIT = 10;
+
+/** A run with when it ended; `endedAt` is null while the run is live. */
+export const OrchestrationAgentRun = Schema.Struct({
+  ...OrchestrationRun.fields,
+  endedAt: Schema.NullOr(IsoDateTime),
+});
+export type OrchestrationAgentRun = typeof OrchestrationAgentRun.Type;
+
+export const OrchestrationListAgentRunsInput = Schema.Struct({
+  agentId: AgentId,
+});
+export type OrchestrationListAgentRunsInput = typeof OrchestrationListAgentRunsInput.Type;
+
+export const OrchestrationListAgentRunsResult = Schema.Struct({
+  runs: Schema.Array(OrchestrationAgentRun),
+});
+export type OrchestrationListAgentRunsResult = typeof OrchestrationListAgentRunsResult.Type;
+
 /** How many of a channel's newest messages a channel subscription starts with. */
 export const CHANNEL_SUBSCRIBE_MESSAGE_LIMIT = 200;
 
@@ -2708,7 +2778,8 @@ export type OrchestrationSubscribeChannelInput = typeof OrchestrationSubscribeCh
 
 /**
  * A channel subscription: the newest messages, then each message as it is
- * posted. A message can arrive in both; clients keep one per id.
+ * posted and each change in a message's delivery. A message can arrive in
+ * both; clients keep one per id.
  */
 export const OrchestrationChannelStreamItem = Schema.Union([
   Schema.Struct({
@@ -2718,6 +2789,11 @@ export const OrchestrationChannelStreamItem = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("message"),
     message: OrchestrationChannelMessage,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("delivery"),
+    messageId: MessageId,
+    delivery: ChannelMessageDelivery,
   }),
 ]);
 export type OrchestrationChannelStreamItem = typeof OrchestrationChannelStreamItem.Type;
@@ -2758,6 +2834,10 @@ export const OrchestrationRpcSchemas = {
   subscribeChannel: {
     input: OrchestrationSubscribeChannelInput,
     output: OrchestrationChannelStreamItem,
+  },
+  listAgentRuns: {
+    input: OrchestrationListAgentRunsInput,
+    output: OrchestrationListAgentRunsResult,
   },
 } as const;
 

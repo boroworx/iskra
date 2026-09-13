@@ -725,6 +725,22 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           yield* projectionChannelRepository.insertRun(event.payload);
           return;
 
+        // A wake leaves its message pending with the agent until a turn carries it.
+        case "channel.agent-wake-requested":
+          yield* projectionChannelRepository.upsertDelivery({
+            messageId: event.payload.triggerMessageId,
+            agentId: event.payload.agentId,
+            channelId: event.payload.channelId,
+            runThreadId: event.payload.liveRunThreadId ?? null,
+            status: "pending",
+            updatedAt: event.payload.requestedAt,
+          });
+          return;
+
+        case "channel.delivery-updated":
+          yield* projectionChannelRepository.updateDeliveries(event.payload);
+          return;
+
         case "thread.session-set":
           if (isRunEndingSessionStatus(event.payload.session.status)) {
             yield* projectionChannelRepository.endRun({

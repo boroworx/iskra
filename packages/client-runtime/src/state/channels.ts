@@ -19,7 +19,11 @@ import {
   updateChannel,
 } from "../operations/commands.ts";
 import { subscribe, type EnvironmentRpcInput } from "../rpc/client.ts";
-import { createEnvironmentCommand, createEnvironmentSubscriptionAtomFamily } from "./runtime.ts";
+import {
+  createEnvironmentCommand,
+  createEnvironmentRpcQueryAtomFamily,
+  createEnvironmentSubscriptionAtomFamily,
+} from "./runtime.ts";
 
 export type {
   CreateAgentInput,
@@ -30,18 +34,35 @@ export type {
 
 /**
  * A channel's messages after one stream item. A snapshot replaces them, so a
- * resubscription starts clean; a message already held is not added twice.
+ * resubscription starts clean; a message already held is not added twice; a
+ * delivery replaces that agent's earlier standing on its message.
  */
 export function applyChannelStreamItem(
   messages: ReadonlyArray<OrchestrationChannelMessage>,
   item: OrchestrationChannelStreamItem,
 ): ReadonlyArray<OrchestrationChannelMessage> {
-  if (item.kind === "snapshot") {
-    return item.messages;
+  switch (item.kind) {
+    case "snapshot":
+      return item.messages;
+    case "message":
+      return messages.some((message) => message.id === item.message.id)
+        ? messages
+        : [...messages, item.message];
+    case "delivery":
+      return messages.map((message) =>
+        message.id === item.messageId
+          ? {
+              ...message,
+              deliveries: [
+                ...(message.deliveries ?? []).filter(
+                  (delivery) => delivery.agentId !== item.delivery.agentId,
+                ),
+                item.delivery,
+              ],
+            }
+          : message,
+      );
   }
-  return messages.some((message) => message.id === item.message.id)
-    ? messages
-    : [...messages, item.message];
 }
 
 export function createChannelEnvironmentAtoms<R, E>(
@@ -60,6 +81,10 @@ export function createChannelEnvironmentAtoms<R, E>(
             },
           ),
         ),
+    }),
+    agentRuns: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:channels:agent-runs",
+      tag: ORCHESTRATION_WS_METHODS.listAgentRuns,
     }),
     postMessage: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:channel:post-message",

@@ -4303,7 +4303,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  for (const desktopOrigin of ["t3code://app", "t3code-dev://app"]) {
+  for (const desktopOrigin of ["iskra://app", "iskra-dev://app"]) {
     it.effect(`allows credentialed preflights from ${desktopOrigin} in development`, () =>
       Effect.gen(function* () {
         yield* buildAppUnderTest({
@@ -9861,7 +9861,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         Array.from(items, (item) =>
           item.kind === "snapshot"
             ? item.messages.map((message) => message.body)
-            : [item.message.body],
+            : item.kind === "message"
+              ? [item.message.body]
+              : [],
         ),
         [["earlier"], ["later"]],
       );
