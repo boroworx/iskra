@@ -1,6 +1,10 @@
 /**
  * Anonymous PostHog telemetry service.
  *
+ * Off by default. Events are only recorded and sent when
+ * `ISKRA_TELEMETRY_ENABLED=true` and both `ISKRA_POSTHOG_KEY` and
+ * `ISKRA_POSTHOG_HOST` are set; Iskra ships no analytics project of its own.
+ *
  * Persists an installation-scoped anonymous identifier, buffers events in
  * memory, and flushes batches over Effect's HTTP client.
  *
@@ -30,13 +34,9 @@ interface BufferedAnalyticsEvent {
 }
 
 const TelemetryEnvConfig = Config.all({
-  posthogKey: Config.string("T3CODE_POSTHOG_KEY").pipe(
-    Config.withDefault("phc_XOWci4oZP4VvLiEyrFqkFjP4CZn55mjYYBMREK5Wd6m"),
-  ),
-  posthogHost: Config.string("T3CODE_POSTHOG_HOST").pipe(
-    Config.withDefault("https://us.i.posthog.com"),
-  ),
-  enabled: Config.boolean("T3CODE_TELEMETRY_ENABLED").pipe(Config.withDefault(true)),
+  posthogKey: Config.nonEmptyString("ISKRA_POSTHOG_KEY").pipe(Config.option),
+  posthogHost: Config.nonEmptyString("ISKRA_POSTHOG_HOST").pipe(Config.option),
+  enabled: Config.boolean("ISKRA_TELEMETRY_ENABLED").pipe(Config.withDefault(false)),
   flushBatchSize: Config.number("T3CODE_TELEMETRY_FLUSH_BATCH_SIZE").pipe(Config.withDefault(20)),
   maxBufferedEvents: Config.number("T3CODE_TELEMETRY_MAX_BUFFERED_EVENTS").pipe(
     Config.withDefault(1_000),
@@ -85,9 +85,16 @@ function serverOsFromNodePlatform(platform: string): ClientOs {
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const telemetryConfig = yield* TelemetryEnvConfig;
+  const destination =
+    telemetryConfig.enabled &&
+    Option.isSome(telemetryConfig.posthogKey) &&
+    Option.isSome(telemetryConfig.posthogHost)
+      ? { key: telemetryConfig.posthogKey.value, host: telemetryConfig.posthogHost.value }
+      : null;
   const httpClient = yield* HttpClient.HttpClient;
   const serverConfig = yield* ServerConfig.ServerConfig;
-  const identifier = yield* getTelemetryIdentifier;
+  // Without a destination, skip identity lookup too so no anonymous id is written.
+  const identifier = destination === null ? null : yield* getTelemetryIdentifier;
   const bufferRef = yield* Ref.make<ReadonlyArray<BufferedAnalyticsEvent>>([]);
   const clientType = serverConfig.mode === "desktop" ? "desktop-app" : "cli-web-client";
   const hostPlatform = yield* HostProcessPlatform;
@@ -123,10 +130,10 @@ export const make = Effect.gen(function* () {
   const sendBatch = Effect.fn("AnalyticsService.sendBatch")(function* (
     events: ReadonlyArray<BufferedAnalyticsEvent>,
   ) {
-    if (!telemetryConfig.enabled || !identifier) return;
+    if (!destination || !identifier) return;
 
     const payload = {
-      api_key: telemetryConfig.posthogKey,
+      api_key: destination.key,
       batch: events.map((event) => ({
         event: event.event,
         distinct_id: identifier,
@@ -148,7 +155,7 @@ export const make = Effect.gen(function* () {
       })),
     };
 
-    yield* HttpClientRequest.post(`${telemetryConfig.posthogHost}/batch/`).pipe(
+    yield* HttpClientRequest.post(`${destination.host}/batch/`).pipe(
       HttpClientRequest.bodyJson(payload),
       Effect.flatMap(httpClient.execute),
       Effect.flatMap(HttpClientResponse.filterStatusOk),
@@ -182,7 +189,7 @@ export const make = Effect.gen(function* () {
 
   const record: AnalyticsService["Service"]["record"] = Effect.fn("AnalyticsService.record")(
     function* (event, properties) {
-      if (!telemetryConfig.enabled || !identifier) return;
+      if (!destination || !identifier) return;
 
       const enqueueResult = yield* enqueueBufferedEvent(event, properties);
       if (enqueueResult.dropped) {

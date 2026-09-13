@@ -14,7 +14,7 @@ import {
   applyManifestDefault,
   BUNDLED_MODEL_MANIFEST,
   classifyModels,
-  make,
+  makeRemote,
   resolveProviderCatalog,
   type ModelManifestData,
   encodeManifestCache,
@@ -29,6 +29,7 @@ import {
  */
 
 const CODEX = ProviderDriverKind.make("codex");
+const TEST_MANIFEST_URL = "https://manifest.example.test/model-manifest.json";
 const model = (overrides: Partial<ServerProviderModel>): ServerProviderModel => ({
   slug: "gpt-test",
   name: "GPT Test",
@@ -344,13 +345,13 @@ const serviceLayers = (input: {
 describe("ModelManifest service", () => {
   it.live("prefers a fetched manifest over the bundle and caches it to disk", () =>
     Effect.gen(function* () {
-      const service = yield* make;
+      const service = yield* makeRemote(TEST_MANIFEST_URL);
       const refreshed = yield* service.refresh;
       assert.deepStrictEqual(refreshed, REMOTE_MANIFEST);
 
       // A fresh service instance sees the disk cache without another fetch:
       // its HTTP layer is still stubbed, but `current` never fetches at all.
-      const rebooted = yield* make;
+      const rebooted = yield* makeRemote(TEST_MANIFEST_URL);
       assert.deepStrictEqual(yield* rebooted.current, REMOTE_MANIFEST);
     }).pipe(
       Effect.scoped,
@@ -365,7 +366,7 @@ describe("ModelManifest service", () => {
 
   it.live("keeps the bundled manifest when the remote payload is malformed", () =>
     Effect.gen(function* () {
-      const service = yield* make;
+      const service = yield* makeRemote(TEST_MANIFEST_URL);
       assert.deepStrictEqual(yield* service.refresh, BUNDLED_MODEL_MANIFEST);
     }).pipe(
       Effect.scoped,
@@ -383,7 +384,7 @@ describe("ModelManifest service", () => {
     const responses = [REMOTE_CLAUDE_MANIFEST, ...INVALID_REMOTE_MANIFESTS];
 
     return Effect.gen(function* () {
-      const service = yield* make;
+      const service = yield* makeRemote(TEST_MANIFEST_URL);
       assert.deepStrictEqual(yield* service.refresh, REMOTE_CLAUDE_MANIFEST);
 
       for (const _invalid of INVALID_REMOTE_MANIFESTS) {
@@ -392,7 +393,7 @@ describe("ModelManifest service", () => {
         assert.deepStrictEqual(yield* service.refresh, REMOTE_CLAUDE_MANIFEST);
       }
 
-      const rebooted = yield* make;
+      const rebooted = yield* makeRemote(TEST_MANIFEST_URL);
       assert.deepStrictEqual(yield* rebooted.current, REMOTE_CLAUDE_MANIFEST);
     }).pipe(
       Effect.scoped,
@@ -423,7 +424,7 @@ describe("ModelManifest service", () => {
           cachePath,
           yield* encodeManifestCache({ fetchedAtMs: 0, manifest: stale }),
         );
-        const service = yield* make;
+        const service = yield* makeRemote(TEST_MANIFEST_URL);
         assert.deepStrictEqual(yield* service.current, BUNDLED_MODEL_MANIFEST);
       }
 
@@ -432,7 +433,7 @@ describe("ModelManifest service", () => {
         cachePath,
         yield* encodeManifestCache({ fetchedAtMs: 0, manifest: REMOTE_MANIFEST }),
       );
-      const later = yield* make;
+      const later = yield* makeRemote(TEST_MANIFEST_URL);
       assert.deepStrictEqual(yield* later.current, REMOTE_MANIFEST);
     }).pipe(
       Effect.scoped,
@@ -448,7 +449,7 @@ describe("ModelManifest service", () => {
   it.live("does not fetch when provider update checks are disabled", () =>
     Effect.gen(function* () {
       let fetchCount = 0;
-      const service = yield* make.pipe(
+      const service = yield* makeRemote(TEST_MANIFEST_URL).pipe(
         Effect.provide(
           httpClientLayer(() => {
             fetchCount += 1;

@@ -18,7 +18,7 @@ Use this skill for the web client. For iOS Simulator, Android Emulator, or physi
 
 Treat a base directory as disposable only when it was created or deliberately selected for the current test. Never delete or directly seed the shared `~/.t3` directory. Prefer starting with a new temporary base directory over clearing state of uncertain ownership.
 
-The worktree-local default deliberately outranks an ambient `T3CODE_HOME`; do not pass the shared home through to a worktree dev server.
+The worktree-local default deliberately outranks an ambient `ISKRA_HOME`; do not pass the shared home through to a worktree dev server.
 
 Ports are derived from the worktree path but can shift when occupied. Always read the actual values from the `[dev-runner]` line.
 

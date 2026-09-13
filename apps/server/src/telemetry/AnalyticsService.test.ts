@@ -57,9 +57,9 @@ it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
       const telemetryLayer = AnalyticsService.layer.pipe(Layer.provideMerge(serverConfigLayer));
       const configLayer = ConfigProvider.layer(
         ConfigProvider.fromUnknown({
-          T3CODE_TELEMETRY_ENABLED: true,
-          T3CODE_POSTHOG_KEY: "phc_test_key",
-          T3CODE_POSTHOG_HOST: "http://localhost",
+          ISKRA_TELEMETRY_ENABLED: true,
+          ISKRA_POSTHOG_KEY: "phc_test_key",
+          ISKRA_POSTHOG_HOST: "http://localhost",
           T3CODE_TELEMETRY_FLUSH_BATCH_SIZE: 20,
         }),
       );
@@ -149,46 +149,51 @@ it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
     }),
   );
 
-  it.effect("does not send batch requests when telemetry is disabled", () =>
+  it.effect("sends nothing unless telemetry is enabled with a PostHog key and host", () =>
     Effect.gen(function* () {
-      const capturedPaths: Array<string> = [];
-      const serverConfigLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
-        prefix: "t3-telemetry-disabled-",
-      });
-      const telemetryLayer = AnalyticsService.layer.pipe(Layer.provideMerge(serverConfigLayer));
-      const configLayer = ConfigProvider.layer(
-        ConfigProvider.fromUnknown({
-          T3CODE_TELEMETRY_ENABLED: false,
-          T3CODE_POSTHOG_KEY: "phc_test_key",
-          T3CODE_POSTHOG_HOST: "http://localhost",
-        }),
-      );
-      const batchServerLayer = HttpServer.serve(
-        Effect.gen(function* () {
-          const request = yield* HttpServerRequest.HttpServerRequest;
-          capturedPaths.push(request.url);
-          return HttpServerResponse.jsonUnsafe({});
-        }),
-      );
-      const runtimeLayer = telemetryLayer.pipe(
-        Layer.provide(configLayer),
-        Layer.provide(
-          Layer.mergeAll(
-            Layer.succeed(HostProcessPlatform, "linux"),
-            Layer.succeed(HostProcessArchitecture, "arm64"),
+      const telemetryEnvs: ReadonlyArray<Record<string, unknown>> = [
+        { ISKRA_POSTHOG_KEY: "phc_test_key", ISKRA_POSTHOG_HOST: "http://localhost" },
+        {
+          ISKRA_TELEMETRY_ENABLED: false,
+          ISKRA_POSTHOG_KEY: "phc_test_key",
+          ISKRA_POSTHOG_HOST: "http://localhost",
+        },
+        { ISKRA_TELEMETRY_ENABLED: true, ISKRA_POSTHOG_HOST: "http://localhost" },
+      ];
+      for (const [index, telemetryEnv] of telemetryEnvs.entries()) {
+        const capturedPaths: Array<string> = [];
+        const serverConfigLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
+          prefix: "t3-telemetry-disabled-",
+        });
+        const telemetryLayer = AnalyticsService.layer.pipe(Layer.provideMerge(serverConfigLayer));
+        const configLayer = ConfigProvider.layer(ConfigProvider.fromUnknown(telemetryEnv));
+        const batchServerLayer = HttpServer.serve(
+          Effect.gen(function* () {
+            const request = yield* HttpServerRequest.HttpServerRequest;
+            capturedPaths.push(request.url);
+            return HttpServerResponse.jsonUnsafe({});
+          }),
+        );
+        const runtimeLayer = telemetryLayer.pipe(
+          Layer.provide(configLayer),
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.succeed(HostProcessPlatform, "linux"),
+              Layer.succeed(HostProcessArchitecture, "arm64"),
+            ),
           ),
-        ),
-        Layer.provideMerge(NodeHttpServer.layerTest),
-      );
+          Layer.provideMerge(NodeHttpServer.layerTest),
+        );
 
-      yield* Effect.gen(function* () {
-        yield* Layer.launch(batchServerLayer).pipe(Effect.forkScoped);
-        const analytics = yield* AnalyticsService.AnalyticsService;
-        yield* analytics.record("test.disabled", { index: 1 });
-        yield* analytics.flush;
-      }).pipe(Effect.provide(runtimeLayer));
+        yield* Effect.gen(function* () {
+          yield* Layer.launch(batchServerLayer).pipe(Effect.forkScoped);
+          const analytics = yield* AnalyticsService.AnalyticsService;
+          yield* analytics.record("test.disabled", { index: 1 });
+          yield* analytics.flush;
+        }).pipe(Effect.provide(runtimeLayer));
 
-      assert.deepEqual(capturedPaths, []);
+        assert.deepEqual(capturedPaths, [], `telemetry env case ${index}`);
+      }
     }),
   );
 });

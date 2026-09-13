@@ -73,6 +73,7 @@ describe("connectCliAuth", () => {
   it("sends the sign-in redirect to the authorize endpoint, not back to /connect", () => {
     vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", TEST_PUBLISHABLE_KEY);
     vi.stubEnv("VITE_CLERK_CLI_OAUTH_CLIENT_ID", "oauthapp_123");
+    vi.stubEnv("VITE_HOSTED_APP_URL", "https://app.t3.codes");
 
     const connectUrl = "https://app.t3.codes/connect#state=state-1&challenge=challenge-1";
     const redirectUrl = connectCliSignInRedirectUrl(

@@ -65,6 +65,10 @@ it.effect("normalizes the hosted app URL to an absolute origin", () =>
   }),
 );
 
+it.effect("requires a hosted app URL when none is configured", () =>
+  hostedAppUrlConfig.pipe(provideEnv({}), Effect.flip),
+);
+
 it.effect("rejects malformed or insecure hosted app URLs", () =>
   Effect.gen(function* () {
     for (const value of [

@@ -14,6 +14,7 @@ import * as ServerConfig from "../config.ts";
 import * as DesktopAppUpdate from "../desktopUpdate/DesktopAppUpdate.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as ServiceLauncherClient from "./serviceLauncherClient.ts";
+import { pinnedRuntimePaths } from "./pinnedRuntime.ts";
 import { SERVICE_LAUNCHER_PROTOCOL } from "./serviceProtocol.ts";
 import * as ServerSelfUpdate from "./selfUpdate.ts";
 
@@ -32,27 +33,14 @@ const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
   const path = yield* Path.Path;
   const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-self-update-test-" });
   const order: string[] = [];
+  // Iskra never downloads a runtime, so an update can only use one already on disk.
+  const runtime = pinnedRuntimePaths(path, baseDir, "1.1.0");
+  yield* fs.makeDirectory(path.dirname(runtime.entryPath), { recursive: true });
+  yield* fs.writeFileString(runtime.entryPath, "export {};\n");
+  yield* fs.writeFileString(runtime.sentinelPath, "1.1.0\n");
   const runner = ProcessRunner.ProcessRunner.of({
     run: (input) =>
       Effect.gen(function* () {
-        if (input.command === "npm") {
-          order.push("install");
-          const prefix = input.args[input.args.indexOf("--prefix") + 1];
-          if (prefix === undefined) return yield* Effect.die("missing npm prefix");
-          const entry = path.join(prefix, "node_modules", "t3", "dist", "bin.mjs");
-          yield* fs.makeDirectory(path.dirname(entry), { recursive: true }).pipe(Effect.orDie);
-          yield* fs.writeFileString(entry, "export {};\n").pipe(Effect.orDie);
-          return {
-            stdout: "",
-            stderr: "",
-            code: ChildProcessSpawner.ExitCode(0),
-            timedOut: false,
-            stdoutTruncated: false,
-            stderrTruncated: false,
-            stdoutInvalidUtf8: false,
-            stderrInvalidUtf8: false,
-          };
-        }
         order.push("preflight");
         const result =
           options.preflight === "blocked"
@@ -321,7 +309,7 @@ it.layer(NodeServices.layer)("server self update", (it) => {
     }),
   );
 
-  it.effect("stages and preflights before asking the launcher for an update ID", () =>
+  it.effect("preflights the pinned runtime before asking the launcher for an update ID", () =>
     Effect.gen(function* () {
       const { selfUpdate, order } = yield* makeHarness();
       expect(yield* selfUpdate.update({ targetVersion: "1.1.0" })).toEqual({
@@ -329,7 +317,7 @@ it.layer(NodeServices.layer)("server self update", (it) => {
         method: "boot-service",
         updateId: "launcher-id",
       });
-      expect(order).toEqual(["install", "preflight", "accept"]);
+      expect(order).toEqual(["preflight", "accept"]);
     }),
   );
 
