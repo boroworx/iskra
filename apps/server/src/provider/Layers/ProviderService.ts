@@ -387,6 +387,7 @@ function toRuntimePayloadFromSession(
     readonly continueAfterServerUpdate?: TurnId;
     readonly lastRuntimeEvent?: string;
     readonly lastRuntimeEventAt?: string;
+    readonly run?: ProviderSessionStartInput["run"];
   },
 ): Record<string, unknown> {
   return {
@@ -394,6 +395,8 @@ function toRuntimePayloadFromSession(
     model: session.model ?? null,
     activeTurnId: session.activeTurnId ?? null,
     lastError: session.lastError ?? null,
+    // Directory upserts merge payloads, so a run marker written at start survives later writes.
+    ...(extra?.run !== undefined ? { run: extra.run } : {}),
     ...(extra?.continueAfterServerUpdate !== undefined
       ? { continueAfterServerUpdate: extra.continueAfterServerUpdate }
       : {}),
@@ -403,6 +406,18 @@ function toRuntimePayloadFromSession(
       ? { lastRuntimeEventAt: extra.lastRuntimeEventAt }
       : {}),
   };
+}
+
+function isPersistedRun(
+  runtimePayload: ProviderSessionDirectory.ProviderRuntimeBinding["runtimePayload"],
+): boolean {
+  return (
+    !!runtimePayload &&
+    typeof runtimePayload === "object" &&
+    !Array.isArray(runtimePayload) &&
+    "run" in runtimePayload &&
+    runtimePayload.run != null
+  );
 }
 
 function readPersistedModelSelection(
@@ -1058,6 +1073,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       readonly continueAfterServerUpdate?: TurnId;
       readonly lastRuntimeEvent?: string;
       readonly lastRuntimeEventAt?: string;
+      readonly run?: ProviderSessionStartInput["run"];
     },
   ) =>
     Effect.gen(function* () {
@@ -1257,6 +1273,15 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           });
           return { adapter, session: existing } as const;
         }
+      }
+
+      // A run is rebuilt from its context on every wake. Once its session is gone
+      // the run is over; reviving it from the binding would drop its restrictions.
+      if (isPersistedRun(input.binding.runtimePayload)) {
+        return yield* toValidationError(
+          input.operation,
+          `Thread '${input.binding.threadId}' is a run whose session has ended; runs are never recovered.`,
+        );
       }
 
       if (!hasResumeCursor) {
@@ -1528,6 +1553,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         });
         yield* upsertSessionBinding(sessionWithInstance, threadId, {
           modelSelection: input.modelSelection,
+          ...(input.run !== undefined ? { run: input.run } : {}),
         });
         yield* analytics.record("provider.session.started", {
           provider: sessionWithInstance.provider,

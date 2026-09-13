@@ -2850,6 +2850,40 @@ routing.layer("ProviderServiceLive routing", (it) => {
     }),
   );
 
+  it.effect(
+    "refuses to recover a run whose session is gone instead of reviving it unrestricted",
+    () =>
+      Effect.gen(function* () {
+        const provider = yield* ProviderService.ProviderService;
+        const run = { systemPrompt: "You are @backend.", capabilities: ["read" as const] };
+
+        const initial = yield* provider.startSession(asThreadId("thread-claude-run"), {
+          provider: ProviderDriverKind.make("claudeAgent"),
+          providerInstanceId: claudeAgentInstanceId,
+          threadId: asThreadId("thread-claude-run"),
+          cwd: fixtureCwd("project-claude-run"),
+          runtimeMode: "full-access",
+          run,
+        });
+        const startInput = routing.claude.startSession.mock.calls.at(-1)?.[0] as
+          | { run?: unknown }
+          | undefined;
+        assert.deepEqual(startInput?.run, run);
+
+        yield* routing.claude.stopAll();
+        routing.claude.startSession.mockClear();
+        routing.claude.sendTurn.mockClear();
+
+        const result = yield* provider
+          .sendTurn({ threadId: initial.threadId, input: "are you still there?", attachments: [] })
+          .pipe(Effect.result);
+
+        assert.equal(result._tag, "Failure");
+        assert.equal(routing.claude.startSession.mock.calls.length, 0);
+        assert.equal(routing.claude.sendTurn.mock.calls.length, 0);
+      }),
+  );
+
   it.effect("recovers stale claudeAgent sessions for sendTurn using persisted cwd", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService.ProviderService;
