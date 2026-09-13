@@ -23,7 +23,7 @@ import {
   RunCapabilities,
   RunContextPayload,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@iskra/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 import type * as Option from "effect/Option";
@@ -225,4 +225,4 @@ export interface ProjectionChannelRepositoryShape {
 export class ProjectionChannelRepository extends Context.Service<
   ProjectionChannelRepository,
   ProjectionChannelRepositoryShape
->()("t3/persistence/Services/ProjectionChannels/ProjectionChannelRepository") {}
+>()("@iskra/cli/persistence/Services/ProjectionChannels/ProjectionChannelRepository") {}

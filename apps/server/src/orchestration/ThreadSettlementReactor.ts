@@ -1,6 +1,6 @@
-import { CommandId, type ServerSettings as ServerSettingsValue } from "@t3tools/contracts";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
-import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { CommandId, type ServerSettings as ServerSettingsValue } from "@iskra/contracts";
+import { resolveProjectSettings } from "@iskra/shared/projectSettings";
+import { makeDrainableWorker } from "@iskra/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -31,7 +31,7 @@ export class ThreadSettlementReactor extends Context.Service<
     readonly start: () => Effect.Effect<void, never, Scope.Scope>;
     readonly drain: Effect.Effect<void>;
   }
->()("t3/orchestration/ThreadSettlementReactor") {}
+>()("@iskra/cli/orchestration/ThreadSettlementReactor") {}
 
 /** @public Service construction is part of the canonical Effect module API. */
 /** Whether any environment default or project override can settle a thread. */

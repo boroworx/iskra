@@ -1,4 +1,4 @@
-import type { PreviewViewportSetting } from "@t3tools/contracts";
+import type { PreviewViewportSetting } from "@iskra/contracts";
 
 import { browserViewportSettingKey } from "~/browser/browserViewportLayout";
 

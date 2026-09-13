@@ -1,4 +1,4 @@
-import { connectionStatusText } from "@t3tools/client-runtime/connection";
+import { connectionStatusText } from "@iskra/client-runtime/connection";
 
 import {
   useClientSettings,

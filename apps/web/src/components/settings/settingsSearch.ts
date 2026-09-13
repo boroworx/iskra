@@ -1,7 +1,7 @@
 import { isElectron } from "~/env";
 import { isMacPlatform, isWindowsPlatform, normalizeSearchText } from "~/lib/utils";
-import type { EnvironmentId } from "@t3tools/contracts";
-import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
+import type { EnvironmentId } from "@iskra/contracts";
+import type { EnvironmentConnectionPhase } from "@iskra/client-runtime/connection";
 import {
   validateSettingsScopeSearch,
   type ResolvedSettingsScope,
@@ -610,7 +610,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "project-actions",
     title: "Actions",
     to: "/settings/projects",
-    searchTerms: ["commands scripts setup run dev server checkout worktree t3.json import"],
+    searchTerms: ["commands scripts setup run dev server checkout worktree iskra.json import"],
   },
   {
     id: "environment-icon",
@@ -650,7 +650,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     wslAvailableOnly: true,
   },
   {
-    id: "t3-connect",
+    id: "iskra-connect",
     title: "Iskra Connect",
     to: "/settings/connections",
     targetId: "connections-environment",

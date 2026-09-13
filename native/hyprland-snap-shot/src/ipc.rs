@@ -181,7 +181,7 @@ mod tests {
             address: "0x123456789abcdef".into(),
             pid,
             title: title.into(),
-            class: "t3".into(),
+            class: "iskra".into(),
             at: [-1920, 20],
             size: [1000, 800],
             mapped: true,

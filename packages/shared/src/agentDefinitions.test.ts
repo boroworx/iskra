@@ -1,4 +1,4 @@
-import { AgentId, ProviderInstanceId, type ModelSelection } from "@t3tools/contracts";
+import { AgentId, ProviderInstanceId, type ModelSelection } from "@iskra/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -87,7 +87,9 @@ describe("withAgentId", () => {
 
     const updated = withAgentId(contents, AgentId.make("agent-1"));
 
-    expect(updated).toBe("---\nid: agent-1\n# the API owner\nname: backend\n---\nOwns the server.\n");
+    expect(updated).toBe(
+      "---\nid: agent-1\n# the API owner\nname: backend\n---\nOwns the server.\n",
+    );
     expect(definition(parseAgentFile(updated, "backend.md")).id).toBe("agent-1");
   });
 });

@@ -18,14 +18,14 @@ import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import * as HttpServer from "effect/unstable/http/HttpServer";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 import * as HttpApi from "effect/unstable/httpapi/HttpApi";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId } from "@iskra/contracts";
 import {
   RelayApi,
   RelayClientAuth,
   RelayClientPrincipal,
   RelayEnvironmentAuth,
   type RelayClientDeviceRecord,
-} from "@t3tools/contracts/relay";
+} from "@iskra/contracts/relay";
 
 import {
   RELAY_REQUEST_DEADLINE_MS,
@@ -61,12 +61,12 @@ const relaySettings: RelayConfiguration.RelayConfiguration["Service"] = {
     teamId: "apns-team",
     keyId: "apns-key",
     privateKey: Redacted.make("apns-private-key"),
-    bundleId: "com.example.t3",
+    bundleId: "com.example.iskra",
     environment: "sandbox",
   },
   clerkSecretKey: Redacted.make("clerk-secret-key"),
   clerkPublishableKey: "pk_test_test",
-  clerkJwtAudience: "t3-code-relay",
+  clerkJwtAudience: "iskra-relay",
   apnsDeliveryJobSigningSecret: Redacted.make("apns-delivery-secret"),
   cloudMintPrivateKey: Redacted.make("cloud-mint-private-key"),
   cloudMintPublicKey: "cloud-mint-public-key",

@@ -11,7 +11,7 @@ import {
   type OrchestrationThreadShell,
   type ProjectId,
   type ThreadId,
-} from "@t3tools/contracts";
+} from "@iskra/contracts";
 
 export interface ChannelListEntry {
   readonly id: ChannelId;

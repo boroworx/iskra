@@ -6,7 +6,7 @@ import {
   type ProjectId as ProjectIdType,
   type ScopedProjectRef,
   type ScopedThreadRef,
-} from "@t3tools/contracts";
+} from "@iskra/contracts";
 
 export function scopeProjectRef(
   environmentId: EnvironmentIdType,

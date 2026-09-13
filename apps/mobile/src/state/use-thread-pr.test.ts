@@ -1,4 +1,4 @@
-import { ProjectId, type ThreadPullRequestLink, type VcsStatusResult } from "@t3tools/contracts";
+import { ProjectId, type ThreadPullRequestLink, type VcsStatusResult } from "@iskra/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -10,7 +10,7 @@ import {
 const pullRequest: NonNullable<VcsStatusResult["pr"]> = {
   number: 3774,
   title: "Desktop-style pull request indicator",
-  url: "https://github.com/t3tools/t3code/pull/3774",
+  url: "https://github.com/boroworx/iskra/pull/3774",
   baseRef: "main",
   headRef: "codex/desktop-style-pr-indicator",
   state: "merged",
@@ -54,9 +54,9 @@ function linkedPr(
 ): ThreadPullRequestLink {
   return {
     host: "github.com",
-    repository: "t3tools/t3code",
+    repository: "boroworx/iskra",
     number,
-    url: `https://github.com/t3tools/t3code/pull/${number}`,
+    url: `https://github.com/boroworx/iskra/pull/${number}`,
     source: "manual",
     linkedAt: "2026-09-08T00:00:00.000Z",
     stack: null,
@@ -158,11 +158,11 @@ describe("presentThreadLinkedPullRequests", () => {
 describe("resolveThreadPrSource compatibility", () => {
   const legacyRef = {
     projectId: ProjectId.make("project"),
-    repository: "t3tools/t3code",
+    repository: "boroworx/iskra",
     number: 1,
-    url: "https://github.com/t3tools/t3code/pull/1",
+    url: "https://github.com/boroworx/iskra/pull/1",
   };
-  const branchRef = { ...legacyRef, number: 2, url: "https://github.com/t3tools/t3code/pull/2" };
+  const branchRef = { ...legacyRef, number: 2, url: "https://github.com/boroworx/iskra/pull/2" };
 
   it("polls the legacy reference when only the older linking capability exists", () => {
     expect(

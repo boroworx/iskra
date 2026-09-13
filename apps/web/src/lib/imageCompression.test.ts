@@ -10,7 +10,7 @@ import {
   prepareImageForAttachment,
 } from "./imageCompression";
 
-import type { SnapShotSource } from "@t3tools/contracts";
+import type { SnapShotSource } from "@iskra/contracts";
 import { hydrateImagesFromPersisted } from "../composerDraftStore";
 import { resizeSnapShotSource } from "./snapShotSource";
 

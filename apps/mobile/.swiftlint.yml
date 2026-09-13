@@ -1,14 +1,14 @@
 included:
-  - ios/T3Code
-  - modules/t3-composer-editor/ios
-  - modules/t3-native-controls/ios
-  - modules/t3-terminal/ios
-  - modules/t3-review-diff/ios
+  - ios/Iskra
+  - modules/iskra-composer-editor/ios
+  - modules/iskra-native-controls/ios
+  - modules/iskra-terminal/ios
+  - modules/iskra-review-diff/ios
 
 excluded:
   - ios/Pods
   - ios/build
-  - modules/t3-terminal/Vendor
+  - modules/iskra-terminal/Vendor
 
 reporter: xcode
 

@@ -10,8 +10,8 @@ import {
 describe("fileRoutePathSegments", () => {
   it("round-trips workspace-relative and host paths through the route", () => {
     expect(fileRoutePathSegments("src/main.ts")).toEqual(["src", "main.ts"]);
-    expect(fileRoutePathSegments("/tmp/t3-cleanup/report.md").join("/")).toBe(
-      "/tmp/t3-cleanup/report.md",
+    expect(fileRoutePathSegments("/tmp/iskra-cleanup/report.md").join("/")).toBe(
+      "/tmp/iskra-cleanup/report.md",
     );
   });
 });
@@ -48,16 +48,16 @@ describe("file preview types", () => {
 describe("fileHeaderSubtitle", () => {
   it("places a workspace file under its project", () => {
     expect(
-      fileHeaderSubtitle("t3code", "apps/mobile/src/features/threads/fileChipMenu.test.ts"),
-    ).toBe("t3code · apps/mobile/src/features/threads");
+      fileHeaderSubtitle("iskra", "apps/mobile/src/features/threads/fileChipMenu.test.ts"),
+    ).toBe("iskra · apps/mobile/src/features/threads");
   });
 
   it("shows only the directory for a host file outside the workspace", () => {
     // It is not under the project, so naming the project there would be a lie.
-    expect(fileHeaderSubtitle("t3code", "/tmp/report.md")).toBe("/tmp");
+    expect(fileHeaderSubtitle("iskra", "/tmp/report.md")).toBe("/tmp");
   });
 
   it("shows only the project for a file at the workspace root", () => {
-    expect(fileHeaderSubtitle("t3code", "README.md")).toBe("t3code");
+    expect(fileHeaderSubtitle("iskra", "README.md")).toBe("iskra");
   });
 });

@@ -12,7 +12,7 @@ vi.mock("./composerContextPresentation", () => ({
 }));
 
 const reference = { kind: "terminal", contextId: "ctx-1", label: "Terminal 1 lines 3-4" };
-const link = "[Terminal 1 lines 3-4](t3-context://v1/terminal/ctx-1)";
+const link = "[Terminal 1 lines 3-4](iskra-context://v1/terminal/ctx-1)";
 
 function createReferenceEditor() {
   const editor = createEditor({ nodes: [ComposerContextReferenceNode] });

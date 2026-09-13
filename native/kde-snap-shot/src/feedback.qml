@@ -134,8 +134,8 @@ Item {
     DBusCall {
         id: next
         service: root.bus
-        path: "/com/t3tools/KdeCapture/Feedback"
-        dbusInterface: "com.t3tools.KdeCapture.Feedback"
+        path: "/sh/iskra/KdeCapture/Feedback"
+        dbusInterface: "sh.iskra.KdeCapture.Feedback"
         method: "Next"
         onFailed: root.finish()
         onFinished: (values) => {
@@ -161,8 +161,8 @@ Item {
     DBusCall {
         id: ready
         service: root.bus
-        path: "/com/t3tools/KdeCapture/Feedback"
-        dbusInterface: "com.t3tools.KdeCapture.Feedback"
+        path: "/sh/iskra/KdeCapture/Feedback"
+        dbusInterface: "sh.iskra.KdeCapture.Feedback"
         method: "Event"
         arguments: [JSON.stringify({event: "ready", animate: root.options.animate})]
         onFailed: root.finish()
@@ -170,8 +170,8 @@ Item {
     DBusCall {
         id: landed
         service: root.bus
-        path: "/com/t3tools/KdeCapture/Feedback"
-        dbusInterface: "com.t3tools.KdeCapture.Feedback"
+        path: "/sh/iskra/KdeCapture/Feedback"
+        dbusInterface: "sh.iskra.KdeCapture.Feedback"
         method: "Event"
         arguments: ['{"event":"landed"}']
         onFailed: root.finish()
@@ -179,8 +179,8 @@ Item {
     DBusCall {
         id: done
         service: root.bus
-        path: "/com/t3tools/KdeCapture/Feedback"
-        dbusInterface: "com.t3tools.KdeCapture.Feedback"
+        path: "/sh/iskra/KdeCapture/Feedback"
+        dbusInterface: "sh.iskra.KdeCapture.Feedback"
         method: "Event"
         arguments: ['{"event":"done"}']
         onFinished: unload.call()

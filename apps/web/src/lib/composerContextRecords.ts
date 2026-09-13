@@ -1,7 +1,7 @@
 import {
   COMPOSER_CONTEXT_REVIEW_DIFF_MAX_CHARS,
   COMPOSER_CONTEXT_REVIEW_TEXT_MAX_CHARS,
-} from "@t3tools/contracts";
+} from "@iskra/contracts";
 import type {
   ComposerContextId,
   ComposerContextRecord,
@@ -16,13 +16,13 @@ import type {
   ReviewCommentContextRecord,
   TerminalContextRecord,
   ThreadId,
-} from "@t3tools/contracts";
-import { upgradeLegacyContextMessage } from "@t3tools/shared/composerContextLegacy";
-import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
+} from "@iskra/contracts";
+import { upgradeLegacyContextMessage } from "@iskra/shared/composerContextLegacy";
+import { encodeComposerContextFragment } from "@iskra/shared/composerContextClipboard";
 import {
   collectComposerContextReferences,
   sanitizeComposerContextLabel,
-} from "@t3tools/shared/composerContextReferences";
+} from "@iskra/shared/composerContextReferences";
 
 import {
   type ComposerContextReference,

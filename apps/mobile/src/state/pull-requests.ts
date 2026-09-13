@@ -1,5 +1,5 @@
-import { createEnvironmentRpcQueryAtomFamily } from "@t3tools/client-runtime/state/runtime";
-import { WS_METHODS } from "@t3tools/contracts";
+import { createEnvironmentRpcQueryAtomFamily } from "@iskra/client-runtime/state/runtime";
+import { WS_METHODS } from "@iskra/contracts";
 import { connectionAtomRuntime } from "../connection/runtime";
 
 export const composerPullRequests = {

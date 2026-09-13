@@ -9,8 +9,8 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-import { buildRemoteNodeEnvScript } from "@t3tools/ssh/tunnel";
-import { satisfiesSemverRange } from "@t3tools/shared/semver";
+import { buildRemoteNodeEnvScript } from "@iskra/ssh/tunnel";
+import { satisfiesSemverRange } from "@iskra/shared/semver";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import { parseWslDistroList, type WslDistro } from "./wslPathParsing.ts";
@@ -114,7 +114,7 @@ export class DesktopWslEnvironment extends Context.Service<
       options?: EnsureWslNodePtyOptions,
     ) => Effect.Effect<EnsureWslNodePtyResult>;
   }
->()("@t3tools/desktop/wsl/DesktopWslEnvironment") {}
+>()("@iskra/desktop/wsl/DesktopWslEnvironment") {}
 
 const buildDistroArgs = (distro: string | null): ReadonlyArray<string> =>
   distro ? ["-d", distro] : [];
@@ -259,8 +259,8 @@ const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")
 // promotes a verified tree. Presence alone only says an install once finished
 // here; the digest is what lets a later launch prove the entry still is what
 // that install wrote.
-const WSL_RUNTIME_READY_MARKER = ".t3code-wsl-runtime-ready";
-const WSL_RUNTIME_SELECTED_MARKER = ".t3code-wsl-runtime-selected";
+const WSL_RUNTIME_READY_MARKER = ".iskra-wsl-runtime-ready";
+const WSL_RUNTIME_SELECTED_MARKER = ".iskra-wsl-runtime-selected";
 const WSL_RUNTIME_SELECTION_GRACE_MINUTES = 5;
 
 const sanitizeWslRuntimeId = (value: string): string => value.replace(/[^A-Za-z0-9._-]/g, "_");
@@ -289,7 +289,7 @@ export const buildWslRuntimeInstallScript = (
     "node_pty_payload_present() {",
     '  for candidate in "$1"/node_modules/node-pty/prebuilds/linux-*/pty.node; do',
     '    [ -f "$candidate" ] || continue',
-    '    [ -f "${candidate%/*}/t3code-wsl-node-pty.json" ] || continue',
+    '    [ -f "${candidate%/*}/iskra-wsl-node-pty.json" ] || continue',
     "    return 0",
     "  done",
     "  return 1",
@@ -527,7 +527,7 @@ const expected = {
   nodePtyVersion: require("node-pty/package.json").version,
 };
 const prebuildDir = path.join(pkgDir, "prebuilds", "linux-" + process.arch);
-const marker = path.join(prebuildDir, "t3code-wsl-node-pty.json");
+const marker = path.join(prebuildDir, "iskra-wsl-node-pty.json");
 const binary = path.join(prebuildDir, "pty.node");
 if (!fs.existsSync(marker) || !fs.existsSync(binary)) process.exit(${NODE_PTY_PREBUILD_MISSING_EXIT_CODE});
 require("node-pty");
@@ -560,7 +560,7 @@ const NODE_PTY_BUILD_SCRIPT = (linuxServerDir: string) =>
     `prebuild_dir="prebuilds/linux-$arch"`,
     `mkdir -p "$prebuild_dir"`,
     `cp build/Release/pty.node "$prebuild_dir/pty.node"`,
-    `printf '{"arch":"%s","modules":"%s","nodePtyVersion":"%s"}\\n' "$arch" "$modules" "$node_pty_version" > "$prebuild_dir/t3code-wsl-node-pty.json"`,
+    `printf '{"arch":"%s","modules":"%s","nodePtyVersion":"%s"}\\n' "$arch" "$modules" "$node_pty_version" > "$prebuild_dir/iskra-wsl-node-pty.json"`,
     `node -e 'require("node-pty")'`,
   ].join("\n");
 

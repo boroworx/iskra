@@ -1,5 +1,5 @@
-import { AgentId, CommandId, ProjectId, ProviderInstanceId } from "@t3tools/contracts";
-import { parseAgentFile, type AgentDefinition } from "@t3tools/shared/agentDefinitions";
+import { AgentId, CommandId, ProjectId, ProviderInstanceId } from "@iskra/contracts";
+import { parseAgentFile, type AgentDefinition } from "@iskra/shared/agentDefinitions";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
@@ -49,7 +49,7 @@ const layer = AgentDefinitionSync.layer.pipe(
   Layer.provideMerge(OrchestrationCommandReceiptRepositoryLive),
   Layer.provide(RepositoryIdentityResolver.layer),
   Layer.provide(SqlitePersistenceMemory),
-  Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-agent-files-test-" })),
+  Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "iskra-agent-files-test-" })),
   Layer.provide(Layer.succeed(Crypto.Crypto, testCrypto)),
   Layer.provideMerge(NodeServices.layer),
 );
@@ -91,7 +91,9 @@ const makeProject = Effect.fn("makeProject")(function* (name: string) {
     agents: snapshotQuery
       .getCommandReadModel()
       .pipe(
-        Effect.map((model) => (model.agents ?? []).filter((agent) => agent.projectId === projectId)),
+        Effect.map((model) =>
+          (model.agents ?? []).filter((agent) => agent.projectId === projectId),
+        ),
       ),
     reconcile: sync.reconcile(projectId),
   };
@@ -126,74 +128,81 @@ it.layer(layer)("AgentDefinitionSync", (it) => {
     ),
   );
 
-  it.effect("follows a renamed file by id, archives a deleted one and restores it when re-added", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const world = yield* makeProject("rename");
-        yield* world.writeAgentFile("backend.md", "---\n---\nOwns the server.\n");
-        yield* world.reconcile;
-        const agentId = (yield* world.agents)[0]?.id;
-        expect(agentId).toBeDefined();
+  it.effect(
+    "follows a renamed file by id, archives a deleted one and restores it when re-added",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const world = yield* makeProject("rename");
+          yield* world.writeAgentFile("backend.md", "---\n---\nOwns the server.\n");
+          yield* world.reconcile;
+          const agentId = (yield* world.agents)[0]?.id;
+          expect(agentId).toBeDefined();
 
-        yield* world.fileSystem.remove(world.agentFile("backend.md"));
-        yield* world.writeAgentFile("api.md", `---\nid: ${agentId}\nname: api\n---\nOwns the API.\n`);
-        yield* world.reconcile;
-        expect(yield* world.agents).toMatchObject([
-          { id: agentId, name: "api", rolePrompt: "Owns the API.", archivedAt: null },
-        ]);
+          yield* world.fileSystem.remove(world.agentFile("backend.md"));
+          yield* world.writeAgentFile(
+            "api.md",
+            `---\nid: ${agentId}\nname: api\n---\nOwns the API.\n`,
+          );
+          yield* world.reconcile;
+          expect(yield* world.agents).toMatchObject([
+            { id: agentId, name: "api", rolePrompt: "Owns the API.", archivedAt: null },
+          ]);
 
-        yield* world.fileSystem.remove(world.agentFile("api.md"));
-        yield* world.reconcile;
-        expect((yield* world.agents)[0]?.archivedAt).not.toBeNull();
+          yield* world.fileSystem.remove(world.agentFile("api.md"));
+          yield* world.reconcile;
+          expect((yield* world.agents)[0]?.archivedAt).not.toBeNull();
 
-        yield* world.writeAgentFile("api.md", "---\n---\nBack again.\n");
-        yield* world.reconcile;
-        expect(yield* world.agents).toMatchObject([
-          { id: agentId, name: "api", rolePrompt: "Back again.", archivedAt: null },
-        ]);
-      }),
-    ),
+          yield* world.writeAgentFile("api.md", "---\n---\nBack again.\n");
+          yield* world.reconcile;
+          expect(yield* world.agents).toMatchObject([
+            { id: agentId, name: "api", rolePrompt: "Back again.", archivedAt: null },
+          ]);
+        }),
+      ),
   );
 
-  it.effect("writes out a project's agents when it has no agent files, then leaves them alone", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const world = yield* makeProject("migrate");
-        const agentId = AgentId.make("agent-migrate");
-        yield* world.engine.dispatch({
-          type: "agent.create",
-          commandId: CommandId.make("cmd-agent-migrate"),
-          agentId,
-          projectId: world.projectId,
-          name: "reviewer",
-          roleTags: ["review"],
-          rolePrompt: "Reviews changes.",
-          modelSelection: haiku,
-          capabilities: ["read"],
-          createdAt: now,
-        });
-
-        yield* world.reconcile;
-
-        const contents = yield* world.fileSystem.readFileString(world.agentFile("reviewer.md"));
-        expect(parseAgentFile(contents, "reviewer.md")).toEqual({
-          ok: true,
-          definition: {
-            id: agentId,
+  it.effect(
+    "writes out a project's agents when it has no agent files, then leaves them alone",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const world = yield* makeProject("migrate");
+          const agentId = AgentId.make("agent-migrate");
+          yield* world.engine.dispatch({
+            type: "agent.create",
+            commandId: CommandId.make("cmd-agent-migrate"),
+            agentId,
+            projectId: world.projectId,
             name: "reviewer",
-            avatar: null,
-            tags: ["review"],
+            roleTags: ["review"],
+            rolePrompt: "Reviews changes.",
             modelSelection: haiku,
             capabilities: ["read"],
-            rolePrompt: "Reviews changes.",
-          },
-        });
-        const migrated = yield* world.agents;
-        yield* world.reconcile;
-        yield* world.reconcile;
-        expect(yield* world.agents).toEqual(migrated);
-      }),
-    ),
+            createdAt: now,
+          });
+
+          yield* world.reconcile;
+
+          const contents = yield* world.fileSystem.readFileString(world.agentFile("reviewer.md"));
+          expect(parseAgentFile(contents, "reviewer.md")).toEqual({
+            ok: true,
+            definition: {
+              id: agentId,
+              name: "reviewer",
+              avatar: null,
+              tags: ["review"],
+              modelSelection: haiku,
+              capabilities: ["read"],
+              rolePrompt: "Reviews changes.",
+            },
+          });
+          const migrated = yield* world.agents;
+          yield* world.reconcile;
+          yield* world.reconcile;
+          expect(yield* world.agents).toEqual(migrated);
+        }),
+      ),
   );
 
   it.effect("archives nothing while an agent file is broken", () =>

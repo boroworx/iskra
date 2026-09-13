@@ -4,49 +4,49 @@ import * as NodeDns from "node:dns";
 import * as NodeOS from "node:os";
 
 export const HostProcessPlatform = Context.Reference<NodeJS.Platform>(
-  "@t3tools/shared/hostProcess/HostProcessPlatform",
+  "@iskra/shared/hostProcess/HostProcessPlatform",
   {
     defaultValue: () => process.platform,
   },
 );
 
 export const HostProcessArchitecture = Context.Reference<NodeJS.Architecture>(
-  "@t3tools/shared/hostProcess/HostProcessArchitecture",
+  "@iskra/shared/hostProcess/HostProcessArchitecture",
   {
     defaultValue: () => process.arch,
   },
 );
 
 export const HostProcessHostname = Context.Reference<string>(
-  "@t3tools/shared/hostProcess/HostProcessHostname",
+  "@iskra/shared/hostProcess/HostProcessHostname",
   {
     defaultValue: () => NodeOS.hostname(),
   },
 );
 
 export const HostProcessEnvironment = Context.Reference<NodeJS.ProcessEnv>(
-  "@t3tools/shared/hostProcess/HostProcessEnvironment",
+  "@iskra/shared/hostProcess/HostProcessEnvironment",
   {
     defaultValue: () => process.env,
   },
 );
 
 export const HostProcessWorkingDirectory = Context.Reference<string>(
-  "@t3tools/shared/hostProcess/HostProcessWorkingDirectory",
+  "@iskra/shared/hostProcess/HostProcessWorkingDirectory",
   {
     defaultValue: () => process.cwd(),
   },
 );
 
 export const HostProcessExecutablePath = Context.Reference<string>(
-  "@t3tools/shared/hostProcess/HostProcessExecutablePath",
+  "@iskra/shared/hostProcess/HostProcessExecutablePath",
   {
     defaultValue: () => process.execPath,
   },
 );
 
 export const HostProcessArguments = Context.Reference<ReadonlyArray<string>>(
-  "@t3tools/shared/hostProcess/HostProcessArguments",
+  "@iskra/shared/hostProcess/HostProcessArguments",
   {
     defaultValue: () => process.argv,
   },
@@ -63,7 +63,7 @@ export const HostProcessArguments = Context.Reference<ReadonlyArray<string>>(
  * Best effort: a failed lookup just leaves the interface set.
  */
 export const HostProcessAddresses = Context.Reference<Effect.Effect<ReadonlySet<string>>>(
-  "@t3tools/shared/hostProcess/HostProcessAddresses",
+  "@iskra/shared/hostProcess/HostProcessAddresses",
   {
     defaultValue: () =>
       Effect.gen(function* () {
@@ -83,7 +83,7 @@ export const HostProcessAddresses = Context.Reference<Effect.Effect<ReadonlySet<
 
 /** Undefined on platforms without POSIX uids (Windows). */
 export const HostProcessUserId = Context.Reference<number | undefined>(
-  "@t3tools/shared/hostProcess/HostProcessUserId",
+  "@iskra/shared/hostProcess/HostProcessUserId",
   {
     defaultValue: () => process.getuid?.(),
   },

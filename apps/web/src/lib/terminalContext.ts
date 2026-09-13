@@ -1,5 +1,5 @@
-import type { ThreadId } from "@t3tools/contracts";
-import { formatComposerContextReference } from "@t3tools/shared/composerContextReferences";
+import type { ThreadId } from "@iskra/contracts";
+import { formatComposerContextReference } from "@iskra/shared/composerContextReferences";
 import { toKindScopedComposerContextId } from "./composerContextReferences";
 
 export interface TerminalContextSelection {

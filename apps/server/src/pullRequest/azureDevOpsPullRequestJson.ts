@@ -8,9 +8,9 @@ import type {
   PullRequestMergeMethod,
   PullRequestMergeability,
   PullRequestState,
-} from "@t3tools/contracts";
-import { TrimmedNonEmptyString } from "@t3tools/contracts";
-import { decodeJsonResult } from "@t3tools/shared/schemaJson";
+} from "@iskra/contracts";
+import { TrimmedNonEmptyString } from "@iskra/contracts";
+import { decodeJsonResult } from "@iskra/shared/schemaJson";
 
 import {
   azureDevOpsOrganizationBaseFromRestApiUrl,

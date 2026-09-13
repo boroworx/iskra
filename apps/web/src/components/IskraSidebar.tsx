@@ -1,11 +1,11 @@
-import type { EnvironmentProject } from "@t3tools/client-runtime/state/models";
+import type { EnvironmentProject } from "@iskra/client-runtime/state/models";
 import {
   agentIdOfDmThread,
   type ChannelId,
   type EnvironmentId,
   type ProjectId,
   type ThreadId,
-} from "@t3tools/contracts";
+} from "@iskra/contracts";
 import { Link, useParams } from "@tanstack/react-router";
 import { AtSignIcon, HashIcon, PlusIcon } from "lucide-react";
 import { memo, useMemo, useState, type ReactNode } from "react";

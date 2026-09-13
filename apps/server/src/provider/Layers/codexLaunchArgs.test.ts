@@ -9,22 +9,22 @@ import {
 } from "./codexLaunchArgs.ts";
 
 describe("resolveCodexLaunchArgs", () => {
-  it("uses T3CODE_CODEX_LAUNCH_ARGS before configured settings", () => {
+  it("uses ISKRA_CODEX_LAUNCH_ARGS before configured settings", () => {
     NodeAssert.equal(
-      resolveCodexLaunchArgs(" --strict-config ", { T3CODE_CODEX_LAUNCH_ARGS: "--enable foo" }),
+      resolveCodexLaunchArgs(" --strict-config ", { ISKRA_CODEX_LAUNCH_ARGS: "--enable foo" }),
       "--enable foo",
     );
   });
 
-  it("uses configured settings when T3CODE_CODEX_LAUNCH_ARGS is empty", () => {
+  it("uses configured settings when ISKRA_CODEX_LAUNCH_ARGS is empty", () => {
     NodeAssert.equal(
-      resolveCodexLaunchArgs(" --strict-config ", { T3CODE_CODEX_LAUNCH_ARGS: "   " }),
+      resolveCodexLaunchArgs(" --strict-config ", { ISKRA_CODEX_LAUNCH_ARGS: "   " }),
       "--strict-config",
     );
   });
 
   it("ignores whitespace-only environment values", () => {
-    NodeAssert.equal(resolveCodexLaunchArgs("", { T3CODE_CODEX_LAUNCH_ARGS: "   " }), "");
+    NodeAssert.equal(resolveCodexLaunchArgs("", { ISKRA_CODEX_LAUNCH_ARGS: "   " }), "");
   });
 });
 

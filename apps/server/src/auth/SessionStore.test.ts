@@ -1,5 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId } from "@iskra/contracts";
 import { expect, it } from "@effect/vitest";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -28,7 +28,9 @@ const makeServerConfigLayer = (overrides?: Partial<ServerConfig.ServerConfig["Se
         ...overrides,
       } satisfies ServerConfig.ServerConfig["Service"];
     }),
-  ).pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-auth-session-test-" })));
+  ).pipe(
+    Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "iskra-auth-session-test-" })),
+  );
 
 const makeServerEnvironmentLayer = (environmentId: EnvironmentId) =>
   Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
@@ -94,9 +96,9 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
           ),
         );
 
-      const original = yield* cookieName("/srv/t3-one", EnvironmentId.make("environment-one"));
-      const moved = yield* cookieName("/srv/t3-moved", EnvironmentId.make("environment-one"));
-      const other = yield* cookieName("/srv/t3-one", EnvironmentId.make("environment-two"));
+      const original = yield* cookieName("/srv/iskra-one", EnvironmentId.make("environment-one"));
+      const moved = yield* cookieName("/srv/iskra-moved", EnvironmentId.make("environment-one"));
+      const other = yield* cookieName("/srv/iskra-one", EnvironmentId.make("environment-two"));
 
       expect(moved).toBe(original);
       expect(other).not.toBe(original);

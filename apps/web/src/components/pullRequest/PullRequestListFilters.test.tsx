@@ -1,4 +1,4 @@
-import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectId } from "@iskra/contracts";
 import { CircleIcon } from "lucide-react";
 import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -120,7 +120,7 @@ describe("pull request filters menu", () => {
           id: projectId,
           environmentId,
           title: "Iskra",
-          workspaceRoot: "/work/t3code",
+          workspaceRoot: "/work/iskra",
         },
       ],
       projectId,
@@ -146,13 +146,13 @@ describe("pull request filters menu", () => {
           id: projectId,
           environmentId: "env-1" as EnvironmentId,
           title: "Iskra · one",
-          workspaceRoot: "/work/t3code-1",
+          workspaceRoot: "/work/iskra-1",
         },
         {
           id: projectId,
           environmentId: "env-2" as EnvironmentId,
           title: "Iskra · two",
-          workspaceRoot: "/work/t3code-2",
+          workspaceRoot: "/work/iskra-2",
         },
       ],
       onProject,

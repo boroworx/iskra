@@ -11,7 +11,7 @@ session or catalog state.
 
 ## Process and account isolation
 
-T3-managed OpenCode chat uses one server per thread. Its MCP registrations are directory-scoped, while
+Iskra-managed OpenCode chat uses one server per thread. Its MCP registrations are directory-scoped, while
 Iskra's MCP connection is thread-scoped. Sharing a chat server between threads in one directory would
 let them replace each other's connection. Catalog and text-generation work can share the
 [instance-owned helper](../../apps/server/src/provider/OpenCodeServerOwner.ts), which closes

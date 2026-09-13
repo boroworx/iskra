@@ -12,7 +12,7 @@ import {
   type OrchestrationProject,
   type OrchestrationReadModel,
   type ProjectId,
-} from "@t3tools/contracts";
+} from "@iskra/contracts";
 import {
   AGENT_DEFINITIONS_DIR,
   IMPORTABLE_AGENT_SOURCES,
@@ -22,7 +22,7 @@ import {
   withAgentId,
   type AgentDefinition,
   type AgentFileResult,
-} from "@t3tools/shared/agentDefinitions";
+} from "@iskra/shared/agentDefinitions";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -70,7 +70,7 @@ export class AgentDefinitionSync extends Context.Service<
       projectId: ProjectId,
     ) => Effect.Effect<AgentImportResult, AgentDefinitionError>;
   }
->()("t3/orchestration/AgentDefinitionSync") {}
+>()("@iskra/cli/orchestration/AgentDefinitionSync") {}
 
 const CLAUDE_INSTANCE = ProviderInstanceId.make("claudeAgent");
 const DEFAULT_CLAUDE_MODEL =
@@ -84,7 +84,10 @@ export function resolveImportedModel(model: string | null): ModelSelection {
   const slug = model === null ? null : resolveClaudeModelSlug(BUNDLED_CLAUDE_MODEL_CATALOG, model);
   const known =
     slug !== null && BUNDLED_CLAUDE_MODEL_CATALOG.models.some((entry) => entry.model.slug === slug);
-  return { instanceId: CLAUDE_INSTANCE, model: known && slug !== null ? slug : DEFAULT_CLAUDE_MODEL };
+  return {
+    instanceId: CLAUDE_INSTANCE,
+    model: known && slug !== null ? slug : DEFAULT_CLAUDE_MODEL,
+  };
 }
 
 const definitionOfAgent = (agent: OrchestrationAgent): AgentDefinition => ({
@@ -161,8 +164,7 @@ const make = Effect.gen(function* () {
       ? Effect.fail(new AgentDefinitionError({ message: "The project no longer exists." }))
       : Effect.succeed(project);
   };
-  const dispatch = (command: OrchestrationCommand) =>
-    engine.dispatch(command).pipe(Effect.asVoid);
+  const dispatch = (command: OrchestrationCommand) => engine.dispatch(command).pipe(Effect.asVoid);
   const agentsDir = (project: OrchestrationProject) =>
     path.join(project.workspaceRoot, AGENT_DEFINITIONS_DIR);
 
@@ -173,17 +175,13 @@ const make = Effect.gen(function* () {
         .toSorted();
       return yield* Effect.forEach(names, (name) => {
         const filePath = path.join(dir, name);
-        return fileSystem
-          .readFileString(filePath)
-          .pipe(
-            Effect.map(
-              (contents): AgentFile => ({
-                filePath,
-                contents,
-                result: parseAgentFile(contents, name),
-              }),
-            ),
-          );
+        return fileSystem.readFileString(filePath).pipe(
+          Effect.map((contents): AgentFile => ({
+            filePath,
+            contents,
+            result: parseAgentFile(contents, name),
+          })),
+        );
       });
     });
 
@@ -278,15 +276,19 @@ const make = Effect.gen(function* () {
       for (const file of files) {
         if (!file.result.ok) {
           complete = false;
-          yield* report(file.filePath, `Agent file ${file.filePath} is invalid: ${file.result.error}`);
+          yield* report(
+            file.filePath,
+            `Agent file ${file.filePath} is invalid: ${file.result.error}`,
+          );
           continue;
         }
         const definition = file.result.definition;
         let agentId = definition.id;
         if (agentId === null) {
           agentId =
-            projectAgents.find((agent) => agent.name === definition.name && !claimedIds.has(agent.id))
-              ?.id ?? (yield* newAgentId);
+            projectAgents.find(
+              (agent) => agent.name === definition.name && !claimedIds.has(agent.id),
+            )?.id ?? (yield* newAgentId);
           claimedIds.add(agentId);
           yield* fileSystem.writeFileString(file.filePath, withAgentId(file.contents, agentId));
         }
@@ -299,15 +301,19 @@ const make = Effect.gen(function* () {
         const existing = allAgents.find((agent) => agent.id === agentId);
         if (existing !== undefined && existing.projectId !== project.id) {
           complete = false;
-          yield* report(file.filePath, `Agent file ${file.filePath} uses another project's agent id.`);
+          yield* report(
+            file.filePath,
+            `Agent file ${file.filePath} uses another project's agent id.`,
+          );
           continue;
         }
         const applied = yield* applyDefinition(project, agentId, definition, existing).pipe(
           Effect.as(true),
           Effect.catchCause((cause) =>
-            reportFailure(file.filePath, `Agent file ${file.filePath} was not applied`)(cause).pipe(
-              Effect.as(false),
-            ),
+            reportFailure(
+              file.filePath,
+              `Agent file ${file.filePath} was not applied`,
+            )(cause).pipe(Effect.as(false)),
           ),
         );
         if (applied) {
@@ -372,8 +378,7 @@ const make = Effect.gen(function* () {
           definition.id ??
           projectAgents.find(
             (agent) =>
-              agent.name === definition.name &&
-              !files.some((file) => definedId(file) === agent.id),
+              agent.name === definition.name && !files.some((file) => definedId(file) === agent.id),
           )?.id ??
           (yield* newAgentId);
         if (files.some((file) => file.filePath === target && definedId(file) !== agentId)) {
@@ -381,7 +386,10 @@ const make = Effect.gen(function* () {
             message: `Another agent is already defined in ${AGENT_DEFINITIONS_DIR}/${definition.name}.md.`,
           });
         }
-        yield* fileSystem.writeFileString(target, serializeAgentFile({ ...definition, id: agentId }));
+        yield* fileSystem.writeFileString(
+          target,
+          serializeAgentFile({ ...definition, id: agentId }),
+        );
         // A rename leaves the old file behind; remove it so the agent is defined once.
         for (const file of files) {
           if (file.filePath !== target && definedId(file) === agentId) {
@@ -441,7 +449,10 @@ const make = Effect.gen(function* () {
               continue;
             }
             if (takenNames.has(result.definition.name)) {
-              skipped.push({ file, reason: `An agent named ${result.definition.name} already exists.` });
+              skipped.push({
+                file,
+                reason: `An agent named ${result.definition.name} already exists.`,
+              });
               continue;
             }
             yield* fileSystem.makeDirectory(dir, { recursive: true });

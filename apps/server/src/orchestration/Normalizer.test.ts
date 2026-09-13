@@ -6,7 +6,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@iskra/contracts";
 
 import { canonicalizeClientCommandTimestamps } from "./Normalizer.ts";
 

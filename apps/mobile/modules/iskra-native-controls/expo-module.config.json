@@ -1,0 +1,12 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["IskraNativeControlsModule", "IskraKeyboardCommandsModule"]
+  },
+  "android": {
+    "modules": [
+      "expo.modules.iskranativecontrols.IskraNativeControlsModule",
+      "expo.modules.iskranativecontrols.IskraKeyboardCommandsModule"
+    ]
+  }
+}

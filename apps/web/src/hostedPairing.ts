@@ -93,7 +93,7 @@ export function buildHostedChannelSelectionUrl(input: {
 }): string | null {
   const hostedAppUrl = configuredHostedAppUrl();
   if (hostedAppUrl === null) return null;
-  const url = new URL("/__t3code/channel", hostedAppUrl);
+  const url = new URL("/__iskra/channel", hostedAppUrl);
   url.searchParams.set("channel", input.channel);
   return url.toString();
 }

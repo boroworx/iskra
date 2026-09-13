@@ -1,4 +1,4 @@
-import { ChannelId, type AgentId, type EnvironmentId, type ProjectId } from "@t3tools/contracts";
+import { ChannelId, type AgentId, type EnvironmentId, type ProjectId } from "@iskra/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useId, useState } from "react";
 

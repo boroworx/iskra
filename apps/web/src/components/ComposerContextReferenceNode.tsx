@@ -1,5 +1,5 @@
-import { formatComposerContextReference } from "@t3tools/shared/composerContextReferences";
-import type { ComposerContextId } from "@t3tools/contracts";
+import { formatComposerContextReference } from "@iskra/shared/composerContextReferences";
+import type { ComposerContextId } from "@iskra/contracts";
 import {
   $applyNodeReplacement,
   DecoratorNode,

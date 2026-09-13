@@ -1,5 +1,5 @@
-import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import { EnvironmentId, ProjectId, ProviderInstanceId } from "@t3tools/contracts";
+import type { EnvironmentProject } from "@iskra/client-runtime/state/shell";
+import { EnvironmentId, ProjectId, ProviderInstanceId } from "@iskra/contracts";
 import { assert, it } from "@effect/vitest";
 
 import {
@@ -10,9 +10,9 @@ import {
 const projects: ReadonlyArray<EnvironmentProject> = [
   {
     environmentId: EnvironmentId.make("moonbase-terminal"),
-    id: ProjectId.make("t3code"),
+    id: ProjectId.make("iskra"),
     title: "Iskra",
-    workspaceRoot: "/workspace/t3code",
+    workspaceRoot: "/workspace/iskra",
     repositoryIdentity: null,
     defaultModelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
     scripts: [],
@@ -47,7 +47,7 @@ it("builds sendable-looking pending tasks against real showcase projects", () =>
     [
       {
         environmentId: "moonbase-terminal",
-        projectId: "t3code",
+        projectId: "iskra",
         title: "Iskra",
         branch: "feat/offline-launchpad",
         createdAt: "2026-07-16T08:52:00.000Z",

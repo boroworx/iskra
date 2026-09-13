@@ -4,7 +4,7 @@ import { formatStartupCrashReport, parseStartupCrashRecords } from "./crash-log-
 
 // Verbatim shape of the entry expo-updates wrote for the build 56 launch crash.
 const BUNDLE =
-  "/Users/expo/workingdir/build/apps/mobile/ios/build/Build/Intermediates.noindex/ArchiveIntermediates/T3Code/BuildProductsPath/Release-iphoneos/main.jsbundle";
+  "/Users/expo/workingdir/build/apps/mobile/ios/build/Build/Intermediates.noindex/ArchiveIntermediates/Iskra/BuildProductsPath/Release-iphoneos/main.jsbundle";
 const FATAL = {
   timestamp: 1789277752000,
   level: "error",

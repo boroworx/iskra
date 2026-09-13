@@ -19,8 +19,8 @@ import {
   TrimmedNonEmptyString,
   type ProviderDriverKind,
   type ServerProviderModel,
-} from "@t3tools/contracts";
-import { codexModelFamily } from "@t3tools/shared/model";
+} from "@iskra/contracts";
+import { codexModelFamily } from "@iskra/shared/model";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -318,7 +318,7 @@ export class ModelManifest extends Context.Service<
      * the teardown of whichever instance happened to trigger it. */
     readonly refreshInBackground: Effect.Effect<void>;
   }
->()("t3/provider/ModelManifest") {}
+>()("@iskra/cli/provider/ModelManifest") {}
 
 /** Bundled-data service backing both the default and test layers. */
 const BundledOnlyModelManifest: ModelManifest["Service"] = {

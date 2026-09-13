@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { AgentId, ChannelId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
-import type { OrchestrationShellSnapshot, OrchestrationShellStreamEvent } from "@t3tools/contracts";
+import { AgentId, ChannelId, ProjectId, ProviderInstanceId, ThreadId } from "@iskra/contracts";
+import type { OrchestrationShellSnapshot, OrchestrationShellStreamEvent } from "@iskra/contracts";
 
 import { applyShellStreamEvent } from "./shellReducer.ts";
 

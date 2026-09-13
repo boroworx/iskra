@@ -1,4 +1,4 @@
-import type { AgentId, OrchestrationAgent } from "@t3tools/contracts";
+import type { AgentId, OrchestrationAgent } from "@iskra/contracts";
 
 // `@name` at the start of the text or after a non-word character, so an email
 // address such as `dev@backend.io` is not a mention.

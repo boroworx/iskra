@@ -3,7 +3,7 @@ import type { NativeStackNavigationOptions } from "@react-navigation/native-stac
 import { Platform, View } from "react-native";
 
 import { AppText as Text } from "./AppText";
-import { T3Wordmark } from "./T3Wordmark";
+import { IskraWordmark } from "./IskraWordmark";
 import { IPAD_HOME_TITLE_OFFSET } from "../lib/layoutMetrics";
 import { resolveMobileStageLabel } from "../lib/mobileBranding";
 
@@ -36,11 +36,11 @@ export function CompactBrandTitle(
       className="flex-row items-center gap-2"
       style={{ marginLeft: titleOffset }}
     >
-      <T3Wordmark colorClassName="accent-icon" height={15} />
+      <IskraWordmark colorClassName="accent-icon" height={15} />
       <View className="rounded-full bg-subtle px-1.5 py-0.5">
         <Text
           allowFontScaling={props.allowFontScaling}
-          className="font-t3-bold text-[9px] tracking-[0.9px] text-foreground-muted uppercase"
+          className="font-iskra-bold text-[9px] tracking-[0.9px] text-foreground-muted uppercase"
         >
           {stageLabel}
         </Text>

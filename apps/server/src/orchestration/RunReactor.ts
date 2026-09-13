@@ -7,8 +7,8 @@ import {
   type ChannelDeliveryStatus,
   type ChannelId,
   type OrchestrationEvent,
-} from "@t3tools/contracts";
-import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+} from "@iskra/contracts";
+import { makeDrainableWorker } from "@iskra/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -53,7 +53,7 @@ export class RunReactor extends Context.Service<
     readonly start: () => Effect.Effect<void, never, Scope.Scope>;
     readonly drain: Effect.Effect<void>;
   }
->()("t3/orchestration/RunReactor") {}
+>()("@iskra/cli/orchestration/RunReactor") {}
 
 type WakeRequestedEvent = Extract<OrchestrationEvent, { type: "channel.agent-wake-requested" }>;
 

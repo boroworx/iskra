@@ -14,7 +14,7 @@ import {
   ProjectId,
   RunCapabilities,
   TrimmedNonEmptyString,
-} from "@t3tools/contracts";
+} from "@iskra/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 import type * as Option from "effect/Option";
@@ -73,4 +73,4 @@ export interface ProjectionAgentRepositoryShape {
 export class ProjectionAgentRepository extends Context.Service<
   ProjectionAgentRepository,
   ProjectionAgentRepositoryShape
->()("t3/persistence/Services/ProjectionAgents/ProjectionAgentRepository") {}
+>()("@iskra/cli/persistence/Services/ProjectionAgents/ProjectionAgentRepository") {}

@@ -4,7 +4,7 @@ import {
   TurnId,
   ProviderInstanceId,
   OrchestrationProposedPlanId,
-} from "@t3tools/contracts";
+} from "@iskra/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -473,14 +473,14 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
       const threads = yield* ProjectionThreadRepository;
       const linkedPullRequest = {
         projectId: ProjectId.make("project-linked-pr"),
-        repository: "pingdotgg/t3code",
+        repository: "boroworx/iskra",
         number: 42,
-        url: "https://github.com/pingdotgg/t3code/pull/42",
+        url: "https://github.com/boroworx/iskra/pull/42",
       };
       const branchPullRequest = {
         ...linkedPullRequest,
         number: 43,
-        url: "https://github.com/pingdotgg/t3code/pull/43",
+        url: "https://github.com/boroworx/iskra/pull/43",
       };
 
       yield* threads.upsert({
@@ -593,9 +593,9 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
       const unsynced: ProjectionThreadPullRequest = {
         threadId,
         host: "github.com",
-        repository: "pingdotgg/t3code",
+        repository: "boroworx/iskra",
         number: 42,
-        url: "https://github.com/pingdotgg/t3code/pull/42",
+        url: "https://github.com/boroworx/iskra/pull/42",
         source: "manual",
         linkedAt: "2026-03-24T00:00:00.000Z",
         snapshot: null,
@@ -604,9 +604,9 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
       const synced: ProjectionThreadPullRequest = {
         threadId,
         host: "github.com",
-        repository: "pingdotgg/t3code",
+        repository: "boroworx/iskra",
         number: 7,
-        url: "https://github.com/pingdotgg/t3code/pull/7",
+        url: "https://github.com/boroworx/iskra/pull/7",
         source: "stack",
         linkedAt: "2026-03-23T00:00:00.000Z",
         snapshot: {
@@ -622,7 +622,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
           kind: "native",
           id: "stack-1",
           number: 1,
-          url: "https://github.com/pingdotgg/t3code/stack/1",
+          url: "https://github.com/boroworx/iskra/stack/1",
           base: "main",
           layers: [
             { number: 7, headBranch: "feat/links", state: "open" },
@@ -666,7 +666,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
       assert.deepStrictEqual(
         yield* pullRequests.listByPullRequest({
           host: "github.com",
-          repository: "pingdotgg/t3code",
+          repository: "boroworx/iskra",
           number: 42,
         }),
         [unsynced, sharedOnOtherThread],
@@ -680,7 +680,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
       yield* pullRequests.delete({
         threadId,
         host: "github.com",
-        repository: "pingdotgg/t3code",
+        repository: "boroworx/iskra",
         number: 7,
       });
       assert.deepStrictEqual(yield* pullRequests.listByThreadId({ threadId }), [resynced]);

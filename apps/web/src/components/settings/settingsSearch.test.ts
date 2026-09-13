@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId } from "@iskra/contracts";
 
 import {
   filterAvailableSettingsSearchItems,
@@ -163,7 +163,7 @@ describe("searchSettings", () => {
       "provider-health-check-interval",
       "source-control-writer-model",
       "source-control-writing-style",
-      "t3-connect",
+      "iskra-connect",
       "tailscale-https",
       "wsl-backend",
       "auto-settle-inactive-threads",

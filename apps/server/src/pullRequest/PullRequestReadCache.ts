@@ -2,7 +2,7 @@ import * as Cache from "effect/Cache";
 import * as Clock from "effect/Clock";
 import * as Equal from "effect/Equal";
 import * as Hash from "effect/Hash";
-import { PullRequestOperationError, PullRequestUnavailableError } from "@t3tools/contracts";
+import { PullRequestOperationError, PullRequestUnavailableError } from "@iskra/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Encoding from "effect/Encoding";
 import * as Option from "effect/Option";
@@ -47,7 +47,7 @@ export class PullRequestReadCache extends Context.Service<
     ) => Effect.Effect<string, ReadError>;
     readonly invalidate: Effect.Effect<void>;
   }
->()("t3/pullRequest/PullRequestReadCache") {}
+>()("@iskra/cli/pullRequest/PullRequestReadCache") {}
 
 export const make = Effect.gen(function* () {
   const backing = yield* KeyValueStore.KeyValueStore;

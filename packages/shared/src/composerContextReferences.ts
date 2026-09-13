@@ -5,15 +5,15 @@ import {
   type ComposerContextRecord,
   type ElementContextDetails,
   type KnownComposerContextRecord,
-} from "@t3tools/contracts";
+} from "@iskra/contracts";
 
 /**
- * Canonical inline reference: `[label](t3-context://v1/<kind>/<contextId>)`, or the image
+ * Canonical inline reference: `[label](iskra-context://v1/<kind>/<contextId>)`, or the image
  * form `![label](...)`. The link carries position and identity only; the payload lives in the
  * message's context records. Labels are display text and never identity.
  */
 
-const CONTEXT_PROTOCOL = "t3-context:";
+const CONTEXT_PROTOCOL = "iskra-context:";
 const COMPOSER_CONTEXT_HREF_PREFIX = `${CONTEXT_PROTOCOL}//v1/`;
 const CONTEXT_KIND_PATTERN = /^[a-z][a-z0-9-]{0,39}$/;
 const CONTEXT_ID_PATTERN = /^[a-z0-9_-]{1,128}$/i;
@@ -76,7 +76,7 @@ export function collectComposerContextReferences(
   const occurrences: ComposerContextReferenceOccurrence[] = [];
   // No link can match without the protocol prefix; skip the scan entirely on
   // plain prose so long messages never pay for a regex walk per `[`.
-  if (!text.includes("](t3-context:")) return occurrences;
+  if (!text.includes("](iskra-context:")) return occurrences;
   for (const match of text.matchAll(CONTEXT_LINK)) {
     const parsed = parseComposerContextHref(match[3]!);
     if (!parsed) continue;
@@ -109,7 +109,7 @@ export function replaceComposerContextReferences(
 // Provider projection
 // ---------------------------------------------------------------------------
 
-const CONTEXT_ENVELOPE_TAG = "t3_context";
+const CONTEXT_ENVELOPE_TAG = "iskra_context";
 const CONTEXT_ENTRY_TAG = "context";
 
 function kindDisplayName(kind: ComposerContextKind): string {
@@ -131,7 +131,7 @@ export function formatComposerContextProviderMarker(
 }
 
 /**
- * Captured text is data. A terminal line or PR comment that contains `</t3_context>` or
+ * Captured text is data. A terminal line or PR comment that contains `</iskra_context>` or
  * `</context>` must not be able to close the envelope and forge a record.
  */
 function escapeComposerContextPayloadText(text: string): string {

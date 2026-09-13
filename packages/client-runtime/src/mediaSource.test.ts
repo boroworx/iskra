@@ -1,4 +1,4 @@
-import { ThreadId } from "@t3tools/contracts";
+import { ThreadId } from "@iskra/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { resolveMediaSource } from "./mediaSource.ts";
@@ -41,7 +41,7 @@ describe("resolveMediaSource", () => {
       });
     });
 
-    it.each(["data:image/png;base64,AAAA", "blob:https://app.t3.codes/id"])(
+    it.each(["data:image/png;base64,AAAA", "blob:https://app.iskra.sh/id"])(
       "loads %s directly",
       (href) => {
         expect(resolveMediaSource(href, { threadId, imageEmbed: true })).toMatchObject({
@@ -131,7 +131,7 @@ describe("resolveMediaSource", () => {
   });
 
   it("serves Iskra attachment files in place like any other host path", () => {
-    const path = `/home/demo/.t3/userdata/attachments/${attachmentId}.mp4`;
+    const path = `/home/demo/.iskra/userdata/attachments/${attachmentId}.mp4`;
     expect(resolveMediaSource(path, { threadId, workspaceRoot: "/repo" })).toMatchObject({
       kind: "video",
       access: "environment",

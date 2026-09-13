@@ -4,7 +4,7 @@ import {
   agentDmThreadId,
   type EnvironmentId,
   type OrchestrationAgentShell,
-} from "@t3tools/contracts";
+} from "@iskra/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 

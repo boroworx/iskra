@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import { toPersistenceSqlError } from "../Errors.ts";
-import { OrchestrationRun } from "@t3tools/contracts";
+import { OrchestrationRun } from "@iskra/contracts";
 
 import {
   EndProjectionRunInput,

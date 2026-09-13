@@ -1,8 +1,8 @@
-import { upgradeLegacyContextMessage } from "@t3tools/shared/composerContextLegacy";
+import { upgradeLegacyContextMessage } from "@iskra/shared/composerContextLegacy";
 import { elementContextToPreviewAnnotation } from "../lib/elementContext";
 import { previewAnnotationContextRecord } from "../lib/composerContextRecords";
-import { EnvironmentId, MessageId, ThreadId, type AssistantCitation } from "@t3tools/contracts";
-import { serializeAssistantCitation } from "@t3tools/shared/assistantCitations";
+import { EnvironmentId, MessageId, ThreadId, type AssistantCitation } from "@iskra/contracts";
+import { serializeAssistantCitation } from "@iskra/shared/assistantCitations";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import {
   $createParagraphNode,
@@ -519,7 +519,7 @@ describe("context reference paste", () => {
       );
       const imported: string[] = [];
       const importFragment = (
-        fragment: import("@t3tools/contracts").ComposerContextClipboardFragment,
+        fragment: import("@iskra/contracts").ComposerContextClipboardFragment,
       ) => {
         imported.push(...fragment.records.map((record) => record.contextId));
         return new Map([["img-old", "img-new"]]);
@@ -533,9 +533,9 @@ describe("context reference paste", () => {
         importContextFragment: importFragment,
       });
       const event = new TestClipboardEvent(
-        `${prefix}![shot](t3-context://v1/image/img-old) and [T](t3-context://v1/terminal/ctx-t)`,
+        `${prefix}![shot](iskra-context://v1/image/img-old) and [T](iskra-context://v1/terminal/ctx-t)`,
         {
-          "web application/x-t3-context-fragment+json": JSON.stringify({
+          "web application/x-iskra-context-fragment+json": JSON.stringify({
             version: 1,
             source: { environmentId: "env-1" },
             records: [
@@ -579,7 +579,7 @@ describe("context reference paste", () => {
       ).toEqual(["img-old", "ctx-t"]);
       if (focus === "blurred") {
         expect(importPastedComposerText(event.clipboardData, importFragment)).toBe(
-          `${prefix}![shot](t3-context://v1/image/img-new) and [T](t3-context://v1/terminal/ctx-t)`,
+          `${prefix}![shot](iskra-context://v1/image/img-new) and [T](iskra-context://v1/terminal/ctx-t)`,
         );
         expect(imported).toEqual(["img-old", "ctx-t"]);
         return;
@@ -614,7 +614,7 @@ describe("context reference paste", () => {
       ].join("\n"),
     );
     const event = new TestClipboardEvent(copied.text, {
-      "web application/x-t3-context-fragment+json": JSON.stringify({
+      "web application/x-iskra-context-fragment+json": JSON.stringify({
         version: 1,
         source: { environmentId: "env-1" },
         records: copied.records,
@@ -630,7 +630,7 @@ describe("context reference paste", () => {
       annotations.push(annotation);
       return new Map([[record.contextId, annotation.contextId]]);
     });
-    expect(text).toContain("t3-context://v1/preview-annotation/preview-annotation_imported");
+    expect(text).toContain("iskra-context://v1/preview-annotation/preview-annotation_imported");
     expect(annotations[0]?.elements?.[0]).toMatchObject({
       selector: "#save",
       htmlPreview: "<button>Save</button>",
@@ -664,9 +664,9 @@ describe("context reference paste", () => {
     const annotationId = "preview-annotation_ann-1";
     const screenshotId = "image_ann-1";
     const event = new TestClipboardEvent(
-      `[Fix button](t3-context://v1/preview-annotation/${annotationId})`,
+      `[Fix button](iskra-context://v1/preview-annotation/${annotationId})`,
       {
-        "web application/x-t3-context-fragment+json": JSON.stringify({
+        "web application/x-iskra-context-fragment+json": JSON.stringify({
           version: 1,
           source: { environmentId: "env-1" },
           records: [
@@ -723,7 +723,7 @@ describe("context reference paste", () => {
   it("turns pasted context links into reference nodes", () => {
     vi.stubGlobal("ClipboardEvent", TestClipboardEvent);
     const editor = createCitationEditor("see ");
-    pasteText(editor, "[Terminal 1 line 4](t3-context://v1/terminal/ctx-1) now");
+    pasteText(editor, "[Terminal 1 line 4](iskra-context://v1/terminal/ctx-1) now");
     expect(editor.getEditorState().read(() => $getRoot().getTextContent())).toBe(
       "see <context:ctx-1> now",
     );

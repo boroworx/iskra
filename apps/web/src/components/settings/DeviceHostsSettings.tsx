@@ -6,7 +6,7 @@ import type {
   DevicePlatformAvailability,
   EnvironmentId,
   SshDeviceHostConfig,
-} from "@t3tools/contracts";
+} from "@iskra/contracts";
 import * as Cause from "effect/Cause";
 import { randomUUID } from "../../lib/utils";
 import { useState } from "react";

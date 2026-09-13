@@ -1,6 +1,6 @@
-import { ThreadId } from "@t3tools/contracts";
+import { ThreadId } from "@iskra/contracts";
 import { describe, expect, it } from "vite-plus/test";
-import { collectComposerContextReferences } from "@t3tools/shared/composerContextReferences";
+import { collectComposerContextReferences } from "@iskra/shared/composerContextReferences";
 import { terminalContextRecord } from "./composerContextRecords";
 
 import {
@@ -49,7 +49,7 @@ describe("terminalContext", () => {
 
   it("formats a terminal context as a canonical reference link", () => {
     expect(formatTerminalContextReference(makeContext())).toBe(
-      "[Terminal 1 lines 12-13](t3-context://v1/terminal/terminal_context-1)",
+      "[Terminal 1 lines 12-13](iskra-context://v1/terminal/terminal_context-1)",
     );
   });
 

@@ -1,9 +1,9 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopeThreadRef } from "@iskra/client-runtime/environment";
 import type {
   EnvironmentId,
   OrchestrationAgentRun,
   OrchestrationChannelShell,
-} from "@t3tools/contracts";
+} from "@iskra/contracts";
 import { memo, useMemo, useState } from "react";
 
 import { useThreadDetail } from "~/state/entities";

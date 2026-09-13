@@ -6,7 +6,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   agentDmThreadId,
-} from "@t3tools/contracts";
+} from "@iskra/contracts";
 import type {
   OrchestrationAgentShell,
   OrchestrationChannelMessage,
@@ -14,7 +14,7 @@ import type {
   OrchestrationMessage,
   OrchestrationThreadActivity,
   OrchestrationThreadShell,
-} from "@t3tools/contracts";
+} from "@iskra/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {

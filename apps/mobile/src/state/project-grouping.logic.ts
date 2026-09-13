@@ -1,5 +1,5 @@
-import type { ProjectGroupingSettings } from "@t3tools/client-runtime/state/project-grouping";
-import type { SidebarProjectGroupingMode } from "@t3tools/contracts";
+import type { ProjectGroupingSettings } from "@iskra/client-runtime/state/project-grouping";
+import type { SidebarProjectGroupingMode } from "@iskra/contracts";
 
 import type { Preferences } from "../persistence/mobile-preferences";
 

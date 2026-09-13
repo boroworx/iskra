@@ -1,4 +1,4 @@
-import type { ChannelId, EnvironmentId } from "@t3tools/contracts";
+import type { ChannelId, EnvironmentId } from "@iskra/contracts";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { ChannelView } from "../components/channels/ChannelView";

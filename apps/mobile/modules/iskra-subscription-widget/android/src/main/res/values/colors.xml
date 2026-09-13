@@ -1,0 +1,5 @@
+<resources>
+  <color name="iskra_widget_background">#FAFAFA</color>
+  <color name="iskra_widget_foreground">#18181B</color>
+  <color name="iskra_widget_secondary">#52525B</color>
+</resources>

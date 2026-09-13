@@ -1,0 +1,10 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["IskraReviewDiffModule"],
+    "podspecPath": "IskraReviewDiffNative.podspec"
+  },
+  "android": {
+    "modules": ["expo.modules.iskrareviewdiff.IskraReviewDiffModule"]
+  }
+}

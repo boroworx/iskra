@@ -11,7 +11,7 @@ import {
   MessageId,
   type OrchestrationMessageContext,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@iskra/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -22,7 +22,7 @@ import { cleanupFailedUploadedAttachments, normalizeDispatchCommand } from "./No
 
 const testLayer = Layer.mergeAll(
   WorkspacePaths.layer,
-  ServerConfig.layerTest(process.cwd(), { prefix: "t3-normalizer-attachments-" }),
+  ServerConfig.layerTest(process.cwd(), { prefix: "iskra-normalizer-attachments-" }),
 ).pipe(Layer.provideMerge(NodeServices.layer));
 
 const attachmentUuid = "00000000-0000-4000-8000-0000000000aa";

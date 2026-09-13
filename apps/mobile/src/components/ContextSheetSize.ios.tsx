@@ -2,7 +2,7 @@ import { requireNativeView } from "expo";
 import type { ViewProps } from "react-native";
 
 const NativeSheetSize = requireNativeView<ViewProps & { contentHeight: number }>(
-  "T3NativeControls",
+  "IskraNativeControls",
   "ContextSheetSize",
 );
 

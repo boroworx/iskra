@@ -1,4 +1,4 @@
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId } from "@iskra/contracts";
 import { act, type ComponentProps, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { create, type ReactTestRenderer } from "react-test-renderer";
@@ -77,7 +77,7 @@ describe("ChatMarkdown context references", () => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     let renderer: ReactTestRenderer | undefined;
     const text =
-      "See [Terminal output](t3-context://v1/terminal/term-1) and ![Error image](t3-context://v1/image/img-1).";
+      "See [Terminal output](iskra-context://v1/terminal/term-1) and ![Error image](iskra-context://v1/image/img-1).";
     try {
       await act(async () => {
         renderer = create(
@@ -122,7 +122,7 @@ describe("ChatMarkdown context references", () => {
         renderer = create(
           <ChatMarkdown
             cwd={undefined}
-            text="See [**Bold** `code`](t3-context://v1/terminal/term-1)."
+            text="See [**Bold** `code`](iskra-context://v1/terminal/term-1)."
             renderContextReference={({ kind, label }) => {
               seen.push(`${kind}: ${label}`);
               return <button>{label}</button>;
@@ -164,7 +164,7 @@ describe("ChatMarkdown favicon privacy", () => {
       expect(renderer!.root.findAllByType("img")).toHaveLength(1);
       // GitHub links draw the brand mark in currentColor instead of fetching a favicon.
       await act(async () => {
-        renderer!.update(markdown("https://github.com/pingdotgg/t3code/pull/1"));
+        renderer!.update(markdown("https://github.com/boroworx/iskra/pull/1"));
       });
       expect(renderer!.root.findAllByType("img")).toHaveLength(0);
       expect(renderer!.root.findAllByType(GitHubIcon)).toHaveLength(1);

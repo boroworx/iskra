@@ -7,15 +7,12 @@ import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
 import { PlainTextPlugin } from "@lexical/react/LexicalPlainTextPlugin";
-import {
-  type ComposerContextClipboardFragment,
-  type ServerProviderSkill,
-} from "@t3tools/contracts";
+import { type ComposerContextClipboardFragment, type ServerProviderSkill } from "@iskra/contracts";
 import {
   COMPOSER_CONTEXT_CLIPBOARD_MIME,
   encodeComposerContextClipboardHtml,
-} from "@t3tools/shared/composerContextClipboard";
-import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
+} from "@iskra/shared/composerContextClipboard";
+import { serializeComposerFileLink } from "@iskra/shared/composerTrigger";
 import {
   $applyNodeReplacement,
   $createRangeSelectionFromDom,
@@ -100,7 +97,7 @@ import {
   ComposerContextRecordsContext,
   type ComposerDraftContextRecords,
 } from "./composerContextPresentation";
-import { formatProviderSkillDisplayName } from "@t3tools/client-runtime/providerSkills";
+import { formatProviderSkillDisplayName } from "@iskra/client-runtime/providerSkills";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { registerComposerInlineTokenPaste } from "./composerInlineTokenPaste";
 import { didComposerSelectionChangeVisibly } from "./composerSelection";
@@ -2088,7 +2085,7 @@ export function ComposerPromptEditor({
   const initialSkillMetadataRef = useRef(skillMetadataByName(skills));
   const initialConfig = useMemo<InitialConfigType>(
     () => ({
-      namespace: "t3tools-composer-editor",
+      namespace: "iskra-composer-editor",
       editable: true,
       nodes: [
         ComposerMentionNode,

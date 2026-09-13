@@ -10,8 +10,8 @@
  *
  * @module AnalyticsService
  */
-import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
-import type { ClientOs } from "@t3tools/contracts";
+import { HostProcessArchitecture, HostProcessPlatform } from "@iskra/shared/hostProcess";
+import type { ClientOs } from "@iskra/contracts";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -37,8 +37,8 @@ const TelemetryEnvConfig = Config.all({
   posthogKey: Config.nonEmptyString("ISKRA_POSTHOG_KEY").pipe(Config.option),
   posthogHost: Config.nonEmptyString("ISKRA_POSTHOG_HOST").pipe(Config.option),
   enabled: Config.boolean("ISKRA_TELEMETRY_ENABLED").pipe(Config.withDefault(false)),
-  flushBatchSize: Config.number("T3CODE_TELEMETRY_FLUSH_BATCH_SIZE").pipe(Config.withDefault(20)),
-  maxBufferedEvents: Config.number("T3CODE_TELEMETRY_MAX_BUFFERED_EVENTS").pipe(
+  flushBatchSize: Config.number("ISKRA_TELEMETRY_FLUSH_BATCH_SIZE").pipe(Config.withDefault(20)),
+  maxBufferedEvents: Config.number("ISKRA_TELEMETRY_MAX_BUFFERED_EVENTS").pipe(
     Config.withDefault(1_000),
   ),
   wslDistroName: Config.string("WSL_DISTRO_NAME").pipe(Config.option),
@@ -56,7 +56,7 @@ export class AnalyticsService extends Context.Service<
     /** Flush all currently queued telemetry events. */
     readonly flush: Effect.Effect<void>;
   }
->()("t3/telemetry/AnalyticsService") {
+>()("@iskra/cli/telemetry/AnalyticsService") {
   /** No-op layer for callers that intentionally disable telemetry. */
   static readonly layerTest = Layer.succeed(
     AnalyticsService,
@@ -143,7 +143,7 @@ export const make = Effect.gen(function* () {
           platform: hostPlatform,
           wsl: Option.getOrUndefined(telemetryConfig.wslDistroName),
           arch: hostArchitecture,
-          t3CodeVersion: packageJson.version,
+          iskraCodeVersion: packageJson.version,
           clientType,
           serverOs: serverOsFromNodePlatform(hostPlatform),
           serverArch: hostArchitecture,

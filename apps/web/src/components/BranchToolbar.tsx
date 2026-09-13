@@ -1,5 +1,5 @@
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { scopeProjectRef, scopeThreadRef } from "@iskra/client-runtime/environment";
+import type { EnvironmentId, ThreadId } from "@iskra/contracts";
 import {
   ChevronDownIcon,
   FolderGit2Icon,

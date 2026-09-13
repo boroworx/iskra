@@ -8,7 +8,7 @@ import {
   ProviderInstanceId,
   RunCapabilities,
   type RunCapability,
-} from "@t3tools/contracts";
+} from "@iskra/contracts";
 import * as Schema from "effect/Schema";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 

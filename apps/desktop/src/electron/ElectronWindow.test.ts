@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessPlatform } from "@iskra/shared/hostProcess";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -129,7 +129,7 @@ describe("ElectronWindow", () => {
         icon: {} as Electron.NativeImage,
         webPreferences: {
           preload: "/tmp/preload.js",
-          partition: "persist:t3code-preview-test",
+          partition: "persist:iskra-preview-test",
           sandbox: true,
           contextIsolation: true,
           nodeIntegration: false,
@@ -155,7 +155,7 @@ describe("ElectronWindow", () => {
         backgroundColor: "#101010",
         webPreferences: {
           preload: "/tmp/preload.js",
-          partition: "persist:t3code-preview-test",
+          partition: "persist:iskra-preview-test",
           backgroundThrottling: null,
           sandbox: true,
           contextIsolation: true,

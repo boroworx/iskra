@@ -1,4 +1,4 @@
-import { AgentId } from "@t3tools/contracts";
+import { AgentId } from "@iskra/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { parseMentions } from "./mentions.ts";

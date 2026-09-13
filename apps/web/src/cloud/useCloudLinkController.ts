@@ -1,10 +1,10 @@
 import { useAuth } from "@clerk/react";
-import { findErrorTraceId } from "@t3tools/client-runtime/errors";
+import { findErrorTraceId } from "@iskra/client-runtime/errors";
 import {
   isAtomCommandInterrupted,
   settlePromise,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@iskra/client-runtime/state/runtime";
 import { useState } from "react";
 
 import { toastManager } from "../components/ui/toast";
@@ -54,7 +54,7 @@ export function useCloudLinkController() {
     const message =
       cause instanceof Error ? cause.message : "Could not update Iskra Connect access.";
     const traceId = findErrorTraceId(cause);
-    console.error("[t3-connect] Could not update Iskra Connect", { message, traceId, cause });
+    console.error("[iskra-connect] Could not update Iskra Connect", { message, traceId, cause });
     setOperationError(traceId ? `${message} Trace ID: ${traceId}` : message);
     toastManager.add({
       type: "error",

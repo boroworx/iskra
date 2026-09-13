@@ -1,9 +1,6 @@
-import type { EnvironmentShellSummary } from "@t3tools/client-runtime/state/shell";
-import {
-  BearerConnectionProfile,
-  BearerConnectionTarget,
-} from "@t3tools/client-runtime/connection";
-import { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentShellSummary } from "@iskra/client-runtime/state/shell";
+import { BearerConnectionProfile, BearerConnectionTarget } from "@iskra/client-runtime/connection";
+import { EnvironmentId } from "@iskra/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Option from "effect/Option";
 

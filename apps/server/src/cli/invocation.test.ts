@@ -4,24 +4,27 @@ import { formatCliCommand } from "./invocation.ts";
 
 it("formats package runner commands from their cache entry paths", () => {
   for (const [entryPath, expected] of [
-    ["/home/theo/.npm/_npx/abc123/node_modules/t3/dist/bin.mjs", "npx @iskra/cli serve"],
+    ["/home/theo/.npm/_npx/abc123/node_modules/@iskra/cli/dist/bin.mjs", "npx @iskra/cli serve"],
     [
-      "C:\\Users\\theo\\AppData\\Local\\npm-cache\\_npx\\abc\\node_modules\\t3\\dist\\bin.mjs",
+      "C:\\Users\\theo\\AppData\\Local\\npm-cache\\_npx\\abc\\node_modules\\@iskra\\cli\\dist\\bin.mjs",
       "npx @iskra/cli serve",
     ],
-    ["/home/theo/.cache/pnpm/dlx/abc/node_modules/t3/dist/bin.mjs", "pnpm dlx @iskra/cli serve"],
     [
-      "/home/theo/.local/share/pnpm/.pnpm/dlx/abc/node_modules/t3/dist/bin.mjs",
+      "/home/theo/.cache/pnpm/dlx/abc/node_modules/@iskra/cli/dist/bin.mjs",
       "pnpm dlx @iskra/cli serve",
     ],
     [
-      "C:\\Users\\theo\\AppData\\Local\\pnpm-cache\\dlx\\abc\\node_modules\\t3\\dist\\bin.mjs",
+      "/home/theo/.local/share/pnpm/.pnpm/dlx/abc/node_modules/@iskra/cli/dist/bin.mjs",
       "pnpm dlx @iskra/cli serve",
     ],
-    ["/home/theo/.bun/install/cache/t3@0.0.31/dist/bin.mjs", "bunx @iskra/cli serve"],
-    ["/tmp/bunx-1000-t3@latest/node_modules/t3/dist/bin.mjs", "bunx @iskra/cli serve"],
     [
-      "C:\\Users\\theo\\AppData\\Local\\Temp\\bunx-0-t3@latest\\node_modules\\t3\\dist\\bin.mjs",
+      "C:\\Users\\theo\\AppData\\Local\\pnpm-cache\\dlx\\abc\\node_modules\\@iskra\\cli\\dist\\bin.mjs",
+      "pnpm dlx @iskra/cli serve",
+    ],
+    ["/home/theo/.bun/install/cache/@iskra/cli@0.0.31/dist/bin.mjs", "bunx @iskra/cli serve"],
+    ["/tmp/bunx-1000-iskra@latest/node_modules/@iskra/cli/dist/bin.mjs", "bunx @iskra/cli serve"],
+    [
+      "C:\\Users\\theo\\AppData\\Local\\Temp\\bunx-0-iskra@latest\\node_modules\\@iskra\\cli\\dist\\bin.mjs",
       "bunx @iskra/cli serve",
     ],
   ] as const) {
@@ -31,9 +34,9 @@ it("formats package runner commands from their cache entry paths", () => {
 
 it("treats stable installs as direct invocations", () => {
   for (const entryPath of [
-    "/usr/local/lib/node_modules/t3/dist/bin.mjs",
-    "/home/theo/Code/work/t3code/apps/server/dist/bin.mjs",
-    "/home/theo/.t3/runtime/0.0.31/node_modules/t3/dist/bin.mjs",
+    "/usr/local/lib/node_modules/@iskra/cli/dist/bin.mjs",
+    "/home/theo/Code/work/iskra/apps/server/dist/bin.mjs",
+    "/home/theo/.iskra/runtime/0.0.31/node_modules/@iskra/cli/dist/bin.mjs",
     "",
   ]) {
     assert.equal(
@@ -51,7 +54,7 @@ it("re-suggests the nightly channel only for nightly builds", () => {
     assert.equal(
       formatCliCommand({
         subcommand: "serve",
-        entryPath: "/home/theo/.npm/_npx/abc123/node_modules/t3/dist/bin.mjs",
+        entryPath: "/home/theo/.npm/_npx/abc123/node_modules/@iskra/cli/dist/bin.mjs",
         version,
       }),
       expected,
@@ -63,7 +66,7 @@ it("formats serve suggestions to match the launching command", () => {
   assert.equal(
     formatCliCommand({
       subcommand: "serve",
-      entryPath: "/home/theo/.npm/_npx/abc/node_modules/t3/dist/bin.mjs",
+      entryPath: "/home/theo/.npm/_npx/abc/node_modules/@iskra/cli/dist/bin.mjs",
       version: "0.0.31-nightly.20260729",
     }),
     "npx @iskra/cli@nightly serve",
@@ -71,7 +74,7 @@ it("formats serve suggestions to match the launching command", () => {
   assert.equal(
     formatCliCommand({
       subcommand: "serve",
-      entryPath: "/tmp/bunx-1000-t3@latest/node_modules/t3/dist/bin.mjs",
+      entryPath: "/tmp/bunx-1000-iskra@latest/node_modules/@iskra/cli/dist/bin.mjs",
       version: "0.0.31",
     }),
     "bunx @iskra/cli serve",
@@ -79,7 +82,7 @@ it("formats serve suggestions to match the launching command", () => {
   assert.equal(
     formatCliCommand({
       subcommand: "serve",
-      entryPath: "/usr/local/lib/node_modules/t3/dist/bin.mjs",
+      entryPath: "/usr/local/lib/node_modules/@iskra/cli/dist/bin.mjs",
       version: "0.0.31-nightly.20260729",
     }),
     "iskra serve",

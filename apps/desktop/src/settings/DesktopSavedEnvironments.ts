@@ -1,5 +1,5 @@
-import { EnvironmentId, type PersistedSavedEnvironmentRecord } from "@t3tools/contracts";
-import { fromLenientJson } from "@t3tools/shared/schemaJson";
+import { EnvironmentId, type PersistedSavedEnvironmentRecord } from "@iskra/contracts";
+import { fromLenientJson } from "@iskra/shared/schemaJson";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -189,7 +189,7 @@ export class DesktopSavedEnvironments extends Context.Service<
       environmentId: string,
     ) => Effect.Effect<void, DesktopSavedEnvironmentsMutationError>;
   }
->()("@t3tools/desktop/settings/DesktopSavedEnvironments") {}
+>()("@iskra/desktop/settings/DesktopSavedEnvironments") {}
 
 function toPersistedSavedEnvironmentRecord(
   record: PersistedSavedEnvironmentStorageRecord,

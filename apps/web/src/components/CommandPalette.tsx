@@ -1,9 +1,9 @@
 "use client";
 
-import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
-import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
+import { threadPullRequestLinkMode } from "@iskra/client-runtime/thread-pull-request-compatibility";
+import { visibleThreadPullRequests } from "@iskra/shared/threadPullRequests";
 
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopeThreadRef } from "@iskra/client-runtime/environment";
 import {
   canCreateProjectInEnvironment,
   getCloneDestinationBrowsePath,
@@ -11,20 +11,20 @@ import {
   getCloneDirectoryName,
   getDefaultCloneUrl,
   normalizePastedCloneUrl,
-} from "@t3tools/client-runtime/operations/projects";
-import { connectionStatusText } from "@t3tools/client-runtime/connection";
-import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
-import { resolveThreadReferenceCopyTarget } from "@t3tools/shared/threadReference";
+} from "@iskra/client-runtime/operations/projects";
+import { connectionStatusText } from "@iskra/client-runtime/connection";
+import { threadSearchMatchKey } from "@iskra/client-runtime/state/thread-search";
+import { resolveThreadReferenceCopyTarget } from "@iskra/shared/threadReference";
 import {
   canPreloadBrowsePath,
   createBrowseNavigationCoordinator,
   filterFilesystemBrowseEntries,
   getFilesystemBrowsePath,
-} from "@t3tools/client-runtime/state/filesystem";
+} from "@iskra/client-runtime/state/filesystem";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@iskra/client-runtime/state/runtime";
 import {
   type DesktopWslState,
   type EnvironmentId,
@@ -37,7 +37,7 @@ import {
   PRIMARY_LOCAL_ENVIRONMENT_ID,
   agentIdOfDmThread,
   resolveEnvironmentMachineKind,
-} from "@t3tools/contracts";
+} from "@iskra/contracts";
 import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import {
@@ -1690,7 +1690,7 @@ function OpenCommandPaletteDialog(props: {
         "grouping",
         "checkout",
         "remove",
-        "t3.json",
+        "iskra.json",
       ],
       title: "Project settings",
       description: contextualProjectGroup.displayName,

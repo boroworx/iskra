@@ -1,4 +1,4 @@
-import { EnvironmentId, ProviderInstanceId } from "@t3tools/contracts";
+import { EnvironmentId, ProviderInstanceId } from "@iskra/contracts";
 import {
   createMemoryHistory,
   createRootRoute,
@@ -12,7 +12,7 @@ import { resolveSettingsScope } from "./settingsScope";
 import { retainSettingsScope, validateSettingsRouteSearch } from "./settingsScopeNavigation";
 
 const checkoutSearch = {
-  project: "repository:t3code",
+  project: "repository:iskra",
   machine: "remote-server",
   checkout: "remote-server:/home/user/Iskra",
 };
@@ -112,7 +112,7 @@ describe("settings scope navigation", () => {
       const router = createSettingsRouter();
       await router.navigate({ to, search: checkoutSearch });
 
-      const regroupedCheckout = { ...checkoutSearch, project: "separate:t3code" };
+      const regroupedCheckout = { ...checkoutSearch, project: "separate:iskra" };
       await router.navigate({
         from: "/settings",
         to: router.state.location.pathname,

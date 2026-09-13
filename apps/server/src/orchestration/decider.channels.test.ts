@@ -8,7 +8,7 @@ import {
   ThreadId,
   type OrchestrationCommand,
   type RunCapability,
-} from "@t3tools/contracts";
+} from "@iskra/contracts";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as NodeServices from "@effect/platform-node/NodeServices";

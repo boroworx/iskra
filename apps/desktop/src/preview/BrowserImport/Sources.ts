@@ -15,14 +15,14 @@
  *
  * @module BrowserImportSources
  */
-import type { BrowserImportSourceId, BrowserImportSourceProfile } from "@t3tools/contracts";
-import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
+import type { BrowserImportSourceId, BrowserImportSourceProfile } from "@iskra/contracts";
+import * as NodeSqliteClient from "@iskra/shared/nodeSqliteClient";
 import {
   HostProcessEnvironment,
   HostProcessAddresses,
   HostProcessHostname,
   HostProcessPlatform,
-} from "@t3tools/shared/hostProcess";
+} from "@iskra/shared/hostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";

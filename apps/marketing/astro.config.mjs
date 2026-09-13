@@ -1,7 +1,7 @@
 import { defineConfig } from "astro/config";
 
 export default defineConfig({
-  site: "https://t3.codes",
+  site: "https://iskra.sh",
   server: {
     port: Number(process.env.PORT ?? 4173),
   },

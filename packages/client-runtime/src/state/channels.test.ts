@@ -4,7 +4,7 @@ import {
   MessageId,
   type ChannelMessageDelivery,
   type OrchestrationChannelMessage,
-} from "@t3tools/contracts";
+} from "@iskra/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { applyChannelStreamItem } from "./channels.ts";

@@ -1,0 +1,1 @@
+ALTER TABLE "relay_environment_links" ALTER COLUMN "environment_label" SET DEFAULT 'Iskra Environment';

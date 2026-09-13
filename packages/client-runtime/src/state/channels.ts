@@ -2,7 +2,7 @@ import {
   ORCHESTRATION_WS_METHODS,
   type OrchestrationChannelMessage,
   type OrchestrationChannelStreamItem,
-} from "@t3tools/contracts";
+} from "@iskra/contracts";
 import type * as Crypto from "effect/Crypto";
 import * as Stream from "effect/Stream";
 import type { Atom } from "effect/unstable/reactivity";
@@ -104,9 +104,8 @@ export function createChannelEnvironmentAtoms<R, E>(
     }),
     saveAgentDefinition: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:agent:save-definition",
-      execute: (
-        input: EnvironmentRpcInput<typeof ORCHESTRATION_WS_METHODS.saveAgentDefinition>,
-      ) => request(ORCHESTRATION_WS_METHODS.saveAgentDefinition, input),
+      execute: (input: EnvironmentRpcInput<typeof ORCHESTRATION_WS_METHODS.saveAgentDefinition>) =>
+        request(ORCHESTRATION_WS_METHODS.saveAgentDefinition, input),
     }),
     importAgentDefinitions: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:agent:import-definitions",

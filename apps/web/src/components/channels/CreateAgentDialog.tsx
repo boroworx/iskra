@@ -1,5 +1,5 @@
-import type { EnvironmentProject } from "@t3tools/client-runtime/state/models";
-import type { AgentId, ModelSelection, ServerProvider } from "@t3tools/contracts";
+import type { EnvironmentProject } from "@iskra/client-runtime/state/models";
+import type { AgentId, ModelSelection, ServerProvider } from "@iskra/contracts";
 import { useId, useState } from "react";
 
 import {

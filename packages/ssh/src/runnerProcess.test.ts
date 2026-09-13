@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessPlatform } from "@iskra/shared/hostProcess";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -11,7 +11,7 @@ import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import * as NodeNet from "node:net";
 
-import { buildRemoteStopScript, buildRemoteT3RunnerScript } from "./tunnel.ts";
+import { buildRemoteStopScript, buildRemoteIskraRunnerScript } from "./tunnel.ts";
 
 const Started = Schema.Struct({
   pid: Schema.Number,
@@ -28,7 +28,7 @@ describe.skipIf(HostProcessPlatform.defaultValue() === "win32")(
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-        const fixture = yield* fs.makeTempDirectoryScoped({ prefix: "t3-runner-" });
+        const fixture = yield* fs.makeTempDirectoryScoped({ prefix: "iskra-runner-" });
         const bin = path.join(fixture, "bin");
         const cliPath = path.join(fixture, "installed cli.mjs");
         yield* fs.makeDirectory(bin);
@@ -44,7 +44,7 @@ const server = net.createServer((socket) => {
 process.on("SIGTERM", () => server.close(() => {
   process.stdout.write("graceful shutdown\\n");
 }));
-server.listen(Number(process.env.T3_TEST_PORT ?? 0), "127.0.0.1", () => {
+server.listen(Number(process.env.ISKRA_TEST_PORT ?? 0), "127.0.0.1", () => {
   process.stdout.write(JSON.stringify({
     pid: process.pid,
     port: server.address().port,
@@ -62,11 +62,13 @@ server.listen(Number(process.env.T3_TEST_PORT ?? 0), "127.0.0.1", () => {
                 cwd: fixture,
                 env: {
                   PATH: bin,
-                  T3_TEST_PORT: String(port),
+                  ISKRA_TEST_PORT: String(port),
                 },
                 detached: false,
                 stdin: Stream.make(
-                  new TextEncoder().encode(buildRemoteT3RunnerScript({ nodeScriptPath: cliPath })),
+                  new TextEncoder().encode(
+                    buildRemoteIskraRunnerScript({ nodeScriptPath: cliPath }),
+                  ),
                 ),
               }),
             );
@@ -139,7 +141,7 @@ describe.skipIf(HostProcessPlatform.defaultValue() === "win32")(
           const fs = yield* FileSystem.FileSystem;
           const path = yield* Path.Path;
           const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-          const fixture = yield* fs.makeTempDirectoryScoped({ prefix: "t3-stop-" });
+          const fixture = yield* fs.makeTempDirectoryScoped({ prefix: "iskra-stop-" });
           const signalPath = path.join(fixture, "signals");
           const child = yield* spawner.spawn(
             ChildProcess.make(
@@ -195,14 +197,14 @@ server.listen(0, "127.0.0.1", () => {
           // Redirect only the state directory. Never use the developer's SSH state.
           const isolatedScript = script.replace(
             /^STATE_DIR=.*$/mu,
-            'STATE_DIR="$T3_TEST_STATE_DIR"',
+            'STATE_DIR="$ISKRA_TEST_STATE_DIR"',
           );
           assert.notEqual(isolatedScript, script);
           const runStop = Effect.fn("test.remoteStop")(function* () {
             const stop = yield* spawner.spawn(
               ChildProcess.make("/bin/sh", ["-s"], {
                 cwd: fixture,
-                env: { T3_TEST_STATE_DIR: fixture },
+                env: { ISKRA_TEST_STATE_DIR: fixture },
                 stdin: Stream.make(new TextEncoder().encode(isolatedScript)),
               }),
             );
@@ -253,22 +255,22 @@ server.listen(0, "127.0.0.1", () => {
 );
 
 describe.skipIf(HostProcessPlatform.defaultValue() === "win32")("remote runner npm refusal", () => {
-  it.live("refuses without running npm, npx, or a t3 already on PATH", () =>
+  it.live("refuses without running npm, npx, or a iskra already on PATH", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-      const fixture = yield* fs.makeTempDirectoryScoped({ prefix: "t3-runner-refusal-" });
+      const fixture = yield* fs.makeTempDirectoryScoped({ prefix: "iskra-runner-refusal-" });
       const bin = path.join(fixture, "bin");
       const callsPath = path.join(fixture, "calls.txt");
       yield* fs.makeDirectory(bin);
       yield* fs.symlink(process.execPath, path.join(bin, "node"));
       yield* fs.writeFileString(callsPath, "");
-      for (const executable of ["npx", "npm", "t3"]) {
+      for (const executable of ["npx", "npm", "iskra"]) {
         yield* fs.writeFileString(
           path.join(bin, executable),
           `#!/usr/bin/env node
-require("node:fs").appendFileSync(process.env.T3_TEST_CALLS, "${executable}\\n");
+require("node:fs").appendFileSync(process.env.ISKRA_TEST_CALLS, "${executable}\\n");
 `,
         );
         yield* fs.chmod(path.join(bin, executable), 0o700);
@@ -278,8 +280,8 @@ require("node:fs").appendFileSync(process.env.T3_TEST_CALLS, "${executable}\\n")
         ChildProcess.make("/bin/sh", ["-s", "--", "serve"], {
           cwd: fixture,
           extendEnv: false,
-          env: { PATH: bin, T3_TEST_CALLS: callsPath },
-          stdin: Stream.make(new TextEncoder().encode(buildRemoteT3RunnerScript())),
+          env: { PATH: bin, ISKRA_TEST_CALLS: callsPath },
+          stdin: Stream.make(new TextEncoder().encode(buildRemoteIskraRunnerScript())),
         }),
       );
       const { stdout, stderr, exitCode } = yield* Effect.all(

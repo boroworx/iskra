@@ -1,4 +1,4 @@
-import type { EnvironmentId, ProjectId, PullRequestCheck } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectId, PullRequestCheck } from "@iskra/contracts";
 import { Children, isValidElement, type ReactNode } from "react";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -68,10 +68,10 @@ function entry(overrides: Partial<EnvironmentPullRequestEntry>): EnvironmentPull
     environmentId: "env-1" as EnvironmentId,
     projectId: "project-1" as ProjectId,
     provider: "github",
-    repository: "pingdotgg/t3code",
+    repository: "boroworx/iskra",
     number: 1,
     title: "Add the pull requests page",
-    url: "https://github.com/pingdotgg/t3code/pull/1",
+    url: "https://github.com/boroworx/iskra/pull/1",
     author: null,
     headBranch: "feat/page",
     baseBranch: "main",

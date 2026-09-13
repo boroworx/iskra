@@ -10,8 +10,8 @@ import {
   EnvironmentHttpForbiddenError,
   EnvironmentHttpInternalServerError,
   EnvironmentHttpUnauthorizedError,
-} from "@t3tools/contracts";
-import { stripPairingTokenFromUrl } from "@t3tools/shared/remote";
+} from "@iskra/contracts";
+import { stripPairingTokenFromUrl } from "@iskra/shared/remote";
 import {
   type RelayEnvironmentConnectResponse as RelayEnvironmentConnectResponseType,
   type RelayEnvironmentLinkResponse as RelayEnvironmentLinkResponseType,
@@ -21,16 +21,16 @@ import {
   type RelayClientEnvironmentRecord,
   type RelayEnvironmentStatusResponse as RelayEnvironmentStatusResponseType,
   type RelayManagedEndpointProviderKind,
-} from "@t3tools/contracts/relay";
-import { exchangeRemoteDpopAccessToken } from "@t3tools/client-runtime/authorization";
-import { fetchRemoteEnvironmentDescriptor } from "@t3tools/client-runtime/environment";
-import { findErrorTraceId } from "@t3tools/client-runtime/errors";
+} from "@iskra/contracts/relay";
+import { exchangeRemoteDpopAccessToken } from "@iskra/client-runtime/authorization";
+import { fetchRemoteEnvironmentDescriptor } from "@iskra/client-runtime/environment";
+import { findErrorTraceId } from "@iskra/client-runtime/errors";
 import {
   dpopFailureMessage,
   ManagedRelay,
   relayProtectedErrorMessage,
-} from "@t3tools/client-runtime/relay";
-import { makeEnvironmentHttpApiClient } from "@t3tools/client-runtime/rpc";
+} from "@iskra/client-runtime/relay";
+import { makeEnvironmentHttpApiClient } from "@iskra/client-runtime/rpc";
 
 import { authClientMetadata } from "../../lib/authClientMetadata";
 import type { SavedRemoteConnection } from "../../lib/connection";

@@ -38,7 +38,7 @@ const environmentLayer = (input: {
         NodeServices.layer,
         DesktopConfig.layerTest({
           ISKRA_HOME: input.baseDir,
-          T3CODE_MODE: "desktop",
+          ISKRA_MODE: "desktop",
         }),
       ),
     ),
@@ -54,7 +54,7 @@ const withTempDir = <A, E, R>(
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const tempDir = yield* fileSystem.makeTempDirectoryScoped({
-      prefix: "t3-wsl-server-tree-test-",
+      prefix: "iskra-wsl-server-tree-test-",
     });
     return yield* run(tempDir);
   }).pipe(Effect.scoped);
@@ -154,7 +154,7 @@ describe("DesktopWslServerTree", () => {
         const dep = yield* fileSystem.exists(path.join(root, "node_modules/effect/package.json"));
         assert.isTrue(dep);
         const marker = yield* fileSystem.readFileString(
-          path.join(root, "t3code-wsl-server-tree.json"),
+          path.join(root, "iskra-wsl-server-tree.json"),
         );
         assert.include(marker, '"version":"1.2.3"');
       }),

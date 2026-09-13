@@ -5,11 +5,11 @@ import {
   type ThreadId,
   type ToolActivitySource,
   type ToolLifecycleItemType,
-} from "@t3tools/contracts";
-import { classifyMarkdownImageSource } from "@t3tools/client-runtime/markdown-images";
-import { resolveMediaSource } from "@t3tools/client-runtime/media-source";
-import { parseChangeRequestUrl } from "@t3tools/shared/changeRequestUrl";
-import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
+} from "@iskra/contracts";
+import { classifyMarkdownImageSource } from "@iskra/client-runtime/markdown-images";
+import { resolveMediaSource } from "@iskra/client-runtime/media-source";
+import { parseChangeRequestUrl } from "@iskra/shared/changeRequestUrl";
+import { isWorkspaceImagePreviewPath } from "@iskra/shared/filePreview";
 
 export function isWorktreeSetupActivity(kind: string): boolean {
   return kind === "setup-script.requested" || kind === "setup-script.started";
@@ -62,7 +62,7 @@ export function normalizeCompactToolLabel(value: string): string {
   return value.replace(/\s+(?:complete|completed)\s*$/i, "").trim();
 }
 
-const T3_MCP_TOOL_LABELS: Record<
+const ISKRA_MCP_TOOL_LABELS: Record<
   string,
   readonly [action: string, running: string, completed: string, detail: string]
 > = {
@@ -78,14 +78,14 @@ const T3_MCP_TOOL_LABELS: Record<
   update_scheduled_task: ["Update", "Updating", "Updated", "a scheduled task"],
   delete_scheduled_task: ["Delete", "Deleting", "Deleted", "a scheduled task"],
   create_threads: ["Create", "Creating", "Created", "Iskra threads"],
-  t3_thread_start: ["Start", "Starting", "Started", "an Iskra thread"],
-  t3_thread_list: ["List", "Listing", "Listed", "Iskra threads"],
-  t3_thread_read: ["Read", "Reading", "Read", "an Iskra thread"],
-  t3_thread_send: ["Send", "Sending", "Sent", "to an Iskra thread"],
-  t3_thread_wait: ["Wait", "Waiting", "Waited", "for an Iskra thread"],
-  t3_thread_interrupt: ["Interrupt", "Interrupting", "Interrupted", "an Iskra thread"],
-  t3_worktree_handoff: ["Hand off", "Handing off", "Handed off", "thread to a git worktree"],
-  t3_worktree_status: ["Get", "Getting", "Got", "thread worktree status"],
+  iskra_thread_start: ["Start", "Starting", "Started", "an Iskra thread"],
+  iskra_thread_list: ["List", "Listing", "Listed", "Iskra threads"],
+  iskra_thread_read: ["Read", "Reading", "Read", "an Iskra thread"],
+  iskra_thread_send: ["Send", "Sending", "Sent", "to an Iskra thread"],
+  iskra_thread_wait: ["Wait", "Waiting", "Waited", "for an Iskra thread"],
+  iskra_thread_interrupt: ["Interrupt", "Interrupting", "Interrupted", "an Iskra thread"],
+  iskra_worktree_handoff: ["Hand off", "Handing off", "Handed off", "thread to a git worktree"],
+  iskra_worktree_status: ["Get", "Getting", "Got", "thread worktree status"],
   preview_status: ["Get", "Getting", "Got", "preview browser status"],
   preview_open: ["Open", "Opening", "Opened", "a page in the preview browser"],
   preview_navigate: ["Navigate", "Navigating", "Navigated", "the preview browser"],
@@ -122,19 +122,19 @@ const PR_TOOL_ACTIONS: Readonly<Record<string, ToolGroupAction>> = {
   list_thread_pull_requests: "list-prs",
 };
 
-function resolveT3McpToolPresentation(
+function resolveIskraMcpToolPresentation(
   value: string | undefined,
   status: string | undefined,
   data?: unknown,
 ) {
   if (!value) return null;
   const name = normalizeCompactToolLabel(value).replace(
-    /^(?:mcp__(?:t3-code|t3_code|t3code)__|(?:t3-code|t3_code|t3code)(?:[.:/]|\s*·\s*))/i,
+    /^(?:mcp__(?:iskra|iskra_code|iskra)__|(?:iskra|iskra_code|iskra)(?:[.:/]|\s*·\s*))/i,
     "",
   );
-  if (!Object.hasOwn(T3_MCP_TOOL_LABELS, name)) return null;
+  if (!Object.hasOwn(ISKRA_MCP_TOOL_LABELS, name)) return null;
 
-  const [action, running, completed, detail] = T3_MCP_TOOL_LABELS[name]!;
+  const [action, running, completed, detail] = ISKRA_MCP_TOOL_LABELS[name]!;
   const verb =
     status === "inProgress"
       ? running
@@ -171,7 +171,7 @@ function resolveT3McpToolPresentation(
           ? ("browser" as const)
           : name.startsWith("device_")
             ? ("device" as const)
-            : ("t3-code" as const),
+            : ("iskra" as const),
     ...(actionKind === undefined ? {} : { action: actionKind }),
   };
 }
@@ -197,16 +197,16 @@ export function resolveWorkEntryToolPresentation(
       "tool" in data &&
       typeof data.tool === "string"
     ) {
-      return resolveT3McpToolPresentation(`${data.server}.${data.tool}`, status, data);
+      return resolveIskraMcpToolPresentation(`${data.server}.${data.tool}`, status, data);
     }
     if ("toolName" in data && typeof data.toolName === "string") {
-      return resolveT3McpToolPresentation(data.toolName, status, data);
+      return resolveIskraMcpToolPresentation(data.toolName, status, data);
     }
   }
 
   return (
-    resolveT3McpToolPresentation(entry.toolTitle, status, data) ??
-    resolveT3McpToolPresentation(entry.label, status, data)
+    resolveIskraMcpToolPresentation(entry.toolTitle, status, data) ??
+    resolveIskraMcpToolPresentation(entry.label, status, data)
   );
 }
 

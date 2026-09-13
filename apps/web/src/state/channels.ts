@@ -1,4 +1,4 @@
-import { createChannelEnvironmentAtoms } from "@t3tools/client-runtime/state/channels";
+import { createChannelEnvironmentAtoms } from "@iskra/client-runtime/state/channels";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 

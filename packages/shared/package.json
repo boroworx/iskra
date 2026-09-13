@@ -1,5 +1,5 @@
 {
-  "name": "@t3tools/shared",
+  "name": "@iskra/shared",
   "private": true,
   "type": "module",
   "exports": {
@@ -119,9 +119,9 @@
       "types": "./src/threadEnvMode.ts",
       "import": "./src/threadEnvMode.ts"
     },
-    "./t3ProjectFile": {
-      "types": "./src/t3ProjectFile.ts",
-      "import": "./src/t3ProjectFile.ts"
+    "./iskraProjectFile": {
+      "types": "./src/iskraProjectFile.ts",
+      "import": "./src/iskraProjectFile.ts"
     },
     "./orchestrationTiming": {
       "types": "./src/orchestrationTiming.ts",
@@ -333,9 +333,9 @@
     "test": "vp test run"
   },
   "dependencies": {
+    "@iskra/contracts": "workspace:*",
     "@noble/curves": "catalog:",
     "@noble/hashes": "catalog:",
-    "@t3tools/contracts": "workspace:*",
     "effect": "catalog:",
     "jose": "catalog:",
     "yaml": "catalog:"

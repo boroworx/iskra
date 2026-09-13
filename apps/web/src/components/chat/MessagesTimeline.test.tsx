@@ -5,7 +5,7 @@ import {
   MessageId,
   TurnId,
   type ComposerContextRecord,
-} from "@t3tools/contracts";
+} from "@iskra/contracts";
 import { act, createRef, useLayoutEffect, type ReactNode, type Ref } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { create, type ReactTestRenderer } from "react-test-renderer";
@@ -264,7 +264,7 @@ function buildSnapShotTimelineEntry(previewUrl?: string) {
             kind: "snap-shot" as const,
             capturedAt: "2026-03-17T19:12:28.000Z",
             appName: "Terminal",
-            windowTitle: "t3code — Tests",
+            windowTitle: "iskra — Tests",
             appIconDataUrl: "data:image/png;base64,aWNvbg==",
           },
         },
@@ -695,7 +695,7 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('data-maintain-visible-content-position-size="true"');
     expect(markup).toContain('data-maintain-visible-content-position-restore="true"');
     expect(markup).toContain("Terminal");
-    expect(markup).toContain("t3code — Tests");
+    expect(markup).toContain("iskra — Tests");
     expect(markup).toContain('src="data:image/png;base64,aWNvbg=="');
     expect(markup).toContain("h-28 w-52 max-w-full");
     expect(onAnchorReady).toHaveBeenCalledOnce();
@@ -709,7 +709,7 @@ describe("MessagesTimeline", () => {
 
     expect(markup).toContain("screenshot.png");
     expect(markup).not.toContain("Terminal");
-    expect(markup).not.toContain("t3code — Tests");
+    expect(markup).not.toContain("iskra — Tests");
     expect(markup).not.toContain('src="data:image/png;base64,aWNvbg=="');
     expect(markup).not.toContain("h-28 w-52 max-w-full");
   });
@@ -1102,15 +1102,15 @@ describe("MessagesTimeline", () => {
         {...buildProps()}
         timelineEntries={[
           buildUserTimelineEntry(
-            '<script>globalThis.__t3Xss = 1</script><img src="x" onerror="globalThis.__t3Xss = 2">',
+            '<script>globalThis.__iskraXss = 1</script><img src="x" onerror="globalThis.__iskraXss = 2">',
           ),
         ]}
       />,
     );
 
-    expect(markup).toContain("&lt;script&gt;globalThis.__t3Xss = 1&lt;/script&gt;");
+    expect(markup).toContain("&lt;script&gt;globalThis.__iskraXss = 1&lt;/script&gt;");
     expect(markup).toContain(
-      "&lt;img src=&quot;x&quot; onerror=&quot;globalThis.__t3Xss = 2&quot;&gt;",
+      "&lt;img src=&quot;x&quot; onerror=&quot;globalThis.__iskraXss = 2&quot;&gt;",
     );
     expect(markup).not.toMatch(/<script(?:\s|>)/i);
     expect(markup).not.toMatch(/<img(?:\s|>)/i);
@@ -1140,11 +1140,11 @@ describe("MessagesTimeline", () => {
         timelineEntries={[
           buildAssistantTimelineEntry(
             [
-              '<details open onclick="globalThis.__t3Xss = 1">',
+              '<details open onclick="globalThis.__iskraXss = 1">',
               "<summary>Safe details</summary>",
-              "<script>globalThis.__t3Xss = 2</script>",
-              '<img src="x" onerror="globalThis.__t3Xss = 3">',
-              '<a href="javascript:globalThis.__t3Xss = 4">Unsafe link</a>',
+              "<script>globalThis.__iskraXss = 2</script>",
+              '<img src="x" onerror="globalThis.__iskraXss = 3">',
+              '<a href="javascript:globalThis.__iskraXss = 4">Unsafe link</a>',
               "</details>",
             ].join(""),
           ),
@@ -1158,7 +1158,7 @@ describe("MessagesTimeline", () => {
     expect(markup).not.toContain("onclick=");
     expect(markup).not.toContain("onerror=");
     expect(markup).not.toContain("javascript:");
-    expect(markup).not.toContain("globalThis.__t3Xss");
+    expect(markup).not.toContain("globalThis.__iskraXss");
   });
 
   it("renders inline terminal labels with the composer chip UI", async () => {
@@ -1265,16 +1265,16 @@ describe("MessagesTimeline", () => {
               createdAt: "2026-03-17T19:12:28.000Z",
               label: "Updated files",
               tone: "tool",
-              changedFiles: ["C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts"],
+              changedFiles: ["C:/Users/mike/dev-stuff/iskra/apps/web/src/session-logic.ts"],
             },
           },
         ]}
-        workspaceRoot="C:/Users/mike/dev-stuff/t3code"
+        workspaceRoot="C:/Users/mike/dev-stuff/iskra"
       />,
     );
 
     expect(markup).toContain("Changed 1 file");
-    expect(markup).not.toContain("C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts");
+    expect(markup).not.toContain("C:/Users/mike/dev-stuff/iskra/apps/web/src/session-logic.ts");
   });
 
   it("keeps mixed-success tool groups neutral", () => {
@@ -1711,7 +1711,7 @@ describe("MessagesTimeline", () => {
             message: {
               id: MessageId.make("message-attachments"),
               role: "user",
-              text: "See ![shot.png](t3-context://v1/image/img-1) and [notes.txt](t3-context://v1/file/file-1).",
+              text: "See ![shot.png](iskra-context://v1/image/img-1) and [notes.txt](iskra-context://v1/file/file-1).",
               attachments: [
                 {
                   type: "image",
@@ -1773,12 +1773,12 @@ describe("MessagesTimeline", () => {
     // Images report their size like every other attachment chip.
     expect(markup).toContain('aria-label="Image attachment, shot.png, 1 KB"');
     // Selection copy re-emits chips as their canonical links.
-    expect(markup).toContain('data-markdown-copy="![shot.png](t3-context://v1/image/img-1)"');
+    expect(markup).toContain('data-markdown-copy="![shot.png](iskra-context://v1/image/img-1)"');
     expect(markup).toContain('aria-label="File attachment, notes.txt, 1 KB"');
     expect(markup).toContain(">1 KB</span>");
     expect(markup).not.toContain('aria-label="Download notes.txt"');
     expect(markup).toContain("legacy.txt");
-    expect(markup).not.toContain('href="t3-context://');
+    expect(markup).not.toContain('href="iskra-context://');
     // A picture keeps its tile even though it also has a chip: the chip names it, the tile is
     // the only way to see it. A plain file's row is what a chip replaces.
     expect(markup).toContain("grid-cols-2");
@@ -1866,7 +1866,7 @@ describe("MessagesTimeline", () => {
             message: {
               id: MessageId.make("message-structured"),
               role: "user",
-              text: "Compare [Terminal 1 line 4](t3-context://v1/terminal/ctx-t) with [gone](t3-context://v1/future/ctx-x).",
+              text: "Compare [Terminal 1 line 4](iskra-context://v1/terminal/ctx-t) with [gone](iskra-context://v1/future/ctx-x).",
               context: {
                 version: 1,
                 records: [
@@ -1897,7 +1897,7 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("Terminal 1 line 4");
     expect(markup).toContain('data-context-unresolved="true"');
     expect(markup).toContain(">gone<");
-    expect(markup).not.toContain('href="t3-context://');
+    expect(markup).not.toContain('href="iskra-context://');
   });
 
   it("keeps failed lifecycle entries discoverable in mixed activity summaries", () => {

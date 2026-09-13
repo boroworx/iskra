@@ -1,4 +1,4 @@
-import type { UserInputQuestion } from "@t3tools/contracts";
+import type { UserInputQuestion } from "@iskra/contracts";
 
 export interface PendingUserInputDraftAnswer {
   selectedOptionValues?: string[];

@@ -16,7 +16,7 @@ import {
   type ServerProviderUsageLimits,
   type ServerProviderUsageWindow,
   type UsageLimitSourceSnapshots,
-} from "@t3tools/contracts";
+} from "@iskra/contracts";
 
 import * as DateTime from "effect/DateTime";
 

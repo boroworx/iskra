@@ -1,10 +1,10 @@
 import {
   createEnvironmentAgentChannelAtoms,
   createEnvironmentProjectAtoms,
-} from "@t3tools/client-runtime/state/projects";
-import { createProjectEnvironmentAtoms } from "@t3tools/client-runtime/state/projects";
-import { createEnvironmentRpcQueryAtomFamily } from "@t3tools/client-runtime/state/runtime";
-import { WS_METHODS } from "@t3tools/contracts";
+} from "@iskra/client-runtime/state/projects";
+import { createProjectEnvironmentAtoms } from "@iskra/client-runtime/state/projects";
+import { createEnvironmentRpcQueryAtomFamily } from "@iskra/client-runtime/state/runtime";
+import { WS_METHODS } from "@iskra/contracts";
 
 import { environmentCatalog } from "../connection/catalog";
 import { connectionAtomRuntime } from "../connection/runtime";

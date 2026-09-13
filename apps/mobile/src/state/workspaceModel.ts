@@ -1,7 +1,7 @@
-import { type EnvironmentShellSummary } from "@t3tools/client-runtime/state/shell";
-import { type NetworkStatus } from "@t3tools/client-runtime/connection";
-import { type EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
-import type { EnvironmentId, ServerConfig } from "@t3tools/contracts";
+import { type EnvironmentShellSummary } from "@iskra/client-runtime/state/shell";
+import { type NetworkStatus } from "@iskra/client-runtime/connection";
+import { type EnvironmentConnectionPhase } from "@iskra/client-runtime/connection";
+import type { EnvironmentId, ServerConfig } from "@iskra/contracts";
 
 import type { EnvironmentPresentation } from "./environments";
 

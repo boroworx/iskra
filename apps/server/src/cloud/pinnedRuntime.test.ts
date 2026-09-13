@@ -15,7 +15,7 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-pinned-refuse-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "iskra-pinned-refuse-" });
       const finalPaths = pinnedRuntimePaths(path, baseDir, "1.2.3");
       // An entry without its sentinel is an interrupted install, not a runtime.
       yield* fs.makeDirectory(path.dirname(finalPaths.entryPath), { recursive: true });
@@ -38,7 +38,7 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-pinned-existing-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "iskra-pinned-existing-" });
       const finalPaths = pinnedRuntimePaths(path, baseDir, "1.2.3");
       yield* fs.makeDirectory(path.dirname(finalPaths.entryPath), { recursive: true });
       yield* fs.writeFileString(finalPaths.entryPath, "export {};\n");
@@ -62,7 +62,7 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-pinned-runtime-repair-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "iskra-pinned-runtime-repair-" });
       const finalPaths = pinnedRuntimePaths(path, baseDir, "1.2.3");
       yield* fs.makeDirectory(path.dirname(finalPaths.entryPath), { recursive: true });
       yield* fs.writeFileString(finalPaths.entryPath, "broken\n");

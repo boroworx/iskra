@@ -34,12 +34,12 @@ import {
   type ProviderRuntimeEvent,
   type ProviderSession,
   type ServerSettings as ServerSettingsValue,
-} from "@t3tools/contracts";
-import { expandAssistantCitationsForProvider } from "@t3tools/shared/assistantCitations";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
-import { causeErrorTag } from "@t3tools/shared/observability";
-import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+} from "@iskra/contracts";
+import { expandAssistantCitationsForProvider } from "@iskra/shared/assistantCitations";
+import { HostProcessPlatform } from "@iskra/shared/hostProcess";
+import { causeErrorTag } from "@iskra/shared/observability";
+import { getModelSelectionStringOptionValue } from "@iskra/shared/model";
+import { resolveProjectSettings } from "@iskra/shared/projectSettings";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";

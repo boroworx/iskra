@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["IskraComposerEditorModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.iskracomposereditor.IskraComposerEditorModule"]
+  }
+}

@@ -10,9 +10,9 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ProviderSetupError,
-} from "@t3tools/contracts";
+} from "@iskra/contracts";
 import { renderAgentDmPrompt } from "../runContext.ts";
-import { createModelSelection } from "@t3tools/shared/model";
+import { createModelSelection } from "@iskra/shared/model";
 import {
   AgentId,
   agentDmThreadId,
@@ -28,8 +28,8 @@ import {
   ProjectId,
   ThreadId,
   TurnId,
-} from "@t3tools/contracts";
-import { serializeAssistantCitation } from "@t3tools/shared/assistantCitations";
+} from "@iskra/contracts";
+import { serializeAssistantCitation } from "@iskra/shared/assistantCitations";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
 import * as Exit from "effect/Exit";
@@ -44,7 +44,7 @@ import { it as effectIt } from "@effect/vitest";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { deriveServerPaths, ServerConfig } from "../../config.ts";
-import { TextGenerationError } from "@t3tools/contracts";
+import { TextGenerationError } from "@iskra/contracts";
 import {
   ProviderAdapterRequestError,
   ProviderWorkspaceMissingError,
@@ -193,7 +193,7 @@ describe("ProviderCommandReactor", () => {
   }) {
     const now = "2026-01-01T00:00:00.000Z";
     const baseDir =
-      input?.baseDir ?? NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3code-reactor-"));
+      input?.baseDir ?? NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "iskra-reactor-"));
     createdBaseDirs.add(baseDir);
     const { stateDir } = deriveServerPathsSync(baseDir, undefined);
     createdStateDirs.add(stateDir);
@@ -676,7 +676,7 @@ describe("ProviderCommandReactor", () => {
           commandId: CommandId.make("cmd-sign-out-worktree"),
           threadId,
           title: "New thread",
-          branch: "t3code/1234abcd",
+          branch: "iskra/1234abcd",
           worktreePath: NodePath.join(harness.stateDir, "missing-worktree"),
         });
 
@@ -1041,7 +1041,7 @@ describe("ProviderCommandReactor", () => {
         message: {
           messageId: asMessageId("user-message-with-context"),
           role: "user",
-          text: "Inspect [build](t3-context://v1/terminal/terminal-1)",
+          text: "Inspect [build](iskra-context://v1/terminal/terminal-1)",
           attachments: [],
           context: {
             version: 1,
@@ -1983,7 +1983,7 @@ describe("ProviderCommandReactor", () => {
     }
     const message = input.message;
     expect(message.startsWith(`USER:\nReview subagent monitoring risks. ${quoteText} `)).toBe(true);
-    expect(message).not.toContain("t3-citation://");
+    expect(message).not.toContain("iskra-citation://");
     expect(message).toContain("[First user message truncated]");
     expect(message).toContain("[Earlier content truncated]");
     expect(message).toContain("image.png");
@@ -2555,7 +2555,9 @@ describe("ProviderCommandReactor", () => {
     expect(harness.generateThreadTitle.mock.calls[0]?.[0].message).toBe(
       `[effort:high]\\n\\nFix reconnect spinner on resume ${assistantQuoteText}`,
     );
-    expect(harness.generateThreadTitle.mock.calls[0]?.[0].message).not.toContain("t3-citation://");
+    expect(harness.generateThreadTitle.mock.calls[0]?.[0].message).not.toContain(
+      "iskra-citation://",
+    );
     const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.title).toBe("Reconnect spinner resume bug");
@@ -2581,7 +2583,7 @@ describe("ProviderCommandReactor", () => {
         type: "thread.meta.update",
         commandId: CommandId.make("cmd-thread-branch"),
         threadId: ThreadId.make("thread-1"),
-        branch: "t3code/1234abcd",
+        branch: "iskra/1234abcd",
         worktreePath: "/tmp/provider-project-worktree",
       }),
     );
@@ -2623,7 +2625,9 @@ describe("ProviderCommandReactor", () => {
     expect(harness.generateBranchName.mock.calls[0]?.[0].message).toBe(
       `Add a safer reconnect backoff. ${assistantQuoteText}`,
     );
-    expect(harness.generateBranchName.mock.calls[0]?.[0].message).not.toContain("t3-citation://");
+    expect(harness.generateBranchName.mock.calls[0]?.[0].message).not.toContain(
+      "iskra-citation://",
+    );
     expect(harness.refreshStatus.mock.calls[0]?.[0]).toBe("/tmp/provider-project-worktree");
     const readModel = await harness.readModel();
     expect(

@@ -7,7 +7,7 @@ import {
   type OrchestrationAgentShell,
   type OrchestrationChannelMessage,
   type OrchestrationChannelShell,
-} from "@t3tools/contracts";
+} from "@iskra/contracts";
 import { HashIcon } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 

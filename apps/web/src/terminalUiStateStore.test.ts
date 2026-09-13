@@ -1,5 +1,5 @@
-import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
-import { ThreadId } from "@t3tools/contracts";
+import { scopeThreadRef, scopedThreadKey } from "@iskra/client-runtime/environment";
+import { ThreadId } from "@iskra/contracts";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {

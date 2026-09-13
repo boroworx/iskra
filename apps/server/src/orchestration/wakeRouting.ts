@@ -4,7 +4,7 @@ import {
   type OrchestrationChannel,
   type OrchestrationReadModel,
   type ThreadId,
-} from "@t3tools/contracts";
+} from "@iskra/contracts";
 
 export type WakeDecision =
   | { readonly kind: "wake"; readonly liveRunThreadId?: ThreadId }

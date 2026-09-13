@@ -14,7 +14,7 @@ import type {
   DeviceHostSummary,
   DevicePlatform,
   DevicePlatformAvailability,
-} from "@t3tools/contracts";
+} from "@iskra/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -100,4 +100,4 @@ export class DeviceHost extends Context.Service<
     /** Stops helpers. Devices themselves keep running; the user owns those. */
     readonly stop: Effect.Effect<void>;
   }
->()("t3/device/DeviceHost") {}
+>()("@iskra/cli/device/DeviceHost") {}

@@ -2,7 +2,7 @@
 
 The environment issues its own sessions and enforces their capabilities. Cloud
 identity and relay credentials belong to a separate trust boundary, described in
-[Iskra Connect](./t3-connect.md). A relay token is never an environment login.
+[Iskra Connect](./iskra-connect.md). A relay token is never an environment login.
 
 ## Authority survives transport changes
 
