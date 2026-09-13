@@ -57,6 +57,7 @@ import { ThreadPlanProgressService } from "../ThreadPlanProgress.ts";
 import { ProjectionAgentDbRow } from "../../persistence/Services/ProjectionAgents.ts";
 import {
   ProjectionChannelDbRow,
+  ProjectionLiveRunDbRow,
   ProjectionRunDbRow,
 } from "../../persistence/Services/ProjectionChannels.ts";
 import { ProjectionProject } from "../../persistence/Services/ProjectionProjects.ts";
@@ -596,6 +597,22 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           archived_at AS "archivedAt"
         FROM projection_channels
         ORDER BY created_at ASC, channel_id ASC
+      `,
+  });
+
+  const listLiveRunRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionLiveRunDbRow,
+    execute: () =>
+      sql`
+        SELECT
+          thread_id AS "threadId",
+          channel_id AS "channelId",
+          agent_id AS "agentId",
+          started_at AS "startedAt"
+        FROM projection_runs
+        WHERE ended_at IS NULL
+        ORDER BY started_at ASC, thread_id ASC
       `,
   });
 
@@ -2439,6 +2456,14 @@ pending_approval_requests AS (
               ),
             ),
           ),
+          listLiveRunRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getCommandReadModel:listLiveRuns:query",
+                "ProjectionSnapshotQuery.getCommandReadModel:listLiveRuns:decodeRows",
+              ),
+            ),
+          ),
         ]),
       )
       .pipe(
@@ -2453,6 +2478,7 @@ pending_approval_requests AS (
             stateRows,
             agentRows,
             channelRows,
+            liveRunRows,
           ]) =>
             Effect.gen(function* () {
               const linkedThreadIds = new Set(pullRequestRows.map((row) => row.threadId));
@@ -2634,6 +2660,7 @@ pending_approval_requests AS (
                   updatedAt: row.updatedAt,
                   archivedAt: row.archivedAt,
                 })),
+                liveRuns: liveRunRows,
                 updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
               } satisfies OrchestrationReadModel;
             }),

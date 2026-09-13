@@ -7,6 +7,7 @@ import { toPersistenceSqlError } from "../Errors.ts";
 import { OrchestrationRun } from "@t3tools/contracts";
 
 import {
+  EndProjectionRunInput,
   GetProjectionChannelInput,
   GetProjectionChannelMessageInput,
   ListProjectionChannelMessagesInput,
@@ -162,6 +163,17 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
       `,
   });
 
+  const endRunRow = SqlSchema.void({
+    Request: EndProjectionRunInput,
+    execute: ({ threadId, endedAt }) =>
+      sql`
+        UPDATE projection_runs
+        SET ended_at = ${endedAt}
+        WHERE thread_id = ${threadId}
+          AND ended_at IS NULL
+      `,
+  });
+
   const listMessageRows = SqlSchema.findAll({
     Request: ListProjectionChannelMessagesInput,
     Result: ProjectionChannelMessage,
@@ -233,6 +245,11 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
       Effect.mapError(toPersistenceSqlError("ProjectionChannelRepository.insertRun:query")),
     );
 
+  const endRun: ProjectionChannelRepositoryShape["endRun"] = (input) =>
+    endRunRow(input).pipe(
+      Effect.mapError(toPersistenceSqlError("ProjectionChannelRepository.endRun:query")),
+    );
+
   const listMessages: ProjectionChannelRepositoryShape["listMessages"] = (input) =>
     listMessageRows(input).pipe(
       Effect.map((rows) => rows.toReversed()),
@@ -251,6 +268,7 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
     appendMessage,
     getMessageById,
     insertRun,
+    endRun,
     listMessages,
     listWakeHistory,
   } satisfies ProjectionChannelRepositoryShape;

@@ -11,6 +11,7 @@ import type {
 } from "@t3tools/contracts";
 import {
   isImportedAgentSessionMessageId,
+  isRunEndingSessionStatus,
   OrchestrationCheckpointSummary,
   OrchestrationMessage,
   OrchestrationSession,
@@ -34,6 +35,7 @@ import {
   AgentUpdatedPayload,
   ChannelArchivedPayload,
   ChannelCreatedPayload,
+  ChannelRunStartedPayload,
   ChannelUnarchivedPayload,
   ChannelUpdatedPayload,
   MessageSentPayloadSchema,
@@ -338,6 +340,7 @@ export function createEmptyReadModel(nowIso: string): OrchestrationReadModel {
     threads: [],
     agents: [],
     channels: [],
+    liveRuns: [],
     updatedAt: nowIso,
   };
 }
@@ -837,24 +840,32 @@ export function projectEvent(
           event.type,
           "payload",
         );
-        const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
-        if (!thread) {
-          return nextBase;
-        }
-
         const session: OrchestrationSession = yield* decodeForEvent(
           OrchestrationSession,
           payload.session,
           event.type,
           "session",
         );
+        // A run ends when its session stops or fails; its agent may then wake again.
+        const base = isRunEndingSessionStatus(session.status)
+          ? {
+              ...nextBase,
+              liveRuns: (nextBase.liveRuns ?? []).filter(
+                (run) => run.threadId !== payload.threadId,
+              ),
+            }
+          : nextBase;
+        const thread = base.threads.find((entry) => entry.id === payload.threadId);
+        if (!thread) {
+          return base;
+        }
 
         // Leaving the "running" session status is the turn-end signal: settle
         // a still-running latest turn so its duration reflects the whole turn.
         const settledTurnState = settledTurnStateForSessionStatus(session.status);
         return {
-          ...nextBase,
-          threads: updateThread(nextBase.threads, payload.threadId, {
+          ...base,
+          threads: updateThread(base.threads, payload.threadId, {
             session,
             latestTurn:
               session.status === "running" && session.activeTurnId !== null
@@ -1214,6 +1225,22 @@ export function projectEvent(
             archivedAt: null,
             updatedAt: payload.updatedAt,
           }),
+        })),
+      );
+
+    case "channel.run-started":
+      return decodeForEvent(ChannelRunStartedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          liveRuns: [
+            ...(nextBase.liveRuns ?? []).filter((run) => run.threadId !== payload.threadId),
+            {
+              threadId: payload.threadId,
+              channelId: payload.channelId,
+              agentId: payload.agentId,
+              startedAt: payload.startedAt,
+            },
+          ],
         })),
       );
 

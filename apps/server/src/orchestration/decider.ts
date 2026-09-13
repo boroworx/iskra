@@ -1,5 +1,6 @@
 import {
   CHANNEL_HUMAN_AUTHOR_ID,
+  CHANNEL_SYSTEM_AUTHOR_ID,
   DEFAULT_CHANNEL_WAKE_DEPTH,
   EventId,
   MAX_SCRIPT_ID_LENGTH,
@@ -52,7 +53,9 @@ import {
   requireThreadAbsent,
   requireThreadNotArchived,
 } from "./commandInvariants.ts";
+import { parseMentions } from "./mentions.ts";
 import { projectEvent } from "./projector.ts";
+import { decideWake } from "./wakeRouting.ts";
 import { threadHasQueuedTurnStart } from "./ThreadSettlementPolicy.ts";
 
 const isScriptRunCommand = Schema.is(SCRIPT_RUN_COMMAND_PATTERN);
@@ -2320,13 +2323,19 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: `Channel '${command.channelId}' is archived and cannot receive messages.`,
         });
       }
-      return {
-        ...(yield* withEventBase({
+      const projectAgents = (readModel.agents ?? []).filter(
+        (agent) => agent.projectId === channel.projectId,
+      );
+      const mentions = parseMentions(command.body, projectAgents);
+      const channelEventBase = () =>
+        withEventBase({
           aggregateKind: "channel",
           aggregateId: command.channelId,
           occurredAt: command.createdAt,
           commandId: command.commandId,
-        })),
+        });
+      const messageEvent: PlannedOrchestrationEvent = {
+        ...(yield* channelEventBase()),
         type: "channel.message-posted",
         payload: {
           channelId: command.channelId,
@@ -2335,8 +2344,54 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           authorId: CHANNEL_HUMAN_AUTHOR_ID,
           body: command.body,
           createdAt: command.createdAt,
+          ...(mentions.length > 0 ? { mentions } : {}),
         },
       };
+
+      // Invariant 3: only a mention, or a message in an agent's DM, wakes anyone.
+      const targets = channel.kind === "dm" ? channel.memberAgentIds : mentions;
+      const events: PlannedOrchestrationEvent[] = [messageEvent];
+      let newRuns = 0;
+      for (const agentId of targets) {
+        const agent = projectAgents.find((candidate) => candidate.id === agentId);
+        if (agent === undefined) {
+          continue;
+        }
+        const decision = decideWake({ readModel, channel, agent, newRuns });
+        if (decision.kind === "refuse") {
+          // Invariant 4: a refused wake is said in the channel, never dropped silently.
+          events.push({
+            ...(yield* channelEventBase()),
+            type: "channel.message-posted",
+            payload: {
+              channelId: command.channelId,
+              messageId: MessageId.make(`${command.messageId}:system:${agent.id}`),
+              authorKind: "system",
+              authorId: CHANNEL_SYSTEM_AUTHOR_ID,
+              body: decision.reason,
+              createdAt: command.createdAt,
+            },
+          });
+          continue;
+        }
+        if (decision.liveRunThreadId === undefined) {
+          newRuns += 1;
+        }
+        events.push({
+          ...(yield* channelEventBase()),
+          type: "channel.agent-wake-requested",
+          payload: {
+            channelId: command.channelId,
+            agentId: agent.id,
+            triggerMessageId: command.messageId,
+            requestedAt: command.createdAt,
+            ...(decision.liveRunThreadId !== undefined
+              ? { liveRunThreadId: decision.liveRunThreadId }
+              : {}),
+          },
+        });
+      }
+      return events.length === 1 ? messageEvent : events;
     }
 
     case "channel.agent.wake": {
@@ -2350,14 +2405,17 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         agentId: command.agentId,
       });
-      if (
-        channel.archivedAt !== null ||
-        agent.archivedAt !== null ||
-        !channel.memberAgentIds.includes(agent.id)
-      ) {
+      if (channel.archivedAt !== null) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
-          detail: `Agent '${agent.id}' is not an active member of active channel '${channel.id}'.`,
+          detail: `Channel '${channel.id}' is archived and cannot wake agents.`,
+        });
+      }
+      const decision = decideWake({ readModel, channel, agent, newRuns: 0 });
+      if (decision.kind === "refuse") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: decision.reason,
         });
       }
       return {
@@ -2373,6 +2431,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           agentId: command.agentId,
           triggerMessageId: command.triggerMessageId,
           requestedAt: command.createdAt,
+          ...(decision.liveRunThreadId !== undefined
+            ? { liveRunThreadId: decision.liveRunThreadId }
+            : {}),
         },
       };
     }

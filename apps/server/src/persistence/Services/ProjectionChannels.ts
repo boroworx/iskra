@@ -12,6 +12,7 @@ import {
   IsoDateTime,
   MessageId,
   NonNegativeInt,
+  OrchestrationLiveRun,
   OrchestrationRun,
   ProjectId,
   RenderedRunContext,
@@ -75,6 +76,15 @@ export const GetProjectionChannelMessageInput = Schema.Struct({
 });
 export type GetProjectionChannelMessageInput = typeof GetProjectionChannelMessageInput.Type;
 
+/** A live run row as selected; it has no JSON columns. */
+export const ProjectionLiveRunDbRow = OrchestrationLiveRun;
+
+export const EndProjectionRunInput = Schema.Struct({
+  threadId: ThreadId,
+  endedAt: IsoDateTime,
+});
+export type EndProjectionRunInput = typeof EndProjectionRunInput.Type;
+
 export const GetProjectionChannelInput = Schema.Struct({
   channelId: ChannelId,
 });
@@ -115,6 +125,9 @@ export interface ProjectionChannelRepositoryShape {
 
   /** Record a started run. Replaying an already-projected run is a no-op. */
   readonly insertRun: (row: OrchestrationRun) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /** Mark a run ended. Ending a thread that is not a live run is a no-op. */
+  readonly endRun: (input: EndProjectionRunInput) => Effect.Effect<void, ProjectionRepositoryError>;
 
   /** What an agent is handed on wake: the channel's newest `wakeDepth` messages, oldest first. */
   readonly listWakeHistory: (

@@ -34,7 +34,8 @@ function authorName(
   }
 }
 
-function toContextMessage(
+/** A channel message as an agent reads it, with its author named. */
+export function toRunContextMessage(
   message: OrchestrationChannelMessage,
   agents: ReadonlyArray<OrchestrationAgent>,
 ): RunContextMessage {
@@ -61,8 +62,8 @@ export function buildRunContext(input: RunContextInput): RunContextPayload {
     channel: { id: channel.id, kind: channel.kind, name: channel.name, topic: channel.topic },
     pinnedSpec: channel.pinnedSpec,
     wakeDepth: channel.wakeDepth,
-    history: history.map((message) => toContextMessage(message, input.agents)),
-    trigger: toContextMessage(input.trigger, input.agents),
+    history: history.map((message) => toRunContextMessage(message, input.agents)),
+    trigger: toRunContextMessage(input.trigger, input.agents),
   };
 }
 
@@ -74,6 +75,11 @@ function section(title: string, body: string): string {
 function formatMessage(message: RunContextMessage): string {
   const author = message.authorKind === "agent" ? `@${message.authorName}` : message.authorName;
   return `[${message.createdAt}] ${author}: ${message.body}`;
+}
+
+/** The text a message is handed to an agent with, first or mid-run. */
+export function renderNewMessage(message: RunContextMessage): string {
+  return `New message for you:\n${formatMessage(message)}`;
 }
 
 /** Renders a context payload into the exact text sent to the provider. */
@@ -90,7 +96,7 @@ export function renderRunContext(payload: RunContextPayload): RenderedRunContext
     payload.history.length === 0
       ? ""
       : `Recent messages in ${where}:\n${payload.history.map(formatMessage).join("\n")}`,
-    `New message for you:\n${formatMessage(payload.trigger)}`,
+    renderNewMessage(payload.trigger),
   ];
   return {
     systemPrompt: systemPrompt.filter((part) => part.length > 0).join("\n\n"),

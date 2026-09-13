@@ -1,6 +1,7 @@
 import {
   ApprovalRequestId,
   isImportedAgentSessionMessageId,
+  isRunEndingSessionStatus,
   UserInputAttachmentAnswerPayload,
   type ChatAttachment,
   type OrchestrationEvent,
@@ -722,6 +723,15 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
 
         case "channel.run-started":
           yield* projectionChannelRepository.insertRun(event.payload);
+          return;
+
+        case "thread.session-set":
+          if (isRunEndingSessionStatus(event.payload.session.status)) {
+            yield* projectionChannelRepository.endRun({
+              threadId: event.payload.threadId,
+              endedAt: event.payload.session.updatedAt,
+            });
+          }
           return;
 
         default:

@@ -260,6 +260,187 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
     }),
   );
 
+  const reviewer = AgentId.make("agent-reviewer");
+  const writer = AgentId.make("agent-writer");
+
+  const startRun = (
+    agentId: AgentId,
+    channelId: string,
+    threadId: string,
+  ): OrchestrationCommand => ({
+    type: "channel.run.start",
+    commandId: CommandId.make(`cmd-run-${threadId}`),
+    threadId: ThreadId.make(threadId),
+    channelId: ChannelId.make(channelId),
+    agentId,
+    triggerMessageId: MessageId.make("message-trigger"),
+    capabilities: ["read"],
+    context: {
+      agent: { id: agentId, name: "agent", rolePrompt: "" },
+      channel: { id: ChannelId.make(channelId), kind: "channel", name: channelId, topic: "" },
+      pinnedSpec: "",
+      wakeDepth: 30,
+      history: [],
+      trigger: {
+        messageId: MessageId.make("message-trigger"),
+        authorKind: "human",
+        authorName: "user",
+        body: "hi",
+        createdAt: now,
+      },
+    },
+    rendered: { systemPrompt: "", firstMessage: "hi" },
+    startedAt: now,
+  });
+
+  // Decides a human post after `commands`, always as a list of events.
+  const decidePost = (
+    commands: ReadonlyArray<OrchestrationCommand>,
+    channelId: string,
+    body: string,
+  ) =>
+    Effect.gen(function* () {
+      const readModel = yield* applyCommands(commands);
+      const decided = yield* decideOrchestrationCommand({
+        command: postMessage(channelId, body),
+        readModel,
+      });
+      return Array.isArray(decided) ? decided : [decided];
+    });
+
+  it.effect("wakes exactly the member agents a message mentions, and nobody otherwise", () =>
+    Effect.gen(function* () {
+      const base = [
+        ...setup,
+        createAgent(reviewer, "reviewer"),
+        createChannel("general", "channel", [backend, frontend]),
+      ];
+
+      const mentioned = yield* decidePost(base, "general", "@frontend can you check this?");
+      expect(mentioned.map((event) => event.type)).toEqual([
+        "channel.message-posted",
+        "channel.agent-wake-requested",
+      ]);
+      expect(mentioned[0]).toMatchObject({ payload: { mentions: [frontend] } });
+      expect(mentioned[1]).toMatchObject({ payload: { agentId: frontend } });
+
+      const silent = yield* decidePost(base, "general", "just thinking out loud");
+      expect(silent.map((event) => event.type)).toEqual(["channel.message-posted"]);
+
+      const outsider = yield* decidePost(base, "general", "@reviewer any thoughts?");
+      expect(outsider.map((event) => event.type)).toEqual([
+        "channel.message-posted",
+        "channel.message-posted",
+      ]);
+      expect(outsider[1]).toMatchObject({
+        payload: { authorKind: "system", body: "@reviewer isn't an active member of #general." },
+      });
+    }),
+  );
+
+  it.effect("wakes a DM's agent on every human message, mention or not", () =>
+    Effect.gen(function* () {
+      const events = yield* decidePost(
+        [...setup, createChannel("dm-backend", "dm", [backend])],
+        "dm-backend",
+        "hello",
+      );
+
+      expect(events.map((event) => event.type)).toEqual([
+        "channel.message-posted",
+        "channel.agent-wake-requested",
+      ]);
+      expect(events[1]).toMatchObject({ payload: { agentId: backend } });
+    }),
+  );
+
+  it.effect("keeps one live run per agent: joins it from the same channel, refuses elsewhere", () =>
+    Effect.gen(function* () {
+      const base = [
+        ...setup,
+        createChannel("general", "channel", [backend]),
+        createChannel("other", "channel", [backend]),
+        startRun(backend, "other", "run-other"),
+      ];
+
+      const elsewhere = yield* decidePost(base, "general", "@backend ping");
+      expect(elsewhere.map((event) => event.type)).toEqual([
+        "channel.message-posted",
+        "channel.message-posted",
+      ]);
+      expect(elsewhere[1]).toMatchObject({
+        payload: { authorKind: "system", body: "@backend is busy in another channel." },
+      });
+
+      const sameChannel = yield* decidePost(base, "other", "@backend one more thing");
+      expect(sameChannel[1]).toMatchObject({
+        type: "channel.agent-wake-requested",
+        payload: { agentId: backend, liveRunThreadId: "run-other" },
+      });
+    }),
+  );
+
+  it.effect("refuses new runs past the project cap until a run's session ends", () =>
+    Effect.gen(function* () {
+      const base = [
+        ...setup,
+        createAgent(reviewer, "reviewer"),
+        createAgent(writer, "writer"),
+        createChannel("general", "channel", [backend, frontend, reviewer, writer]),
+        startRun(backend, "general", "run-1"),
+        startRun(frontend, "general", "run-2"),
+        startRun(reviewer, "general", "run-3"),
+      ];
+
+      const capped = yield* decidePost(base, "general", "@writer help");
+      expect(capped[1]).toMatchObject({ payload: { authorKind: "system" } });
+
+      const threadId = ThreadId.make("run-1");
+      const freed = yield* decidePost(
+        [
+          ...base,
+          {
+            type: "thread.create",
+            commandId: CommandId.make("cmd-thread-run-1"),
+            threadId,
+            projectId,
+            title: "@backend in #general",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("claudeAgent"),
+              model: "claude-haiku-4-5",
+            },
+            runtimeMode: "approval-required",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            createdAt: now,
+          },
+          {
+            type: "thread.session.set",
+            commandId: CommandId.make("cmd-stop-run-1"),
+            threadId,
+            session: {
+              threadId,
+              status: "stopped",
+              providerName: "claudeAgent",
+              runtimeMode: "approval-required",
+              activeTurnId: null,
+              lastError: null,
+              updatedAt: now,
+            },
+            createdAt: now,
+          },
+        ],
+        "general",
+        "@writer help",
+      );
+      expect(freed[1]).toMatchObject({
+        type: "channel.agent-wake-requested",
+        payload: { agentId: writer },
+      });
+    }),
+  );
+
   it.effect("accepts human messages only while the channel is not archived", () =>
     Effect.gen(function* () {
       const base = [...setup, createChannel("general", "channel", [backend])];

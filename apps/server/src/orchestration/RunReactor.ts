@@ -21,7 +21,12 @@ import {
   type ProjectionChannelMessage,
 } from "../persistence/Services/ProjectionChannels.ts";
 import { forkParked } from "../serverActivation.ts";
-import { buildRunContext, renderRunContext } from "./runContext.ts";
+import {
+  buildRunContext,
+  renderNewMessage,
+  renderRunContext,
+  toRunContextMessage,
+} from "./runContext.ts";
 import * as OrchestrationEngine from "./Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts";
 
@@ -79,13 +84,37 @@ const make = Effect.gen(function* () {
       });
     }
 
+    const projectAgents = (readModel.agents ?? []).filter(
+      (candidate) => candidate.projectId === channel.projectId,
+    );
+
+    const liveRunThreadId = event.payload.liveRunThreadId;
+    if (liveRunThreadId !== undefined) {
+      // The agent is already working in this channel: the message joins its live run.
+      yield* engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make(`run-follow-up:${event.eventId}`),
+        threadId: liveRunThreadId,
+        message: {
+          messageId: MessageId.make(`run-follow-up:${event.eventId}`),
+          role: "user",
+          text: renderNewMessage(
+            toRunContextMessage(toChannelMessage(trigger.value), projectAgents),
+          ),
+          attachments: [],
+        },
+        runtimeMode: "approval-required",
+        interactionMode: "default",
+        createdAt: yield* nowIso,
+      });
+      return;
+    }
+
     const history = yield* channels.listWakeHistory({ channelId });
     const context = buildRunContext({
       agent,
       channel,
-      agents: (readModel.agents ?? []).filter(
-        (candidate) => candidate.projectId === channel.projectId,
-      ),
+      agents: projectAgents,
       messages: history.map(toChannelMessage),
       trigger: toChannelMessage(trigger.value),
     });

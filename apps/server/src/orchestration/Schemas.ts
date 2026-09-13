@@ -10,6 +10,7 @@ import {
   ChannelUpdatedPayload as ContractsChannelUpdatedPayloadSchema,
   ChannelArchivedPayload as ContractsChannelArchivedPayloadSchema,
   ChannelUnarchivedPayload as ContractsChannelUnarchivedPayloadSchema,
+  ChannelRunStartedPayload as ContractsChannelRunStartedPayloadSchema,
   ThreadCreatedPayload as ContractsThreadCreatedPayloadSchema,
   ThreadArchivedPayload as ContractsThreadArchivedPayloadSchema,
   ThreadSettledPayload as ContractsThreadSettledPayloadSchema,
@@ -54,6 +55,7 @@ export const ChannelCreatedPayload = ContractsChannelCreatedPayloadSchema;
 export const ChannelUpdatedPayload = ContractsChannelUpdatedPayloadSchema;
 export const ChannelArchivedPayload = ContractsChannelArchivedPayloadSchema;
 export const ChannelUnarchivedPayload = ContractsChannelUnarchivedPayloadSchema;
+export const ChannelRunStartedPayload = ContractsChannelRunStartedPayloadSchema;
 
 export const ThreadCreatedPayload = ContractsThreadCreatedPayloadSchema;
 export const ThreadArchivedPayload = ContractsThreadArchivedPayloadSchema;

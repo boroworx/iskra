@@ -549,6 +549,9 @@ export type ChannelMessageAuthorKind = typeof ChannelMessageAuthorKind.Type;
 /** Author id of every human message until multiplayer adds identities. */
 export const CHANNEL_HUMAN_AUTHOR_ID = "human";
 
+/** Author id of messages the server posts itself, such as a refused wake. */
+export const CHANNEL_SYSTEM_AUTHOR_ID = "system";
+
 export const OrchestrationChannelMessage = Schema.Struct({
   id: MessageId,
   channelId: ChannelId,
@@ -617,6 +620,22 @@ export const OrchestrationRun = Schema.Struct({
   startedAt: IsoDateTime,
 });
 export type OrchestrationRun = typeof OrchestrationRun.Type;
+
+/** A run whose session has not yet stopped. An agent has at most one. */
+export const OrchestrationLiveRun = Schema.Struct({
+  threadId: ThreadId,
+  channelId: ChannelId,
+  agentId: AgentId,
+  startedAt: IsoDateTime,
+});
+export type OrchestrationLiveRun = typeof OrchestrationLiveRun.Type;
+
+/** Live runs allowed at once in one project. */
+export const DEFAULT_PROJECT_RUN_CAP = 3;
+
+/** A run ends when its session stops or fails; a finished turn alone leaves it live. */
+export const isRunEndingSessionStatus = (status: OrchestrationSessionStatus): boolean =>
+  status === "stopped" || status === "error";
 
 export const OrchestrationMessageRole = Schema.Literals(["user", "assistant", "system"]);
 export type OrchestrationMessageRole = typeof OrchestrationMessageRole.Type;
@@ -901,6 +920,7 @@ export const OrchestrationReadModel = Schema.Struct({
   agents: Schema.optional(Schema.Array(OrchestrationAgent)),
   // Channel messages are not part of the read model; they are paged from the projection.
   channels: Schema.optional(Schema.Array(OrchestrationChannel)),
+  liveRuns: Schema.optional(Schema.Array(OrchestrationLiveRun)),
   updatedAt: IsoDateTime,
 });
 export type OrchestrationReadModel = typeof OrchestrationReadModel.Type;
@@ -1949,6 +1969,8 @@ export const ChannelMessagePostedPayload = Schema.Struct({
   body: Schema.String,
   createdAt: IsoDateTime,
   runThreadId: Schema.optional(ThreadId),
+  // The project agents a human message named, resolved when it was posted.
+  mentions: Schema.optional(Schema.Array(AgentId)),
 });
 
 export const ChannelAgentWakeRequestedPayload = Schema.Struct({
@@ -1956,6 +1978,8 @@ export const ChannelAgentWakeRequestedPayload = Schema.Struct({
   agentId: AgentId,
   triggerMessageId: MessageId,
   requestedAt: IsoDateTime,
+  // Set when the agent is already live in this channel: the message joins that run.
+  liveRunThreadId: Schema.optional(ThreadId),
 });
 
 export const ChannelRunStartedPayload = OrchestrationRun;
