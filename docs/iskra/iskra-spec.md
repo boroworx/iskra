@@ -132,12 +132,13 @@ queue-backed reactors emitting receipts. Each turn ends with a checkpoint, a hid
 Define all of these in `packages/contracts` with Effect/Schema, following the existing contract
 files. Field lists are the contract; naming and encoding follow local convention.
 
-**Agent** — durable. `id`, `projectId`, `name`, `avatar`, `roleTags[]`, `rolePrompt`,
-`providerId`, `model`, `reasoningLevel`, `permissions`, `channelIds[]`, `scratchpadRef`,
-`archivedAt?`.
+**Agent** — durable. `id`, `projectId`, `name` (`[a-z0-9-]+`, unique per project), `avatar`,
+`roleTags[]`, `rolePrompt`, `providerId`, `model`, `reasoningLevel`, `capabilities` (the ceiling
+for card-scoped runs; see permission model), `channelIds[]`, `scratchpadRef`, `archivedAt?`.
 
-**Channel** — durable. `id`, `projectId`, `name`, `topic`, `pinnedSpecRef`, `wakeDepth`
-(messages of history given to an agent on wake, default 30), `memberAgentIds[]`.
+**Channel** — durable. `id`, `projectId`, `kind` (`channel` | `dm`), `name`, `topic`,
+`pinnedSpecRef`, `wakeDepth` (messages of history given to an agent on wake, default 30),
+`memberAgentIds[]`. A `dm` channel has exactly one human and one agent member.
 
 **Message** — durable, append-only. `id`, `channelId`, `authorKind` (`human` | `agent` |
 `system` | `webhook`), `authorId`, `body`, `mentions[]`, `createdAt`, `runId?`.
@@ -146,14 +147,14 @@ files. Field lists are the contract; naming and encoding follow local convention
 `status` (`triage` | `ready` | `claimed` | `inProgress` | `inReview` | `landed` | `abandoned`),
 `assigneeAgentId?`, `worktreePath?`, `branch?`, `createdBy`, `claimedAt?`.
 
-**Run** — ephemeral, but its events are persisted. `id`, `agentId`, `providerId`, `scope`
-(`card` | `conversation`), `cardId?`, `channelId?`, `writeAccess` (boolean),
-`contextPayloadRef`, `startedAt`, `endedAt?`, `costTokens`.
+**Run** — ephemeral, but its events are persisted. `id`, `threadId` (the hidden upstream thread
+backing it), `agentId`, `providerId`, `scope` (`card` | `conversation`), `cardId?`, `channelId`,
+`capabilities`, `contextPayload`, `startedAt`, `endedAt?`, `costTokens`.
 
 ### Message flag: `addressedToUser`
 
-Run output events carry a boolean `addressedToUser`. False by default — reasoning, tool calls,
-file reads, all ambient work. True only when the agent is speaking to a human. The client
+Each item of run output carries a boolean `addressedToUser`. False by default — reasoning, tool
+calls, file reads, denials, all ambient work. True only when the agent is speaking to a human. The client
 renders false as grey and true as full white. This flag is the product; treat it as a
 first-class part of the contract, not a UI detail.
 
@@ -199,12 +200,53 @@ and verified by running it, Codex is not a supported provider for write-restrict
 **Provider scope for M1:** Claude only. Codex support is added when its verdicts are confirmed
 by running them, not by reading.
 
+### Runs, context and channels — decided
+
+**A run is a hidden upstream thread.** Every provider contract upstream is keyed by `threadId`
+(sessions, turns, runtime events, ingestion). Iskra does not rebuild that machinery. Starting a
+run creates a thread flagged as an Iskra run and excluded from the upstream thread list, and
+emits `RunStarted` binding it to the agent, scope, capabilities and context payload. Run output
+is that thread's upstream messages and activities; a run ends when its session stops. There is
+no separate run output or run end event.
+
+**`addressedToUser` maps onto upstream's existing split.** Assistant messages are `true`.
+Activities — reasoning, tool lifecycle, `tool.denied` — are `false`. The Iskra projection exposes
+the flag; the adapter needs no change for Claude.
+
+**Context injection.** The context builder (M1.3) returns a structured record. A pure renderer
+turns it into two strings: the **system prompt** (role prompt, scratchpad, pinned spec) and the
+**first message** (the last `wakeDepth` channel messages, then the triggering message; the card
+in M2). `RunStarted` stores the record and both rendered strings as `contextPayload`. The
+adapter sends exactly those strings.
+
+**Every run is a fresh session.** Never pass a resume cursor to a run. Durable memory is the
+channel and the scratchpad, not the provider's session. A run ends when its turn completes with
+no pending messages; the next wake starts a new run.
+
+**One live run per agent.** A message that wakes an agent with a live run in the same channel is
+delivered into that run as mid-turn input and shows as `pending` (invariant 10). A wake from a
+different channel is rejected with a system message saying the agent is busy — contexts are
+never mixed across channels. Waking past the project's concurrent-run cap (default 3) is
+rejected the same way.
+
+**DMs are channels.** A DM is a `kind: dm` channel with one human and one agent. Every human
+message in a DM wakes its agent; no mention needed. Wake depth and history work as in any
+channel.
+
+**What is posted back.** When a run's turn completes, its final assistant message is posted to
+the run's channel as a `Message` (`authorKind: agent`, `runId` set). Reasoning, tool calls and
+intermediate assistant text stay in the DM view. White rendering means any assistant text; an
+agent `@mention`ing a human is a notification concern for M4, not a rendering rule.
+
+**Mentions.** `@name`, matched case-insensitively against agent names in the project, parsed in
+the decider. A mention of an unknown name is plain text. A mention of an agent that isn't a
+member of the channel wakes nothing and posts a system message saying so.
+
 ### New event types (minimum)
 
 `AgentCreated`, `AgentUpdated`, `AgentArchived`, `ChannelCreated`, `ChannelUpdated`,
-`MessagePosted`, `AgentMentioned`, `RunStarted`, `RunOutputEmitted`, `RunEnded`,
-`ScratchpadWritten`, `CardCreated`, `CardPromoted`, `CardClaimed`, `CardStatusChanged`,
-`CardLanded`, `CardAbandoned`.
+`MessagePosted`, `AgentMentioned`, `RunStarted`, `ScratchpadWritten`, `CardCreated`,
+`CardPromoted`, `CardClaimed`, `CardStatusChanged`, `CardLanded`, `CardAbandoned`.
 
 ---
 
@@ -213,15 +255,17 @@ by running them, not by reading.
 These are the rules the deciders enforce. Each needs a test that fails when the rule is
 removed.
 
-1. **No writes without a card.** A run with `scope: conversation` has `writeAccess: false` and
-   is denied filesystem writes and destructive commands at the adapter boundary. To write, an
-   agent opens a card.
+1. **No writes without a card.** A run with `scope: conversation` has capabilities `["read"]`
+   and is denied filesystem writes and shell commands at the adapter boundary. To write, an agent
+   opens a card.
 2. **One worktree per card, never per agent.** Created from current main at claim time,
    destroyed on land or abandon. Agents own no workspace.
-3. **Agents are silent by default.** A run starts only on an explicit `@mention`, a card
-   assignment, or a routed webhook event. A message with no mentions wakes nobody.
-4. **One in-progress card per agent**, and a configurable global cap on concurrent runs per
-   project.
+3. **Agents are silent by default.** A run starts only on an explicit `@mention`, a human message
+   in the agent's DM, a card assignment, or a routed webhook event. A channel message with no
+   mentions wakes nobody.
+4. **One live run per agent, one in-progress card per agent**, and a configurable cap on
+   concurrent runs per project (default 3). Wakes beyond either limit are rejected with a system
+   message, never dropped silently.
 5. **Agent-created cards enter `triage`.** Only a human promotes `triage → ready`. Agents may
    claim only `ready` cards.
 6. **Claims are atomic.** Single writer; a losing claim is rejected and the agent is told.
@@ -230,8 +274,8 @@ removed.
    failure the card returns to `inProgress` with the failure as context for its agent.
 8. **Overlap flagging.** When a card lands, any `inProgress` card whose changed file set
    intersects it is flagged and its agent told to rebase before review.
-9. **No agent-to-agent DMs.** Agents communicate in channels or through cards. There is no
-   private agent channel.
+9. **No agent-to-agent DMs.** Agents communicate in channels or through cards. A `dm` channel
+   always has exactly one human and one agent; the decider rejects any other membership.
 10. **No message is silently dropped.** A message sent to a running agent is held in a `pending`
     state until the provider demonstrably consumes it. If the turn it attached to ends without
     the message being read, it is re-delivered to the next turn or surfaced to the user as
@@ -274,31 +318,38 @@ no writes.** This milestone alone must feel better than a terminal; if it doesn'
 rules, projector, persistence. _Accept when:_ an agent can be created and survives a server
 restart, with a test asserting the projection matches the event log.
 
-**M1.2 — Channel and messages.** Channel entity, `MessagePosted`, append-only history
-projection, `wakeDepth` setting. _Accept when:_ messages persist and paginate; changing
-`wakeDepth` changes what a later context build returns.
+**M1.2 — Channel and messages.** Channel entity including `kind: dm`, `MessagePosted`,
+append-only history projection, `wakeDepth` setting. _Accept when:_ messages persist and
+paginate; changing `wakeDepth` changes what a later context build returns; a `dm` channel with
+anything other than one human and one agent is rejected.
 
 **M1.3 — Context builder.** A pure function from (agent, channel, pinned spec, wakeDepth,
-optional card) to a structured context payload. No IO. _Accept when:_ fully unit-tested,
-deterministic for fixed inputs, and returning a structured record — not a concatenated string.
+optional card) to a structured context payload, plus a pure renderer from that payload to the
+system prompt and first message. No IO. _Accept when:_ both are fully unit-tested and
+deterministic for fixed inputs, and the builder returns a structured record — not a concatenated
+string.
 
-**M1.4 — Read-only run lifecycle.** Spawn a Claude session scoped to an agent with the `read`
-capability only, using the verified configuration in the permission model above, streaming
-`RunOutputEmitted` events. _Accept when:_ an agent answers a question about the repo; a write
+**M1.4 — Read-only run lifecycle.** Start a run as a hidden upstream thread with a fresh Claude
+session (no resume cursor), capability `read` only, using the verified configuration in the
+permission model above. _Accept when:_ an agent answers a question about the repo; a write
 attempt and a shell attempt are both denied at the adapter boundary and appear in the UI as
-denial events; and a test proves neither launch-argument flags nor a mid-session
-`interactionMode` change can raise the run's capabilities.
+denial events; the run's thread does not appear in the upstream thread list; the final assistant
+message is posted to the channel; and a test proves neither launch-argument flags nor a
+mid-session `interactionMode` change can raise the run's capabilities.
 
-**M1.5 — Mention routing.** Parse mentions on `MessagePosted`; wake only mentioned agents.
-Decider-level, pure. _Accept when:_ a message mentioning one of three agents starts exactly one
-run, and an unmentioned message starts none. Test both.
+**M1.5 — Mention routing.** Parse `@name` mentions on `MessagePosted`; wake only mentioned
+member agents, and the agent of a DM. Decider-level, pure. _Accept when:_ a message mentioning
+one of three agents starts exactly one run; an unmentioned channel message starts none; a DM
+message starts one; a mention of a non-member, of an agent busy in another channel, or beyond
+the concurrent-run cap starts none and posts a system message. Test each.
 
 **M1.6 — Server shell UI.** `apps/web`: project sidebar, channel list, member list showing
 agents with presence (idle / running / blocked). Reads the projection; no new state.
 _Accept when:_ the shell renders live agent state and presence updates without a refresh.
 
-**M1.7 — DM view.** Per-agent conversation view rendering `RunOutputEmitted` with
-`addressedToUser: false` as grey and `true` as full white. A message sent to a busy agent shows
+**M1.7 — DM view.** The agent's DM channel, interleaved with the output of all of that agent's
+runs (each labelled with its originating channel), rendering `addressedToUser: false` as grey
+and `true` as full white. A message sent to a busy agent shows
 as `pending` until consumed — upstream marks it sent immediately, which is wrong here (see
 invariant 10). Delivery can take tens of seconds with no upper bound, so pending is a normal
 state, not an error state. _Accept when:_ a single run visibly produces both grey and white; a
@@ -307,8 +358,8 @@ consuming it does not silently disappear; and no continuously repainting animati
 GPU profile.
 
 **M1.8 — Context inspector.** For any run, show exactly the payload M1.3 produced.
-_Accept when:_ the inspector is reachable from the DM view and its content matches the stored
-`contextPayloadRef` byte for byte.
+_Accept when:_ the inspector is reachable from the DM view, shows the structured record and both
+rendered strings, and the rendered strings match what the adapter sent byte for byte.
 
 ### M2–M5 (not yet briefed)
 
