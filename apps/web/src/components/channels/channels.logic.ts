@@ -1,14 +1,17 @@
-import type {
-  AgentId,
-  AgentPresence,
-  ChannelId,
-  OrchestrationAgentRun,
-  OrchestrationAgentShell,
-  OrchestrationChannelMessage,
-  OrchestrationChannelShell,
-  OrchestrationMessage,
-  OrchestrationThreadActivity,
-  ProjectId,
+import {
+  agentDmThreadId,
+  type AgentId,
+  type AgentPresence,
+  type ChannelId,
+  type OrchestrationAgentRun,
+  type OrchestrationAgentShell,
+  type OrchestrationChannelMessage,
+  type OrchestrationChannelShell,
+  type OrchestrationMessage,
+  type OrchestrationThreadActivity,
+  type OrchestrationThreadShell,
+  type ProjectId,
+  type ThreadId,
 } from "@t3tools/contracts";
 
 export interface ChannelListEntry {
@@ -20,9 +23,15 @@ export interface AgentListEntry {
   readonly id: AgentId;
   readonly name: string;
   readonly presence: AgentPresence;
-  /** The agent's DM, when it has one. */
-  readonly dmChannelId: ChannelId | null;
+  /** The agent's DM thread, whether or not it has been opened yet. */
+  readonly dmThreadId: ThreadId;
 }
+
+/** The parts of a DM thread's shell that say whether the agent is busy in it. */
+export type DmThreadStatus = Pick<
+  OrchestrationThreadShell,
+  "id" | "session" | "hasPendingApprovals" | "hasPendingUserInput"
+>;
 
 export interface ChannelMemberEntry {
   readonly id: AgentId;
@@ -62,27 +71,44 @@ export function channelListEntries(
     .toSorted((left, right) => left.name.localeCompare(right.name));
 }
 
-/** A project's agents by name, with presence and their DM when it exists. */
+const PRESENCE_ATTENTION: Record<AgentPresence, number> = { idle: 0, running: 1, blocked: 2 };
+
+/** An agent's presence in its DM: waiting on the person, working on a turn, or idle. */
+function dmPresence(thread: DmThreadStatus | undefined): AgentPresence {
+  if (thread === undefined) {
+    return "idle";
+  }
+  if (thread.hasPendingApprovals || thread.hasPendingUserInput) {
+    return "blocked";
+  }
+  return thread.session?.status === "running" ? "running" : "idle";
+}
+
+/**
+ * A project's agents by name. Presence is whichever needs more attention: the
+ * agent's channel runs or its DM.
+ */
 export function agentListEntries(
-  channels: ReadonlyArray<OrchestrationChannelShell>,
   agents: ReadonlyArray<OrchestrationAgentShell>,
+  dmThreads: ReadonlyArray<DmThreadStatus>,
   projectId: ProjectId,
 ): ReadonlyArray<AgentListEntry> {
-  const dmByAgent = new Map<AgentId, ChannelId>();
-  for (const channel of channels) {
-    const [agentId] = channel.memberAgentIds;
-    if (channel.kind === "dm" && agentId !== undefined && !dmByAgent.has(agentId)) {
-      dmByAgent.set(agentId, channel.id);
-    }
-  }
+  const dmThreadsById = new Map<string, DmThreadStatus>(
+    dmThreads.map((thread) => [thread.id, thread]),
+  );
   return agents
     .filter((agent) => agent.projectId === projectId)
-    .map((agent) => ({
-      id: agent.id,
-      name: agent.name,
-      presence: agent.presence,
-      dmChannelId: dmByAgent.get(agent.id) ?? null,
-    }))
+    .map((agent) => {
+      const dmThreadId = agentDmThreadId(agent.id);
+      const inDm = dmPresence(dmThreadsById.get(dmThreadId));
+      return {
+        id: agent.id,
+        name: agent.name,
+        presence:
+          PRESENCE_ATTENTION[inDm] > PRESENCE_ATTENTION[agent.presence] ? inDm : agent.presence,
+        dmThreadId,
+      };
+    })
     .toSorted((left, right) => left.name.localeCompare(right.name));
 }
 

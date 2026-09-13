@@ -1048,6 +1048,8 @@ export const OrchestrationAgentShell = Schema.Struct({
   name: AgentName,
   avatar: Schema.NullOr(TrimmedNonEmptyString),
   roleTags: Schema.Array(TrimmedNonEmptyString),
+  // The model the agent's DM starts on.
+  modelSelection: ModelSelection,
   // Derived from the agent's live run: running while it has one, blocked while that run waits on the user.
   presence: AgentPresence,
 });

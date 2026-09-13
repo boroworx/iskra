@@ -1,6 +1,5 @@
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/models";
-import { AgentId, ChannelId, type ModelSelection, type ServerProvider } from "@t3tools/contracts";
-import { useNavigate } from "@tanstack/react-router";
+import { AgentId, type ModelSelection, type ServerProvider } from "@t3tools/contracts";
 import { useState } from "react";
 
 import { randomUUID } from "~/lib/utils";
@@ -24,11 +23,12 @@ import {
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
 import { toAgentName } from "./channels.logic";
+import { useOpenAgentDm } from "./useOpenAgentDm";
 
 const EMPTY_PROVIDERS: ReadonlyArray<ServerProvider> = [];
 
 /**
- * The model a new agent runs on. Agent runs are read-only and only the Claude
+ * The model a new agent runs on. Channel runs are read-only and only the Claude
  * adapter enforces that, so agents use Claude: the project's default model when
  * it is a Claude one, otherwise the first available Claude instance's default.
  */
@@ -61,12 +61,11 @@ export function CreateAgentDialog(props: {
   readonly project: EnvironmentProject;
 }) {
   const { environmentId, id: projectId } = props.project;
-  const navigate = useNavigate();
   const providers = useServerConfigs().get(environmentId)?.providers ?? EMPTY_PROVIDERS;
   const channels = useEnvironmentChannels(environmentId);
   const createAgent = useAtomCommand(channelEnvironment.createAgent);
-  const createChannel = useAtomCommand(channelEnvironment.create);
   const updateChannel = useAtomCommand(channelEnvironment.update);
+  const openAgentDm = useOpenAgentDm();
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
   const [creating, setCreating] = useState(false);
@@ -104,27 +103,11 @@ export function CreateAgentDialog(props: {
         input: { channelId: channel.id, memberAgentIds: [...channel.memberAgentIds, agentId] },
       });
     }
-    const dmChannelId = ChannelId.make(randomUUID());
-    const dm = await createChannel({
-      environmentId,
-      input: {
-        channelId: dmChannelId,
-        projectId,
-        kind: "dm",
-        name: `dm-${agentName}`,
-        memberAgentIds: [agentId],
-      },
-    });
     setCreating(false);
     setName("");
     setRole("");
     props.onOpenChange(false);
-    if (dm._tag === "Success") {
-      void navigate({
-        to: "/channels/$environmentId/$channelId",
-        params: { environmentId, channelId: dmChannelId },
-      });
-    }
+    void openAgentDm(environmentId, { id: agentId, projectId, name: agentName, modelSelection });
   };
 
   return (
@@ -139,8 +122,8 @@ export function CreateAgentDialog(props: {
           <DialogHeader>
             <DialogTitle>New agent</DialogTitle>
             <DialogDescription>
-              It joins every channel in this project and replies when you mention it. For now,
-              agents can read the code but not change it.
+              It joins every channel in this project and answers there when you mention it. In its
+              DM it works on the code with you.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel className="space-y-4">
@@ -160,7 +143,7 @@ export function CreateAgentDialog(props: {
             </div>
             <Textarea
               aria-label="Role"
-              placeholder="What it owns and how it should answer, e.g. Owns the server. Answers API questions."
+              placeholder="What it owns and how it should work, e.g. Owns the server. Answers API questions."
               rows={3}
               size="sm"
               value={role}

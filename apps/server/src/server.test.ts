@@ -9743,6 +9743,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   name: "backend",
                   avatar: null,
                   roleTags: [],
+                  modelSelection: {
+                    instanceId: ProviderInstanceId.make("claudeAgent"),
+                    model: "claude-haiku-4-5",
+                  },
                   presence: "running" as const,
                 }),
               ),

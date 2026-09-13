@@ -1,4 +1,13 @@
-import { AgentId, ChannelId, EventId, MessageId, ProjectId, ThreadId } from "@t3tools/contracts";
+import {
+  AgentId,
+  ChannelId,
+  EventId,
+  MessageId,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+  agentDmThreadId,
+} from "@t3tools/contracts";
 import type {
   OrchestrationAgentRun,
   OrchestrationAgentShell,
@@ -6,6 +15,7 @@ import type {
   OrchestrationChannelShell,
   OrchestrationMessage,
   OrchestrationThreadActivity,
+  OrchestrationThreadShell,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -33,6 +43,10 @@ const agent = (id: string, name: string, overrides: Partial<OrchestrationAgentSh
     name,
     avatar: null,
     roleTags: [],
+    modelSelection: {
+      instanceId: ProviderInstanceId.make("claudeAgent"),
+      model: "claude-haiku-4-5",
+    },
     presence: "idle",
     ...overrides,
   }) satisfies OrchestrationAgentShell;
@@ -82,18 +96,41 @@ describe("channelListEntries", () => {
 });
 
 describe("agentListEntries", () => {
-  it("lists every project agent by name, with its DM when it has one", () => {
-    const backend = agent("agent-backend", "backend", { presence: "running" });
-    const writer = agent("agent-writer", "writer");
+  it("lists a project's agents by name, taking whichever of run or DM presence needs more attention", () => {
+    const dm = (
+      agentId: string,
+      overrides: Partial<
+        Pick<OrchestrationThreadShell, "session" | "hasPendingApprovals" | "hasPendingUserInput">
+      > = {},
+    ) => ({
+      id: agentDmThreadId(AgentId.make(agentId)),
+      session: null,
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      ...overrides,
+    });
+    const session = (status: "running" | "ready") =>
+      ({ status }) as unknown as OrchestrationThreadShell["session"];
+
     const entries = agentListEntries(
-      [channel("dm-backend", "dm-backend", { kind: "dm", memberAgentIds: [backend.id] })],
-      [writer, agent("agent-other", "other", { projectId: otherProjectId }), backend],
+      [
+        agent("agent-writer", "writer"),
+        agent("agent-other", "other", { projectId: otherProjectId }),
+        agent("agent-backend", "backend", { presence: "running" }),
+        agent("agent-reviewer", "reviewer"),
+      ],
+      [
+        dm("agent-writer", { hasPendingApprovals: true }),
+        dm("agent-reviewer", { session: session("running") }),
+        dm("agent-backend", { session: session("ready") }),
+      ],
       projectId,
     );
 
-    expect(entries).toEqual([
-      { id: "agent-backend", name: "backend", presence: "running", dmChannelId: "dm-backend" },
-      { id: "agent-writer", name: "writer", presence: "idle", dmChannelId: null },
+    expect(entries.map((entry) => [entry.name, entry.presence, entry.dmThreadId])).toEqual([
+      ["backend", "running", "dm:agent-backend"],
+      ["reviewer", "running", "dm:agent-reviewer"],
+      ["writer", "blocked", "dm:agent-writer"],
     ]);
   });
 });

@@ -1,25 +1,32 @@
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/models";
-import { ChannelId, type EnvironmentId, type ProjectId } from "@t3tools/contracts";
-import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { AtSignIcon, HashIcon, MessagesSquareIcon, PlusIcon } from "lucide-react";
+import {
+  agentIdOfDmThread,
+  type ChannelId,
+  type EnvironmentId,
+  type ProjectId,
+  type ThreadId,
+} from "@t3tools/contracts";
+import { Link, useParams } from "@tanstack/react-router";
+import { AtSignIcon, HashIcon, PlusIcon } from "lucide-react";
 import { memo, useMemo, useState, type ReactNode } from "react";
 
 import { isElectron } from "../env";
-import { useNewThreadHandler } from "../hooks/useHandleNewThread";
-import { cn, randomUUID } from "../lib/utils";
-import { channelEnvironment } from "../state/channels";
-import { useEnvironmentAgents, useEnvironmentChannels, useProjects } from "../state/entities";
-import { useAtomCommand } from "../state/use-atom-command";
+import { cn } from "../lib/utils";
+import {
+  useEnvironmentAgents,
+  useEnvironmentChannels,
+  useProjects,
+  useThreadShells,
+} from "../state/entities";
 import {
   agentListEntries,
   channelListEntries,
   presenceDotClassName,
   presenceLabel,
-  type AgentListEntry,
 } from "./channels/channels.logic";
 import { CreateAgentDialog } from "./channels/CreateAgentDialog";
 import { CreateChannelDialog } from "./channels/CreateChannelDialog";
+import { useOpenAgentDm } from "./channels/useOpenAgentDm";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import {
   SidebarContent,
@@ -45,8 +52,8 @@ function projectInitials(title: string): string {
 
 /**
  * The Iskra sidebar: a rail of projects, and the selected project's channels
- * and agents. The open channel's project is selected unless the user picked
- * another project since opening it.
+ * and agents. The open channel's or DM's project is selected unless the user
+ * picked another project since opening it.
  */
 export default function IskraSidebar() {
   const projects = useProjects();
@@ -58,14 +65,23 @@ export default function IskraSidebar() {
     strict: false,
     select: (params) => (params.channelId ?? null) as ChannelId | null,
   });
+  const routeThreadId = useParams({
+    strict: false,
+    select: (params) => (params.threadId ?? null) as ThreadId | null,
+  });
+  const routeAgentId = routeThreadId === null ? null : agentIdOfDmThread(routeThreadId);
   const routeChannels = useEnvironmentChannels(routeChannelId === null ? null : routeEnvironmentId);
+  const routeAgents = useEnvironmentAgents(routeAgentId === null ? null : routeEnvironmentId);
   const routeProjectId =
-    routeChannels.find((channel) => channel.id === routeChannelId)?.projectId ?? null;
+    routeChannels.find((channel) => channel.id === routeChannelId)?.projectId ??
+    routeAgents.find((agent) => agent.id === routeAgentId)?.projectId ??
+    null;
+  const routeKey = routeChannelId ?? routeThreadId;
   const [picked, setPicked] = useState<{
     readonly key: string;
-    readonly routeChannelId: ChannelId | null;
+    readonly routeKey: string | null;
   } | null>(null);
-  const pickedKey = picked !== null && picked.routeChannelId === routeChannelId ? picked.key : null;
+  const pickedKey = picked !== null && picked.routeKey === routeKey ? picked.key : null;
   const selected =
     projects.find((project) => projectKey(project) === pickedKey) ??
     projects.find(
@@ -94,7 +110,7 @@ export default function IskraSidebar() {
                       type="button"
                       aria-label={project.title}
                       aria-current={active ? "true" : undefined}
-                      onClick={() => setPicked({ key, routeChannelId })}
+                      onClick={() => setPicked({ key, routeKey })}
                       className={cn(
                         "flex size-10 shrink-0 items-center justify-center rounded-xl text-xs font-semibold outline-hidden ring-ring focus-visible:ring-2",
                         active
@@ -121,6 +137,7 @@ export default function IskraSidebar() {
               key={selectedKey}
               project={selected}
               activeChannelId={routeChannelId}
+              activeThreadId={routeThreadId}
             />
           )}
         </SidebarContent>
@@ -133,43 +150,27 @@ export default function IskraSidebar() {
 const ProjectChannels = memo(function ProjectChannels(props: {
   readonly project: EnvironmentProject;
   readonly activeChannelId: ChannelId | null;
+  readonly activeThreadId: ThreadId | null;
 }) {
   const { environmentId, id: projectId } = props.project;
-  const navigate = useNavigate();
   const channels = useEnvironmentChannels(environmentId);
   const agents = useEnvironmentAgents(environmentId);
-  const handleNewThread = useNewThreadHandler();
-  const createChannel = useAtomCommand(channelEnvironment.create);
+  const threads = useThreadShells();
+  const openAgentDm = useOpenAgentDm();
   const [openDialog, setOpenDialog] = useState<"channel" | "agent" | null>(null);
   const channelEntries = useMemo(
     () => channelListEntries(channels, projectId),
     [channels, projectId],
   );
   const agentEntries = useMemo(
-    () => agentListEntries(channels, agents, projectId),
-    [channels, agents, projectId],
-  );
-
-  // Agents created before DMs existed have none; the first click opens one.
-  const openDirectMessage = async (agent: AgentListEntry) => {
-    const channelId = ChannelId.make(randomUUID());
-    const result = await createChannel({
-      environmentId,
-      input: {
-        channelId,
+    () =>
+      agentListEntries(
+        agents,
+        threads.filter((thread) => thread.environmentId === environmentId),
         projectId,
-        kind: "dm",
-        name: `dm-${agent.name}`,
-        memberAgentIds: [agent.id],
-      },
-    });
-    if (result._tag === "Success") {
-      void navigate({
-        to: "/channels/$environmentId/$channelId",
-        params: { environmentId, channelId },
-      });
-    }
-  };
+      ),
+    [agents, threads, environmentId, projectId],
+  );
 
   return (
     <>
@@ -205,9 +206,18 @@ const ProjectChannels = memo(function ProjectChannels(props: {
         onAdd={() => setOpenDialog("agent")}
         isEmpty={agentEntries.length === 0}
       >
-        {agentEntries.map((entry) => {
-          const content = (
-            <>
+        {agentEntries.map((entry) => (
+          <SidebarMenuItem key={entry.id}>
+            {/* An agent's row opens its DM, creating it on first open. */}
+            <SidebarMenuButton
+              isActive={entry.dmThreadId === props.activeThreadId}
+              onClick={() => {
+                const agent = agents.find((candidate) => candidate.id === entry.id);
+                if (agent !== undefined) {
+                  void openAgentDm(environmentId, agent);
+                }
+              }}
+            >
               <AtSignIcon />
               <span className="truncate">{entry.name}</span>
               <span className="ml-auto flex shrink-0 items-center">
@@ -217,44 +227,10 @@ const ProjectChannels = memo(function ProjectChannels(props: {
                 />
                 <span className="sr-only">{presenceLabel(entry.presence)}</span>
               </span>
-            </>
-          );
-          return (
-            <SidebarMenuItem key={entry.id}>
-              {entry.dmChannelId === null ? (
-                <SidebarMenuButton onClick={() => void openDirectMessage(entry)}>
-                  {content}
-                </SidebarMenuButton>
-              ) : (
-                <SidebarMenuButton
-                  isActive={entry.dmChannelId === props.activeChannelId}
-                  render={
-                    <Link
-                      to="/channels/$environmentId/$channelId"
-                      params={{ environmentId, channelId: entry.dmChannelId }}
-                    />
-                  }
-                >
-                  {content}
-                </SidebarMenuButton>
-              )}
-            </SidebarMenuItem>
-          );
-        })}
-      </SidebarListGroup>
-      <SidebarGroup className="mt-auto">
-        <SidebarMenu>
-          <SidebarMenuItem>
-            {/* The project's ordinary coding threads, in the thread sidebar. */}
-            <SidebarMenuButton
-              onClick={() => void handleNewThread(scopeProjectRef(environmentId, projectId))}
-            >
-              <MessagesSquareIcon />
-              <span>Threads</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarGroup>
+        ))}
+      </SidebarListGroup>
       <CreateChannelDialog
         open={openDialog === "channel"}
         onOpenChange={(open) => setOpenDialog(open ? "channel" : null)}

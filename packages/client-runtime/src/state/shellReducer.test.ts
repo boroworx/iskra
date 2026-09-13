@@ -74,6 +74,10 @@ describe("applyShellStreamEvent", () => {
       name: "backend",
       avatar: null,
       roleTags: [],
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-haiku-4-5",
+      },
       presence: "idle" as const,
     };
     const channel = {
