@@ -19,7 +19,7 @@ comments, commits, UI copy, event names.
 | ------------- | ------------------------------------ | --------------------------------------------------------------------------------------------- |
 | agent         | **provider**                         | The coding CLI/harness: Claude Code, Codex, Cursor, Grok, OpenCode, Antigravity               |
 | provider      | **provider**                         | Unchanged                                                                                     |
-| — (new)       | **agent**                            | A persistent entity in a server: name, avatar, role prompt, provider, permissions, scratchpad |
+| — (new)       | **agent**                            | A named worker defined by a repo file (role prompt, model, permissions), with a record in the server |
 | thread        | **run**                              | One provider session. Ephemeral. Scoped to a card or a conversation                           |
 | turn          | **turn**                             | Unchanged: one user-to-agent cycle inside a run                                               |
 | project       | **server** (UI) / **project** (code) | A git repo plus its Iskra state. "Server" is user-facing only                                 |
@@ -132,11 +132,17 @@ queue-backed reactors emitting receipts. Each turn ends with a checkpoint, a hid
 Define all of these in `packages/contracts` with Effect/Schema, following the existing contract
 files. Field lists are the contract; naming and encoding follow local convention.
 
-**Agent** — durable. `id`, `projectId`, `name` (`[a-z0-9-]+`, unique per project), `avatar`,
-`roleTags[]`, `rolePrompt`, `modelSelection` (upstream's provider instance + model + options,
-including reasoning effort), `capabilities` (the ceiling for card-scoped runs; see permission
-model), `archivedAt?`. Channel membership lives only on the channel. `scratchpadRef` is added in
-M3.
+**Agent** — durable. Defined by a file in the project checkout, `.iskra/agents/<name>.md`:
+frontmatter `id`, `name` (`[a-z0-9-]+`, unique per project), `avatar`, `tags[]`, `model`
+(upstream's provider instance + model + options, including reasoning effort) and `capabilities`
+(the ceiling for any of its sessions; see permission model); the body is the role prompt. The
+format follows Claude Code's subagent files, so `.claude/agents/*.md` and `.github/agents/*.md`
+definitions can be imported. The server writes `id` into a file it sees for the first time, so a
+rename keeps the agent's history. The server holds what a file cannot: `archivedAt?`, presence,
+and the agent's record — spend, cards landed, review returns, Needs you items raised — keyed by
+`id`. Definitions are read from the project checkout; editing an agent in the UI writes its file
+there. M1 stored definitions in the event log; M2.0 moves them to files. Channel membership lives
+only on the channel.
 
 **Channel** — durable. `id`, `projectId`, `kind` (`channel` | `dm`), `name`, `topic`,
 `pinnedSpec` (plain text in M1; M3 decides whether agents write it), `wakeDepth` (messages of
@@ -189,8 +195,8 @@ A **per-run capability set**: `read`, `write`, `shell`, `network`. Denied unless
 Resolved at run start from agent config plus run scope, expressed once in
 `packages/contracts`, translated per adapter.
 
-Channel runs get `read` only. An agent's DM is not a run: it is a coding session with the full
-thread controls, including the access mode (full access or approval required). A card's owner
+Channel runs get `read` only. An agent's DM has no session of its own and grants nothing: it writes into
+sessions that already exist, under their capabilities. A card's owner
 session gets whatever the agent's config allows; a card's helper runs get `read` only.
 
 **Claude translation (verified).** `permissionMode: "dontAsk"`, an explicit tool allowlist
@@ -231,14 +237,16 @@ Activities — reasoning, tool lifecycle, `tool.denied` — are `false`. The Isk
 the flag; the adapter needs no change for Claude.
 
 **Context injection.** The context builder (M1.3) returns a structured record. A pure renderer
-turns it into two strings: the **system prompt** (role prompt, scratchpad, pinned spec) and the
+turns it into two strings: the **system prompt** (role prompt, pinned spec) and the
 **first message** (the last `wakeDepth` channel messages, then the triggering message; the card
 in M2). `channel.run-started` stores the record as `context` and both strings as `rendered`. The
 Claude adapter appends the system prompt to Claude Code's own preset, which keeps its tool
-instructions, and sends the first message unchanged. The scratchpad joins the system prompt in M3.
+instructions, and sends the first message unchanged. Repo knowledge (AGENTS.md) reaches the
+agent through the harness itself; a per-agent scratchpad joins the system prompt only if the M3
+experiment keeps it.
 
 **Every run is a fresh session.** Never pass a resume cursor to a run. Durable memory is the
-channel and the scratchpad, not the provider's session. When a run's turn settles, `RunReactor`
+channel, the card record and the repo's reviewed knowledge, not the provider's session. When a run's turn settles, `RunReactor`
 posts the reply and stops the session, which ends the run; the next wake starts a new run. Session
 recovery refuses run threads rather than reviving them without their restrictions.
 
@@ -253,18 +261,18 @@ A wake from a different channel is rejected with a system message saying the age
 contexts are never mixed across channels. Waking past the project's concurrent-run cap (3, a
 constant until a project needs another value) is rejected the same way.
 
-**An agent's DM is its coding session — decided after M1.** DMs replace T3 threads: there are no
-free-standing threads. Each agent has one continuous thread, `dm:<agentId>`, created on first
-open with the agent's model and rendered with the full thread view and composer. Its provider
-session starts with the agent's role appended to the harness instructions (Claude; other
-providers ignore it for now) and keeps that role across recovery. A DM thread can only be created
-for an existing agent in its project. Messages sent mid-turn follow the thread's own queueing:
-because the session is continuous, a message the provider has not read yet is read on the next
-turn rather than dropped, so channel delivery statuses do not apply to DMs. The thread keeps its
-`@name` title: neither the client nor the server auto-titles a DM. An agent's presence is the more
-urgent of its run and its DM: `blocked` when either waits on an approval or an answer, `running`
-when either is working, otherwise `idle`. `kind: dm` channels from M1 remain in the model but are
-no longer shown.
+**An agent's DM is a window onto its sessions — decided in M2.** After M1 the DM became a
+continuous coding thread, `dm:<agentId>`, working in the project checkout with the agent's role
+appended to the harness instructions and its `@name` title kept. In M2 the DM stops writing. It
+shows every live and recent session of that agent — card owner sessions, helper and critic runs,
+channel and lead runs — labelled by card or channel, grey and white, each with its context or
+handoff brief in the inspector and a link to open it in full. Its composer writes into one of the
+agent's live sessions, chosen explicitly and defaulting to the most recently active, and the
+message follows that session's delivery rules. A DM message never starts a session, and nothing
+reached from a DM writes outside a card worktree. An agent's presence is its most urgent session:
+`blocked` when any waits on an approval or an answer, `running` when any is working, otherwise
+`idle`. The `dm:` thread is retired in M2.3; `kind: dm` channels from M1 remain in the model but
+are not shown.
 
 **What is posted back.** When a run's session is ready again with no active turn, the latest
 turn's final assistant message is posted to the run's channel as a `Message` (`authorKind: agent`,
@@ -373,13 +381,10 @@ approves or wakes other agents. An `@mention` bypasses it.
 - *Transport:* a local server usually has no public URL for Linear's webhooks. Sync polls the API
   on an interval and on client focus; webhooks are used only when the server is reachable.
 
-**DMs.** An agent's DM stays a coding session in the project checkout until it is decided whether
-DMs remain alongside cards.
-
 ### New event types (minimum)
 
 `AgentCreated`, `AgentUpdated`, `AgentArchived`, `ChannelCreated`, `ChannelUpdated`,
-`MessagePosted`, `AgentMentioned`, `RunStarted`, `ScratchpadWritten`, `CardCreated`,
+`MessagePosted`, `AgentMentioned`, `RunStarted`, `KnowledgeProposed`, `CardCreated`,
 `CardPromoted`, `CardClaimed`, `CardStatusChanged`, `CardLanded`, `CardAbandoned`.
 
 Implemented under local naming so far: `agent.created` / `updated` / `archived` / `unarchived`,
@@ -396,13 +401,14 @@ removed.
 
 1. **No writes in channels.** A channel run has capabilities `["read"]` and is denied filesystem
    writes and shell commands at the adapter boundary, and the server refuses a run on any provider
-   that cannot enforce that. Writing happens in an agent's DM, under that session's access mode,
-   or on a card.
+   that cannot enforce that. Writing happens only in a card's owner session, inside the card's
+   worktree.
 2. **One worktree per card, never per agent.** Created from the card's `baseBranch` when its first
    write session starts, removed when it lands or is abandoned. Agents own no workspace.
-3. **Agents are silent by default.** A run starts only on an explicit `@mention`, a human message
-   in the agent's DM, a card assignment, a card's helper or critic request, or a routed webhook
-   event. A channel message with no mentions wakes only the channel's lead, if it has one.
+3. **Agents are silent by default.** A run starts only on an explicit `@mention`, a card
+   assignment, a card's helper or critic request, or a routed webhook event. A channel message
+   with no mentions wakes only the channel's lead, if it has one; a DM message never starts a
+   session.
 4. **One live run per agent per channel**, and a cap on concurrent live sessions per project,
    counting channel runs and card sessions (3 by default, a project setting). Wakes beyond either
    limit are rejected with a system message, never dropped silently.
@@ -467,9 +473,9 @@ behaviour and sandbox denial semantics by running Codex, not reading it.
 One project, one channel, persistent agents, read-only runs, grey/white DM view. **No cards,
 no writes.** This milestone alone must feel better than a terminal; if it doesn't, stop.
 
-**After M1.** M1 was accepted with DMs as `kind: dm` channels. The DM then became the agent's
-coding session and free-standing threads were removed (see "An agent's DM is its coding
-session"), so the M1.7 DM view no longer exists. A run's grey and white output and its M1.8
+**After M1.** M1 was accepted with DMs as `kind: dm` channels. The DM then became a coding
+thread and free-standing threads were removed; M2 turns the DM into a window onto the agent's
+sessions (see "An agent's DM is a window onto its sessions"). The M1.7 DM view no longer exists. A run's grey and white output and its M1.8
 context inspector now open from "Show work" under the agent's reply in the channel. The
 acceptance notes below record M1 as it was accepted.
 
@@ -550,8 +556,15 @@ started with.
 
 Cards as features on a derived board, with worktrees, a plan gate, a review loop, a merge queue,
 budgets, best-of-N attempts and two-way Linear sync. See "Cards, board and integrations". Build in
-order; M2.1–M2.6 is the first usable board, and M2.7 lands before anything starts agent work
+order; M2.0–M2.6 is the first usable board, and M2.7 lands before anything starts agent work
 without a human in the loop.
+
+**M2.0 — Agents as repo files.** Load agent definitions from `.iskra/agents/*.md`, import from
+`.claude/agents/*.md` and `.github/agents/*.md`, write edits made in the UI back to the file,
+migrate M1's event-log agents to files. _Accept when:_ a file added to the checkout appears in the
+roster without a restart; an imported Claude Code subagent keeps its prompt, model and tools as
+capabilities; renaming a file keeps the agent's history; deleting a file archives the agent
+rather than erasing its record.
 
 **M2.1 — Card entity and derived status.** Contracts, events, decider rules, projection for cards,
 relations and the decision log; the human decisions and their reverses. _Accept when:_ decider
@@ -565,10 +578,12 @@ the app at the same time on different ports; abandoning a card runs `archive` an
 worktree and branch.
 
 **M2.3 — Card sessions.** Owner write sessions in the card worktree, session states, the handoff
-brief, delegate reassignment, helper runs. _Accept when:_ a second write session is refused;
-reassigning starts a session whose first message is the brief (spec, decisions, diff), checked
-byte for byte in the inspector; a helper's write is denied and its reply reaches the owner's next
-turn; a session lost across a restart shows `stale`.
+brief, delegate reassignment, helper runs, and the DM as a window onto the agent's sessions.
+_Accept when:_ a second write session is refused; reassigning starts a session whose first
+message is the brief (spec, decisions, diff), checked byte for byte in the inspector; a helper's
+write is denied and its reply reaches the owner's next turn; a session lost across a restart shows
+`stale`; an agent's DM lists its sessions by card and channel with their context, a message sent
+from it reaches the chosen session, and the `dm:` coding thread is gone.
 
 **M2.4 — Plan gate.** Spec states, the critic run, approval and skip. _Accept when:_ a write
 session is refused on a `draft` spec; the critic's findings appear on the card; a skip is recorded
@@ -588,7 +603,8 @@ conflicting card returns to `inProgress` with the conflict in its next turn; an 
 
 **M2.7 — Budgets.** Spend per card from usage pricing, the default cap, stopping at the cap,
 raising it, accepting unpriced models. _Accept when:_ a turn is refused at the cap and resumes after
-a raise; spend on the card matches the priced usage of its sessions and runs.
+a raise; spend on the card matches the priced usage of its sessions and runs; each agent's page
+shows its spend, cards landed, review returns and Needs you items raised.
 
 **M2.8 — Best-of-N attempts.** _Accept when:_ three attempts run in parallel on separate branches;
 review shows their diffs side by side; promoting one removes the others' worktrees and branches;
@@ -609,7 +625,9 @@ the lead cannot answer, assign, approve or wake another agent.
 
 ### M3–M5 (not yet briefed)
 
-M3 scratchpads and cost reporting across projects. M4 roles, webhooks and scheduled triggers into
+M3 knowledge: agents propose AGENTS.md edits as items a human reviews; a per-agent scratchpad
+runs as an experiment measured against fresh sessions and is kept only if it wins; cost reporting
+across projects. M4 roles, webhooks and scheduled triggers into
 triage, auto-claim. M5 multiplayer. Brief each when the previous milestone is accepted.
 
 ---
@@ -629,13 +647,14 @@ Follow upstream rules. In particular:
 
 ## 8. Do not
 
-- Do not build M3 or later features (scratchpads, roles, webhooks, scheduled triggers,
+- Do not build M3 or later features (knowledge proposals, scratchpads, roles, webhooks, scheduled triggers,
   auto-claim, multiplayer) during M2.
 - Do not add Iskra UI to `apps/mobile` before M4.
 - Do not implement free-flowing agent-to-agent conversation, agent-to-agent DMs, or a manager
   agent that directs other agents or merges their work. The channel lead only proposes `triage`
   cards. See `docs/iskra/iskra-concept.md` for why; these are rejected, not deferred.
-- Do not add a second state store, ORM, or bus. SQLite and the event log are the state.
+- Do not add a second state store, ORM, or bus. SQLite and the event log are the state. Agent
+  definitions are repo files, like AGENTS.md: configuration, not state.
 - Do not mass-rename upstream identifiers.
 - Do not open a pull request unless explicitly asked.
 - Do not commit implementation plans, research notes, or scratch files. Findings go in

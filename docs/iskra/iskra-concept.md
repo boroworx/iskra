@@ -35,7 +35,7 @@ model underneath.
 | Unit         | Thread = task           | Agent = entity, card = feature, run = session |
 | Lifetime     | Disposable, isolated    | Durable identity, disposable context       |
 | Coordination | None                    | Channels + derived board + merge queue + Linear |
-| Memory       | In the thread           | In the channel and the agent's scratchpad  |
+| Memory       | In the thread           | In the channel, the feature record and reviewed repo knowledge |
 | Audience     | Single player by design | Multiplayer by design                      |
 
 ---
@@ -50,9 +50,11 @@ Five entities. Getting these boundaries right is the whole architecture.
 a branch. `#backend` agents don't read `#design` history. Channel history is the long-term
 memory of the project.
 
-**Agent** — durable identity. Name, avatar, role prompt, model/provider, reasoning level,
-tool and filesystem permissions, channel membership, scratchpad, cost ledger. **Owns no
-worktree.**
+**Agent** — durable identity, defined as a file in the repo (`.iskra/agents/<name>.md`, close to
+Claude Code's subagent format, so existing `.claude/agents` definitions import): name, avatar,
+role prompt, model and reasoning level, permissions, tags. Versioned and reviewable like code. The
+server keeps what a file can't: presence and a track record — spend, features landed, how often
+review sent its work back, how often it needed you. **Owns no worktree.**
 
 **Card** — the unit of work, shown as a **feature**. Owns a worktree and a branch for its
 lifetime. One accountable human and one writing agent at a time; many sessions over time sharing
@@ -68,8 +70,8 @@ onto a Claude Code or Codex session.
 
 A channel message spawns a **read-only run**: the agent reads the repo, reasons and answers,
 but cannot write. Writing happens on a **feature**: its own branch and worktree, one writing
-agent at a time, the full controls of a coding thread. An agent's DM is also a coding session
-today, in the project checkout; whether DMs remain alongside features is still open.
+agent at a time, the full controls of a coding thread. An agent's DM writes nothing: it is a
+window onto every session that agent is running.
 
 This resolves several things at once:
 
@@ -84,10 +86,11 @@ Provider CLIs are session-per-task. A "persistent agent" is a fiction maintained
 context on every wake, from:
 
 - role prompt
-- the agent's own scratchpad
+- the repo's reviewed knowledge (AGENTS.md), and the agent's scratchpad only if the M3
+  experiment keeps it
 - the channel's pinned spec
 - the last N messages of the channel (N configurable per channel)
-- the card description and card thread, if the run is card-scoped
+- the feature's spec, decision log and diff, if the session is on a feature
 
 This assembly is the core engineering problem of Iskra, not a design nicety. It should be one
 function, and **the UI should show exactly what an agent was handed on any given wake.**
@@ -102,19 +105,29 @@ channel is therefore a real, user-facing cost dial.
 Identity is durable, context is disposable. Auto-compaction is inherited from the underlying
 CLI — not built.
 
-Two things make an agent more than a system-prompt preset with a face:
+Where durable knowledge lives:
 
-1. **Per-agent scratchpad.** A small durable file the agent writes and you can edit. Not a
-   transcript — curated knowledge: codebase conventions, corrections it keeps receiving,
-   decisions and rationale.
-2. **Channel-as-memory.** History persists forever, as in real Discord. Compaction stops being
-   a loss because the durable record was never in the context window.
+1. **Reviewed repo knowledge.** Agents propose edits to AGENTS.md — conventions, corrections
+   they keep receiving, decisions and rationale — as items you approve. Shared by every agent,
+   versioned in git. This is where the rest of the category keeps memory too (Devin Knowledge,
+   Codex skills, Cursor rules), because per-agent memory drifts and is hard to inspect.
+2. **Channel and feature records.** Channel history persists forever, as in real Discord, and a
+   feature's spec and decision log carry it across sessions and owners. Compaction stops being a
+   loss because the durable record was never in the context window.
+3. **Per-agent scratchpad — an experiment.** A small file the agent writes and you can edit.
+   Kept only if agents with one measurably beat fresh sessions given the same spec; otherwise an
+   agent is a named, permissioned preset with a track record, and that is enough.
 
 ---
 
 ## The DM view
 
 The strongest interaction idea in the concept.
+
+A DM is where you see exactly what an agent is doing. It lists every session the agent is
+running — the feature it owns, a review it's helping with, a question in a channel — each
+labelled, each with the exact context it was handed, and you can write into any of them. The DM
+never has a session of its own and never writes code: work happens on features.
 
 Open a DM with an agent and you see all of its work — reasoning, tool calls, file reads —
 rendered in **grey**. When it wants you specifically, it tags you, and that message renders in
@@ -251,7 +264,7 @@ and secrets, per-tenant isolation, egress. Thin margins, heavy ops, direct compe
 model providers' own cloud agent products on their cost structure. It also destroys the
 "entirely local" positioning, which is currently the clearest thing about Iskra.
 
-**State sync.** Fits. The durable layer — channel history, scratchpads, board, agent configs —
+**State sync.** Fits. The durable layer — channel history, board, agent records and definitions —
 is all small text. Repos, worktrees and containers are local by definition and never sync.
 Cheap to build and run, which is good, but also hard to charge for.
 
@@ -272,7 +285,7 @@ else is shaped right to become.
 Nobody pays to sync their own state between their own two machines. Teams pay for shared state
 and an audit trail.
 
-**Act on now, not later:** keep durable state (history, scratchpads, board, configs) as a
+**Act on now, not later:** keep durable state (history, board, agent records, configs) as a
 small, clean, serializable layer with a hard boundary against local execution state. Sharp
 boundary from day one keeps every model available. Smeared through the app, none are.
 
@@ -310,8 +323,8 @@ This alone should feel better than a terminal. If it doesn't, stop.
 the serialized merge queue with overlap flagging, Needs you, budgets, best-of-N attempts,
 board tools for agents, two-way Linear sync, and the channel lead proposing features.
 
-**M3 — memory.** Scratchpads, pinned specs, per-channel wake depth, cost reporting across
-projects.
+**M3 — memory.** Reviewed knowledge proposals, a measured per-agent scratchpad experiment, pinned
+specs, per-channel wake depth, cost reporting across projects.
 
 **M4 — server furniture.** Roles and permissions, webhooks and scheduled triggers into triage,
 auto-claim with guardrails.
@@ -334,8 +347,10 @@ auto-claim with guardrails.
 
 1. **Does a persistent agent beat a fresh session?** Long-lived context is where agents rot. If
    a three-week-old backend agent is worse than a clean one given a good spec, the model
-   collapses back to threads with avatars. Scratchpad + channel-as-memory is the hedge; it
-   needs measuring, not assuming.
+   collapses back to threads with avatars. Most orchestrators have no persistent agents at all
+   and keep knowledge in the repo. Iskra's hedge is that an agent is still useful as a named,
+   permissioned preset with a track record, and the per-agent record is how the scratchpad
+   experiment gets measured rather than assumed.
 2. **Is the Discord framing load-bearing?** Load-bearing version: roles are permissions, cards
    are merge slots, channels are context scopes. Skin version loses to whoever ships a better
    diff view.
