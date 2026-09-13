@@ -168,23 +168,36 @@ message.
 An explicit agent-side convention (a marker the role prompt tells the agent to emit) may be
 layered on later if derivation proves too coarse. It is not the v1 mechanism.
 
-### Permission model — shape decided by M0.2
+### Permission model — decided (M0.2)
 
-`permissions` on the agent and `writeAccess` on the run are placeholders until M0.2 reports.
-Constraints the eventual shape must satisfy:
+A **per-run capability set**: `read`, `write`, `shell`, `network`. Denied unless listed.
+Resolved at run start from agent config plus run scope, expressed once in
+`packages/contracts`, translated per adapter.
 
-- **Enforced at the adapter boundary**, through the provider's permission/approval path — never
-  by instruction in a role prompt. An agent that can talk itself into a write has no permission
-  model.
-- **Denials are events.** A refused tool call emits a run output event and is visible in the UI.
-  Silent denial is a bug.
-- **Per-run, not per-agent.** The same agent is read-only in a conversation and writable on a
-  claimed card. Permissions resolve at run start from agent config plus run scope.
-- **Deny by default.** An unrecognized tool is denied, not allowed.
+Conversation-scoped runs get `read` only. Card-scoped runs get whatever the agent's config
+allows.
 
-Express it as whatever the provider path actually supports — a tool allowlist, a capability
-set, path scoping — but decide once, in `packages/contracts`, and translate per adapter. **Do
-not implement M1.4 before this is settled.**
+**Claude translation (verified).** `permissionMode: "dontAsk"`, an explicit tool allowlist
+(`Read`, `Glob`, `Grep` for a read-only run), and `settingSources: []`. Write and Bash are
+refused by the harness, each refusal arriving as a `tool.denied` event, and no file is created.
+
+**`shell` is not a subset of `read`.** Nothing can reliably determine whether a shell command
+writes, so `Bash` and equivalents are excluded from any run without the `shell` capability —
+never allowlisted "for read-only commands."
+
+**Two upstream settings can widen a run and must be ignored for Iskra runs:** permission flags
+in the user's launch arguments, and switching `interactionMode` mid-session. Capability
+resolution happens once at run start and nothing in the session may raise it. Add a test that
+fails if either path can escalate.
+
+**Codex translation (read from code, not run).** A read-only sandbox with no approval
+escalation. **Denials surface as failed items, not as denial events** — semantically different,
+since a failure invites a retry and a denial does not. The Codex adapter must normalize a
+sandbox-blocked write into the same canonical denial event Claude emits. Until that is built
+and verified by running it, Codex is not a supported provider for write-restricted runs.
+
+**Provider scope for M1:** Claude only. Codex support is added when its verdicts are confirmed
+by running them, not by reading.
 
 ### New event types (minimum)
 
@@ -219,6 +232,12 @@ removed.
    intersects it is flagged and its agent told to rebase before review.
 9. **No agent-to-agent DMs.** Agents communicate in channels or through cards. There is no
    private agent channel.
+10. **No message is silently dropped.** A message sent to a running agent is held in a `pending`
+    state until the provider demonstrably consumes it. If the turn it attached to ends without
+    the message being read, it is re-delivered to the next turn or surfaced to the user as
+    unanswered. It is never marked delivered on the strength of having been sent. Test the
+    turn-ends-without-consuming path explicitly — it was traced in upstream code but not
+    observed, so assume it happens.
 
 ---
 
@@ -232,24 +251,19 @@ the code looks right. Do not start a milestone before the previous one is accept
 Answers, not systems. Each produces a written finding in `docs/findings/` and a minimal
 reproduction. Do not build product code in M0.
 
-**M0.1 — Mid-turn input delivery.** Interrupt is confirmed present for Claude. The remaining
-question is what happens to a _message_ sent while a turn is running: delivered immediately,
-queued to the turn boundary, or rejected. Answer for Claude and Codex; note the latency if
-queued. _Accept when:_ a provider × behaviour table with a runnable reproduction each, and a
-one-line verdict on whether the DM view needs a pending-message state. Do not redesign the DM
-view in this task — report.
+**M0.1 — Mid-turn input (answered for Claude).** A message sent mid-turn is neither delivered
+immediately nor rejected: it is read at the next natural break — after the current tool call, or
+after the turn ends. Observed 4–19s, with no upper bound. Codex was read from code, not run.
 
-**M0.2 — Deny write tools through the permission path.** The Claude adapter already returns
-deny decisions for pending approvals without prompting. Confirm that the same path can deny
-write and destructive tools categorically for a whole session, and determine the Codex
-equivalent. _Accept when:_ a session runs in which a write attempt is denied by the harness and
-the denial surfaces as an event, plus a written verdict per provider. Invariant 1 is only
-enforceable if this works; if it doesn't, say so rather than proposing a prompt-based
-substitute.
+**M0.2 — Deny write tools (answered for Claude).** Writes are blockable by the harness; see the
+permission model above. Codex was read from code, not run.
 
-**M0.3 — Fork bootstrap.** Fork, install, run dev, seed worktree state from a snapshot per the
-upstream test-data procedure, confirm what `vp` is. _Accept when:_ server and web run locally
-from the fork with seeded data, and `docs/fork-point.md` records the SHA.
+**M0.3 — Fork bootstrap (done).** `vp` is the Vite+ CLI, installed globally with Node takeover
+disabled; it appends a PATH line to `~/.zshenv` and `~/.zshrc`. `vp i` and `vp run dev` work on
+Node 26 against a worktree copy of real state. Fork point recorded in `docs/fork-point.md`.
+
+**Residual M0 work**, to be run before Codex is enabled as a provider: confirm mid-turn input
+behaviour and sandbox denial semantics by running Codex, not reading it.
 
 ### M1 — the core bet
 
@@ -268,10 +282,12 @@ projection, `wakeDepth` setting. _Accept when:_ messages persist and paginate; c
 optional card) to a structured context payload. No IO. _Accept when:_ fully unit-tested,
 deterministic for fixed inputs, and returning a structured record — not a concatenated string.
 
-**M1.4 — Read-only run lifecycle.** Spawn a provider session scoped to an agent with
-`writeAccess: false`, streaming `RunOutputEmitted` events. **Blocked until the permission model
-is settled from M0.2's finding.** _Accept when:_ an agent answers a question about the repo, a
-write attempt is denied at the adapter boundary, and the denial appears in the UI as an event.
+**M1.4 — Read-only run lifecycle.** Spawn a Claude session scoped to an agent with the `read`
+capability only, using the verified configuration in the permission model above, streaming
+`RunOutputEmitted` events. _Accept when:_ an agent answers a question about the repo; a write
+attempt and a shell attempt are both denied at the adapter boundary and appear in the UI as
+denial events; and a test proves neither launch-argument flags nor a mid-session
+`interactionMode` change can raise the run's capabilities.
 
 **M1.5 — Mention routing.** Parse mentions on `MessagePosted`; wake only mentioned agents.
 Decider-level, pure. _Accept when:_ a message mentioning one of three agents starts exactly one
@@ -282,8 +298,13 @@ agents with presence (idle / running / blocked). Reads the projection; no new st
 _Accept when:_ the shell renders live agent state and presence updates without a refresh.
 
 **M1.7 — DM view.** Per-agent conversation view rendering `RunOutputEmitted` with
-`addressedToUser: false` as grey and `true` as full white. _Accept when:_ a single run visibly
-produces both, and no continuously repainting animation appears in a GPU profile.
+`addressedToUser: false` as grey and `true` as full white. A message sent to a busy agent shows
+as `pending` until consumed — upstream marks it sent immediately, which is wrong here (see
+invariant 10). Delivery can take tens of seconds with no upper bound, so pending is a normal
+state, not an error state. _Accept when:_ a single run visibly produces both grey and white; a
+message sent mid-turn shows pending and resolves when read; a message whose turn ends without
+consuming it does not silently disappear; and no continuously repainting animation appears in a
+GPU profile.
 
 **M1.8 — Context inspector.** For any run, show exactly the payload M1.3 produced.
 _Accept when:_ the inspector is reachable from the DM view and its content matches the stored

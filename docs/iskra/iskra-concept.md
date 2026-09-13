@@ -122,14 +122,16 @@ you" unmissable, in one visual grammar.
 The same idea generalizes: _blocked, needs you_ is a first-class status everywhere, not a
 buried log line.
 
-**Partly verified.** Stopping a running agent is supported: the Claude adapter holds the SDK
-stream fiber and interrupts it, normalizing the result into a completed-interrupted turn. Also
-already handled is the agent speaking without being asked — the adapter creates a synthetic
-turn when output arrives outside a user turn, which is exactly the wake-up-and-tag-you case.
+**Verified, with one caveat.** Stopping a running agent works: the Claude adapter interrupts
+the SDK stream fiber and normalizes the result into a completed-interrupted turn. Agents
+speaking unprompted also already works — the adapter creates a synthetic turn when output
+arrives outside a user turn, which is exactly the wake-up-and-tag-you case.
 
-Still open: whether a message sent mid-turn reaches the agent immediately or waits for the turn
-boundary. If it waits, the DM view shows it as pending rather than pretending it landed. Don't
-build on an assumption of instant delivery.
+The caveat is timing. A message sent mid-turn isn't delivered immediately; the agent reads it
+at the next natural break, measured at 4 to 19 seconds with no upper bound. So barge-in is real
+but asynchronous, and the DM view has to show a pending state rather than claiming the message
+landed. There's also a path where a message attaches to a turn that ends without reading it —
+which must be re-delivered or surfaced, never silently dropped.
 
 ---
 
@@ -271,12 +273,10 @@ Implementation details live in `docs/iskra/iskra-spec.md`.
 
 ## Build order
 
-**M0 — spikes (days, not weeks).** Narrowed after reading the upstream adapters. Interrupt and
-unprompted agent output already exist, so what remains is: does a message sent mid-turn arrive
-immediately or at the turn boundary; can the existing permission path deny write tools
-categorically for a whole session; and a fork bootstrap. The second is the one that matters —
-if writes can't be denied by the harness, the no-writes-without-a-card rule is advisory rather
-than enforced, which is a materially weaker product.
+**M0 — answered for Claude.** Writes can be blocked by the harness, so the
+no-writes-without-a-card rule is enforceable rather than advisory — the central structural bet
+holds. Mid-turn messages arrive at the next natural break rather than instantly. Codex verdicts
+were read from code, not run, so M1 targets Claude only.
 
 **M1 — the core bet.** One project, one channel, 2–3 agents as persistent entities, mention
 routing, read-only runs, grey/white DM view, context-builder inspector. No cards, no writes.
