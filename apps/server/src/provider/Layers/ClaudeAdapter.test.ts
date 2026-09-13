@@ -18,6 +18,7 @@ import {
   ProviderDriverKind,
   ProviderItemId,
   ProviderRuntimeEvent,
+  type RunCapability,
   type RuntimeMode,
   ThreadId,
   ProviderInstanceId,
@@ -6721,6 +6722,157 @@ describe("ClaudeAdapterLive", () => {
       });
 
       assert.deepEqual(harness.query.setPermissionModeCalls, []);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect(
+    "starts a run as a fresh read-only session whatever the launch args and resume cursor",
+    () => {
+      const harness = makeHarness({
+        claudeConfig: {
+          launchArgs:
+            "--dangerously-skip-permissions --permission-mode bypassPermissions --verbose",
+        },
+      });
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+          resumeCursor: {
+            threadId: THREAD_ID,
+            resume: "550e8400-e29b-41d4-a716-446655440000",
+            turnCount: 3,
+          },
+          run: { systemPrompt: "You are @backend.", capabilities: ["read"] },
+        });
+
+        const options = harness.getLastCreateQueryInput()?.options;
+        assert.equal(options?.permissionMode, "dontAsk");
+        assert.equal(options?.allowDangerouslySkipPermissions, undefined);
+        assert.deepEqual(options?.allowedTools, ["Read", "Glob", "Grep"]);
+        assert.deepEqual(options?.settingSources, []);
+        assert.equal(options?.resume, undefined);
+        assert.equal(options?.extraArgs, undefined);
+        assert.equal(options?.mcpServers, undefined);
+        assert.deepEqual(options?.systemPrompt, {
+          type: "preset",
+          preset: "claude_code",
+          append: "You are @backend.",
+        });
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
+  it.effect.each<{ capabilities: ReadonlyArray<RunCapability>; tools: ReadonlyArray<string> }>([
+    { capabilities: ["read", "shell"], tools: ["Read", "Glob", "Grep"] },
+    {
+      capabilities: ["read", "write", "shell", "network"],
+      tools: [
+        "Read",
+        "Glob",
+        "Grep",
+        "Edit",
+        "Write",
+        "NotebookEdit",
+        "Bash",
+        "WebFetch",
+        "WebSearch",
+      ],
+    },
+  ])(
+    "grants a run only the tools its capabilities allow ($capabilities)",
+    ({ capabilities, tools }) => {
+      const harness = makeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+          run: { systemPrompt: "", capabilities },
+        });
+
+        assert.deepEqual(harness.getLastCreateQueryInput()?.options.allowedTools, tools);
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
+  it.effect("never widens a run's permission mode when a turn changes interaction mode", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+        run: { systemPrompt: "", capabilities: ["read"] },
+      });
+
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "plan this",
+        interactionMode: "plan",
+        attachments: [],
+      });
+      const turnCompletedFiber = yield* Stream.filter(
+        adapter.streamEvents,
+        (event) => event.type === "turn.completed",
+      ).pipe(Stream.runHead, Effect.forkChild);
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        errors: [],
+        session_id: "sdk-session-run",
+        uuid: "result-run",
+      } as unknown as SDKMessage);
+      yield* Fiber.join(turnCompletedFiber);
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "now do it",
+        interactionMode: "default",
+        attachments: [],
+      });
+
+      assert.deepEqual(harness.query.setPermissionModeCalls, []);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("denies any tool that reaches the permission callback during a run", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+        run: { systemPrompt: "", capabilities: ["read"] },
+      });
+      const canUseTool = harness.getLastCreateQueryInput()?.options.canUseTool;
+      assert.isDefined(canUseTool);
+
+      const result = yield* Effect.promise(() =>
+        canUseTool!("Write", { file_path: "/tmp/probe.txt", content: "hi" }, {
+          signal: new AbortController().signal,
+          toolUseID: "tool-write-1",
+        } as Parameters<NonNullable<ClaudeQueryOptions["canUseTool"]>>[2]),
+      );
+
+      assert.equal(result?.behavior, "deny");
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
