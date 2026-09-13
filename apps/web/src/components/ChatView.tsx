@@ -1,6 +1,6 @@
 import { useLoadBalancedEnvironment } from "../hooks/useLoadBalancedEnvironment";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
-import type { UsageLimitSourceSnapshots } from "@t3tools/contracts";
+import { agentIdOfDmThread, type UsageLimitSourceSnapshots } from "@t3tools/contracts";
 import {
   collectProviderUsageLimits,
   hasProviderUsageLimits,
@@ -7357,8 +7357,8 @@ export default function ChatView(props: ChatViewProps) {
     );
 
     let failure: AtomCommandResult<unknown, unknown> | null = null;
-    // Auto-title from first message
-    if (isFirstMessage && isServerThread) {
+    // Auto-title from first message; an agent's DM keeps its "@name" title.
+    if (isFirstMessage && isServerThread && agentIdOfDmThread(threadIdForSend) === null) {
       const titleResult = await updateThreadMetadata({
         environmentId,
         input: {

@@ -933,6 +933,8 @@ describe("ProviderCommandReactor", () => {
         text: "Review the last commit.",
         attachments: [],
       },
+      // A seed matching the title would let an ordinary thread be renamed.
+      titleSeed: "@reviewer",
       interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
       runtimeMode: "full-access",
       createdAt: now,
@@ -944,6 +946,8 @@ describe("ProviderCommandReactor", () => {
       agentPrompt: renderAgentDmPrompt({ name: "reviewer", rolePrompt: "You review changes." }),
     });
     expect(startInput).not.toHaveProperty("run");
+    await harness.drain();
+    expect(harness.generateThreadTitle).not.toHaveBeenCalled();
   });
 
   it("starts a run thread's provider session with the run's read-only restrictions", async () => {

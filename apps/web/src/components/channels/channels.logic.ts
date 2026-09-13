@@ -3,7 +3,6 @@ import {
   type AgentId,
   type AgentPresence,
   type ChannelId,
-  type OrchestrationAgentRun,
   type OrchestrationAgentShell,
   type OrchestrationChannelMessage,
   type OrchestrationChannelShell,
@@ -159,41 +158,6 @@ function channelAuthorName(
     case "webhook":
       return message.authorId;
   }
-}
-
-export type DmTimelineEntry =
-  | { readonly kind: "message"; readonly row: ChannelMessageRow }
-  | { readonly kind: "run"; readonly run: OrchestrationAgentRun };
-
-/**
- * A DM as its view shows it: the DM's messages interleaved by time with the
- * agent's runs, wherever they ran. A reply is left out when its run is shown,
- * since the run already carries that answer, and a message after a run starts
- * a new header.
- */
-export function dmTimelineEntries(
-  messages: ReadonlyArray<OrchestrationChannelMessage>,
-  runs: ReadonlyArray<OrchestrationAgentRun>,
-  agents: ReadonlyArray<OrchestrationAgentShell>,
-): ReadonlyArray<DmTimelineEntry> {
-  const shownRunIds = new Set<string>(runs.map((run) => run.threadId));
-  const rows = channelMessageRows(
-    messages.filter(
-      (message) => message.runThreadId === undefined || !shownRunIds.has(message.runThreadId),
-    ),
-    agents,
-  );
-  const sorted = [
-    ...rows.map((row) => ({ entry: { kind: "message" as const, row }, at: row.message.createdAt })),
-    ...runs.map((run) => ({ entry: { kind: "run" as const, run }, at: run.startedAt })),
-  ].toSorted((left, right) => Date.parse(left.at) - Date.parse(right.at));
-
-  return sorted.map(({ entry }, index): DmTimelineEntry => {
-    const previous = sorted[index - 1]?.entry;
-    return entry.kind === "message" && previous?.kind === "run" && !entry.row.showHeader
-      ? { kind: "message", row: { ...entry.row, showHeader: true } }
-      : entry;
-  });
 }
 
 export interface RunOutputItem {

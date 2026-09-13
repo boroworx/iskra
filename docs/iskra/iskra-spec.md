@@ -254,12 +254,16 @@ session starts with the agent's role appended to the harness instructions (Claud
 providers ignore it for now) and keeps that role across recovery. A DM thread can only be created
 for an existing agent in its project. Messages sent mid-turn follow the thread's own queueing:
 because the session is continuous, a message the provider has not read yet is read on the next
-turn rather than dropped. `kind: dm` channels from M1 remain in the model but are no longer shown.
+turn rather than dropped, so channel delivery statuses do not apply to DMs. The thread keeps its
+`@name` title: neither the client nor the server auto-titles a DM. An agent's presence is the more
+urgent of its run and its DM: `blocked` when either waits on an approval or an answer, `running`
+when either is working, otherwise `idle`. `kind: dm` channels from M1 remain in the model but are
+no longer shown.
 
 **What is posted back.** When a run's session is ready again with no active turn, the latest
 turn's final assistant message is posted to the run's channel as a `Message` (`authorKind: agent`,
 `runThreadId` set). Reasoning, tool calls and
-intermediate assistant text stay in the DM view. White rendering means any assistant text; an
+intermediate assistant text stay on the run, opened from the reply's "Show work". White rendering means any assistant text; an
 agent `@mention`ing a human is a notification concern for M4, not a rendering rule.
 
 **Mentions.** `@name`, matched case-insensitively against agent names in the project, parsed in
@@ -345,6 +349,12 @@ behaviour and sandbox denial semantics by running Codex, not reading it.
 One project, one channel, persistent agents, read-only runs, grey/white DM view. **No cards,
 no writes.** This milestone alone must feel better than a terminal; if it doesn't, stop.
 
+**After M1.** M1 was accepted with DMs as `kind: dm` channels. The DM then became the agent's
+coding session and free-standing threads were removed (see "An agent's DM is its coding
+session"), so the M1.7 DM view no longer exists. A run's grey and white output and its M1.8
+context inspector now open from "Show work" under the agent's reply in the channel. The
+acceptance notes below record M1 as it was accepted.
+
 **M1.1 — Agent entity.** Contracts, events (`AgentCreated`/`Updated`/`Archived`), decider
 rules, projector, persistence. _Accept when:_ an agent can be created and survives a server
 restart, with a test asserting the projection matches the event log. _Accepted:_ an engine test
@@ -386,8 +396,7 @@ tests cover each case, and the run reactor test turns a wake into exactly one ru
 agents with presence (idle / running / blocked). Reads the projection; no new state.
 _Accept when:_ the shell renders live agent state and presence updates without a refresh.
 The shell is Iskra-first: a project rail, then the project's channels and agents; a channel opens
-its messages, a composer and its members. `/` opens a channel, and T3's thread view stays reachable
-from the sidebar. A channel's messages arrive over `subscribeChannel` (recent messages, then each
+its messages, a composer and its members. `/` opens a channel. A channel's messages arrive over `subscribeChannel` (recent messages, then each
 new one). Agents run on Claude only: the server refuses a run on any provider that cannot enforce
 run restrictions.
 _Accepted:_ in a paired browser, an `@mention` sent from the composer showed the agent Working,

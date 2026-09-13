@@ -5,11 +5,9 @@ import {
   MessageId,
   ProjectId,
   ProviderInstanceId,
-  ThreadId,
   agentDmThreadId,
 } from "@t3tools/contracts";
 import type {
-  OrchestrationAgentRun,
   OrchestrationAgentShell,
   OrchestrationChannelMessage,
   OrchestrationChannelShell,
@@ -25,7 +23,6 @@ import {
   channelMemberEntries,
   channelMessageRows,
   deliveryNotes,
-  dmTimelineEntries,
   runOutputItems,
   presenceDotClassName,
   presenceLabel,
@@ -172,47 +169,6 @@ describe("channelMessageRows", () => {
       ["backend", true],
       ["backend", true],
       ["Iskra", true],
-    ]);
-  });
-});
-
-const run = (threadId: string, startedAt: string): OrchestrationAgentRun =>
-  ({
-    threadId: ThreadId.make(threadId),
-    channelId: ChannelId.make("general"),
-    agentId: AgentId.make("agent-backend"),
-    triggerMessageId: MessageId.make("trigger"),
-    capabilities: ["read"],
-    startedAt,
-    endedAt: null,
-  }) as unknown as OrchestrationAgentRun;
-
-describe("dmTimelineEntries", () => {
-  it("interleaves runs by time, drops replies their run shows, and heads the message after a run", () => {
-    const shownReply = {
-      ...message("reply-shown", "agent", "agent-backend", "2026-01-01T10:02:00.000Z"),
-      runThreadId: ThreadId.make("run-1"),
-    };
-    const entries = dmTimelineEntries(
-      [
-        message("q1", "human", "human", "2026-01-01T10:00:00.000Z"),
-        shownReply,
-        message("q2", "human", "human", "2026-01-01T10:03:00.000Z"),
-      ],
-      [run("run-1", "2026-01-01T10:01:00.000Z")],
-      [agent("agent-backend", "backend")],
-    );
-
-    expect(
-      entries.map((entry) =>
-        entry.kind === "run"
-          ? ["run", entry.run.threadId]
-          : ["message", entry.row.message.id, entry.row.showHeader],
-      ),
-    ).toEqual([
-      ["message", "q1", true],
-      ["run", "run-1"],
-      ["message", "q2", true],
     ]);
   });
 });

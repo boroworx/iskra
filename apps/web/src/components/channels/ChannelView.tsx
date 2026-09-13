@@ -1,12 +1,14 @@
 import {
+  AgentId,
   MessageId,
+  type ThreadId,
   type ChannelId,
   type EnvironmentId,
   type OrchestrationAgentShell,
   type OrchestrationChannelMessage,
   type OrchestrationChannelShell,
 } from "@t3tools/contracts";
-import { AtSignIcon, HashIcon } from "lucide-react";
+import { HashIcon } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 
 import { cn, randomUUID } from "~/lib/utils";
@@ -19,22 +21,21 @@ import { ComposerPrimaryActions } from "../chat/ComposerPrimaryActions";
 import { ComposerSurface } from "../chat/ComposerSurface";
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
 import { EMPTY_COMPOSER_CONTEXT_RECORDS } from "../composerContextPresentation";
+import { Button } from "../ui/button";
 import { SidebarInset, SidebarTrigger } from "../ui/sidebar";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import {
   channelMemberEntries,
   channelMessageRows,
   deliveryNotes,
-  dmTimelineEntries,
   presenceDotClassName,
   presenceLabel,
   type ChannelMemberEntry,
   type ChannelMessageRow,
-  type DmTimelineEntry,
 } from "./channels.logic";
 import { RunBlock } from "./RunBlock";
 
-/** One channel or DM: its messages, a composer, and who is in it. A DM also shows the agent's runs. */
+/** One channel: its messages, a composer, and who is in it. */
 export function ChannelView(props: {
   readonly environmentId: EnvironmentId;
   readonly channelId: ChannelId;
@@ -59,8 +60,7 @@ export function ChannelView(props: {
     () => (channel === null ? [] : channelMemberEntries(channel, agents)),
     [channel, agents],
   );
-  const dmAgent = channel?.kind === "dm" ? (members[0] ?? null) : null;
-  const title = dmAgent?.name ?? channel?.name ?? "";
+  const title = channel?.name ?? "";
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
@@ -69,13 +69,8 @@ export function ChannelView(props: {
           <SidebarTrigger className="md:hidden" />
           {channel === null ? null : (
             <div className="flex min-w-0 items-center gap-2">
-              {channel.kind === "dm" ? (
-                <AtSignIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-              ) : (
-                <HashIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-              )}
+              <HashIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
               <h1 className="truncate text-sm font-semibold">{title}</h1>
-              {dmAgent !== null ? <PresenceBadge presence={dmAgent.presence} /> : null}
               {channel.topic.length > 0 ? (
                 <span className="hidden truncate text-sm text-muted-foreground sm:inline">
                   {channel.topic}
@@ -93,31 +88,19 @@ export function ChannelView(props: {
         ) : (
           <div className="flex min-h-0 flex-1">
             <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-              {dmAgent !== null ? (
-                <DmTimeline
-                  agent={dmAgent}
-                  messages={messages.data ?? EMPTY_MESSAGES}
-                  error={messages.error}
-                  agents={agents}
-                  channels={channels}
-                  cwd={project?.workspaceRoot}
-                  environmentId={props.environmentId}
-                />
-              ) : (
-                <ChannelTimeline
-                  messages={messages.data ?? EMPTY_MESSAGES}
-                  error={messages.error}
-                  agents={agents}
-                  channels={channels}
-                  cwd={project?.workspaceRoot}
-                  environmentId={props.environmentId}
-                />
-              )}
+              <Timeline
+                messages={messages.data ?? EMPTY_MESSAGES}
+                error={messages.error}
+                agents={agents}
+                channels={channels}
+                cwd={project?.workspaceRoot}
+                environmentId={props.environmentId}
+              />
               <ChannelComposer
                 key={props.channelId}
                 environmentId={props.environmentId}
                 channelId={props.channelId}
-                placeholder={dmAgent !== null ? `Message @${title}` : `Message #${title}`}
+                placeholder={`Message #${title}`}
               />
             </main>
             {channel.kind === "channel" ? <ChannelMemberList members={members} /> : null}
@@ -139,90 +122,40 @@ interface TimelineSource {
   readonly environmentId: EnvironmentId;
 }
 
-function ChannelTimeline(props: TimelineSource) {
-  const entries = useMemo(
-    () =>
-      channelMessageRows(props.messages, props.agents).map((row): DmTimelineEntry => ({
-        kind: "message",
-        row,
-      })),
-    [props.messages, props.agents],
-  );
-  return <Timeline {...props} entries={entries} />;
-}
-
-/** A DM: its messages and the agent's runs, wherever they ran. */
-function DmTimeline(props: TimelineSource & { readonly agent: ChannelMemberEntry }) {
-  const runs = useEnvironmentQuery(
-    channelEnvironment.agentRuns({
-      environmentId: props.environmentId,
-      input: { agentId: props.agent.id },
-    }),
-  );
-  const { refresh } = runs;
-  const presence = props.agent.presence;
-  // A run starting or ending moves the agent between idle and running: refetch its runs then.
-  useEffect(() => {
-    if (presence !== "blocked") {
-      refresh();
-    }
-  }, [presence, refresh]);
-
-  const entries = useMemo(
-    () => dmTimelineEntries(props.messages, runs.data?.runs ?? [], props.agents),
-    [props.messages, runs.data, props.agents],
-  );
-  return <Timeline {...props} entries={entries} />;
-}
-
 const messageTimeFormat = new Intl.DateTimeFormat(undefined, {
   hour: "numeric",
   minute: "2-digit",
 });
 
-const Timeline = memo(function Timeline(
-  props: TimelineSource & { readonly entries: ReadonlyArray<DmTimelineEntry> },
-) {
+const Timeline = memo(function Timeline(props: TimelineSource) {
+  const rows = useMemo(
+    () => channelMessageRows(props.messages, props.agents),
+    [props.messages, props.agents],
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
-  const newest = props.entries.at(-1);
-  const newestKey =
-    newest === undefined
-      ? undefined
-      : newest.kind === "run"
-        ? newest.run.threadId
-        : newest.row.message.id;
-  // Keep the newest entry in view as entries arrive.
+  const newestId = rows.at(-1)?.message.id;
+  // Keep the newest message in view as messages arrive.
   useEffect(() => {
     const element = scrollRef.current;
-    if (element !== null && newestKey !== undefined) {
+    if (element !== null && newestId !== undefined) {
       element.scrollTop = element.scrollHeight;
     }
-  }, [newestKey]);
+  }, [newestId]);
 
   return (
     <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
       {props.error !== null ? <p className="text-sm text-destructive">{props.error}</p> : null}
       <ol className="flex flex-col">
-        {props.entries.map((entry) =>
-          entry.kind === "run" ? (
-            <li key={entry.run.threadId} className="mt-4 first:mt-0">
-              <RunBlock
-                run={entry.run}
-                channels={props.channels}
-                cwd={props.cwd}
-                environmentId={props.environmentId}
-              />
-            </li>
-          ) : (
-            <MessageRow
-              key={entry.row.message.id}
-              row={entry.row}
-              agents={props.agents}
-              cwd={props.cwd}
-              environmentId={props.environmentId}
-            />
-          ),
-        )}
+        {rows.map((row) => (
+          <MessageRow
+            key={row.message.id}
+            row={row}
+            agents={props.agents}
+            channels={props.channels}
+            cwd={props.cwd}
+            environmentId={props.environmentId}
+          />
+        ))}
       </ol>
     </div>
   );
@@ -231,6 +164,7 @@ const Timeline = memo(function Timeline(
 function MessageRow(props: {
   readonly row: ChannelMessageRow;
   readonly agents: ReadonlyArray<OrchestrationAgentShell>;
+  readonly channels: ReadonlyArray<OrchestrationChannelShell>;
   readonly cwd: string | undefined;
   readonly environmentId: EnvironmentId;
 }) {
@@ -254,7 +188,18 @@ function MessageRow(props: {
         </div>
       ) : null}
       {message.authorKind === "agent" ? (
-        <ChatMarkdown text={message.body} cwd={props.cwd} environmentId={props.environmentId} />
+        <>
+          <ChatMarkdown text={message.body} cwd={props.cwd} environmentId={props.environmentId} />
+          {message.runThreadId !== undefined ? (
+            <RunWork
+              agentId={AgentId.make(message.authorId)}
+              runThreadId={message.runThreadId}
+              channels={props.channels}
+              cwd={props.cwd}
+              environmentId={props.environmentId}
+            />
+          ) : null}
+        </>
       ) : (
         <p
           className={cn(
@@ -278,6 +223,59 @@ function MessageRow(props: {
         </p>
       ) : null}
     </li>
+  );
+}
+
+interface RunWorkProps {
+  readonly agentId: AgentId;
+  readonly runThreadId: ThreadId;
+  readonly channels: ReadonlyArray<OrchestrationChannelShell>;
+  readonly cwd: string | undefined;
+  readonly environmentId: EnvironmentId;
+}
+
+/** Under an agent's reply: the run behind it, its work and the context it was given. */
+function RunWork(props: RunWorkProps) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-1 flex min-w-0 flex-col gap-1">
+      <Button
+        className="-ml-2 self-start"
+        size="sm"
+        variant="ghost-muted"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        {open ? "Hide work" : "Show work"}
+      </Button>
+      {open ? <RunWorkDetail {...props} /> : null}
+    </div>
+  );
+}
+
+// ponytail: fetches every run of the agent to show one; add a getRun RPC when agents have many runs.
+function RunWorkDetail(props: RunWorkProps) {
+  const runs = useEnvironmentQuery(
+    channelEnvironment.agentRuns({
+      environmentId: props.environmentId,
+      input: { agentId: props.agentId },
+    }),
+  );
+  const run = runs.data?.runs.find((candidate) => candidate.threadId === props.runThreadId);
+  if (run === undefined) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        {runs.error ?? (runs.data ? "This run is no longer available." : "Loading work…")}
+      </p>
+    );
+  }
+  return (
+    <RunBlock
+      run={run}
+      channels={props.channels}
+      cwd={props.cwd}
+      environmentId={props.environmentId}
+    />
   );
 }
 

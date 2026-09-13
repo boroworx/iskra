@@ -19,7 +19,7 @@ export function buildRuntimeInstructions(runtime: {
   const effortInfo = effort ? ` with ${effort} reasoning effort` : "";
   const agentPrompt = runtime.agentPrompt?.trim() ?? "";
   const agentRole = agentPrompt ? `\n\n<agent_role>\n${agentPrompt}\n</agent_role>` : "";
-  return `<runtime_info>In case you're asked: you are running in T3 Code through the ${harness} harness${modelInfo}${effortInfo}. No need to mention this otherwise. You can embed images and videos in your response using Markdown with absolute file paths.</runtime_info>\n\n${PULL_REQUEST_LINKING_INSTRUCTIONS}${agentRole}`;
+  return `<runtime_info>In case you're asked: you are running in Iskra through the ${harness} harness${modelInfo}${effortInfo}. No need to mention this otherwise. You can embed images and videos in your response using Markdown with absolute file paths.</runtime_info>\n\n${PULL_REQUEST_LINKING_INSTRUCTIONS}${agentRole}`;
 }
 
 function toSingleLine(value: string): string {
