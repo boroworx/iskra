@@ -104,6 +104,57 @@ export const createProject: (input: CreateProjectInput) => CommandEffect = Effec
   });
 });
 
+export type CreateAgentInput = CommandInput<"agent.create">;
+export type CreateChannelInput = CommandInput<"channel.create">;
+export type PostChannelMessageInput = CommandInput<"channel.message.post">;
+export type UpdateChannelInput = CommandInput<"channel.update">;
+
+export const updateChannel: (input: UpdateChannelInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.updateChannel",
+)(function* (input) {
+  return yield* dispatch({
+    ...input,
+    type: "channel.update",
+    commandId: yield* commandId(input),
+  });
+});
+
+export const createAgent: (input: CreateAgentInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.createAgent",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "agent.create",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const createChannel: (input: CreateChannelInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.createChannel",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "channel.create",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const postChannelMessage: (input: PostChannelMessageInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.postChannelMessage",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "channel.message.post",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
 export const updateProject: (input: UpdateProjectInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.updateProject",
 )(function* (input) {

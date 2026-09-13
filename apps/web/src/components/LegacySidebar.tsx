@@ -24,7 +24,6 @@ import {
 } from "./ThreadStatusIndicators";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { ProjectFavicon } from "./ProjectFavicon";
-import { SidebarAgentChannels } from "./sidebar/SidebarAgentChannels";
 import { useAtomValue } from "@effect/atom-react";
 import { autoAnimate } from "@formkit/auto-animate";
 import React, { useCallback, useEffect, memo, useMemo, useRef, useState } from "react";
@@ -2498,8 +2497,6 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         expandThreadListForProject={expandThreadListForProject}
         collapseThreadListForProject={collapseThreadListForProject}
       />
-
-      {projectExpanded ? <SidebarAgentChannels projectRefs={project.memberProjectRefs} /> : null}
 
       <Dialog
         open={projectRenameTarget !== null}

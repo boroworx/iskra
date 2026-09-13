@@ -1,8 +1,6 @@
-import { RefreshIcon } from "~/components/ui/refresh-icon";
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { LinkIcon, PlusIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo } from "react";
 
 import { NoProjectsHero } from "../components/NoProjectsHero";
 import { sortScopedProjectsForSidebar } from "../components/Sidebar.logic";
@@ -10,13 +8,13 @@ import { Button } from "../components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
 import { SidebarInset } from "../components/ui/sidebar";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
-import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import {
   useAllEnvironmentShellsBootstrapped,
+  useEnvironmentChannels,
   useProjects,
   useThreadShells,
 } from "../state/entities";
-import { useEnvironments } from "../state/environments";
+import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import { APP_DISPLAY_NAME } from "~/branding";
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 
@@ -29,78 +27,69 @@ function ChatIndexRouteView() {
     if (environments.length === 0) return <HostedStaticOnboardingState />;
   }
 
-  return <IndexDraftLanding />;
+  return <IndexChannelLanding />;
 }
 
 /**
- * Landing on the index route drops straight into a draft thread for the most
- * recently active project, so the first screen is a prompt instead of a dead
- * end. Falls back to an add-project hero when no project exists yet.
+ * Landing on the index route opens a channel: the first one in the most
+ * recently active project that has any. Without channels it points at the
+ * sidebar, where agents and channels are created; without projects it shows
+ * the add-project hero.
  */
-function IndexDraftLanding() {
+function IndexChannelLanding() {
+  const navigate = useNavigate();
   const projects = useProjects();
   const threads = useThreadShells();
   const bootstrapped = useAllEnvironmentShellsBootstrapped();
-  const handleNewThread = useNewThreadHandler();
-  const startingRef = useRef(false);
-  const [startState, setStartState] = useState({ failed: false, retryRequest: 0 });
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const primaryChannels = useEnvironmentChannels(primaryEnvironmentId);
 
-  const mostRecentProject = useMemo(
-    () =>
-      bootstrapped
-        ? (sortScopedProjectsForSidebar(projects, threads, "updated_at")[0] ?? null)
-        : null,
+  const sortedProjects = useMemo(
+    () => (bootstrapped ? sortScopedProjectsForSidebar(projects, threads, "updated_at") : []),
     [bootstrapped, projects, threads],
   );
+  const landingProject = sortedProjects.find(
+    (project) =>
+      project.environmentId === primaryEnvironmentId &&
+      primaryChannels.some((channel) => channel.projectId === project.id),
+  );
+  const landingProjectChannels = primaryChannels.filter(
+    (channel) => channel.projectId === landingProject?.id,
+  );
+  const landingChannel =
+    landingProjectChannels.find((channel) => channel.kind === "channel") ??
+    landingProjectChannels[0];
+  const landingEnvironmentId = landingProject?.environmentId ?? null;
+  const landingChannelId = landingChannel?.id ?? null;
 
   useEffect(() => {
-    if (mostRecentProject === null || startingRef.current) {
+    if (landingEnvironmentId === null || landingChannelId === null) {
       return;
     }
-    startingRef.current = true;
-    void handleNewThread(scopeProjectRef(mostRecentProject.environmentId, mostRecentProject.id), {
+    void navigate({
+      to: "/channels/$environmentId/$channelId",
+      params: { environmentId: landingEnvironmentId, channelId: landingChannelId },
       replace: true,
-    }).catch(() => {
-      startingRef.current = false;
-      setStartState((state) => ({ ...state, failed: true }));
     });
-  }, [handleNewThread, mostRecentProject, startState.retryRequest]);
+  }, [landingChannelId, landingEnvironmentId, navigate]);
 
-  if (!bootstrapped) {
+  if (!bootstrapped || landingChannelId !== null) {
     return null;
   }
-  if (mostRecentProject !== null) {
-    return startState.failed ? (
-      <DraftStartError
-        onRetry={() => {
-          setStartState((state) => ({
-            failed: false,
-            retryRequest: state.retryRequest + 1,
-          }));
-        }}
-      />
-    ) : null;
+  if (sortedProjects.length === 0) {
+    // First-run routing to the welcome wizard happens in FirstRunGate at the
+    // root, before this route ever renders.
+    return <NoProjectsHero />;
   }
-  // First-run routing to the welcome wizard happens in FirstRunGate at the
-  // root, before this route ever renders.
-  return <NoProjectsHero />;
-}
-
-function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <Empty className="flex-1">
         <EmptyHeader className="max-w-md">
-          <EmptyTitle className="text-foreground text-xl">Couldn’t start a new thread</EmptyTitle>
+          <EmptyTitle className="text-foreground text-xl">No channels yet</EmptyTitle>
           <EmptyDescription className="mt-2 text-sm text-muted-foreground/78">
-            The project is still available. Try opening the draft again.
+            Add an agent and a channel from the sidebar, then mention the agent in the channel to
+            put it to work.
           </EmptyDescription>
-          <div className="mt-5 flex justify-center">
-            <Button size="sm" onClick={onRetry}>
-              <RefreshIcon className="size-4" />
-              Try again
-            </Button>
-          </div>
         </EmptyHeader>
       </Empty>
     </SidebarInset>

@@ -1,5 +1,4 @@
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
-import { SidebarAgentChannels } from "./sidebar/SidebarAgentChannels";
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/shared/threadPullRequests";
 import { useAtomValue } from "@effect/atom-react";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
@@ -4543,10 +4542,6 @@ export default function Sidebar() {
                 No threads found
               </p>
             )
-          ) : null}
-          {!isSearchingThreads && scopedProjectGroup !== null ? (
-            // Channels and agents belong to one project, so they appear once a project is scoped.
-            <SidebarAgentChannels projectRefs={scopedProjectGroup.memberProjectRefs} />
           ) : null}
           {!isSearchingThreads ? (
             <TooltipProvider
