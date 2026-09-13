@@ -1,5 +1,7 @@
 import type {
+  CardRelationKind,
   OrchestrationAgent,
+  OrchestrationCard,
   OrchestrationChannel,
   OrchestrationEvent,
   OrchestrationProject,
@@ -27,12 +29,20 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Predicate from "effect/Predicate";
 
+import { inverseRelationKind, withRelation, withoutRelation } from "./cardRules.ts";
 import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from "./Errors.ts";
 import {
   AgentArchivedPayload,
   AgentCreatedPayload,
   AgentUnarchivedPayload,
   AgentUpdatedPayload,
+  CardCreatedPayload,
+  CardDecisionRecordedPayload,
+  CardDelegateChangedPayload,
+  CardRelationAddedPayload,
+  CardRelationRemovedPayload,
+  CardStatusChangedPayload,
+  CardUpdatedPayload,
   ChannelArchivedPayload,
   ChannelCreatedPayload,
   ChannelRunStartedPayload,
@@ -325,6 +335,45 @@ function updateAgent(
   return agents.map((agent) => (agent.id === agentId ? { ...agent, ...patch } : agent));
 }
 
+function updateCard(
+  cards: ReadonlyArray<OrchestrationCard>,
+  cardId: string,
+  patch: (card: OrchestrationCard) => OrchestrationCard,
+): ReadonlyArray<OrchestrationCard> {
+  return cards.map((card) => (card.id === cardId ? patch(card) : card));
+}
+
+/** Applies a relation change to the card that named it and, when it has one, the inverse to the other card. */
+function relateCards(
+  cards: ReadonlyArray<OrchestrationCard>,
+  input: {
+    readonly cardId: OrchestrationCard["id"];
+    readonly kind: CardRelationKind;
+    readonly otherCardId: OrchestrationCard["id"];
+    readonly updatedAt: string;
+  },
+  change: typeof withRelation,
+): ReadonlyArray<OrchestrationCard> {
+  const inverse = inverseRelationKind(input.kind);
+  return cards.map((card) => {
+    if (card.id === input.cardId) {
+      return {
+        ...card,
+        relations: change(card.relations, { kind: input.kind, cardId: input.otherCardId }),
+        updatedAt: input.updatedAt,
+      };
+    }
+    if (inverse !== null && card.id === input.otherCardId) {
+      return {
+        ...card,
+        relations: change(card.relations, { kind: inverse, cardId: input.cardId }),
+        updatedAt: input.updatedAt,
+      };
+    }
+    return card;
+  });
+}
+
 function updateChannel(
   channels: ReadonlyArray<OrchestrationChannel>,
   channelId: string,
@@ -340,6 +389,7 @@ export function createEmptyReadModel(nowIso: string): OrchestrationReadModel {
     threads: [],
     agents: [],
     channels: [],
+    cards: [],
     liveRuns: [],
     updatedAt: nowIso,
   };
@@ -1159,6 +1209,98 @@ export function projectEvent(
             updatedAt: payload.updatedAt,
           }),
         })),
+      );
+
+    case "card.created":
+      return decodeForEvent(CardCreatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const cards = nextBase.cards ?? [];
+          const nextCard: OrchestrationCard = {
+            id: payload.cardId,
+            projectId: payload.projectId,
+            channelId: payload.channelId,
+            parentCardId: payload.parentCardId,
+            title: payload.title,
+            spec: payload.spec,
+            specState: payload.specState,
+            tags: payload.tags,
+            status: payload.status,
+            ownerHumanId: payload.ownerHumanId,
+            delegateAgentId: null,
+            baseBranch: payload.baseBranch,
+            relations: [],
+            createdBy: payload.createdBy,
+            createdAt: payload.createdAt,
+            updatedAt: payload.updatedAt,
+          };
+          return {
+            ...nextBase,
+            cards: cards.some((card) => card.id === payload.cardId)
+              ? cards.map((card) => (card.id === payload.cardId ? nextCard : card))
+              : [...cards, nextCard],
+          };
+        }),
+      );
+
+    case "card.updated":
+      return decodeForEvent(CardUpdatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          cards: updateCard(nextBase.cards ?? [], payload.cardId, (card) => ({
+            ...card,
+            ...(payload.title !== undefined ? { title: payload.title } : {}),
+            ...(payload.spec !== undefined ? { spec: payload.spec } : {}),
+            ...(payload.specState !== undefined ? { specState: payload.specState } : {}),
+            ...(payload.tags !== undefined ? { tags: payload.tags } : {}),
+            updatedAt: payload.updatedAt,
+          })),
+        })),
+      );
+
+    case "card.status-changed":
+      return decodeForEvent(CardStatusChangedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          cards: updateCard(nextBase.cards ?? [], payload.cardId, (card) => ({
+            ...card,
+            status: payload.to,
+            updatedAt: payload.updatedAt,
+          })),
+        })),
+      );
+
+    case "card.delegate-changed":
+      return decodeForEvent(CardDelegateChangedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          cards: updateCard(nextBase.cards ?? [], payload.cardId, (card) => ({
+            ...card,
+            delegateAgentId: payload.delegateAgentId,
+            updatedAt: payload.updatedAt,
+          })),
+        })),
+      );
+
+    case "card.relation-added":
+      return decodeForEvent(CardRelationAddedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          cards: relateCards(nextBase.cards ?? [], payload, withRelation),
+        })),
+      );
+
+    case "card.relation-removed":
+      return decodeForEvent(CardRelationRemovedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          cards: relateCards(nextBase.cards ?? [], payload, withoutRelation),
+        })),
+      );
+
+    // A card's decision log is paged from its projection; the read model does not hold it.
+    case "card.decision-recorded":
+      return decodeForEvent(CardDecisionRecordedPayload, event.payload, event.type, "payload").pipe(
+        Effect.as(nextBase),
       );
 
     case "channel.created":

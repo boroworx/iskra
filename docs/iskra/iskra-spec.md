@@ -159,11 +159,13 @@ never part of the command read model; history is ordered and paged by event sequ
 `attemptGroupId?` (set on best-of-N attempts), `title`, `spec` (plain text), `specState`
 (`draft` | `approved` | `skipped`), `tags[]`, `status` (`triage` | `ready` | `inProgress` |
 `inReview` | `landing` | `landed` | `abandoned`), `ownerHumanId` (the accountable person; the
-single local human until M5), `delegateAgentId?` (the writing agent), `baseBranch` (main, or the
-parent card's branch), `branch?`, `worktreePath?`, `budgetCapUsd`, `spentUsd`, `plan[]` (the
-owner's checklist), `relations[]` (`blocks` | `blockedBy` | `duplicateOf` | `related` |
-`overlaps`, each with a card id), `linearIssueId?`, `createdBy`, `createdAt`. The decision log is
-the card's append-only events, not a field.
+single local human until M5), `delegateAgentId?` (the writing agent), `baseBranch?` (null means
+the repository's default branch; a sub-card uses its parent's branch), `branch?`, `worktreePath?`,
+`budgetCapUsd`, `spentUsd`, `plan[]` (the owner's checklist), `relations[]` (`blocks` |
+`blockedBy` | `duplicateOf` | `related` | `overlaps`, each with a card id; a relation is recorded
+once and its inverse is applied to the other card), `linearIssueId?`, `createdBy`, `createdAt`.
+Each field arrives with the milestone task that uses it. The decision log is the card's
+append-only events, projected to its own table and never held in the read model.
 
 **Run** — ephemeral, but its events are persisted. `threadId` (the hidden upstream thread backing
 it; also the run's id), `channelId`, `agentId`, `triggerMessageId`, `capabilities`, `context` (the
@@ -577,6 +579,14 @@ Claude Code and Copilot files once.
 relations and the decision log; the human decisions and their reverses. _Accept when:_ decider
 tests cover every transition in the status table and each reverse; non-decision status commands
 are rejected; agent-created cards land in `triage`; a restart restores cards equal to a replay.
+_Accepted:_ `cardRules.ts` holds the status rules as pure functions, tested for every move from
+every status. `decider.cards.test.ts` walks a card from triage to landed through each reverse,
+rejects forbidden moves with the rule's reason, holds a merge on an open sub-card or blocker,
+limits assignment to an active agent of the project after approval, keeps relations symmetric
+and within one project, and refuses edits once finished. Every create path produces a `triage`
+card. Work start, review request, return to work and land are internal commands a client cannot
+send. An engine test restarts on the same SQLite file and compares cards, including their
+relations, with a replay of the event log. Cards are not yet streamed to clients; that is M2.5.
 
 **M2.2 — Worktrees and project scripts.** Create and remove card worktrees; extend the existing
 project setup script with `run` and `archive` scripts, an `ISKRA_PORT` range per card, and a

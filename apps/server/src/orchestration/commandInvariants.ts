@@ -1,7 +1,9 @@
 import type {
   AgentId,
+  CardId,
   ChannelId,
   OrchestrationAgent,
+  OrchestrationCard,
   OrchestrationChannel,
   OrchestrationCommand,
   OrchestrationProject,
@@ -104,6 +106,46 @@ export function requireAgentNameAvailable(input: {
     invariantError(
       input.command.type,
       `Agent name '${input.name}' is already taken in project '${input.projectId}'.`,
+    ),
+  );
+}
+
+function findCardById(
+  readModel: OrchestrationReadModel,
+  cardId: CardId,
+): OrchestrationCard | undefined {
+  return (readModel.cards ?? []).find((card) => card.id === cardId);
+}
+
+export function requireCard(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly cardId: CardId;
+}): Effect.Effect<OrchestrationCard, OrchestrationCommandInvariantError> {
+  const card = findCardById(input.readModel, input.cardId);
+  if (card) {
+    return Effect.succeed(card);
+  }
+  return Effect.fail(
+    invariantError(
+      input.command.type,
+      `Card '${input.cardId}' does not exist for command '${input.command.type}'.`,
+    ),
+  );
+}
+
+export function requireCardAbsent(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly cardId: CardId;
+}): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  if (!findCardById(input.readModel, input.cardId)) {
+    return Effect.void;
+  }
+  return Effect.fail(
+    invariantError(
+      input.command.type,
+      `Card '${input.cardId}' already exists and cannot be created twice.`,
     ),
   );
 }

@@ -48,6 +48,12 @@ import {
 import { ProjectionThreadRepository } from "../../persistence/Services/ProjectionThreads.ts";
 import { ProjectionPendingApprovalRepositoryLive } from "../../persistence/Layers/ProjectionPendingApprovals.ts";
 import { ProjectionAgentRepositoryLive } from "../../persistence/Layers/ProjectionAgents.ts";
+import { ProjectionCardRepositoryLive } from "../../persistence/Layers/ProjectionCards.ts";
+import {
+  type ProjectionCard,
+  ProjectionCardRepository,
+} from "../../persistence/Services/ProjectionCards.ts";
+import { inverseRelationKind, withRelation, withoutRelation } from "../cardRules.ts";
 import { ProjectionChannelRepositoryLive } from "../../persistence/Layers/ProjectionChannels.ts";
 import { ProjectionProjectRepositoryLive } from "../../persistence/Layers/ProjectionProjects.ts";
 import { ProjectionStateRepositoryLive } from "../../persistence/Layers/ProjectionState.ts";
@@ -72,6 +78,7 @@ import {
 export const ORCHESTRATION_PROJECTOR_NAMES = {
   projects: "projection.projects",
   agents: "projection.agents",
+  cards: "projection.cards",
   channels: "projection.channels",
   threads: "projection.threads",
   threadMessages: "projection.thread-messages",
@@ -500,6 +507,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const projectionPendingApprovalRepository = yield* ProjectionPendingApprovalRepository;
     const projectionAgentRepository = yield* ProjectionAgentRepository;
     const projectionChannelRepository = yield* ProjectionChannelRepository;
+    const projectionCardRepository = yield* ProjectionCardRepository;
 
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -639,6 +647,111 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             });
             return;
           }
+
+          default:
+            return;
+        }
+      },
+    );
+
+    const patchCard = (
+      cardId: ProjectionCard["cardId"],
+      patch: (row: ProjectionCard) => ProjectionCard,
+    ) =>
+      projectionCardRepository
+        .getById({ cardId })
+        .pipe(
+          Effect.flatMap((row) =>
+            Option.isNone(row) ? Effect.void : projectionCardRepository.upsert(patch(row.value)),
+          ),
+        );
+
+    const applyCardsProjection: ProjectorDefinition["apply"] = Effect.fn("applyCardsProjection")(
+      function* (event, _attachmentSideEffects) {
+        switch (event.type) {
+          case "card.created":
+            yield* projectionCardRepository.upsert({
+              cardId: event.payload.cardId,
+              projectId: event.payload.projectId,
+              channelId: event.payload.channelId,
+              parentCardId: event.payload.parentCardId,
+              title: event.payload.title,
+              spec: event.payload.spec,
+              specState: event.payload.specState,
+              tags: event.payload.tags,
+              status: event.payload.status,
+              ownerHumanId: event.payload.ownerHumanId,
+              delegateAgentId: null,
+              baseBranch: event.payload.baseBranch,
+              relations: [],
+              createdBy: event.payload.createdBy,
+              createdAt: event.payload.createdAt,
+              updatedAt: event.payload.updatedAt,
+            });
+            return;
+
+          case "card.updated": {
+            const payload = event.payload;
+            yield* patchCard(payload.cardId, (row) => ({
+              ...row,
+              ...(payload.title !== undefined ? { title: payload.title } : {}),
+              ...(payload.spec !== undefined ? { spec: payload.spec } : {}),
+              ...(payload.specState !== undefined ? { specState: payload.specState } : {}),
+              ...(payload.tags !== undefined ? { tags: payload.tags } : {}),
+              updatedAt: payload.updatedAt,
+            }));
+            return;
+          }
+
+          case "card.status-changed": {
+            const payload = event.payload;
+            yield* patchCard(payload.cardId, (row) => ({
+              ...row,
+              status: payload.to,
+              updatedAt: payload.updatedAt,
+            }));
+            return;
+          }
+
+          case "card.delegate-changed": {
+            const payload = event.payload;
+            yield* patchCard(payload.cardId, (row) => ({
+              ...row,
+              delegateAgentId: payload.delegateAgentId,
+              updatedAt: payload.updatedAt,
+            }));
+            return;
+          }
+
+          case "card.relation-added":
+          case "card.relation-removed": {
+            const { cardId, kind, otherCardId, updatedAt } = event.payload;
+            const change = event.type === "card.relation-added" ? withRelation : withoutRelation;
+            yield* patchCard(cardId, (row) => ({
+              ...row,
+              relations: change(row.relations, { kind, cardId: otherCardId }),
+              updatedAt,
+            }));
+            const inverse = inverseRelationKind(kind);
+            if (inverse !== null) {
+              yield* patchCard(otherCardId, (row) => ({
+                ...row,
+                relations: change(row.relations, { kind: inverse, cardId }),
+                updatedAt,
+              }));
+            }
+            return;
+          }
+
+          case "card.decision-recorded":
+            yield* projectionCardRepository.appendDecision({
+              decisionId: event.payload.decisionId,
+              cardId: event.payload.cardId,
+              author: event.payload.author,
+              text: event.payload.text,
+              createdAt: event.payload.createdAt,
+            });
+            return;
 
           default:
             return;
@@ -2119,6 +2232,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         apply: applyChannelsProjection,
       },
       {
+        name: ORCHESTRATION_PROJECTOR_NAMES.cards,
+        apply: applyCardsProjection,
+      },
+      {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadMessages,
         apply: applyThreadMessagesProjection,
       },
@@ -2376,6 +2493,7 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
   Layer.provideMerge(ProjectionProjectRepositoryLive),
   Layer.provideMerge(ProjectionAgentRepositoryLive),
   Layer.provideMerge(ProjectionChannelRepositoryLive),
+  Layer.provideMerge(ProjectionCardRepositoryLive),
   Layer.provideMerge(ProjectionThreadRepositoryLive),
   Layer.provideMerge(ProjectionThreadMessageRepositoryLive),
   Layer.provideMerge(ProjectionThreadProposedPlanRepositoryLive),

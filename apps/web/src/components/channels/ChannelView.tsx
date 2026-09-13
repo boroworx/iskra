@@ -22,7 +22,7 @@ import { ComposerSurface } from "../chat/ComposerSurface";
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
 import { EMPTY_COMPOSER_CONTEXT_RECORDS } from "../composerContextPresentation";
 import { Button } from "../ui/button";
-import { SidebarInset, SidebarTrigger } from "../ui/sidebar";
+import { SidebarInset } from "../ui/sidebar";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import {
   channelMemberEntries,
@@ -66,7 +66,6 @@ export function ChannelView(props: {
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <WorkspacePageHeader className="border-b border-border">
-          <SidebarTrigger className="md:hidden" />
           {channel === null ? null : (
             <div className="flex min-w-0 items-center gap-2">
               <HashIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
