@@ -1,4 +1,6 @@
 import type {
+  AgentId,
+  OrchestrationAgent,
   OrchestrationCommand,
   OrchestrationProject,
   OrchestrationReadModel,
@@ -37,6 +39,71 @@ export function listThreadsByProjectId(
   projectId: ProjectId,
 ): ReadonlyArray<OrchestrationThread> {
   return readModel.threads.filter((thread) => thread.projectId === projectId);
+}
+
+function findAgentById(
+  readModel: OrchestrationReadModel,
+  agentId: AgentId,
+): OrchestrationAgent | undefined {
+  return (readModel.agents ?? []).find((agent) => agent.id === agentId);
+}
+
+export function requireAgent(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly agentId: AgentId;
+}): Effect.Effect<OrchestrationAgent, OrchestrationCommandInvariantError> {
+  const agent = findAgentById(input.readModel, input.agentId);
+  if (agent) {
+    return Effect.succeed(agent);
+  }
+  return Effect.fail(
+    invariantError(
+      input.command.type,
+      `Agent '${input.agentId}' does not exist for command '${input.command.type}'.`,
+    ),
+  );
+}
+
+export function requireAgentAbsent(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly agentId: AgentId;
+}): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  if (!findAgentById(input.readModel, input.agentId)) {
+    return Effect.void;
+  }
+  return Effect.fail(
+    invariantError(
+      input.command.type,
+      `Agent '${input.agentId}' already exists and cannot be created twice.`,
+    ),
+  );
+}
+
+/** Names are `@mention` handles: unique per project, archived agents included. */
+export function requireAgentNameAvailable(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly projectId: ProjectId;
+  readonly name: string;
+  readonly exceptAgentId?: AgentId;
+}): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  const taken = (input.readModel.agents ?? []).some(
+    (agent) =>
+      agent.projectId === input.projectId &&
+      agent.name === input.name &&
+      agent.id !== input.exceptAgentId,
+  );
+  if (!taken) {
+    return Effect.void;
+  }
+  return Effect.fail(
+    invariantError(
+      input.command.type,
+      `Agent name '${input.name}' is already taken in project '${input.projectId}'.`,
+    ),
+  );
 }
 
 export function requireProject(input: {

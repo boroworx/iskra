@@ -2,8 +2,6 @@ import type {
   OrchestrationClientOrigin,
   OrchestrationEvent,
   OrchestrationReadModel,
-  ProjectId,
-  ThreadId,
 } from "@t3tools/contracts";
 import { OrchestrationCommand } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -62,10 +60,18 @@ interface CommandEnvelope {
 }
 
 function commandToAggregateRef(command: OrchestrationCommand): {
-  readonly aggregateKind: "project" | "thread";
-  readonly aggregateId: ProjectId | ThreadId;
+  readonly aggregateKind: OrchestrationEvent["aggregateKind"];
+  readonly aggregateId: OrchestrationEvent["aggregateId"];
 } {
   switch (command.type) {
+    case "agent.create":
+    case "agent.update":
+    case "agent.archive":
+    case "agent.unarchive":
+      return {
+        aggregateKind: "agent",
+        aggregateId: command.agentId,
+      };
     case "project.create":
     case "project.meta.update":
     case "project.delete":

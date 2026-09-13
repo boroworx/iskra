@@ -24,6 +24,7 @@ import {
 import { toPersistenceSqlError, type ProjectionRepositoryError } from "../../persistence/Errors.ts";
 import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
 import { ProjectionPendingApprovalRepository } from "../../persistence/Services/ProjectionPendingApprovals.ts";
+import { ProjectionAgentRepository } from "../../persistence/Services/ProjectionAgents.ts";
 import { ProjectionProjectRepository } from "../../persistence/Services/ProjectionProjects.ts";
 import { ProjectionStateRepository } from "../../persistence/Services/ProjectionState.ts";
 import { ProjectionThreadActivityRepository } from "../../persistence/Services/ProjectionThreadActivities.ts";
@@ -44,6 +45,7 @@ import {
 } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionThreadRepository } from "../../persistence/Services/ProjectionThreads.ts";
 import { ProjectionPendingApprovalRepositoryLive } from "../../persistence/Layers/ProjectionPendingApprovals.ts";
+import { ProjectionAgentRepositoryLive } from "../../persistence/Layers/ProjectionAgents.ts";
 import { ProjectionProjectRepositoryLive } from "../../persistence/Layers/ProjectionProjects.ts";
 import { ProjectionStateRepositoryLive } from "../../persistence/Layers/ProjectionState.ts";
 import { ProjectionThreadActivityRepositoryLive } from "../../persistence/Layers/ProjectionThreadActivities.ts";
@@ -66,6 +68,7 @@ import {
 
 export const ORCHESTRATION_PROJECTOR_NAMES = {
   projects: "projection.projects",
+  agents: "projection.agents",
   threads: "projection.threads",
   threadMessages: "projection.thread-messages",
   threadProposedPlans: "projection.thread-proposed-plans",
@@ -491,6 +494,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const projectionThreadSessionRepository = yield* ProjectionThreadSessionRepository;
     const projectionTurnRepository = yield* ProjectionTurnRepository;
     const projectionPendingApprovalRepository = yield* ProjectionPendingApprovalRepository;
+    const projectionAgentRepository = yield* ProjectionAgentRepository;
 
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -568,6 +572,74 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
       }
     });
+
+    const applyAgentsProjection: ProjectorDefinition["apply"] = Effect.fn("applyAgentsProjection")(
+      function* (event, _attachmentSideEffects) {
+        switch (event.type) {
+          case "agent.created":
+            yield* projectionAgentRepository.upsert({
+              agentId: event.payload.agentId,
+              projectId: event.payload.projectId,
+              name: event.payload.name,
+              avatar: event.payload.avatar,
+              roleTags: event.payload.roleTags,
+              rolePrompt: event.payload.rolePrompt,
+              modelSelection: event.payload.modelSelection,
+              capabilities: event.payload.capabilities,
+              createdAt: event.payload.createdAt,
+              updatedAt: event.payload.updatedAt,
+              archivedAt: null,
+            });
+            return;
+
+          case "agent.updated": {
+            const existingRow = yield* projectionAgentRepository.getById({
+              agentId: event.payload.agentId,
+            });
+            if (Option.isNone(existingRow)) {
+              return;
+            }
+            yield* projectionAgentRepository.upsert({
+              ...existingRow.value,
+              ...(event.payload.name !== undefined ? { name: event.payload.name } : {}),
+              ...(event.payload.avatar !== undefined ? { avatar: event.payload.avatar } : {}),
+              ...(event.payload.roleTags !== undefined ? { roleTags: event.payload.roleTags } : {}),
+              ...(event.payload.rolePrompt !== undefined
+                ? { rolePrompt: event.payload.rolePrompt }
+                : {}),
+              ...(event.payload.modelSelection !== undefined
+                ? { modelSelection: event.payload.modelSelection }
+                : {}),
+              ...(event.payload.capabilities !== undefined
+                ? { capabilities: event.payload.capabilities }
+                : {}),
+              updatedAt: event.payload.updatedAt,
+            });
+            return;
+          }
+
+          case "agent.archived":
+          case "agent.unarchived": {
+            const existingRow = yield* projectionAgentRepository.getById({
+              agentId: event.payload.agentId,
+            });
+            if (Option.isNone(existingRow)) {
+              return;
+            }
+            yield* projectionAgentRepository.upsert({
+              ...existingRow.value,
+              ...(event.type === "agent.archived"
+                ? { archivedAt: event.payload.archivedAt, updatedAt: event.payload.archivedAt }
+                : { archivedAt: null, updatedAt: event.payload.updatedAt }),
+            });
+            return;
+          }
+
+          default:
+            return;
+        }
+      },
+    );
 
     const refreshThreadShellSummary = Effect.fn("refreshThreadShellSummary")(function* (
       threadId: ThreadId,
@@ -1925,6 +1997,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         apply: applyProjectsProjection,
       },
       {
+        name: ORCHESTRATION_PROJECTOR_NAMES.agents,
+        apply: applyAgentsProjection,
+      },
+      {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadMessages,
         apply: applyThreadMessagesProjection,
       },
@@ -2180,6 +2256,7 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
   makeOrchestrationProjectionPipeline(),
 ).pipe(
   Layer.provideMerge(ProjectionProjectRepositoryLive),
+  Layer.provideMerge(ProjectionAgentRepositoryLive),
   Layer.provideMerge(ProjectionThreadRepositoryLive),
   Layer.provideMerge(ProjectionThreadMessageRepositoryLive),
   Layer.provideMerge(ProjectionThreadProposedPlanRepositoryLive),

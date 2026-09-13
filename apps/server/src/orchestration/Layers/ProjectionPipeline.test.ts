@@ -1434,18 +1434,21 @@ it.layer(
 
       yield* projectionPipeline.bootstrap;
       yield* projectionPipeline.bootstrap;
-      assert.deepEqual(yield* projectionState.listAll(), [
-        {
-          projector: "projection.attachment-cleanup",
-          lastAppliedSequence: pendingEvent.sequence,
-          updatedAt: pendingEvent.occurredAt,
-        },
-        ...cursorsBeforeFailure.map((cursor) => ({
-          ...cursor,
-          lastAppliedSequence: pendingEvent.sequence,
-          updatedAt: pendingEvent.occurredAt,
-        })),
-      ]);
+      assert.deepEqual(
+        yield* projectionState.listAll(),
+        [
+          {
+            projector: "projection.attachment-cleanup",
+            lastAppliedSequence: pendingEvent.sequence,
+            updatedAt: pendingEvent.occurredAt,
+          },
+          ...cursorsBeforeFailure.map((cursor) => ({
+            ...cursor,
+            lastAppliedSequence: pendingEvent.sequence,
+            updatedAt: pendingEvent.occurredAt,
+          })),
+        ].toSorted((left, right) => left.projector.localeCompare(right.projector)),
+      );
       const replayedMessages = yield* sql<{ readonly text: string }>`
         SELECT text FROM projection_thread_messages WHERE message_id = 'message-rollback'
       `;

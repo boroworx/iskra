@@ -54,6 +54,7 @@ import {
 import { ProjectionCheckpoint } from "../../persistence/Services/ProjectionCheckpoints.ts";
 import { ThreadBackgroundLivenessService } from "../ThreadBackgroundLiveness.ts";
 import { ThreadPlanProgressService } from "../ThreadPlanProgress.ts";
+import { ProjectionAgentDbRow } from "../../persistence/Services/ProjectionAgents.ts";
 import { ProjectionProject } from "../../persistence/Services/ProjectionProjects.ts";
 import { ProjectionState } from "../../persistence/Services/ProjectionState.ts";
 import { ProjectionThreadActivity } from "../../persistence/Services/ProjectionThreadActivities.ts";
@@ -547,6 +548,28 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         WHERE ${filter?.activeOnly === true ? sql`deleted_at IS NULL` : sql`1 = 1`}
           AND ${filter?.projectIds === undefined ? sql`1 = 1` : sql.in("project_id", filter.projectIds)}
         ORDER BY created_at ASC, project_id ASC
+      `,
+  });
+
+  const listAgentRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionAgentDbRow,
+    execute: () =>
+      sql`
+        SELECT
+          agent_id AS "agentId",
+          project_id AS "projectId",
+          name,
+          avatar,
+          role_tags_json AS "roleTags",
+          role_prompt AS "rolePrompt",
+          model_selection_json AS "modelSelection",
+          capabilities_json AS "capabilities",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt",
+          archived_at AS "archivedAt"
+        FROM projection_agents
+        ORDER BY created_at ASC, agent_id ASC
       `,
   });
 
@@ -2350,6 +2373,14 @@ pending_approval_requests AS (
               ),
             ),
           ),
+          listAgentRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getCommandReadModel:listAgents:query",
+                "ProjectionSnapshotQuery.getCommandReadModel:listAgents:decodeRows",
+              ),
+            ),
+          ),
         ]),
       )
       .pipe(
@@ -2362,6 +2393,7 @@ pending_approval_requests AS (
             sessionRows,
             latestTurnRows,
             stateRows,
+            agentRows,
           ]) =>
             Effect.gen(function* () {
               const linkedThreadIds = new Set(pullRequestRows.map((row) => row.threadId));
@@ -2517,6 +2549,19 @@ pending_approval_requests AS (
                 snapshotSequence: computeSnapshotSequence(stateRows),
                 projects,
                 threads,
+                agents: agentRows.map((row) => ({
+                  id: row.agentId,
+                  projectId: row.projectId,
+                  name: row.name,
+                  avatar: row.avatar,
+                  roleTags: row.roleTags,
+                  rolePrompt: row.rolePrompt,
+                  modelSelection: row.modelSelection,
+                  capabilities: row.capabilities,
+                  createdAt: row.createdAt,
+                  updatedAt: row.updatedAt,
+                  archivedAt: row.archivedAt,
+                })),
                 updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
               } satisfies OrchestrationReadModel;
             }),

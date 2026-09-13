@@ -1,4 +1,5 @@
 import type {
+  OrchestrationAgent,
   OrchestrationEvent,
   OrchestrationProject,
   OrchestrationReadModel,
@@ -26,6 +27,10 @@ import * as Predicate from "effect/Predicate";
 
 import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from "./Errors.ts";
 import {
+  AgentArchivedPayload,
+  AgentCreatedPayload,
+  AgentUnarchivedPayload,
+  AgentUpdatedPayload,
   MessageSentPayloadSchema,
   ProjectCreatedPayload,
   ProjectDeletedPayload,
@@ -305,11 +310,20 @@ function compareThreadActivities(
   return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
 }
 
+function updateAgent(
+  agents: ReadonlyArray<OrchestrationAgent>,
+  agentId: string,
+  patch: Partial<Omit<OrchestrationAgent, "id" | "projectId">>,
+): ReadonlyArray<OrchestrationAgent> {
+  return agents.map((agent) => (agent.id === agentId ? { ...agent, ...patch } : agent));
+}
+
 export function createEmptyReadModel(nowIso: string): OrchestrationReadModel {
   return {
     snapshotSequence: 0,
     projects: [],
     threads: [],
+    agents: [],
     updatedAt: nowIso,
   };
 }
@@ -1054,6 +1068,72 @@ export function projectEvent(
             }),
           };
         }),
+      );
+
+    case "agent.created":
+      return decodeForEvent(AgentCreatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const agents = nextBase.agents ?? [];
+          const nextAgent: OrchestrationAgent = {
+            id: payload.agentId,
+            projectId: payload.projectId,
+            name: payload.name,
+            avatar: payload.avatar,
+            roleTags: payload.roleTags,
+            rolePrompt: payload.rolePrompt,
+            modelSelection: payload.modelSelection,
+            capabilities: payload.capabilities,
+            createdAt: payload.createdAt,
+            updatedAt: payload.updatedAt,
+            archivedAt: null,
+          };
+          return {
+            ...nextBase,
+            agents: agents.some((agent) => agent.id === payload.agentId)
+              ? agents.map((agent) => (agent.id === payload.agentId ? nextAgent : agent))
+              : [...agents, nextAgent],
+          };
+        }),
+      );
+
+    case "agent.updated":
+      return decodeForEvent(AgentUpdatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          agents: updateAgent(nextBase.agents ?? [], payload.agentId, {
+            ...(payload.name !== undefined ? { name: payload.name } : {}),
+            ...(payload.avatar !== undefined ? { avatar: payload.avatar } : {}),
+            ...(payload.roleTags !== undefined ? { roleTags: payload.roleTags } : {}),
+            ...(payload.rolePrompt !== undefined ? { rolePrompt: payload.rolePrompt } : {}),
+            ...(payload.modelSelection !== undefined
+              ? { modelSelection: payload.modelSelection }
+              : {}),
+            ...(payload.capabilities !== undefined ? { capabilities: payload.capabilities } : {}),
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "agent.archived":
+      return decodeForEvent(AgentArchivedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          agents: updateAgent(nextBase.agents ?? [], payload.agentId, {
+            archivedAt: payload.archivedAt,
+            updatedAt: payload.archivedAt,
+          }),
+        })),
+      );
+
+    case "agent.unarchived":
+      return decodeForEvent(AgentUnarchivedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          agents: updateAgent(nextBase.agents ?? [], payload.agentId, {
+            archivedAt: null,
+            updatedAt: payload.updatedAt,
+          }),
+        })),
       );
 
     default:

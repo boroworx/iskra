@@ -4,6 +4,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import {
+  AgentId,
   ApprovalRequestId,
   EventId,
   CheckpointRef,
@@ -20,6 +21,7 @@ import {
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it as effectIt } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Metric from "effect/Metric";
@@ -48,6 +50,7 @@ import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQu
 import * as ThreadBackgroundLiveness from "../ThreadBackgroundLiveness.ts";
 import * as ThreadPlanProgress from "../ThreadPlanProgress.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
+import { createEmptyReadModel, projectEvent } from "../projector.ts";
 import {
   OrchestrationProjectionPipeline,
   type OrchestrationProjectionPipelineShape,
@@ -107,6 +110,7 @@ async function createOrchestrationSystem(
   return {
     engine,
     readModel: () => runtime.runPromise(snapshotQuery.getSnapshot()),
+    commandReadModel: () => runtime.runPromise(snapshotQuery.getCommandReadModel()),
     readThread: (threadId: ThreadId) =>
       runtime.runPromise(snapshotQuery.getThreadDetailById(threadId)),
     run: <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect),
@@ -849,6 +853,81 @@ describe("OrchestrationEngine", () => {
     ).toBe("Archive me");
 
     await system.dispose();
+  });
+
+  it("keeps agents across a restart, matching a replay of the event log", async () => {
+    const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-agents-"));
+    const databasePath = NodePath.join(directory, "state.sqlite");
+    const projectId = asProjectId("agents-project");
+    const createBackendAgent = (id: string): OrchestrationCommand => ({
+      type: "agent.create",
+      commandId: CommandId.make(`cmd-${id}`),
+      agentId: AgentId.make(id),
+      projectId,
+      name: "backend",
+      roleTags: ["api"],
+      rolePrompt: "",
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-haiku-4-5",
+      },
+      capabilities: ["read"],
+      createdAt: now(),
+    });
+    let system = await createOrchestrationSystem(databasePath);
+    try {
+      await system.run(
+        system.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.make("cmd-agents-project"),
+          projectId,
+          title: "Agents",
+          workspaceRoot: "/tmp/agents-project",
+          createdAt: now(),
+        }),
+      );
+      await system.run(system.engine.dispatch(createBackendAgent("agent-backend")));
+      await system.run(
+        system.engine.dispatch({
+          type: "agent.update",
+          commandId: CommandId.make("cmd-agent-backend-update"),
+          agentId: AgentId.make("agent-backend"),
+          rolePrompt: "Own the API.",
+        }),
+      );
+      await system.dispose();
+
+      system = await createOrchestrationSystem(databasePath);
+      const restored = await system.commandReadModel();
+      const events = await system.run(
+        Stream.runCollect(system.engine.readEvents(0)).pipe(
+          Effect.map((chunk): OrchestrationEvent[] => Array.from(chunk)),
+        ),
+      );
+      const replayed = await system.run(
+        Effect.gen(function* () {
+          let model = createEmptyReadModel(now());
+          for (const event of events) {
+            model = yield* projectEvent(model, event);
+          }
+          return model;
+        }),
+      );
+
+      expect(restored.agents).toEqual(replayed.agents);
+      expect(restored.agents).toMatchObject([
+        { id: "agent-backend", name: "backend", rolePrompt: "Own the API.", archivedAt: null },
+      ]);
+
+      // The restarted decider still enforces unique names against persisted agents.
+      const duplicate = await system.run(
+        Effect.exit(system.engine.dispatch(createBackendAgent("agent-backend-2"))),
+      );
+      expect(Exit.isFailure(duplicate)).toBe(true);
+    } finally {
+      await system.dispose();
+      await NodeFSP.rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("replays append-only events from sequence", async () => {

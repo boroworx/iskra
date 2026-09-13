@@ -36,6 +36,9 @@ import {
 } from "./Errors.ts";
 import {
   listThreadsByProjectId,
+  requireAgent,
+  requireAgentAbsent,
+  requireAgentNameAvailable,
   requireActiveProjectWorkspaceRootAbsent,
   requireProject,
   requireProjectAbsent,
@@ -2018,6 +2021,141 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         },
       };
       return [unsettledEvent, activityAppendedEvent];
+    }
+
+    case "agent.create": {
+      yield* requireProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      yield* requireAgentAbsent({
+        readModel,
+        command,
+        agentId: command.agentId,
+      });
+      yield* requireAgentNameAvailable({
+        readModel,
+        command,
+        projectId: command.projectId,
+        name: command.name,
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "agent",
+          aggregateId: command.agentId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "agent.created",
+        payload: {
+          agentId: command.agentId,
+          projectId: command.projectId,
+          name: command.name,
+          avatar: command.avatar ?? null,
+          roleTags: command.roleTags,
+          rolePrompt: command.rolePrompt,
+          modelSelection: command.modelSelection,
+          capabilities: command.capabilities,
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "agent.update": {
+      const agent = yield* requireAgent({
+        readModel,
+        command,
+        agentId: command.agentId,
+      });
+      if (command.name !== undefined) {
+        yield* requireAgentNameAvailable({
+          readModel,
+          command,
+          projectId: agent.projectId,
+          name: command.name,
+          exceptAgentId: agent.id,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "agent",
+          aggregateId: command.agentId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "agent.updated",
+        payload: {
+          agentId: command.agentId,
+          ...(command.name !== undefined ? { name: command.name } : {}),
+          ...(command.avatar !== undefined ? { avatar: command.avatar } : {}),
+          ...(command.roleTags !== undefined ? { roleTags: command.roleTags } : {}),
+          ...(command.rolePrompt !== undefined ? { rolePrompt: command.rolePrompt } : {}),
+          ...(command.modelSelection !== undefined
+            ? { modelSelection: command.modelSelection }
+            : {}),
+          ...(command.capabilities !== undefined ? { capabilities: command.capabilities } : {}),
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "agent.archive": {
+      const agent = yield* requireAgent({
+        readModel,
+        command,
+        agentId: command.agentId,
+      });
+      if (agent.archivedAt !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Agent '${command.agentId}' is already archived.`,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "agent",
+          aggregateId: command.agentId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "agent.archived",
+        payload: {
+          agentId: command.agentId,
+          archivedAt: occurredAt,
+        },
+      };
+    }
+
+    case "agent.unarchive": {
+      const agent = yield* requireAgent({
+        readModel,
+        command,
+        agentId: command.agentId,
+      });
+      if (agent.archivedAt === null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Agent '${command.agentId}' is not archived.`,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "agent",
+          aggregateId: command.agentId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "agent.unarchived",
+        payload: {
+          agentId: command.agentId,
+          updatedAt: occurredAt,
+        },
+      };
     }
 
     default: {

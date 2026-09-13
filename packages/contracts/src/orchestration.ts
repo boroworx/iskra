@@ -7,6 +7,7 @@ import { OrchestrationMessageContext } from "./composerContext.ts";
 import { ProviderOptionSelections } from "./model.ts";
 import { RepositoryIdentity, ThreadEnvMode } from "./environment.ts";
 import {
+  AgentId,
   ApprovalRequestId,
   CheckpointRef,
   ClientSurface,
@@ -490,6 +491,35 @@ export const OrchestrationProject = Schema.Struct({
 });
 export type OrchestrationProject = typeof OrchestrationProject.Type;
 
+/** What a run may do. Anything not listed is denied at the adapter boundary. */
+export const RunCapability = Schema.Literals(["read", "write", "shell", "network"]);
+export type RunCapability = typeof RunCapability.Type;
+export const RunCapabilities = Schema.Array(RunCapability);
+export type RunCapabilities = typeof RunCapabilities.Type;
+
+const AGENT_NAME_MAX_CHARS = 64;
+/** Agents are addressed as `@name`, so names are lowercase slugs. */
+export const AgentName = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(AGENT_NAME_MAX_CHARS),
+  Schema.isPattern(/^[a-z0-9-]+$/),
+);
+
+export const OrchestrationAgent = Schema.Struct({
+  id: AgentId,
+  projectId: ProjectId,
+  name: AgentName,
+  avatar: Schema.NullOr(TrimmedNonEmptyString),
+  roleTags: Schema.Array(TrimmedNonEmptyString),
+  rolePrompt: Schema.String,
+  modelSelection: ModelSelection,
+  // Ceiling for card-scoped runs; conversation runs are always read-only.
+  capabilities: RunCapabilities,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  archivedAt: Schema.NullOr(IsoDateTime),
+});
+export type OrchestrationAgent = typeof OrchestrationAgent.Type;
+
 export const OrchestrationMessageRole = Schema.Literals(["user", "assistant", "system"]);
 export type OrchestrationMessageRole = typeof OrchestrationMessageRole.Type;
 
@@ -769,6 +799,8 @@ export const OrchestrationReadModel = Schema.Struct({
   snapshotSequence: NonNegativeInt,
   projects: Schema.Array(OrchestrationProject),
   threads: Schema.Array(OrchestrationThread),
+  // Optional on the wire so read models from servers without agents still decode.
+  agents: Schema.optional(Schema.Array(OrchestrationAgent)),
   updatedAt: IsoDateTime,
 });
 export type OrchestrationReadModel = typeof OrchestrationReadModel.Type;
@@ -1019,6 +1051,44 @@ const ProjectDeleteCommand = Schema.Struct({
   commandId: CommandId,
   projectId: ProjectId,
   force: Schema.optional(Schema.Boolean),
+});
+
+const AgentCreateCommand = Schema.Struct({
+  type: Schema.Literal("agent.create"),
+  commandId: CommandId,
+  agentId: AgentId,
+  projectId: ProjectId,
+  name: AgentName,
+  avatar: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  roleTags: Schema.Array(TrimmedNonEmptyString),
+  rolePrompt: Schema.String,
+  modelSelection: ModelSelection,
+  capabilities: RunCapabilities,
+  createdAt: IsoDateTime,
+});
+
+const AgentUpdateCommand = Schema.Struct({
+  type: Schema.Literal("agent.update"),
+  commandId: CommandId,
+  agentId: AgentId,
+  name: Schema.optional(AgentName),
+  avatar: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  roleTags: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  rolePrompt: Schema.optional(Schema.String),
+  modelSelection: Schema.optional(ModelSelection),
+  capabilities: Schema.optional(RunCapabilities),
+});
+
+const AgentArchiveCommand = Schema.Struct({
+  type: Schema.Literal("agent.archive"),
+  commandId: CommandId,
+  agentId: AgentId,
+});
+
+const AgentUnarchiveCommand = Schema.Struct({
+  type: Schema.Literal("agent.unarchive"),
+  commandId: CommandId,
+  agentId: AgentId,
 });
 
 const ThreadCreateCommand = Schema.Struct({
@@ -1321,6 +1391,10 @@ const ThreadSessionStopCommand = Schema.Struct({
 });
 
 const DispatchableClientOrchestrationCommand = Schema.Union([
+  AgentCreateCommand,
+  AgentUpdateCommand,
+  AgentArchiveCommand,
+  AgentUnarchiveCommand,
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
@@ -1354,6 +1428,10 @@ export type DispatchableClientOrchestrationCommand =
   typeof DispatchableClientOrchestrationCommand.Type;
 
 export const ClientOrchestrationCommand = Schema.Union([
+  AgentCreateCommand,
+  AgentUpdateCommand,
+  AgentArchiveCommand,
+  AgentUnarchiveCommand,
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
@@ -1526,6 +1604,10 @@ export const OrchestrationEventType = Schema.Literals([
   "project.created",
   "project.meta-updated",
   "project.deleted",
+  "agent.created",
+  "agent.updated",
+  "agent.archived",
+  "agent.unarchived",
   "thread.created",
   "thread.deleted",
   "thread.archived",
@@ -1558,7 +1640,7 @@ export const OrchestrationEventType = Schema.Literals([
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
-export const OrchestrationAggregateKind = Schema.Literals(["project", "thread"]);
+export const OrchestrationAggregateKind = Schema.Literals(["project", "thread", "agent"]);
 export type OrchestrationAggregateKind = typeof OrchestrationAggregateKind.Type;
 export const OrchestrationActorKind = Schema.Literals(["client", "server", "provider"]);
 
@@ -1593,6 +1675,40 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
 export const ProjectDeletedPayload = Schema.Struct({
   projectId: ProjectId,
   deletedAt: IsoDateTime,
+});
+
+export const AgentCreatedPayload = Schema.Struct({
+  agentId: AgentId,
+  projectId: ProjectId,
+  name: AgentName,
+  avatar: Schema.NullOr(TrimmedNonEmptyString),
+  roleTags: Schema.Array(TrimmedNonEmptyString),
+  rolePrompt: Schema.String,
+  modelSelection: ModelSelection,
+  capabilities: RunCapabilities,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const AgentUpdatedPayload = Schema.Struct({
+  agentId: AgentId,
+  name: Schema.optional(AgentName),
+  avatar: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  roleTags: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  rolePrompt: Schema.optional(Schema.String),
+  modelSelection: Schema.optional(ModelSelection),
+  capabilities: Schema.optional(RunCapabilities),
+  updatedAt: IsoDateTime,
+});
+
+export const AgentArchivedPayload = Schema.Struct({
+  agentId: AgentId,
+  archivedAt: IsoDateTime,
+});
+
+export const AgentUnarchivedPayload = Schema.Struct({
+  agentId: AgentId,
+  updatedAt: IsoDateTime,
 });
 
 export const ThreadCreatedPayload = Schema.Struct({
@@ -1852,7 +1968,7 @@ const EventBaseFields = {
   sequence: NonNegativeInt,
   eventId: EventId,
   aggregateKind: OrchestrationAggregateKind,
-  aggregateId: Schema.Union([ProjectId, ThreadId]),
+  aggregateId: Schema.Union([ProjectId, ThreadId, AgentId]),
   occurredAt: IsoDateTime,
   commandId: Schema.NullOr(CommandId),
   causationEventId: Schema.NullOr(EventId),
@@ -1875,6 +1991,26 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("project.deleted"),
     payload: ProjectDeletedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("agent.created"),
+    payload: AgentCreatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("agent.updated"),
+    payload: AgentUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("agent.archived"),
+    payload: AgentArchivedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("agent.unarchived"),
+    payload: AgentUnarchivedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,
