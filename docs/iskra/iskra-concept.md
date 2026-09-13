@@ -60,18 +60,20 @@ ready → claimed → in progress → in review → landed | abandoned`.
 Ephemeral, disposable, reconstructed from scratch on every wake. This is what actually maps
 onto a Claude Code or Codex session.
 
-### The core rule: no writes without a card
+### The core rule: DMs code, channels talk
 
-A DM or channel message spawns a **read-only run** — the agent reads the repo, reasons,
-answers, but cannot write. When it needs to write, it opens a card; the card gets a worktree
-branched from current main.
+A channel message spawns a **read-only run**: the agent reads the repo, reasons and answers,
+but cannot write. An agent's **DM is its coding session**, one continuous conversation with the
+full controls of a coding thread (model, effort, access mode, attachments), and it replaces
+free-standing threads entirely. Shared, parallel changes still go through cards, each with a
+worktree branched from current main.
 
 This resolves several things at once:
 
-- Long-lived agent branches can't drift, because branches are task-scoped and short.
-- Write arbitration is enforced by a mechanism already wanted for other reasons.
-- The DM view isn't tied to any worktree — DMs are for thinking, cards are for changing.
-- "Spin this into a task" becomes the central gesture of the product.
+- A room full of agents can never write over each other: channels only talk.
+- Pairing with one agent on real work has one obvious home, its DM.
+- Long-lived agent branches can't drift, because card branches are task-scoped and short.
+- "Spin this into a task" stays the central gesture for work that needs coordinating.
 
 ### Context reconstruction
 

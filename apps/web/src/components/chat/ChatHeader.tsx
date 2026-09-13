@@ -65,7 +65,6 @@ interface ChatHeaderProps {
   rightPanelOpen: boolean;
   gitCwd: string | null;
   readonly onOpenPullRequest?: ((number: number) => void) | undefined;
-  onNewThreadInProject: () => void;
   onOpenProjectSettings?: (() => void) | undefined;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
@@ -134,7 +133,6 @@ export const ChatHeader = memo(function ChatHeader({
   rightPanelOpen,
   gitCwd,
   onOpenPullRequest,
-  onNewThreadInProject,
   onOpenProjectSettings,
   onRunProjectScript,
   onAddProjectScript,
@@ -336,22 +334,10 @@ export const ChatHeader = memo(function ChatHeader({
         {activeProject ? (
           <>
             <WorkspaceBreadcrumbItem className="shrink">
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      aria-label={`New thread in ${activeProjectName}`}
-                      onClick={onNewThreadInProject}
-                      className="inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
-                    />
-                  }
-                >
-                  <ProjectFavicon project={activeProject} className="size-3.5" />
-                  <span className="max-w-40 truncate">{activeProjectName}</span>
-                </TooltipTrigger>
-                <TooltipPopup side="top">New thread in {activeProjectName}</TooltipPopup>
-              </Tooltip>
+              <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 text-muted-foreground">
+                <ProjectFavicon project={activeProject} className="size-3.5" />
+                <span className="max-w-40 truncate">{activeProjectName}</span>
+              </span>
             </WorkspaceBreadcrumbItem>
             <WorkspaceBreadcrumbSeparator />
           </>

@@ -183,8 +183,9 @@ A **per-run capability set**: `read`, `write`, `shell`, `network`. Denied unless
 Resolved at run start from agent config plus run scope, expressed once in
 `packages/contracts`, translated per adapter.
 
-Conversation-scoped runs get `read` only. Card-scoped runs get whatever the agent's config
-allows.
+Channel runs get `read` only. An agent's DM is not a run: it is a coding session with the full
+thread controls, including the access mode (full access or approval required). Card-scoped runs
+get whatever the agent's config allows.
 
 **Claude translation (verified).** `permissionMode: "dontAsk"`, an explicit tool allowlist
 (`Read`, `Glob`, `Grep` for a read-only run), and `settingSources: []`. Write and Bash are
@@ -246,9 +247,14 @@ A wake from a different channel is rejected with a system message saying the age
 contexts are never mixed across channels. Waking past the project's concurrent-run cap (3, a
 constant until a project needs another value) is rejected the same way.
 
-**DMs are channels.** A DM is a `kind: dm` channel with one human and one agent. Every human
-message in a DM wakes its agent; no mention needed. Wake depth and history work as in any
-channel.
+**An agent's DM is its coding session — decided after M1.** DMs replace T3 threads: there are no
+free-standing threads. Each agent has one continuous thread, `dm:<agentId>`, created on first
+open with the agent's model and rendered with the full thread view and composer. Its provider
+session starts with the agent's role appended to the harness instructions (Claude; other
+providers ignore it for now) and keeps that role across recovery. A DM thread can only be created
+for an existing agent in its project. Messages sent mid-turn follow the thread's own queueing:
+because the session is continuous, a message the provider has not read yet is read on the next
+turn rather than dropped. `kind: dm` channels from M1 remain in the model but are no longer shown.
 
 **What is posted back.** When a run's session is ready again with no active turn, the latest
 turn's final assistant message is posted to the run's channel as a `Message` (`authorKind: agent`,
@@ -279,9 +285,10 @@ the payload; there is no separate `AgentMentioned`), `channel.agent-wake-request
 These are the rules the deciders enforce. Each needs a test that fails when the rule is
 removed.
 
-1. **No writes without a card.** A run with `scope: conversation` has capabilities `["read"]`
-   and is denied filesystem writes and shell commands at the adapter boundary. To write, an agent
-   opens a card.
+1. **No writes in channels.** A channel run has capabilities `["read"]` and is denied filesystem
+   writes and shell commands at the adapter boundary, and the server refuses a run on any provider
+   that cannot enforce that. Writing happens in an agent's DM, under that session's access mode,
+   or on a card.
 2. **One worktree per card, never per agent.** Created from current main at claim time,
    destroyed on land or abandon. Agents own no workspace.
 3. **Agents are silent by default.** A run starts only on an explicit `@mention`, a human message
