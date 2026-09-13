@@ -61,7 +61,8 @@
       "entry": ["index.ts!", "plugins/*.cjs"],
       // Fonts are configured as asset paths; Expo autolinks the native packages.
       "ignoreDependencies": [
-        "@expo-google-fonts/dm-sans",
+        "@expo-google-fonts/ibm-plex-sans",
+        "@expo-google-fonts/michroma",
         "@t3tools/mobile-review-diff-native",
         "@t3tools/mobile-terminal-native",
       ],

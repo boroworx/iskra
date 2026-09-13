@@ -102,7 +102,7 @@ static inline NSAttributedString *T3MarkdownTextAttachmentString(
 static UIFont *T3ContextChipFont(NSDictionary *payload)
 {
   CGFloat size = MAX(10, MIN(40, [payload[@"fontSize"] doubleValue]));
-  return [UIFont fontWithName:@"DMSans-Medium" size:size]
+  return [UIFont fontWithName:@"IBMPlexSans-Medium" size:size]
     ?: [UIFont systemFontOfSize:size weight:UIFontWeightMedium];
 }
 
