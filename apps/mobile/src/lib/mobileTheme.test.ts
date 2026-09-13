@@ -67,10 +67,10 @@ describe("mobile themes", () => {
   });
 
   it("preserves the existing mobile palette as the default", () => {
-    expect(readDefaultMobileThemeVariables("light")["--color-screen"]).toBe("#f2f2f7");
-    expect(readDefaultMobileThemeVariables("dark")["--color-screen"]).toBe("#0a0a0a");
+    expect(readDefaultMobileThemeVariables("light")["--color-screen"]).toBe("#eef3f8");
+    expect(readDefaultMobileThemeVariables("dark")["--color-screen"]).toBe("#080d12");
     expect(readDefaultMobileThemeVariables("light")["--color-user-bubble-skill-foreground"]).toBe(
-      "#2563eb",
+      "#496c90",
     );
   });
 
@@ -85,9 +85,9 @@ describe("mobile themes", () => {
 
   it("uses the same preview roles and standard artwork as desktop", () => {
     expect(getMobileThemePreviewColors(DEFAULT_MOBILE_THEME_ID, "light")).toEqual({
-      canvas: "#fcfcfc",
-      accent: "#f4f4f5",
-      messageAction: "#4f46e5",
+      canvas: "#fbfcfe",
+      accent: "#eaf0f6",
+      messageAction: "#496c90",
     });
     const desktopOcean = BUILT_IN_THEMES.find((theme) => theme.id === "ocean")!;
     expect(getMobileThemePreviewColors("ocean", "light")).toEqual({

@@ -1,7 +1,7 @@
 const FONT_FAMILIES = {
-  regular: "DMSans-Regular",
-  medium: "DMSans-Medium",
-  bold: "DMSans-Bold",
+  regular: "IBMPlexSans-Regular",
+  medium: "IBMPlexSans-Medium",
+  bold: "IBMPlexSans-Bold",
 } as const;
 
 /**

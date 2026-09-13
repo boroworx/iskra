@@ -388,7 +388,7 @@ public final class T3ComposerEditorView: ExpoView, UITextViewDelegate, UITextDro
     skillText: "#a21caf",
     fileTint: "#737373"
   )
-  private var fontFamily = "DMSans-Regular"
+  private var fontFamily = "IBMPlexSans-Regular"
   private var fontSize: CGFloat = 14
   private var lineHeight: CGFloat = 20
   private var contentInsetVertical: CGFloat = 0
@@ -892,7 +892,7 @@ public final class T3ComposerEditorView: ExpoView, UITextViewDelegate, UITextDro
     // Kept in step with `T3ContextChipVectorIcon` in the markdown module: a chip drawn here and
     // the same chip drawn in a sent message have to be the same picture.
     let chipFontSize = fontSize * 0.86
-    let font = UIFont(name: "DMSans-Medium", size: chipFontSize)
+    let font = UIFont(name: "IBMPlexSans-Medium", size: chipFontSize)
       ?? UIFont.systemFont(ofSize: chipFontSize, weight: .medium)
     let fallbackIcon = Self.vectorIcon(named: iconName, size: 14, color: style.textColor)
       ?? UIImage(
@@ -904,7 +904,7 @@ public final class T3ComposerEditorView: ExpoView, UITextViewDelegate, UITextDro
     // label the way the web chip does.
     let paragraph = NSMutableParagraphStyle()
     paragraph.alignment = .left
-    let detailFont = UIFont(name: "DMSans-Medium", size: chipFontSize * 0.84)
+    let detailFont = UIFont(name: "IBMPlexSans-Medium", size: chipFontSize * 0.84)
       ?? UIFont.systemFont(ofSize: chipFontSize * 0.84, weight: .medium)
     let attributedLabel = NSMutableAttributedString(
       string: label,
