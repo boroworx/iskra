@@ -31,7 +31,7 @@ function ConnectCliAuthMessage({
           {eyebrow}
         </p>
       ) : null}
-      <h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">{title}</h1>
+      <h1 className="mt-2 font-display text-xl font-normal sm:text-2xl">{title}</h1>
       <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{description}</p>
     </>
   );
