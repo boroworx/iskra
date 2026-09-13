@@ -335,18 +335,21 @@ no writes.** This milestone alone must feel better than a terminal; if it doesn'
 
 **M1.1 — Agent entity.** Contracts, events (`AgentCreated`/`Updated`/`Archived`), decider
 rules, projector, persistence. _Accept when:_ an agent can be created and survives a server
-restart, with a test asserting the projection matches the event log.
+restart, with a test asserting the projection matches the event log. _Accepted:_ an engine test
+restarts on the same SQLite file and compares the restored agents with a replay of the event log.
 
 **M1.2 — Channel and messages.** Channel entity including `kind: dm`, `MessagePosted`,
 append-only history projection, `wakeDepth` setting. _Accept when:_ messages persist and
 paginate; changing `wakeDepth` changes what a later context build returns; a `dm` channel with
-anything other than one human and one agent is rejected.
+anything other than one human and one agent is rejected. _Accepted:_ an engine test pages posted
+messages and shows wake history follow `wakeDepth`; decider tests reject invalid DM membership.
 
 **M1.3 — Context builder.** A pure function from (agent, channel, pinned spec, wakeDepth,
 optional card) to a structured context payload, plus a pure renderer from that payload to the
 system prompt and first message. No IO. _Accept when:_ both are fully unit-tested and
 deterministic for fixed inputs, and the builder returns a structured record — not a concatenated
-string.
+string. _Accepted:_ builder and renderer unit tests, including exact rendered text and the payload
+decoding through its stored schema.
 
 **M1.4 — Read-only run lifecycle.** Start a run as a hidden upstream thread with a fresh Claude
 session (no resume cursor), capability `read` only, using the verified configuration in the
@@ -354,13 +357,18 @@ permission model above. _Accept when:_ an agent answers a question about the rep
 attempt and a shell attempt are both denied at the adapter boundary and appear in the UI as
 denial events; the run's thread does not appear in the upstream thread list; the final assistant
 message is posted to the channel; and a test proves neither launch-argument flags nor a
-mid-session `interactionMode` change can raise the run's capabilities.
+mid-session `interactionMode` change can raise the run's capabilities. _Accepted:_ two live Claude
+Haiku runs against a dev server — the agent answered from the code, a Write and a Bash attempt
+were each refused and recorded as `tool.denied` on the run thread with no file created, the reply
+was posted to the channel, and the run thread never appeared in the thread list. Adapter tests
+cover launch-arg flags and interaction-mode changes. Rendering the denials is part of M1.7.
 
 **M1.5 — Mention routing.** Parse `@name` mentions on `MessagePosted`; wake only mentioned
 member agents, and the agent of a DM. Decider-level, pure. _Accept when:_ a message mentioning
 one of three agents starts exactly one run; an unmentioned channel message starts none; a DM
 message starts one; a mention of a non-member, of an agent busy in another channel, or beyond
-the concurrent-run cap starts none and posts a system message. Test each.
+the concurrent-run cap starts none and posts a system message. Test each. _Accepted:_ decider
+tests cover each case, and the run reactor test turns a wake into exactly one run.
 
 **M1.6 — Server shell UI.** `apps/web`: project sidebar, channel list, member list showing
 agents with presence (idle / running / blocked). Reads the projection; no new state.
