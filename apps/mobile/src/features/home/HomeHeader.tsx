@@ -221,11 +221,8 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
               onPress={props.onOpenEnvironments}
               brand={
                 <View className="flex-row items-center gap-2">
-                  {/* Mirrors the desktop SidebarBrand: T3 mark + muted "Code". */}
+                  {/* Mirrors the desktop SidebarBrand: the Iskra wordmark. */}
                   <T3Wordmark colorClassName="accent-icon" height={15} />
-                  <RNText className="-ml-0.5 text-[21px] font-t3-medium tracking-[-0.5px] text-foreground-muted">
-                    Code
-                  </RNText>
                   <View className="rounded-full bg-subtle px-2 py-0.75">
                     <RNText className="text-[11px] font-t3-bold tracking-[1.1px] text-foreground-muted uppercase">
                       {stageLabel}

@@ -189,15 +189,8 @@ export function WelcomeWizard({
         initialFocus={() => document.getElementById("onboarding-pairing-url") ?? true}
       >
         <WizardHeader
-          title="Set up T3 Code"
-          identity={
-            <div className="flex items-baseline gap-1.5" role="img" aria-label="T3 Code">
-              <T3Wordmark className="h-4 w-auto shrink-0" aria-hidden />
-              <span className="text-[1.4rem] font-medium tracking-tight text-muted-foreground">
-                Code
-              </span>
-            </div>
-          }
+          title="Set up Iskra"
+          identity={<T3Wordmark className="h-4 w-auto shrink-0" role="img" aria-label="Iskra" />}
         >
           <WizardSteps
             steps={ONBOARDING_STAGES}

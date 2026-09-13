@@ -91,17 +91,7 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
       )}
       to="/"
     >
-      <span className="inline-flex min-w-0 items-baseline gap-1">
-        <T3Wordmark aria-label="T3" className="h-2.5 w-auto shrink-0" />
-        <span
-          className={cn(
-            "truncate text-sm font-medium tracking-tight",
-            onBackdrop ? "text-white/70" : "text-muted-foreground",
-          )}
-        >
-          Code
-        </span>
-      </span>
+      <T3Wordmark aria-label="Iskra" className="h-3 w-auto shrink-0" />
     </Link>
   );
 }
