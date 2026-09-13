@@ -18,7 +18,7 @@ import {
   postChannelMessage,
   updateChannel,
 } from "../operations/commands.ts";
-import { subscribe, type EnvironmentRpcInput } from "../rpc/client.ts";
+import { request, subscribe, type EnvironmentRpcInput } from "../rpc/client.ts";
 import {
   createEnvironmentCommand,
   createEnvironmentRpcQueryAtomFamily,
@@ -101,6 +101,18 @@ export function createChannelEnvironmentAtoms<R, E>(
     createAgent: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:agent:create",
       execute: (input: CreateAgentInput) => createAgent(input),
+    }),
+    saveAgentDefinition: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:agent:save-definition",
+      execute: (
+        input: EnvironmentRpcInput<typeof ORCHESTRATION_WS_METHODS.saveAgentDefinition>,
+      ) => request(ORCHESTRATION_WS_METHODS.saveAgentDefinition, input),
+    }),
+    importAgentDefinitions: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:agent:import-definitions",
+      execute: (
+        input: EnvironmentRpcInput<typeof ORCHESTRATION_WS_METHODS.importAgentDefinitions>,
+      ) => request(ORCHESTRATION_WS_METHODS.importAgentDefinitions, input),
     }),
   };
 }

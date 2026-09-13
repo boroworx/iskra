@@ -85,6 +85,7 @@ import {
   OrchestrationDispatchCommandError,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetFullThreadDiffInput,
+  AgentDefinitionError,
   OrchestrationGetSnapshotError,
   OrchestrationSearchThreadsError,
   OrchestrationSearchThreadsInput,
@@ -1240,6 +1241,24 @@ const WsOrchestrationListAgentRunsRpc = Rpc.make(ORCHESTRATION_WS_METHODS.listAg
   error: Schema.Union([OrchestrationGetSnapshotError, EnvironmentAuthorizationError]),
 });
 
+const WsOrchestrationSaveAgentDefinitionRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.saveAgentDefinition,
+  {
+    payload: OrchestrationRpcSchemas.saveAgentDefinition.input,
+    success: OrchestrationRpcSchemas.saveAgentDefinition.output,
+    error: Schema.Union([AgentDefinitionError, EnvironmentAuthorizationError]),
+  },
+);
+
+const WsOrchestrationImportAgentDefinitionsRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.importAgentDefinitions,
+  {
+    payload: OrchestrationRpcSchemas.importAgentDefinitions.input,
+    success: OrchestrationRpcSchemas.importAgentDefinitions.output,
+    error: Schema.Union([AgentDefinitionError, EnvironmentAuthorizationError]),
+  },
+);
+
 const WsSubscribeTerminalEventsRpc = Rpc.make(WS_METHODS.subscribeTerminalEvents, {
   payload: Schema.Struct({}),
   success: TerminalEvent,
@@ -1443,4 +1462,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationSubscribeThreadRpc,
   WsOrchestrationSubscribeChannelRpc,
   WsOrchestrationListAgentRunsRpc,
+  WsOrchestrationSaveAgentDefinitionRpc,
+  WsOrchestrationImportAgentDefinitionsRpc,
 );

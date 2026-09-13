@@ -1,6 +1,6 @@
 import { ChannelId, type AgentId, type EnvironmentId, type ProjectId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import { randomUUID } from "~/lib/utils";
 import { channelEnvironment } from "~/state/channels";
@@ -30,6 +30,7 @@ export function CreateChannelDialog(props: {
   const createChannel = useAtomCommand(channelEnvironment.create);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
+  const formId = useId();
   const channelName = toChannelName(name);
 
   const submit = async () => {
@@ -63,19 +64,20 @@ export function CreateChannelDialog(props: {
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogPopup className="max-w-md">
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            void submit();
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>New channel</DialogTitle>
-            <DialogDescription>
-              Every agent in this project joins it. Agents only reply when you mention them.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogPanel>
+        <DialogHeader>
+          <DialogTitle>New channel</DialogTitle>
+          <DialogDescription>
+            Every agent in this project joins it. Agents only reply when you mention them.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogPanel>
+          <form
+            id={formId}
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submit();
+            }}
+          >
             <Input
               aria-label="Channel name"
               placeholder="general"
@@ -83,16 +85,16 @@ export function CreateChannelDialog(props: {
               value={name}
               onChange={(event) => setName(event.target.value)}
             />
-          </DialogPanel>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => props.onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={channelName.length === 0 || creating}>
-              Create channel
-            </Button>
-          </DialogFooter>
-        </form>
+          </form>
+        </DialogPanel>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => props.onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button type="submit" form={formId} disabled={channelName.length === 0 || creating}>
+            Create channel
+          </Button>
+        </DialogFooter>
       </DialogPopup>
     </Dialog>
   );

@@ -564,7 +564,14 @@ without a human in the loop.
 migrate M1's event-log agents to files. _Accept when:_ a file added to the checkout appears in the
 roster without a restart; an imported Claude Code subagent keeps its prompt, model and tools as
 capabilities; renaming a file keeps the agent's history; deleting a file archives the agent
-rather than erasing its record.
+rather than erasing its record. _Accepted:_ against a paired dev server, a new `notes.md` appeared
+in the sidebar within one poll and had its id written back, renaming it to `scribe.md` with a new
+name kept the same agent id, deleting it archived that agent, and the test project's existing
+agents were written out as files on first sync. "Import existing agents" turned a Claude Code
+subagent (`tools: Read, Glob, Grep`, `model: sonnet`) into `code-reviewer.md` with `read` only,
+`claude-sonnet-5` and its prompt. `AgentDefinitionSync` tests cover create, rename, archive and
+restore, migration without churn, a broken file archiving nothing, save with rename, and importing
+Claude Code and Copilot files once.
 
 **M2.1 — Card entity and derived status.** Contracts, events, decider rules, projection for cards,
 relations and the decision log; the human decisions and their reverses. _Accept when:_ decider

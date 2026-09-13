@@ -1,8 +1,7 @@
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/models";
-import { AgentId, type ModelSelection, type ServerProvider } from "@t3tools/contracts";
-import { useState } from "react";
+import type { AgentId, ModelSelection, ServerProvider } from "@t3tools/contracts";
+import { useId, useState } from "react";
 
-import { randomUUID } from "~/lib/utils";
 import {
   deriveProviderInstanceEntries,
   getDefaultProviderInstanceModel,
@@ -22,6 +21,7 @@ import {
 } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
+import { toastManager } from "../ui/toast";
 import { toAgentName } from "./channels.logic";
 import { useOpenAgentDm } from "./useOpenAgentDm";
 
@@ -54,7 +54,11 @@ function resolveAgentModelSelection(
   return null;
 }
 
-/** Creates an agent, adds it to the project's channels, and opens its DM. */
+/**
+ * Creates an agent by writing its file to `.iskra/agents`, or imports agents
+ * defined for Claude Code or Copilot, adds them to the project's channels, and
+ * opens a new agent's DM.
+ */
 export function CreateAgentDialog(props: {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
@@ -63,70 +67,110 @@ export function CreateAgentDialog(props: {
   const { environmentId, id: projectId } = props.project;
   const providers = useServerConfigs().get(environmentId)?.providers ?? EMPTY_PROVIDERS;
   const channels = useEnvironmentChannels(environmentId);
-  const createAgent = useAtomCommand(channelEnvironment.createAgent);
+  const saveAgentDefinition = useAtomCommand(channelEnvironment.saveAgentDefinition);
+  const importAgentDefinitions = useAtomCommand(channelEnvironment.importAgentDefinitions);
   const updateChannel = useAtomCommand(channelEnvironment.update);
   const openAgentDm = useOpenAgentDm();
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
-  const [creating, setCreating] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const formId = useId();
   const agentName = toAgentName(name);
   const modelSelection = resolveAgentModelSelection(providers, props.project.defaultModelSelection);
 
-  const submit = async () => {
-    if (agentName.length === 0 || modelSelection === null || creating) {
-      return;
-    }
-    setCreating(true);
-    const agentId = AgentId.make(randomUUID());
-    const created = await createAgent({
-      environmentId,
-      input: {
-        agentId,
-        projectId,
-        name: agentName,
-        roleTags: [],
-        rolePrompt: role.trim(),
-        modelSelection,
-        capabilities: ["read"],
-      },
-    });
-    if (created._tag !== "Success") {
-      setCreating(false);
-      return;
-    }
+  const joinChannels = async (agentIds: ReadonlyArray<AgentId>) => {
     for (const channel of channels) {
       if (channel.projectId !== projectId || channel.kind !== "channel") {
         continue;
       }
       await updateChannel({
         environmentId,
-        input: { channelId: channel.id, memberAgentIds: [...channel.memberAgentIds, agentId] },
+        input: { channelId: channel.id, memberAgentIds: [...channel.memberAgentIds, ...agentIds] },
       });
     }
-    setCreating(false);
+  };
+
+  const submit = async () => {
+    if (agentName.length === 0 || modelSelection === null || busy) {
+      return;
+    }
+    setBusy(true);
+    const saved = await saveAgentDefinition({
+      environmentId,
+      input: {
+        projectId,
+        definition: {
+          id: null,
+          name: agentName,
+          avatar: null,
+          tags: [],
+          modelSelection,
+          capabilities: ["read"],
+          rolePrompt: role.trim(),
+        },
+      },
+    });
+    if (saved._tag !== "Success") {
+      setBusy(false);
+      return;
+    }
+    const { agentId } = saved.value;
+    await joinChannels([agentId]);
+    setBusy(false);
     setName("");
     setRole("");
     props.onOpenChange(false);
     void openAgentDm(environmentId, { id: agentId, projectId, name: agentName, modelSelection });
   };
 
+  const importAgents = async () => {
+    if (busy) {
+      return;
+    }
+    setBusy(true);
+    const result = await importAgentDefinitions({ environmentId, input: { projectId } });
+    if (result._tag !== "Success") {
+      setBusy(false);
+      return;
+    }
+    const { imported, skipped } = result.value;
+    await joinChannels(imported.map((agent) => agent.agentId));
+    setBusy(false);
+    toastManager.add({
+      type: imported.length > 0 ? "success" : "warning",
+      title:
+        imported.length > 0
+          ? `Imported ${imported.map((agent) => `@${agent.name}`).join(", ")}`
+          : "No agents to import",
+      description:
+        skipped.length > 0
+          ? skipped.map((entry) => `${entry.file}: ${entry.reason}`).join("\n")
+          : "Looked in .claude/agents and .github/agents.",
+    });
+    if (imported.length > 0) {
+      props.onOpenChange(false);
+    }
+  };
+
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogPopup className="max-w-md">
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            void submit();
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>New agent</DialogTitle>
-            <DialogDescription>
-              It joins every channel in this project and answers there when you mention it. In its
-              DM it works on the code with you.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogPanel className="space-y-4">
+        <DialogHeader>
+          <DialogTitle>New agent</DialogTitle>
+          <DialogDescription>
+            It joins every channel in this project and answers there when you mention it. It is
+            saved to .iskra/agents in the repository.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogPanel>
+          <form
+            id={formId}
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submit();
+            }}
+          >
             <div className="space-y-1.5">
               <Input
                 aria-label="Agent name"
@@ -156,19 +200,29 @@ export function CreateAgentDialog(props: {
             ) : (
               <p className="text-xs text-muted-foreground">Runs on {modelSelection.model}</p>
             )}
-          </DialogPanel>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => props.onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              disabled={agentName.length === 0 || modelSelection === null || creating}
-            >
-              Create agent
-            </Button>
-          </DialogFooter>
-        </form>
+          </form>
+        </DialogPanel>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="ghost"
+            className="sm:mr-auto"
+            disabled={busy}
+            onClick={() => void importAgents()}
+          >
+            Import existing agents
+          </Button>
+          <Button type="button" variant="outline" onClick={() => props.onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            form={formId}
+            disabled={agentName.length === 0 || modelSelection === null || busy}
+          >
+            Create agent
+          </Button>
+        </DialogFooter>
       </DialogPopup>
     </Dialog>
   );

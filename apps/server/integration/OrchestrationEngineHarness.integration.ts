@@ -89,6 +89,7 @@ import { GitWorkflowService } from "../src/git/GitWorkflowService.ts";
 import * as VcsProcess from "../src/vcs/VcsProcess.ts";
 import * as AgentAwarenessRelay from "../src/relay/AgentAwarenessRelay.ts";
 import * as RunReactor from "../src/orchestration/RunReactor.ts";
+import * as AgentDefinitionSync from "../src/orchestration/AgentDefinitionSync.ts";
 import * as PullRequestService from "../src/pullRequest/PullRequestService.ts";
 
 const decodeCodexSettings = Schema.decodeEffect(CodexSettings);
@@ -423,6 +424,14 @@ export const makeOrchestrationIntegrationHarness = (
         Layer.succeed(RunReactor.RunReactor, {
           start: () => Effect.void,
           drain: Effect.void,
+        }),
+      ),
+      Layer.provideMerge(
+        Layer.succeed(AgentDefinitionSync.AgentDefinitionSync, {
+          start: () => Effect.void,
+          reconcile: () => Effect.void,
+          save: () => Effect.die("agent files are not used by the engine harness"),
+          importDefinitions: () => Effect.die("agent files are not used by the engine harness"),
         }),
       ),
     );

@@ -45,6 +45,8 @@ export const ORCHESTRATION_WS_METHODS = {
   subscribeThread: "orchestration.subscribeThread",
   subscribeChannel: "orchestration.subscribeChannel",
   listAgentRuns: "orchestration.listAgentRuns",
+  saveAgentDefinition: "orchestration.saveAgentDefinition",
+  importAgentDefinitions: "orchestration.importAgentDefinitions",
 } as const;
 
 export const ProviderApprovalPolicy = Schema.Literals([
@@ -2782,6 +2784,44 @@ export const OrchestrationListAgentRunsResult = Schema.Struct({
 });
 export type OrchestrationListAgentRunsResult = typeof OrchestrationListAgentRunsResult.Type;
 
+/** An agent as a client sends it to be written to `.iskra/agents/<name>.md`. */
+export const AgentDefinitionInput = Schema.Struct({
+  id: Schema.NullOr(AgentId),
+  name: AgentName,
+  avatar: Schema.NullOr(Schema.String),
+  tags: Schema.Array(Schema.String),
+  modelSelection: ModelSelection,
+  capabilities: RunCapabilities,
+  rolePrompt: Schema.String,
+});
+export type AgentDefinitionInput = typeof AgentDefinitionInput.Type;
+
+export const OrchestrationSaveAgentDefinitionInput = Schema.Struct({
+  projectId: ProjectId,
+  definition: AgentDefinitionInput,
+});
+export type OrchestrationSaveAgentDefinitionInput =
+  typeof OrchestrationSaveAgentDefinitionInput.Type;
+
+export const OrchestrationSaveAgentDefinitionResult = Schema.Struct({
+  agentId: AgentId,
+});
+export type OrchestrationSaveAgentDefinitionResult =
+  typeof OrchestrationSaveAgentDefinitionResult.Type;
+
+export const OrchestrationImportAgentDefinitionsInput = Schema.Struct({
+  projectId: ProjectId,
+});
+export type OrchestrationImportAgentDefinitionsInput =
+  typeof OrchestrationImportAgentDefinitionsInput.Type;
+
+export const OrchestrationImportAgentDefinitionsResult = Schema.Struct({
+  imported: Schema.Array(Schema.Struct({ agentId: AgentId, name: Schema.String })),
+  skipped: Schema.Array(Schema.Struct({ file: Schema.String, reason: Schema.String })),
+});
+export type OrchestrationImportAgentDefinitionsResult =
+  typeof OrchestrationImportAgentDefinitionsResult.Type;
+
 /** How many of a channel's newest messages a channel subscription starts with. */
 export const CHANNEL_SUBSCRIBE_MESSAGE_LIMIT = 200;
 
@@ -2853,10 +2893,27 @@ export const OrchestrationRpcSchemas = {
     input: OrchestrationListAgentRunsInput,
     output: OrchestrationListAgentRunsResult,
   },
+  saveAgentDefinition: {
+    input: OrchestrationSaveAgentDefinitionInput,
+    output: OrchestrationSaveAgentDefinitionResult,
+  },
+  importAgentDefinitions: {
+    input: OrchestrationImportAgentDefinitionsInput,
+    output: OrchestrationImportAgentDefinitionsResult,
+  },
 } as const;
 
 export class OrchestrationGetSnapshotError extends Schema.TaggedError<OrchestrationGetSnapshotError>()(
   "OrchestrationGetSnapshotError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
+/** Reading, writing or applying a project's agent files failed. */
+export class AgentDefinitionError extends Schema.TaggedError<AgentDefinitionError>()(
+  "AgentDefinitionError",
   {
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect()),

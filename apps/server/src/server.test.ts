@@ -122,6 +122,7 @@ import {
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor.ts";
 import * as PullRequestSyncReactor from "./orchestration/PullRequestSyncReactor.ts";
+import * as AgentDefinitionSync from "./orchestration/AgentDefinitionSync.ts";
 import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
 import { OrchestrationEventStoreLive } from "./persistence/Layers/OrchestrationEventStore.ts";
 import { OrchestrationEventStore } from "./persistence/Services/OrchestrationEventStore.ts";
@@ -972,6 +973,9 @@ const buildAppUnderTest = (options?: {
             start: () => Effect.void,
             drain: Effect.void,
             requestSync: () => Effect.void,
+          }),
+          Layer.mock(AgentDefinitionSync.AgentDefinitionSync)({
+            start: () => Effect.void,
           }),
         ),
       ),
