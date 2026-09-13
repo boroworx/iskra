@@ -28,8 +28,8 @@ type IconVariant = "dev" | "nightly" | "prod";
 const ADAPTIVE_CANVAS = 432;
 // 288dp at xxxhdpi: the full Android 12+ splash canvas, so the icon needs no upscaling.
 const SPLASH_CANVAS = 1152;
-// Icon Composer's layer sources use a 128pt viewBox; the wordmark path spans this box.
-const TEXT = { x: 15.53, y: 37, width: 94.5, height: 57 };
+// Icon Composer's layer sources use a 128pt viewBox; the Iskra mark spans this box.
+const TEXT = { x: 30, y: 17, width: 68, height: 94 };
 // Wordmark width as a fraction of the 108dp canvas. The visible area is 72dp (66dp
 // guaranteed), so 0.48 leaves the letters at ~72% of the mask with room for the
 // launcher's own zoom effects.
@@ -39,7 +39,7 @@ const COMPOSER_CANVAS_PT = 1024;
 const SVG_DENSITY = 300;
 const OUTPUT_DIRECTORY = "apps/mobile/assets";
 // Production has no background artwork, so its splash composes onto the adaptive color.
-const PRODUCTION_BACKGROUND_COLOR = "#000000";
+const PRODUCTION_BACKGROUND_COLOR = "#080d12";
 
 export class AndroidIconRenderError extends Schema.TaggedError<AndroidIconRenderError>()(
   "AndroidIconRenderError",
@@ -47,7 +47,8 @@ export class AndroidIconRenderError extends Schema.TaggedError<AndroidIconRender
 ) {}
 
 const wordmarkTransform = (size: number) => {
-  const scale = (size * WORDMARK_FRACTION) / TEXT.width;
+  // The mark is taller than wide, so its larger side sets the scale.
+  const scale = (size * WORDMARK_FRACTION) / Math.max(TEXT.width, TEXT.height);
   const tx = (size - TEXT.width * scale) / 2 - TEXT.x * scale;
   const ty = (size - TEXT.height * scale) / 2 - TEXT.y * scale;
   return `translate(${tx.toFixed(3)} ${ty.toFixed(3)}) scale(${scale.toFixed(4)})`;
