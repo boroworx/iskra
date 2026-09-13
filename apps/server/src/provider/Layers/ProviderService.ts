@@ -387,6 +387,8 @@ function toRuntimePayloadFromSession(
     readonly continueAfterServerUpdate?: TurnId;
     readonly lastRuntimeEvent?: string;
     readonly lastRuntimeEventAt?: string;
+    readonly run?: ProviderSessionStartInput["run"];
+    readonly agentPrompt?: string;
   },
 ): Record<string, unknown> {
   return {
@@ -394,6 +396,10 @@ function toRuntimePayloadFromSession(
     model: session.model ?? null,
     activeTurnId: session.activeTurnId ?? null,
     lastError: session.lastError ?? null,
+    // Directory upserts merge payloads, so a run marker written at start survives later writes.
+    ...(extra?.run !== undefined ? { run: extra.run } : {}),
+    // Kept so a recovered agent DM resumes with its role.
+    ...(extra?.agentPrompt !== undefined ? { agentPrompt: extra.agentPrompt } : {}),
     ...(extra?.continueAfterServerUpdate !== undefined
       ? { continueAfterServerUpdate: extra.continueAfterServerUpdate }
       : {}),
@@ -403,6 +409,28 @@ function toRuntimePayloadFromSession(
       ? { lastRuntimeEventAt: extra.lastRuntimeEventAt }
       : {}),
   };
+}
+
+function isPersistedRun(
+  runtimePayload: ProviderSessionDirectory.ProviderRuntimeBinding["runtimePayload"],
+): boolean {
+  return (
+    !!runtimePayload &&
+    typeof runtimePayload === "object" &&
+    !Array.isArray(runtimePayload) &&
+    "run" in runtimePayload &&
+    runtimePayload.run != null
+  );
+}
+
+function readPersistedAgentPrompt(
+  runtimePayload: ProviderSessionDirectory.ProviderRuntimeBinding["runtimePayload"],
+): string | undefined {
+  if (!runtimePayload || typeof runtimePayload !== "object" || Array.isArray(runtimePayload)) {
+    return undefined;
+  }
+  const raw = "agentPrompt" in runtimePayload ? runtimePayload.agentPrompt : undefined;
+  return typeof raw === "string" ? raw : undefined;
 }
 
 function readPersistedModelSelection(
@@ -1058,6 +1086,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       readonly continueAfterServerUpdate?: TurnId;
       readonly lastRuntimeEvent?: string;
       readonly lastRuntimeEventAt?: string;
+      readonly run?: ProviderSessionStartInput["run"];
     },
   ) =>
     Effect.gen(function* () {
@@ -1259,6 +1288,15 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         }
       }
 
+      // A run is rebuilt from its context on every wake. Once its session is gone
+      // the run is over; reviving it from the binding would drop its restrictions.
+      if (isPersistedRun(input.binding.runtimePayload)) {
+        return yield* toValidationError(
+          input.operation,
+          `Thread '${input.binding.threadId}' is a run whose session has ended; runs are never recovered.`,
+        );
+      }
+
       if (!hasResumeCursor) {
         return yield* toValidationError(
           input.operation,
@@ -1268,6 +1306,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
       const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
       const persistedModelSelection = readPersistedModelSelection(input.binding.runtimePayload);
+      const persistedAgentPrompt = readPersistedAgentPrompt(input.binding.runtimePayload);
 
       yield* prepareMcpSession(input.binding.threadId, bindingInstanceId);
       const resumed = yield* adapter
@@ -1277,6 +1316,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           providerInstanceId: bindingInstanceId,
           ...(persistedCwd ? { cwd: persistedCwd } : {}),
           ...(persistedModelSelection ? { modelSelection: persistedModelSelection } : {}),
+          ...(persistedAgentPrompt !== undefined ? { agentPrompt: persistedAgentPrompt } : {}),
           ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
           runtimeMode: input.binding.runtimeMode ?? "full-access",
         })
@@ -1499,6 +1539,14 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           }
         }
         const adapter = yield* registry.getByInstance(resolvedInstanceId);
+        // Only the Claude adapter enforces a run's restrictions (tool allowlist, no
+        // MCP, no resume). Any other adapter would ignore them and run unrestricted.
+        if (input.run !== undefined && adapter.provider !== "claudeAgent") {
+          return yield* toValidationError(
+            "ProviderService.startSession",
+            `Agent runs need a Claude provider; '${adapter.provider}' cannot enforce run restrictions.`,
+          );
+        }
         yield* clearTurnAnalyticsSession(resolvedInstanceId, threadId);
         yield* prepareMcpSession(threadId, resolvedInstanceId);
         const session = yield* adapter
@@ -1528,6 +1576,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         });
         yield* upsertSessionBinding(sessionWithInstance, threadId, {
           modelSelection: input.modelSelection,
+          ...(input.run !== undefined ? { run: input.run } : {}),
+          ...(input.agentPrompt !== undefined ? { agentPrompt: input.agentPrompt } : {}),
         });
         yield* analytics.record("provider.session.started", {
           provider: sessionWithInstance.provider,

@@ -215,7 +215,6 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
         version: targetVersion,
         fs,
         path,
-        runner,
         validate: (runtime) =>
           runner
             .run({

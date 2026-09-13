@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import { AgentId, ChannelId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import type { OrchestrationShellSnapshot, OrchestrationShellStreamEvent } from "@t3tools/contracts";
 
 import { applyShellStreamEvent } from "./shellReducer.ts";
@@ -65,6 +65,69 @@ describe("applyShellStreamEvent", () => {
       expect(next.snapshotSequence).toBe(4);
       expect(next.projects[0]?.title).toBe("Test Project");
     }
+  });
+
+  describe("agents and channels", () => {
+    const agent = {
+      id: AgentId.make("agent-1"),
+      projectId: ProjectId.make("project-1"),
+      name: "backend",
+      avatar: null,
+      roleTags: [],
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-haiku-4-5",
+      },
+      presence: "idle" as const,
+    };
+    const channel = {
+      id: ChannelId.make("channel-1"),
+      projectId: ProjectId.make("project-1"),
+      kind: "channel" as const,
+      name: "general",
+      topic: "",
+      memberAgentIds: [agent.id],
+    };
+
+    it("adds, updates and removes agents on a snapshot that has none yet", () => {
+      const added = applyShellStreamEvent(baseSnapshot, {
+        kind: "agent-upserted",
+        sequence: 1,
+        agent,
+      });
+      expect(added.agents).toEqual([agent]);
+
+      const running = applyShellStreamEvent(added, {
+        kind: "agent-upserted",
+        sequence: 2,
+        agent: { ...agent, presence: "running" },
+      });
+      expect(running.agents?.map((entry) => entry.presence)).toEqual(["running"]);
+
+      const removed = applyShellStreamEvent(running, {
+        kind: "agent-removed",
+        sequence: 3,
+        agentId: agent.id,
+      });
+      expect(removed.agents).toEqual([]);
+      expect(removed.snapshotSequence).toBe(3);
+    });
+
+    it("adds and removes channels on a snapshot that has none yet", () => {
+      const added = applyShellStreamEvent(baseSnapshot, {
+        kind: "channel-upserted",
+        sequence: 1,
+        channel,
+      });
+      expect(added.channels).toEqual([channel]);
+
+      const removed = applyShellStreamEvent(added, {
+        kind: "channel-removed",
+        sequence: 2,
+        channelId: channel.id,
+      });
+      expect(removed.channels).toEqual([]);
+    });
   });
 
   describe("project-upserted", () => {

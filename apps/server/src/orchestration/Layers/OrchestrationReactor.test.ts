@@ -12,6 +12,7 @@ import { ThreadDeletionReactor } from "../Services/ThreadDeletionReactor.ts";
 import * as ThreadSettlementReactor from "../ThreadSettlementReactor.ts";
 import * as PullRequestSyncReactor from "../PullRequestSyncReactor.ts";
 import * as ThreadPullRequestReactor from "../ThreadPullRequestReactor.ts";
+import * as RunReactor from "../RunReactor.ts";
 import { OrchestrationReactor } from "../Services/OrchestrationReactor.ts";
 import { makeOrchestrationReactor } from "./OrchestrationReactor.ts";
 import * as AgentAwarenessRelay from "../../relay/AgentAwarenessRelay.ts";
@@ -104,6 +105,15 @@ describe("OrchestrationReactor", () => {
             },
           }),
         ),
+        Layer.provideMerge(
+          Layer.succeed(RunReactor.RunReactor, {
+            start: () => {
+              started.push("run-reactor");
+              return Effect.void;
+            },
+            drain: Effect.void,
+          }),
+        ),
       ),
     );
 
@@ -120,6 +130,7 @@ describe("OrchestrationReactor", () => {
       "thread-settlement-reactor",
       "pull-request-sync-reactor",
       "agent-awareness-relay",
+      "run-reactor",
     ]);
 
     await Effect.runPromise(Scope.close(scope, Exit.void));

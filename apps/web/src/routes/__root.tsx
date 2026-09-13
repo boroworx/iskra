@@ -7,7 +7,6 @@ import {
   createRootRoute,
   type ErrorComponentProps,
   useLocation,
-  useNavigate,
 } from "@tanstack/react-router";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
@@ -114,14 +113,6 @@ function RootRouteView() {
   const pathname = useLocation({ select: (location) => location.pathname });
   const { authGateState } = Route.useRouteContext();
   const primaryEnvironmentAuthenticated = authGateState.status === "authenticated";
-  const returningFromWelcomeRef = useRef(pathname === "/welcome");
-
-  useEffect(() => {
-    if (pathname === "/welcome") {
-      returningFromWelcomeRef.current = true;
-    }
-  }, [pathname]);
-
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       syncBrowserChromeTheme();
@@ -179,9 +170,9 @@ function RootRouteView() {
   );
 
   // FirstRunGate holds back everything below it — including EventRouter,
-  // whose welcome payload navigates into a thread — until the first-run
-  // decision is known, so a fresh install renders nothing (not the shell,
-  // not a flash of threads) before landing on the welcome wizard.
+  // which handles the server's welcome payload — until the first-run
+  // decision is known, so a fresh install renders nothing (not the shell)
+  // before landing on the welcome wizard.
   return (
     <ToastProvider>
       <AnchoredToastProvider>
@@ -204,9 +195,7 @@ function RootRouteView() {
           <ConfirmDialogHost />
           <SlowRpcRequestToastCoordinator />
           <HostedStaticEnvironmentBootstrap />
-          {primaryEnvironmentAuthenticated ? (
-            <EventRouter skipInitialBootstrapNavigation={returningFromWelcomeRef.current} />
-          ) : null}
+          {primaryEnvironmentAuthenticated ? <EventRouter /> : null}
           {primaryEnvironmentAuthenticated ? <PlanAgentSelectionHeal /> : null}
           {primaryEnvironmentAuthenticated ? <ProviderUpdateLaunchNotification /> : null}
           {appShell}
@@ -448,13 +437,7 @@ function AuthenticatedTracingBootstrap() {
   return null;
 }
 
-function EventRouter({
-  skipInitialBootstrapNavigation,
-}: {
-  readonly skipInitialBootstrapNavigation: boolean;
-}) {
-  const navigate = useNavigate();
-  const pathname = useLocation({ select: (loc) => loc.pathname });
+function EventRouter() {
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const primaryEnvironment = usePrimaryEnvironment();
   const openInEditor = useAtomCommand(shellEnvironment.openInEditor, {
@@ -463,9 +446,6 @@ function EventRouter({
   const serverConfig = useAtomValue(primaryServerConfigAtom);
   const serverConfigEvent = useAtomValue(primaryServerConfigEventAtom);
   const serverWelcome = useAtomValue(primaryServerWelcomeAtom);
-  const readPathname = useEffectEvent(() => pathname);
-  const handledBootstrapThreadIdRef = useRef<string | null>(null);
-  const skipInitialBootstrapNavigationRef = useRef(skipInitialBootstrapNavigation);
   const handledConfigEventRef = useRef(serverConfigEvent);
   const [keybindingsToastController] = useState<KeybindingsUpdateToastController>(() =>
     createKeybindingsUpdateToastController({}),
@@ -476,7 +456,7 @@ function EventRouter({
 
     setActiveEnvironmentId(payload.environment.environmentId);
     void (async () => {
-      if (!payload.bootstrapProjectId || !payload.bootstrapThreadId) {
+      if (!payload.bootstrapProjectId) {
         return;
       }
       const bootstrapProject = readProject(
@@ -493,27 +473,7 @@ function EventRouter({
           scopeProjectRef(payload.environment.environmentId, payload.bootstrapProjectId),
         );
       useUiStateStore.getState().setProjectExpanded(bootstrapProjectKey, true);
-
-      if (readPathname() !== "/") {
-        return;
-      }
-      if (skipInitialBootstrapNavigationRef.current) {
-        skipInitialBootstrapNavigationRef.current = false;
-        handledBootstrapThreadIdRef.current = payload.bootstrapThreadId;
-        return;
-      }
-      if (handledBootstrapThreadIdRef.current === payload.bootstrapThreadId) {
-        return;
-      }
-      await navigate({
-        to: "/$environmentId/$threadId",
-        params: {
-          environmentId: payload.environment.environmentId,
-          threadId: payload.bootstrapThreadId,
-        },
-        replace: true,
-      });
-      handledBootstrapThreadIdRef.current = payload.bootstrapThreadId;
+      // Iskra lands on channels: the server's bootstrap thread is never opened for the user.
     })().catch(() => undefined);
   });
 

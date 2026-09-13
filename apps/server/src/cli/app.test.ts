@@ -186,7 +186,7 @@ describe("t3 app", () => {
     ),
   );
 
-  it.effect("uses T3CODE_HOME or --base-dir and sends the default or explicit path", () =>
+  it.effect("uses ISKRA_HOME or --base-dir and sends the default or explicit path", () =>
     withTempDirectory("t3-app-command-test-", (root) =>
       Effect.gen(function* () {
         const baseDir = NodePath.join(root, "t3-home");
@@ -195,7 +195,7 @@ describe("t3 app", () => {
         const workingDirectory = yield* HostProcessWorkingDirectory;
         const desktop = yield* fakeDesktop({ baseDir });
 
-        yield* runCli(["app"], { T3CODE_HOME: baseDir });
+        yield* runCli(["app"], { ISKRA_HOME: baseDir });
         yield* runCli(["app", explicitPath, "--base-dir", baseDir]);
 
         expect(desktop.received.map((request) => request.workspaceRoot)).toEqual([
@@ -211,7 +211,7 @@ describe("t3 app", () => {
     withTempDirectory("t3-app-preferred-test-", (root) =>
       Effect.gen(function* () {
         vi.mocked(NodeOS.homedir).mockReturnValue(root);
-        const baseDir = NodePath.join(root, ".t3");
+        const baseDir = NodePath.join(root, ".iskra");
         const desktop = yield* fakeDesktop({ baseDir });
         const development = yield* fakeDesktop({ baseDir, stateSubdirectory: "dev" });
 
@@ -227,11 +227,11 @@ describe("t3 app", () => {
     withTempDirectory("t3-app-dev-test-", (root) =>
       Effect.gen(function* () {
         vi.mocked(NodeOS.homedir).mockReturnValue(root);
-        const baseDir = NodePath.join(root, ".t3");
+        const baseDir = NodePath.join(root, ".iskra");
         const development = yield* fakeDesktop({ baseDir, stateSubdirectory: "dev" });
 
         yield* runCli(["app"]);
-        yield* runCli(["app"], { T3CODE_HOME: "   " });
+        yield* runCli(["app"], { ISKRA_HOME: "   " });
 
         expect(development.received).toHaveLength(2);
         expect(yield* pathExists(baseDir)).toBe(false);
@@ -243,11 +243,11 @@ describe("t3 app", () => {
     withTempDirectory("t3-app-explicit-test-", (root) =>
       Effect.gen(function* () {
         vi.mocked(NodeOS.homedir).mockReturnValue(root);
-        const baseDir = NodePath.join(root, ".t3");
+        const baseDir = NodePath.join(root, ".iskra");
         const development = yield* fakeDesktop({ baseDir, stateSubdirectory: "dev" });
 
         const flagError = yield* runCli(["app", "--base-dir", baseDir]).pipe(Effect.flip);
-        const envError = yield* runCli(["app"], { T3CODE_HOME: baseDir }).pipe(Effect.flip);
+        const envError = yield* runCli(["app"], { ISKRA_HOME: baseDir }).pipe(Effect.flip);
 
         expect(flagError).toMatchObject({ _tag: "DesktopAppUnreachableError" });
         expect(envError).toMatchObject({ _tag: "DesktopAppUnreachableError" });
@@ -261,7 +261,7 @@ describe("t3 app", () => {
       withTempDirectory("t3-app-response-test-", (root) =>
         Effect.gen(function* () {
           vi.mocked(NodeOS.homedir).mockReturnValue(root);
-          const baseDir = NodePath.join(root, ".t3");
+          const baseDir = NodePath.join(root, ".iskra");
           const desktop = yield* fakeDesktop({
             baseDir,
             reply: (request) =>

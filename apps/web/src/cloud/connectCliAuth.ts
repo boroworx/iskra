@@ -44,16 +44,18 @@ export function connectCliAuthRoutesEnabled(): boolean {
 export function buildConnectCliClerkAuthorizeUrl(request: ConnectAuthorizeRequest): string | null {
   const { clerkPublishableKey } = resolveCloudPublicConfig();
   const clientId = resolveConnectCliOAuthClientId();
-  if (!clerkPublishableKey || !clientId) {
+  const hostedAppUrl = configuredHostedAppUrl();
+  const redirectUri =
+    request.loopbackPort === undefined
+      ? hostedAppUrl && connectCallbackUrl(hostedAppUrl)
+      : connectLoopbackRedirectUri(request.loopbackPort);
+  if (!clerkPublishableKey || !clientId || !redirectUri) {
     return null;
   }
   return buildConnectClerkAuthorizeUrl({
     authorizationEndpoint: `${clerkFrontendApiUrlFromPublishableKey(clerkPublishableKey)}/oauth/authorize`,
     clientId,
-    redirectUri:
-      request.loopbackPort === undefined
-        ? connectCallbackUrl(configuredHostedAppUrl())
-        : connectLoopbackRedirectUri(request.loopbackPort),
+    redirectUri,
     scopes: CONNECT_OAUTH_SCOPES,
     state: request.state,
     challenge: request.challenge,

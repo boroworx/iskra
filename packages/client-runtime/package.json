@@ -99,6 +99,10 @@
       "types": "./src/state/assets.ts",
       "default": "./src/state/assets.ts"
     },
+    "./state/channels": {
+      "types": "./src/state/channels.ts",
+      "default": "./src/state/channels.ts"
+    },
     "./state/attachments": {
       "types": "./src/state/attachments.ts",
       "default": "./src/state/attachments.ts"

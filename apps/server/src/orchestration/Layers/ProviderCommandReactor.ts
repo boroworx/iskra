@@ -8,6 +8,7 @@ import {
   type ProjectId,
   type OrchestrationSession,
   ThreadId,
+  agentIdOfDmThread,
   type ProviderSession,
   type RuntimeMode,
   type TurnId,
@@ -45,6 +46,7 @@ import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
+import { renderAgentDmPrompt } from "../runContext.ts";
 import {
   ProviderCommandReactor,
   type ProviderCommandReactorShape,
@@ -677,6 +679,18 @@ const make = Effect.gen(function* () {
     if (!thread) {
       return yield* Effect.die(new Error(`Thread '${threadId}' was not found in read model.`));
     }
+    // A run thread's restrictions come from its run record, never from thread settings.
+    const run = yield* projectionSnapshotQuery
+      .getRunByThreadId(threadId)
+      .pipe(Effect.map(Option.getOrUndefined));
+    // An agent's DM session starts with the agent's role; any other thread starts plain.
+    const dmAgentId = agentIdOfDmThread(threadId);
+    const dmAgent =
+      dmAgentId === null
+        ? undefined
+        : yield* projectionSnapshotQuery
+            .getAgentById(dmAgentId)
+            .pipe(Effect.map(Option.getOrUndefined));
 
     const desiredRuntimeMode = thread.runtimeMode;
     const requestedModelSelection = options?.modelSelection;
@@ -822,6 +836,12 @@ const make = Effect.gen(function* () {
           ...(thread.title ? { title: thread.title } : {}),
           modelSelection: desiredModelSelection,
           ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
+          ...(run
+            ? {
+                run: { systemPrompt: run.rendered.systemPrompt, capabilities: run.capabilities },
+              }
+            : {}),
+          ...(dmAgent ? { agentPrompt: renderAgentDmPrompt(dmAgent) } : {}),
           runtimeMode: desiredRuntimeMode,
         })
         .pipe(Effect.tap(() => refreshWorkspaceSnapshot));
@@ -1424,7 +1444,11 @@ const make = Effect.gen(function* () {
         ...generationInput,
       }).pipe(Effect.forkScoped);
 
-      if (canReplaceThreadTitle(thread.title, event.payload.titleSeed)) {
+      // An agent's DM keeps its "@name" title.
+      if (
+        agentIdOfDmThread(event.payload.threadId) === null &&
+        canReplaceThreadTitle(thread.title, event.payload.titleSeed)
+      ) {
         yield* maybeGenerateThreadTitleForFirstTurn({
           threadId: event.payload.threadId,
           cwd: generationCwd,

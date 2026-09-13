@@ -1,6 +1,6 @@
 import { useLoadBalancedEnvironment } from "../hooks/useLoadBalancedEnvironment";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
-import type { UsageLimitSourceSnapshots } from "@t3tools/contracts";
+import { agentIdOfDmThread, type UsageLimitSourceSnapshots } from "@t3tools/contracts";
 import {
   collectProviderUsageLimits,
   hasProviderUsageLimits,
@@ -441,7 +441,6 @@ import {
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
   shouldWriteThreadErrorToCurrentServerThread,
-  startNewThreadForProject,
   codexArtifactTemplatePromptToAppend,
   toolGroupConsumesUpwardNavigation,
   waitForStartedServerThread,
@@ -2067,9 +2066,6 @@ export default function ChatView(props: ChatViewProps) {
     [activeProject, settings],
   );
   const activeProjectDefaultModelSelection = activeProjectSettings.settings.defaultModelSelection;
-  const handleNewThreadInActiveProject = useCallback(() => {
-    startNewThreadForProject(activeProjectRef, handleNewThread);
-  }, [activeProjectRef, handleNewThread]);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const activeDraftLogicalProjectKey =
     !isServerThread && activeProject
@@ -7361,8 +7357,8 @@ export default function ChatView(props: ChatViewProps) {
     );
 
     let failure: AtomCommandResult<unknown, unknown> | null = null;
-    // Auto-title from first message
-    if (isFirstMessage && isServerThread) {
+    // Auto-title from first message; an agent's DM keeps its "@name" title.
+    if (isFirstMessage && isServerThread && agentIdOfDmThread(threadIdForSend) === null) {
       const titleResult = await updateThreadMetadata({
         environmentId,
         input: {
@@ -8691,7 +8687,6 @@ export default function ChatView(props: ChatViewProps) {
             availableEditors={availableEditors}
             rightPanelOpen={rightPanelOpen}
             gitCwd={gitCwd}
-            onNewThreadInProject={handleNewThreadInActiveProject}
             {...(activeDraftLogicalProjectKey
               ? { onOpenProjectSettings: handleOpenDraftProjectSettings }
               : {})}

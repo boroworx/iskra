@@ -3,7 +3,7 @@
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   canCreateProjectInEnvironment,
   getCloneDestinationBrowsePath,
@@ -23,7 +23,6 @@ import {
 } from "@t3tools/client-runtime/state/filesystem";
 import {
   isAtomCommandInterrupted,
-  settlePromise,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import {
@@ -36,6 +35,7 @@ import {
   type SourceControlProviderKind,
   type SourceControlRepositoryInfo,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
+  agentIdOfDmThread,
   resolveEnvironmentMachineKind,
 } from "@t3tools/contracts";
 import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
@@ -51,7 +51,6 @@ import {
   MessageSquareIcon,
   PaletteIcon,
   SettingsIcon,
-  SquarePenIcon,
   TextSearchIcon,
 } from "lucide-react";
 import {
@@ -84,9 +83,14 @@ import { sourceControlEnvironment } from "../state/sourceControl";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
-import { useProjects, useServerConfigs, useThreadShells } from "../state/entities";
+import {
+  useEnvironmentChannels,
+  useProjects,
+  useServerConfigs,
+  useThreadShells,
+} from "../state/entities";
 import { useThreadSearch } from "../state/queries";
-import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
+import { resolveThreadActionProjectRef } from "../lib/chatThreadActions";
 import {
   appendBrowsePathSegment,
   ensureBrowseDirectoryPath,
@@ -106,7 +110,6 @@ import {
   selectActiveRightPanel,
   useRightPanelStore,
 } from "../rightPanelStore";
-import { getLatestThreadForProject, sortThreads } from "../lib/threadSort";
 import {
   cn,
   getLocalFileManagerName,
@@ -132,7 +135,6 @@ import {
   buildRootGroups,
   buildThreadActionItems,
   buildLinkedThreadActionItems,
-  enumerateCommandPaletteItems,
   type CommandPaletteActionItem,
   type CommandPaletteOpenIntent,
   type CommandPaletteSubmenuItem,
@@ -450,7 +452,6 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     [],
   );
   const openAddProject = useCallback(() => dispatch({ _tag: "OpenAddProject" }), []);
-  const openNewThreadIn = useCallback(() => dispatch({ _tag: "OpenNewThreadIn" }), []);
   const clearOpenIntent = useCallback(() => dispatch({ _tag: "ClearOpenIntent" }), []);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { theme, themeHalves, resolvedTheme } = useTheme();
@@ -521,9 +522,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   useEffect(
     () =>
       onOpenCommandPalette((detail) => {
-        if (detail.open === "new-thread-in") {
-          openNewThreadIn();
-        } else if (detail.open === "add-project") {
+        if (detail.open === "add-project") {
           openAddProject();
         } else if (detail.query !== undefined) {
           dispatch({
@@ -535,7 +534,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           setOpen(true);
         }
       }),
-    [openAddProject, openNewThreadIn, setOpen],
+    [openAddProject, setOpen],
   );
 
   return (
@@ -646,6 +645,7 @@ function OpenCommandPaletteDialog(props: {
   const { environments } = useEnvironments();
   const desktopLocalBootstraps = useDesktopLocalBootstraps();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const primaryChannels = useEnvironmentChannels(primaryEnvironmentId);
   const availableSettingsSearchItems = useAvailableSettingsSearchItems();
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
@@ -1070,49 +1070,27 @@ function OpenCommandPaletteDialog(props: {
     [browseNavigation],
   );
 
-  const openProjectFromSearch = useMemo(
-    () => async (project: (typeof projects)[number]) => {
-      const group = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`);
-      const groupedProjectKeys = group
-        ? new Set(
-            group.memberProjectRefs.map(
-              (projectRef) => `${projectRef.environmentId}:${projectRef.projectId}`,
-            ),
-          )
-        : null;
-      const latestThread = groupedProjectKeys
-        ? (sortThreads(
-            threads.filter(
-              (thread) =>
-                thread.archivedAt === null &&
-                groupedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`),
-            ),
-            clientSettings.sidebarThreadSortOrder,
-          )[0] ?? null)
-        : getLatestThreadForProject(
-            threads.filter((thread) => thread.environmentId === project.environmentId),
-            project.id,
-            clientSettings.sidebarThreadSortOrder,
-          );
-      if (latestThread) {
-        await navigate({
-          to: "/$environmentId/$threadId",
-          params: buildThreadRouteParams(
-            scopeThreadRef(latestThread.environmentId, latestThread.id),
-          ),
-        });
+  // A project opens on its first channel; without one it lands on the shell home.
+  const openProjectFromSearch = useCallback(
+    async (project: (typeof projects)[number]) => {
+      const channel = primaryChannels
+        .filter(
+          (candidate) =>
+            project.environmentId === primaryEnvironmentId &&
+            candidate.projectId === project.id &&
+            candidate.kind === "channel",
+        )
+        .toSorted((left, right) => left.name.localeCompare(right.name))[0];
+      if (channel === undefined) {
+        await navigate({ to: "/" });
         return;
       }
-
-      await handleNewThread(scopeProjectRef(project.environmentId, project.id));
+      await navigate({
+        to: "/channels/$environmentId/$channelId",
+        params: { environmentId: project.environmentId, channelId: channel.id },
+      });
     },
-    [
-      clientSettings.sidebarThreadSortOrder,
-      handleNewThread,
-      navigate,
-      projectGroupByTargetKey,
-      threads,
-    ],
+    [navigate, primaryChannels, primaryEnvironmentId],
   );
 
   const projectSearchItems = useMemo(
@@ -1160,75 +1138,16 @@ function OpenCommandPaletteDialog(props: {
     ],
   );
 
-  const projectThreadItems = useMemo(
-    () =>
-      enumerateCommandPaletteItems(
-        buildProjectActionItems({
-          projects: pickerProjects,
-          valuePrefix: "new-thread-in",
-          searchTerms: (project) => {
-            const group = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`);
-            const location = projectEnvironmentLocationById.get(project.environmentId);
-            return [
-              ...(group?.memberProjects.flatMap((member) => [member.title, member.workspaceRoot]) ??
-                []),
-              ...(location ? [location.label] : []),
-            ];
-          },
-          renderDescription: (project) => {
-            const location = projectEnvironmentLocationById.get(project.environmentId) ?? {
-              kind: "remote",
-              label: "Remote",
-              machine: "server" as const,
-            };
-            return (
-              <span className="flex min-w-0 items-center gap-1">
-                <span className="inline-flex min-w-0 items-center gap-1">
-                  {location.kind === "remote" ? (
-                    <EnvironmentMachineIcon
-                      aria-hidden
-                      kind={location.machine}
-                      className={COMMAND_PALETTE_META_ICON_CLASS}
-                    />
-                  ) : null}
-                  <span className="truncate">{location.label}</span>
-                </span>
-                <CommandPaletteMetaDot />
-                <span className="truncate">{project.workspaceRoot}</span>
-              </span>
-            );
-          },
-          icon: projectFavicon,
-          runProject: async (project) => {
-            const group = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`);
-            const contextualRefBelongsToGroup =
-              contextualProjectRef !== null &&
-              group?.memberProjectRefs.some(
-                (projectRef) =>
-                  projectRef.environmentId === contextualProjectRef.environmentId &&
-                  projectRef.projectId === contextualProjectRef.projectId,
-              );
-            await handleNewThread(
-              contextualRefBelongsToGroup
-                ? contextualProjectRef
-                : scopeProjectRef(project.environmentId, project.id),
-            );
-          },
-        }),
-      ),
-    [
-      contextualProjectRef,
-      handleNewThread,
-      pickerProjects,
-      projectEnvironmentLocationById,
-      projectGroupByTargetKey,
-    ],
+  // Every thread Iskra shows is an agent's DM; older free-standing threads stay out of search.
+  const dmThreads = useMemo(
+    () => threads.filter((thread) => agentIdOfDmThread(thread.id) !== null),
+    [threads],
   );
 
   const allThreadItems = useMemo(
     () =>
       buildThreadActionItems({
-        threads,
+        threads: dmThreads,
         ...(activeThreadId ? { activeThreadId } : {}),
         projectTitleById,
         sortOrder: clientSettings.sidebarThreadSortOrder,
@@ -1291,7 +1210,7 @@ function OpenCommandPaletteDialog(props: {
       providerEntryByEnvironmentAndInstanceId,
       threadContentMatchByKey,
       threadSearchQuery,
-      threads,
+      dmThreads,
     ],
   );
   const recentThreadItems = allThreadItems.slice(0, RECENT_THREAD_LIMIT);
@@ -1602,85 +1521,7 @@ function OpenCommandPaletteDialog(props: {
     openAddProjectFlow();
   }, [clearOpenIntent, openAddProjectFlow, openIntent]);
 
-  useLayoutEffect(() => {
-    if (openIntent?.kind !== "new-thread-in" || projectThreadItems.length === 0) {
-      return;
-    }
-    clearOpenIntent();
-    browseNavigation.invalidate();
-    setAddProjectCloneFlow(null);
-    setViewStack([]);
-    setQuery("");
-    const currentPrefix =
-      currentProjectEnvironmentId && currentProjectId
-        ? `new-thread-in:${currentProjectEnvironmentId}:${currentProjectId}`
-        : null;
-    const prioritized = currentPrefix
-      ? [
-          ...projectThreadItems.filter((item) => item.value === currentPrefix),
-          ...projectThreadItems.filter((item) => item.value !== currentPrefix),
-        ]
-      : projectThreadItems;
-    pushPaletteView({
-      addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
-      groups: [
-        {
-          value: "projects",
-          label: "Projects",
-          items: enumerateCommandPaletteItems(prioritized),
-        },
-      ],
-    });
-  }, [
-    clearOpenIntent,
-    browseNavigation,
-    currentProjectEnvironmentId,
-    currentProjectId,
-    openIntent,
-    projectThreadItems,
-    pushPaletteView,
-  ]);
-
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
-
-  if (projects.length > 0) {
-    const activeProjectTitle =
-      projectPickerEntries.find((entry) => entry.isPreferred)?.group.displayName ??
-      (currentProjectId ? (projectTitleById.get(currentProjectId) ?? null) : null);
-
-    if (activeProjectTitle) {
-      actionItems.push({
-        kind: "action",
-        value: "action:new-thread",
-        searchTerms: ["new thread", "chat", "create", "draft"],
-        title: (
-          <>
-            New thread in <span className="font-semibold">{activeProjectTitle}</span>
-          </>
-        ),
-        icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
-        shortcutCommand: "chat.new",
-        run: async () => {
-          await startNewThreadFromContext({
-            activeDraftThread,
-            activeThread: activeThread ?? undefined,
-            defaultProjectRef,
-            handleNewThread,
-          });
-        },
-      });
-    }
-
-    actionItems.push({
-      kind: "submenu",
-      value: "action:new-thread-in",
-      searchTerms: ["new thread", "project", "pick", "choose", "select"],
-      title: "New thread in...",
-      icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
-      addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
-      groups: [{ value: "projects", label: "Projects", items: projectThreadItems }],
-    });
-  }
 
   if (activeThreadReferenceCopyTarget !== null) {
     actionItems.push({
@@ -1969,34 +1810,7 @@ function OpenCommandPaletteDialog(props: {
         cwd,
       );
       if (existing) {
-        const latestThread = getLatestThreadForProject(
-          threads.filter((thread) => thread.environmentId === existing.environmentId),
-          existing.id,
-          clientSettings.sidebarThreadSortOrder,
-        );
-        if (latestThread) {
-          await navigate({
-            to: "/$environmentId/$threadId",
-            params: buildThreadRouteParams(
-              scopeThreadRef(latestThread.environmentId, latestThread.id),
-            ),
-          });
-        } else {
-          const navigationResult = await settlePromise(() =>
-            handleNewThread(scopeProjectRef(existing.environmentId, existing.id)),
-          );
-          if (navigationResult._tag === "Failure") {
-            const error = squashAtomCommandFailure(navigationResult);
-            toastManager.add(
-              stackedThreadToast({
-                type: "error",
-                title: "Failed to open project",
-                description: error instanceof Error ? error.message : "An error occurred.",
-              }),
-            );
-            return;
-          }
-        }
+        await openProjectFromSearch(existing);
         setOpen(false);
         return;
       }
@@ -2026,33 +1840,19 @@ function OpenCommandPaletteDialog(props: {
         return;
       }
 
-      const navigationResult = await settlePromise(() =>
-        handleNewThread(scopeProjectRef(input.environmentId, projectId)),
-      );
-      if (navigationResult._tag === "Failure") {
-        const error = squashAtomCommandFailure(navigationResult);
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Failed to add project",
-            description: error instanceof Error ? error.message : "An error occurred.",
-          }),
-        );
-        return;
-      }
+      // A new project has no channels yet: land on the shell, where they are created.
+      await navigate({ to: "/" });
       setOpen(false);
     },
     [
-      handleNewThread,
       createProject,
       environments,
       navigate,
+      openProjectFromSearch,
       primaryEnvironmentId,
       projects,
       providers,
       setOpen,
-      clientSettings.sidebarThreadSortOrder,
-      threads,
     ],
   );
 

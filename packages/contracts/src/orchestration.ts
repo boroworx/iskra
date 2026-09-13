@@ -7,7 +7,9 @@ import { OrchestrationMessageContext } from "./composerContext.ts";
 import { ProviderOptionSelections } from "./model.ts";
 import { RepositoryIdentity, ThreadEnvMode } from "./environment.ts";
 import {
+  AgentId,
   ApprovalRequestId,
+  ChannelId,
   CheckpointRef,
   ClientSurface,
   CommandId,
@@ -41,6 +43,8 @@ export const ORCHESTRATION_WS_METHODS = {
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
+  subscribeChannel: "orchestration.subscribeChannel",
+  listAgentRuns: "orchestration.listAgentRuns",
 } as const;
 
 export const ProviderApprovalPolicy = Schema.Literals([
@@ -490,6 +494,185 @@ export const OrchestrationProject = Schema.Struct({
 });
 export type OrchestrationProject = typeof OrchestrationProject.Type;
 
+/** What a run may do. Anything not listed is denied at the adapter boundary. */
+export const RunCapability = Schema.Literals(["read", "write", "shell", "network"]);
+export type RunCapability = typeof RunCapability.Type;
+export const RunCapabilities = Schema.Array(RunCapability);
+export type RunCapabilities = typeof RunCapabilities.Type;
+
+const AGENT_NAME_MAX_CHARS = 64;
+/** Agents are addressed as `@name`, so names are lowercase slugs. */
+export const AgentName = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(AGENT_NAME_MAX_CHARS),
+  Schema.isPattern(/^[a-z0-9-]+$/),
+);
+
+export const OrchestrationAgent = Schema.Struct({
+  id: AgentId,
+  projectId: ProjectId,
+  name: AgentName,
+  avatar: Schema.NullOr(TrimmedNonEmptyString),
+  roleTags: Schema.Array(TrimmedNonEmptyString),
+  rolePrompt: Schema.String,
+  modelSelection: ModelSelection,
+  // Ceiling for card-scoped runs; conversation runs are always read-only.
+  capabilities: RunCapabilities,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  archivedAt: Schema.NullOr(IsoDateTime),
+});
+export type OrchestrationAgent = typeof OrchestrationAgent.Type;
+
+export const ChannelKind = Schema.Literals(["channel", "dm"]);
+export type ChannelKind = typeof ChannelKind.Type;
+
+/** Messages of channel history handed to an agent when it wakes. */
+export const DEFAULT_CHANNEL_WAKE_DEPTH = 30;
+
+export const OrchestrationChannel = Schema.Struct({
+  id: ChannelId,
+  projectId: ProjectId,
+  kind: ChannelKind,
+  name: TrimmedNonEmptyString,
+  topic: Schema.String,
+  pinnedSpec: Schema.String,
+  wakeDepth: NonNegativeInt,
+  // A `dm` has exactly one agent; its human is implicit until there is more than one.
+  memberAgentIds: Schema.Array(AgentId),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  archivedAt: Schema.NullOr(IsoDateTime),
+});
+export type OrchestrationChannel = typeof OrchestrationChannel.Type;
+
+export const ChannelMessageAuthorKind = Schema.Literals(["human", "agent", "system", "webhook"]);
+export type ChannelMessageAuthorKind = typeof ChannelMessageAuthorKind.Type;
+
+/** Author id of every human message until multiplayer adds identities. */
+export const CHANNEL_HUMAN_AUTHOR_ID = "human";
+
+/** Author id of messages the server posts itself, such as a refused wake. */
+export const CHANNEL_SYSTEM_AUTHOR_ID = "system";
+
+/**
+ * Where a message stands with an agent it woke. `pending` waits for the agent's
+ * next turn, `sent` rides a turn that has not started yet, `delivered` is in a
+ * running turn, and `undelivered` never reached one and shows as unanswered.
+ * A message is never `delivered` merely because it was sent (invariant 10).
+ */
+export const ChannelDeliveryStatus = Schema.Literals([
+  "pending",
+  "sent",
+  "delivered",
+  "undelivered",
+]);
+export type ChannelDeliveryStatus = typeof ChannelDeliveryStatus.Type;
+
+export const ChannelMessageDelivery = Schema.Struct({
+  agentId: AgentId,
+  status: ChannelDeliveryStatus,
+});
+export type ChannelMessageDelivery = typeof ChannelMessageDelivery.Type;
+
+export const OrchestrationChannelMessage = Schema.Struct({
+  id: MessageId,
+  channelId: ChannelId,
+  authorKind: ChannelMessageAuthorKind,
+  authorId: TrimmedNonEmptyString,
+  body: Schema.String,
+  createdAt: IsoDateTime,
+  // Set on an agent's reply: the run whose final answer it is.
+  runThreadId: Schema.optional(ThreadId),
+  // A human message's standing with each agent it woke.
+  deliveries: Schema.optional(Schema.Array(ChannelMessageDelivery)),
+});
+export type OrchestrationChannelMessage = typeof OrchestrationChannelMessage.Type;
+
+/** One channel message as an agent sees it, with its author resolved to a display name. */
+export const RunContextMessage = Schema.Struct({
+  messageId: MessageId,
+  authorKind: ChannelMessageAuthorKind,
+  authorName: TrimmedNonEmptyString,
+  body: Schema.String,
+  createdAt: IsoDateTime,
+});
+export type RunContextMessage = typeof RunContextMessage.Type;
+
+/**
+ * Everything an agent is handed when it wakes, before rendering to prompt text.
+ * Stored with the run so the context inspector shows exactly what the run saw.
+ */
+export const RunContextPayload = Schema.Struct({
+  agent: Schema.Struct({
+    id: AgentId,
+    name: AgentName,
+    rolePrompt: Schema.String,
+  }),
+  channel: Schema.Struct({
+    id: ChannelId,
+    kind: ChannelKind,
+    name: TrimmedNonEmptyString,
+    topic: Schema.String,
+  }),
+  pinnedSpec: Schema.String,
+  wakeDepth: NonNegativeInt,
+  // The newest `wakeDepth` messages before the trigger, oldest first.
+  history: Schema.Array(RunContextMessage),
+  trigger: RunContextMessage,
+});
+export type RunContextPayload = typeof RunContextPayload.Type;
+
+/** The exact text a run sends its provider, rendered from a `RunContextPayload`. */
+export const RenderedRunContext = Schema.Struct({
+  systemPrompt: Schema.String,
+  firstMessage: Schema.String,
+});
+export type RenderedRunContext = typeof RenderedRunContext.Type;
+
+/**
+ * A run: one provider session backing a single agent wake. It lives in a
+ * hidden thread and records exactly what the agent was handed.
+ */
+export const OrchestrationRun = Schema.Struct({
+  threadId: ThreadId,
+  channelId: ChannelId,
+  agentId: AgentId,
+  triggerMessageId: MessageId,
+  capabilities: RunCapabilities,
+  context: RunContextPayload,
+  rendered: RenderedRunContext,
+  startedAt: IsoDateTime,
+});
+export type OrchestrationRun = typeof OrchestrationRun.Type;
+
+/** A run whose session has not yet stopped. An agent has at most one. */
+export const OrchestrationLiveRun = Schema.Struct({
+  threadId: ThreadId,
+  channelId: ChannelId,
+  agentId: AgentId,
+  startedAt: IsoDateTime,
+});
+export type OrchestrationLiveRun = typeof OrchestrationLiveRun.Type;
+
+/** Live runs allowed at once in one project. */
+export const DEFAULT_PROJECT_RUN_CAP = 3;
+
+/** A run ends when its session stops or fails; a finished turn alone leaves it live. */
+export const isRunEndingSessionStatus = (status: OrchestrationSessionStatus): boolean =>
+  status === "stopped" || status === "error";
+
+const AGENT_DM_THREAD_PREFIX = "dm:";
+
+/** An agent's DM: one continuous coding thread per agent, with a fixed id. */
+export const agentDmThreadId = (agentId: AgentId): ThreadId =>
+  ThreadId.make(`${AGENT_DM_THREAD_PREFIX}${agentId}`);
+
+/** The agent whose DM this thread is, or null for any other thread. */
+export const agentIdOfDmThread = (threadId: ThreadId): AgentId | null =>
+  threadId.startsWith(AGENT_DM_THREAD_PREFIX)
+    ? AgentId.make(threadId.slice(AGENT_DM_THREAD_PREFIX.length))
+    : null;
+
 export const OrchestrationMessageRole = Schema.Literals(["user", "assistant", "system"]);
 export type OrchestrationMessageRole = typeof OrchestrationMessageRole.Type;
 
@@ -769,6 +952,11 @@ export const OrchestrationReadModel = Schema.Struct({
   snapshotSequence: NonNegativeInt,
   projects: Schema.Array(OrchestrationProject),
   threads: Schema.Array(OrchestrationThread),
+  // Optional on the wire so read models from servers without agents still decode.
+  agents: Schema.optional(Schema.Array(OrchestrationAgent)),
+  // Channel messages are not part of the read model; they are paged from the projection.
+  channels: Schema.optional(Schema.Array(OrchestrationChannel)),
+  liveRuns: Schema.optional(Schema.Array(OrchestrationLiveRun)),
   updatedAt: IsoDateTime,
 });
 export type OrchestrationReadModel = typeof OrchestrationReadModel.Type;
@@ -850,10 +1038,41 @@ export const OrchestrationThreadShell = Schema.Struct({
 });
 export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;
 
+export const AgentPresence = Schema.Literals(["idle", "running", "blocked"]);
+export type AgentPresence = typeof AgentPresence.Type;
+
+/** What a client needs to list an agent; its role prompt and model settings stay on the server. */
+export const OrchestrationAgentShell = Schema.Struct({
+  id: AgentId,
+  projectId: ProjectId,
+  name: AgentName,
+  avatar: Schema.NullOr(TrimmedNonEmptyString),
+  roleTags: Schema.Array(TrimmedNonEmptyString),
+  // The model the agent's DM starts on.
+  modelSelection: ModelSelection,
+  // Derived from the agent's live run: running while it has one, blocked while that run waits on the user.
+  presence: AgentPresence,
+});
+export type OrchestrationAgentShell = typeof OrchestrationAgentShell.Type;
+
+/** What a client needs to list a channel; its pinned spec and history stay on the server. */
+export const OrchestrationChannelShell = Schema.Struct({
+  id: ChannelId,
+  projectId: ProjectId,
+  kind: ChannelKind,
+  name: TrimmedNonEmptyString,
+  topic: Schema.String,
+  memberAgentIds: Schema.Array(AgentId),
+});
+export type OrchestrationChannelShell = typeof OrchestrationChannelShell.Type;
+
 export const OrchestrationShellSnapshot = Schema.Struct({
   snapshotSequence: NonNegativeInt,
   projects: Schema.Array(OrchestrationProjectShell),
   threads: Schema.Array(OrchestrationThreadShell),
+  // Optional so cached snapshots and servers without agents still decode. Active entries only.
+  agents: Schema.optional(Schema.Array(OrchestrationAgentShell)),
+  channels: Schema.optional(Schema.Array(OrchestrationChannelShell)),
   updatedAt: IsoDateTime,
 });
 export type OrchestrationShellSnapshot = typeof OrchestrationShellSnapshot.Type;
@@ -878,6 +1097,27 @@ export const OrchestrationShellStreamEvent = Schema.Union([
     kind: Schema.Literal("thread-removed"),
     sequence: NonNegativeInt,
     threadId: ThreadId,
+  }),
+  // Sent only to subscribers that set `includeAgentChannels`; older clients reject unknown kinds.
+  Schema.Struct({
+    kind: Schema.Literal("agent-upserted"),
+    sequence: NonNegativeInt,
+    agent: OrchestrationAgentShell,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("agent-removed"),
+    sequence: NonNegativeInt,
+    agentId: AgentId,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("channel-upserted"),
+    sequence: NonNegativeInt,
+    channel: OrchestrationChannelShell,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("channel-removed"),
+    sequence: NonNegativeInt,
+    channelId: ChannelId,
   }),
 ]);
 export type OrchestrationShellStreamEvent = typeof OrchestrationShellStreamEvent.Type;
@@ -909,6 +1149,11 @@ export const OrchestrationSubscribeShellInput = Schema.Struct({
    * snapshot or catch-up replay and before it begins emitting live events.
    */
   requestCompletionMarker: Schema.optionalKey(Schema.Boolean),
+  /**
+   * Requests agent and channel shell events. The server sends those kinds only
+   * to subscribers that ask, because older clients reject unknown kinds.
+   */
+  includeAgentChannels: Schema.optionalKey(Schema.Boolean),
 });
 export type OrchestrationSubscribeShellInput = typeof OrchestrationSubscribeShellInput.Type;
 
@@ -1019,6 +1264,127 @@ const ProjectDeleteCommand = Schema.Struct({
   commandId: CommandId,
   projectId: ProjectId,
   force: Schema.optional(Schema.Boolean),
+});
+
+const AgentCreateCommand = Schema.Struct({
+  type: Schema.Literal("agent.create"),
+  commandId: CommandId,
+  agentId: AgentId,
+  projectId: ProjectId,
+  name: AgentName,
+  avatar: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  roleTags: Schema.Array(TrimmedNonEmptyString),
+  rolePrompt: Schema.String,
+  modelSelection: ModelSelection,
+  capabilities: RunCapabilities,
+  createdAt: IsoDateTime,
+});
+
+const AgentUpdateCommand = Schema.Struct({
+  type: Schema.Literal("agent.update"),
+  commandId: CommandId,
+  agentId: AgentId,
+  name: Schema.optional(AgentName),
+  avatar: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  roleTags: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  rolePrompt: Schema.optional(Schema.String),
+  modelSelection: Schema.optional(ModelSelection),
+  capabilities: Schema.optional(RunCapabilities),
+});
+
+const AgentArchiveCommand = Schema.Struct({
+  type: Schema.Literal("agent.archive"),
+  commandId: CommandId,
+  agentId: AgentId,
+});
+
+const AgentUnarchiveCommand = Schema.Struct({
+  type: Schema.Literal("agent.unarchive"),
+  commandId: CommandId,
+  agentId: AgentId,
+});
+
+const ChannelCreateCommand = Schema.Struct({
+  type: Schema.Literal("channel.create"),
+  commandId: CommandId,
+  channelId: ChannelId,
+  projectId: ProjectId,
+  kind: ChannelKind,
+  name: TrimmedNonEmptyString,
+  topic: Schema.optional(Schema.String),
+  pinnedSpec: Schema.optional(Schema.String),
+  wakeDepth: Schema.optional(NonNegativeInt),
+  memberAgentIds: Schema.Array(AgentId),
+  createdAt: IsoDateTime,
+});
+
+const ChannelUpdateCommand = Schema.Struct({
+  type: Schema.Literal("channel.update"),
+  commandId: CommandId,
+  channelId: ChannelId,
+  name: Schema.optional(TrimmedNonEmptyString),
+  topic: Schema.optional(Schema.String),
+  pinnedSpec: Schema.optional(Schema.String),
+  wakeDepth: Schema.optional(NonNegativeInt),
+  memberAgentIds: Schema.optional(Schema.Array(AgentId)),
+});
+
+const ChannelArchiveCommand = Schema.Struct({
+  type: Schema.Literal("channel.archive"),
+  commandId: CommandId,
+  channelId: ChannelId,
+});
+
+const ChannelUnarchiveCommand = Schema.Struct({
+  type: Schema.Literal("channel.unarchive"),
+  commandId: CommandId,
+  channelId: ChannelId,
+});
+
+const ChannelMessagePostCommand = Schema.Struct({
+  type: Schema.Literal("channel.message.post"),
+  commandId: CommandId,
+  channelId: ChannelId,
+  messageId: MessageId,
+  body: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
+const ChannelAgentWakeCommand = Schema.Struct({
+  type: Schema.Literal("channel.agent.wake"),
+  commandId: CommandId,
+  channelId: ChannelId,
+  agentId: AgentId,
+  triggerMessageId: MessageId,
+  createdAt: IsoDateTime,
+});
+
+const ChannelRunStartCommand = Schema.Struct({
+  type: Schema.Literal("channel.run.start"),
+  commandId: CommandId,
+  ...OrchestrationRun.fields,
+});
+
+const ChannelMessageAgentPostCommand = Schema.Struct({
+  type: Schema.Literal("channel.message.agent.post"),
+  commandId: CommandId,
+  channelId: ChannelId,
+  messageId: MessageId,
+  agentId: AgentId,
+  runThreadId: ThreadId,
+  body: Schema.String,
+  createdAt: IsoDateTime,
+});
+
+const ChannelDeliveryUpdateCommand = Schema.Struct({
+  type: Schema.Literal("channel.delivery.update"),
+  commandId: CommandId,
+  channelId: ChannelId,
+  agentId: AgentId,
+  messageIds: Schema.Array(MessageId),
+  status: ChannelDeliveryStatus,
+  runThreadId: Schema.NullOr(ThreadId),
+  updatedAt: IsoDateTime,
 });
 
 const ThreadCreateCommand = Schema.Struct({
@@ -1321,6 +1687,15 @@ const ThreadSessionStopCommand = Schema.Struct({
 });
 
 const DispatchableClientOrchestrationCommand = Schema.Union([
+  AgentCreateCommand,
+  AgentUpdateCommand,
+  AgentArchiveCommand,
+  AgentUnarchiveCommand,
+  ChannelCreateCommand,
+  ChannelUpdateCommand,
+  ChannelArchiveCommand,
+  ChannelUnarchiveCommand,
+  ChannelMessagePostCommand,
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
@@ -1354,6 +1729,15 @@ export type DispatchableClientOrchestrationCommand =
   typeof DispatchableClientOrchestrationCommand.Type;
 
 export const ClientOrchestrationCommand = Schema.Union([
+  AgentCreateCommand,
+  AgentUpdateCommand,
+  AgentArchiveCommand,
+  AgentUnarchiveCommand,
+  ChannelCreateCommand,
+  ChannelUpdateCommand,
+  ChannelArchiveCommand,
+  ChannelUnarchiveCommand,
+  ChannelMessagePostCommand,
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
@@ -1499,6 +1883,10 @@ const ThreadPullRequestLinkSyncCommand = Schema.Struct({
 });
 
 const InternalOrchestrationCommand = Schema.Union([
+  ChannelAgentWakeCommand,
+  ChannelRunStartCommand,
+  ChannelMessageAgentPostCommand,
+  ChannelDeliveryUpdateCommand,
   ThreadAutoSettleCommand,
   ThreadPullRequestSyncCommand,
   ThreadPullRequestLinkSyncCommand,
@@ -1526,6 +1914,18 @@ export const OrchestrationEventType = Schema.Literals([
   "project.created",
   "project.meta-updated",
   "project.deleted",
+  "agent.created",
+  "agent.updated",
+  "agent.archived",
+  "agent.unarchived",
+  "channel.created",
+  "channel.updated",
+  "channel.archived",
+  "channel.unarchived",
+  "channel.message-posted",
+  "channel.agent-wake-requested",
+  "channel.run-started",
+  "channel.delivery-updated",
   "thread.created",
   "thread.deleted",
   "thread.archived",
@@ -1558,7 +1958,12 @@ export const OrchestrationEventType = Schema.Literals([
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
-export const OrchestrationAggregateKind = Schema.Literals(["project", "thread"]);
+export const OrchestrationAggregateKind = Schema.Literals([
+  "project",
+  "thread",
+  "agent",
+  "channel",
+]);
 export type OrchestrationAggregateKind = typeof OrchestrationAggregateKind.Type;
 export const OrchestrationActorKind = Schema.Literals(["client", "server", "provider"]);
 
@@ -1593,6 +1998,105 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
 export const ProjectDeletedPayload = Schema.Struct({
   projectId: ProjectId,
   deletedAt: IsoDateTime,
+});
+
+export const AgentCreatedPayload = Schema.Struct({
+  agentId: AgentId,
+  projectId: ProjectId,
+  name: AgentName,
+  avatar: Schema.NullOr(TrimmedNonEmptyString),
+  roleTags: Schema.Array(TrimmedNonEmptyString),
+  rolePrompt: Schema.String,
+  modelSelection: ModelSelection,
+  capabilities: RunCapabilities,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const AgentUpdatedPayload = Schema.Struct({
+  agentId: AgentId,
+  name: Schema.optional(AgentName),
+  avatar: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  roleTags: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  rolePrompt: Schema.optional(Schema.String),
+  modelSelection: Schema.optional(ModelSelection),
+  capabilities: Schema.optional(RunCapabilities),
+  updatedAt: IsoDateTime,
+});
+
+export const AgentArchivedPayload = Schema.Struct({
+  agentId: AgentId,
+  archivedAt: IsoDateTime,
+});
+
+export const AgentUnarchivedPayload = Schema.Struct({
+  agentId: AgentId,
+  updatedAt: IsoDateTime,
+});
+
+export const ChannelCreatedPayload = Schema.Struct({
+  channelId: ChannelId,
+  projectId: ProjectId,
+  kind: ChannelKind,
+  name: TrimmedNonEmptyString,
+  topic: Schema.String,
+  pinnedSpec: Schema.String,
+  wakeDepth: NonNegativeInt,
+  memberAgentIds: Schema.Array(AgentId),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const ChannelUpdatedPayload = Schema.Struct({
+  channelId: ChannelId,
+  name: Schema.optional(TrimmedNonEmptyString),
+  topic: Schema.optional(Schema.String),
+  pinnedSpec: Schema.optional(Schema.String),
+  wakeDepth: Schema.optional(NonNegativeInt),
+  memberAgentIds: Schema.optional(Schema.Array(AgentId)),
+  updatedAt: IsoDateTime,
+});
+
+export const ChannelArchivedPayload = Schema.Struct({
+  channelId: ChannelId,
+  archivedAt: IsoDateTime,
+});
+
+export const ChannelUnarchivedPayload = Schema.Struct({
+  channelId: ChannelId,
+  updatedAt: IsoDateTime,
+});
+
+export const ChannelMessagePostedPayload = Schema.Struct({
+  channelId: ChannelId,
+  messageId: MessageId,
+  authorKind: ChannelMessageAuthorKind,
+  authorId: TrimmedNonEmptyString,
+  body: Schema.String,
+  createdAt: IsoDateTime,
+  runThreadId: Schema.optional(ThreadId),
+  // The project agents a human message named, resolved when it was posted.
+  mentions: Schema.optional(Schema.Array(AgentId)),
+});
+
+export const ChannelAgentWakeRequestedPayload = Schema.Struct({
+  channelId: ChannelId,
+  agentId: AgentId,
+  triggerMessageId: MessageId,
+  requestedAt: IsoDateTime,
+  // Set when the agent is already live in this channel: the message joins that run.
+  liveRunThreadId: Schema.optional(ThreadId),
+});
+
+export const ChannelRunStartedPayload = OrchestrationRun;
+
+export const ChannelDeliveryUpdatedPayload = Schema.Struct({
+  channelId: ChannelId,
+  agentId: AgentId,
+  messageIds: Schema.Array(MessageId),
+  status: ChannelDeliveryStatus,
+  runThreadId: Schema.NullOr(ThreadId),
+  updatedAt: IsoDateTime,
 });
 
 export const ThreadCreatedPayload = Schema.Struct({
@@ -1852,7 +2356,7 @@ const EventBaseFields = {
   sequence: NonNegativeInt,
   eventId: EventId,
   aggregateKind: OrchestrationAggregateKind,
-  aggregateId: Schema.Union([ProjectId, ThreadId]),
+  aggregateId: Schema.Union([ProjectId, ThreadId, AgentId, ChannelId]),
   occurredAt: IsoDateTime,
   commandId: Schema.NullOr(CommandId),
   causationEventId: Schema.NullOr(EventId),
@@ -1875,6 +2379,66 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("project.deleted"),
     payload: ProjectDeletedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("agent.created"),
+    payload: AgentCreatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("agent.updated"),
+    payload: AgentUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("agent.archived"),
+    payload: AgentArchivedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("agent.unarchived"),
+    payload: AgentUnarchivedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("channel.created"),
+    payload: ChannelCreatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("channel.updated"),
+    payload: ChannelUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("channel.archived"),
+    payload: ChannelArchivedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("channel.unarchived"),
+    payload: ChannelUnarchivedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("channel.message-posted"),
+    payload: ChannelMessagePostedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("channel.agent-wake-requested"),
+    payload: ChannelAgentWakeRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("channel.run-started"),
+    payload: ChannelRunStartedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("channel.delivery-updated"),
+    payload: ChannelDeliveryUpdatedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,
@@ -2198,6 +2762,56 @@ export class OrchestrationGetWorkflowScriptError extends Schema.TaggedError<Orch
   }
 }
 
+/** How many of an agent's newest runs a DM shows. */
+export const AGENT_RUNS_LIMIT = 10;
+
+/** A run with when it ended; `endedAt` is null while the run is live. */
+export const OrchestrationAgentRun = Schema.Struct({
+  ...OrchestrationRun.fields,
+  endedAt: Schema.NullOr(IsoDateTime),
+});
+export type OrchestrationAgentRun = typeof OrchestrationAgentRun.Type;
+
+export const OrchestrationListAgentRunsInput = Schema.Struct({
+  agentId: AgentId,
+});
+export type OrchestrationListAgentRunsInput = typeof OrchestrationListAgentRunsInput.Type;
+
+export const OrchestrationListAgentRunsResult = Schema.Struct({
+  runs: Schema.Array(OrchestrationAgentRun),
+});
+export type OrchestrationListAgentRunsResult = typeof OrchestrationListAgentRunsResult.Type;
+
+/** How many of a channel's newest messages a channel subscription starts with. */
+export const CHANNEL_SUBSCRIBE_MESSAGE_LIMIT = 200;
+
+export const OrchestrationSubscribeChannelInput = Schema.Struct({
+  channelId: ChannelId,
+});
+export type OrchestrationSubscribeChannelInput = typeof OrchestrationSubscribeChannelInput.Type;
+
+/**
+ * A channel subscription: the newest messages, then each message as it is
+ * posted and each change in a message's delivery. A message can arrive in
+ * both; clients keep one per id.
+ */
+export const OrchestrationChannelStreamItem = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("snapshot"),
+    messages: Schema.Array(OrchestrationChannelMessage),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("message"),
+    message: OrchestrationChannelMessage,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("delivery"),
+    messageId: MessageId,
+    delivery: ChannelMessageDelivery,
+  }),
+]);
+export type OrchestrationChannelStreamItem = typeof OrchestrationChannelStreamItem.Type;
+
 export const OrchestrationRpcSchemas = {
   dispatchCommand: {
     input: ClientOrchestrationCommand,
@@ -2230,6 +2844,14 @@ export const OrchestrationRpcSchemas = {
   subscribeShell: {
     input: OrchestrationSubscribeShellInput,
     output: OrchestrationShellStreamItem,
+  },
+  subscribeChannel: {
+    input: OrchestrationSubscribeChannelInput,
+    output: OrchestrationChannelStreamItem,
+  },
+  listAgentRuns: {
+    input: OrchestrationListAgentRunsInput,
+    output: OrchestrationListAgentRunsResult,
   },
 } as const;
 

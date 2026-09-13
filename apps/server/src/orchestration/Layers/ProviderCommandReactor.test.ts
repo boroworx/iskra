@@ -11,11 +11,16 @@ import {
   ProviderInstanceId,
   ProviderSetupError,
 } from "@t3tools/contracts";
+import { renderAgentDmPrompt } from "../runContext.ts";
 import { createModelSelection } from "@t3tools/shared/model";
 import {
+  AgentId,
+  agentDmThreadId,
   ApprovalRequestId,
+  ChannelId,
   CommandId,
   ComposerContextId,
+  type OrchestrationCommand,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EnvironmentId,
   EventId,
@@ -881,6 +886,148 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.status).toBe("starting");
     expect(thread?.session?.runtimeMode).toBe("approval-required");
+  });
+
+  it("starts an agent DM's provider session with the agent's role and no run restrictions", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+    const projectId = asProjectId("project-1");
+    const agentId = AgentId.make("agent-reviewer");
+    const threadId = agentDmThreadId(agentId);
+    const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" };
+    const dispatch = (command: OrchestrationCommand) =>
+      Effect.runPromise(harness.engine.dispatch(command));
+
+    await dispatch({
+      type: "agent.create",
+      commandId: CommandId.make("cmd-agent-reviewer"),
+      agentId,
+      projectId,
+      name: "reviewer",
+      roleTags: [],
+      rolePrompt: "You review changes.",
+      modelSelection,
+      capabilities: ["read"],
+      createdAt: now,
+    });
+    await dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("cmd-dm-reviewer"),
+      threadId,
+      projectId,
+      title: "@reviewer",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      branch: null,
+      worktreePath: null,
+      createdAt: now,
+    });
+    await dispatch({
+      type: "thread.turn.start",
+      commandId: CommandId.make("cmd-dm-turn"),
+      threadId,
+      message: {
+        messageId: asMessageId("dm-first-message"),
+        role: "user",
+        text: "Review the last commit.",
+        attachments: [],
+      },
+      // A seed matching the title would let an ordinary thread be renamed.
+      titleSeed: "@reviewer",
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      runtimeMode: "full-access",
+      createdAt: now,
+    });
+
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    const startInput = harness.startSession.mock.calls[0]?.[1];
+    expect(startInput).toMatchObject({
+      agentPrompt: renderAgentDmPrompt({ name: "reviewer", rolePrompt: "You review changes." }),
+    });
+    expect(startInput).not.toHaveProperty("run");
+    await harness.drain();
+    expect(harness.generateThreadTitle).not.toHaveBeenCalled();
+  });
+
+  it("starts a run thread's provider session with the run's read-only restrictions", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+    const projectId = asProjectId("project-1");
+    const threadId = ThreadId.make("thread-1");
+    const agentId = AgentId.make("agent-backend");
+    const channelId = ChannelId.make("channel-backend");
+    const trigger = {
+      messageId: asMessageId("channel-question"),
+      authorKind: "human" as const,
+      authorName: "user",
+      body: "@backend which API style do we use?",
+      createdAt: now,
+    };
+    const dispatch = (command: OrchestrationCommand) =>
+      Effect.runPromise(harness.engine.dispatch(command));
+
+    await dispatch({
+      type: "agent.create",
+      commandId: CommandId.make("cmd-agent-backend"),
+      agentId,
+      projectId,
+      name: "backend",
+      roleTags: [],
+      rolePrompt: "",
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" },
+      // The agent may write elsewhere; this conversation run still only reads.
+      capabilities: ["read", "write"],
+      createdAt: now,
+    });
+    await dispatch({
+      type: "channel.create",
+      commandId: CommandId.make("cmd-channel-backend"),
+      channelId,
+      projectId,
+      kind: "channel",
+      name: "backend",
+      memberAgentIds: [agentId],
+      createdAt: now,
+    });
+    await dispatch({
+      type: "channel.run.start",
+      commandId: CommandId.make("cmd-run-start"),
+      threadId,
+      channelId,
+      agentId,
+      triggerMessageId: trigger.messageId,
+      capabilities: ["read"],
+      context: {
+        agent: { id: agentId, name: "backend", rolePrompt: "" },
+        channel: { id: channelId, kind: "channel", name: "backend", topic: "" },
+        pinnedSpec: "",
+        wakeDepth: 30,
+        history: [],
+        trigger,
+      },
+      rendered: { systemPrompt: "You are @backend.", firstMessage: trigger.body },
+      startedAt: now,
+    });
+    await dispatch({
+      type: "thread.turn.start",
+      commandId: CommandId.make("cmd-run-turn-start"),
+      threadId,
+      message: {
+        messageId: asMessageId("run-first-message"),
+        role: "user",
+        text: trigger.body,
+        attachments: [],
+      },
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      runtimeMode: "approval-required",
+      createdAt: now,
+    });
+
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
+      run: { systemPrompt: "You are @backend.", capabilities: ["read"] },
+    });
   });
 
   effectIt.effect("projects inline context before sending the provider turn", () =>

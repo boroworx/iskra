@@ -1,10 +1,14 @@
 import {
+  CHANNEL_HUMAN_AUTHOR_ID,
+  CHANNEL_SYSTEM_AUTHOR_ID,
+  DEFAULT_CHANNEL_WAKE_DEPTH,
   EventId,
   MAX_SCRIPT_ID_LENGTH,
   SCRIPT_RUN_COMMAND_PATTERN,
   MessageId,
   ThreadLinkedPullRequest,
   UserInputRequestedPayload,
+  agentIdOfDmThread,
   isImportedAgentSessionMessageId,
   type OrchestrationCommand,
   type OrchestrationEvent,
@@ -36,6 +40,12 @@ import {
 } from "./Errors.ts";
 import {
   listThreadsByProjectId,
+  requireAgent,
+  requireAgentAbsent,
+  requireAgentNameAvailable,
+  requireChannel,
+  requireChannelAbsent,
+  requireValidChannelMembers,
   requireActiveProjectWorkspaceRootAbsent,
   requireProject,
   requireProjectAbsent,
@@ -44,7 +54,9 @@ import {
   requireThreadAbsent,
   requireThreadNotArchived,
 } from "./commandInvariants.ts";
+import { parseMentions } from "./mentions.ts";
 import { projectEvent } from "./projector.ts";
+import { decideWake } from "./wakeRouting.ts";
 import { threadHasQueuedTurnStart } from "./ThreadSettlementPolicy.ts";
 
 const isScriptRunCommand = Schema.is(SCRIPT_RUN_COMMAND_PATTERN);
@@ -370,6 +382,17 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         projectId: command.projectId,
       });
+      // An agent's DM exists only for a real agent, inside that agent's project.
+      const dmAgentId = agentIdOfDmThread(command.threadId);
+      if (dmAgentId !== null) {
+        const dmAgent = yield* requireAgent({ readModel, command, agentId: dmAgentId });
+        if (dmAgent.projectId !== command.projectId) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `A DM with @${dmAgent.name} belongs to that agent's own project.`,
+          });
+        }
+      }
       yield* requireThreadAbsent({
         readModel,
         command,
@@ -2018,6 +2041,514 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         },
       };
       return [unsettledEvent, activityAppendedEvent];
+    }
+
+    case "agent.create": {
+      yield* requireProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      yield* requireAgentAbsent({
+        readModel,
+        command,
+        agentId: command.agentId,
+      });
+      yield* requireAgentNameAvailable({
+        readModel,
+        command,
+        projectId: command.projectId,
+        name: command.name,
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "agent",
+          aggregateId: command.agentId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "agent.created",
+        payload: {
+          agentId: command.agentId,
+          projectId: command.projectId,
+          name: command.name,
+          avatar: command.avatar ?? null,
+          roleTags: command.roleTags,
+          rolePrompt: command.rolePrompt,
+          modelSelection: command.modelSelection,
+          capabilities: command.capabilities,
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "agent.update": {
+      const agent = yield* requireAgent({
+        readModel,
+        command,
+        agentId: command.agentId,
+      });
+      if (command.name !== undefined) {
+        yield* requireAgentNameAvailable({
+          readModel,
+          command,
+          projectId: agent.projectId,
+          name: command.name,
+          exceptAgentId: agent.id,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "agent",
+          aggregateId: command.agentId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "agent.updated",
+        payload: {
+          agentId: command.agentId,
+          ...(command.name !== undefined ? { name: command.name } : {}),
+          ...(command.avatar !== undefined ? { avatar: command.avatar } : {}),
+          ...(command.roleTags !== undefined ? { roleTags: command.roleTags } : {}),
+          ...(command.rolePrompt !== undefined ? { rolePrompt: command.rolePrompt } : {}),
+          ...(command.modelSelection !== undefined
+            ? { modelSelection: command.modelSelection }
+            : {}),
+          ...(command.capabilities !== undefined ? { capabilities: command.capabilities } : {}),
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "agent.archive": {
+      const agent = yield* requireAgent({
+        readModel,
+        command,
+        agentId: command.agentId,
+      });
+      if (agent.archivedAt !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Agent '${command.agentId}' is already archived.`,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "agent",
+          aggregateId: command.agentId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "agent.archived",
+        payload: {
+          agentId: command.agentId,
+          archivedAt: occurredAt,
+        },
+      };
+    }
+
+    case "agent.unarchive": {
+      const agent = yield* requireAgent({
+        readModel,
+        command,
+        agentId: command.agentId,
+      });
+      if (agent.archivedAt === null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Agent '${command.agentId}' is not archived.`,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "agent",
+          aggregateId: command.agentId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "agent.unarchived",
+        payload: {
+          agentId: command.agentId,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "channel.create": {
+      yield* requireProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      yield* requireChannelAbsent({
+        readModel,
+        command,
+        channelId: command.channelId,
+      });
+      yield* requireValidChannelMembers({
+        readModel,
+        command,
+        projectId: command.projectId,
+        kind: command.kind,
+        memberAgentIds: command.memberAgentIds,
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "channel",
+          aggregateId: command.channelId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "channel.created",
+        payload: {
+          channelId: command.channelId,
+          projectId: command.projectId,
+          kind: command.kind,
+          name: command.name,
+          topic: command.topic ?? "",
+          pinnedSpec: command.pinnedSpec ?? "",
+          wakeDepth: command.wakeDepth ?? DEFAULT_CHANNEL_WAKE_DEPTH,
+          memberAgentIds: command.memberAgentIds,
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "channel.update": {
+      const channel = yield* requireChannel({
+        readModel,
+        command,
+        channelId: command.channelId,
+      });
+      if (command.memberAgentIds !== undefined) {
+        yield* requireValidChannelMembers({
+          readModel,
+          command,
+          projectId: channel.projectId,
+          kind: channel.kind,
+          memberAgentIds: command.memberAgentIds,
+          exceptChannelId: channel.id,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "channel",
+          aggregateId: command.channelId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "channel.updated",
+        payload: {
+          channelId: command.channelId,
+          ...(command.name !== undefined ? { name: command.name } : {}),
+          ...(command.topic !== undefined ? { topic: command.topic } : {}),
+          ...(command.pinnedSpec !== undefined ? { pinnedSpec: command.pinnedSpec } : {}),
+          ...(command.wakeDepth !== undefined ? { wakeDepth: command.wakeDepth } : {}),
+          ...(command.memberAgentIds !== undefined
+            ? { memberAgentIds: command.memberAgentIds }
+            : {}),
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "channel.archive": {
+      const channel = yield* requireChannel({
+        readModel,
+        command,
+        channelId: command.channelId,
+      });
+      if (channel.archivedAt !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Channel '${command.channelId}' is already archived.`,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "channel",
+          aggregateId: command.channelId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "channel.archived",
+        payload: {
+          channelId: command.channelId,
+          archivedAt: occurredAt,
+        },
+      };
+    }
+
+    case "channel.unarchive": {
+      const channel = yield* requireChannel({
+        readModel,
+        command,
+        channelId: command.channelId,
+      });
+      if (channel.archivedAt === null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Channel '${command.channelId}' is not archived.`,
+        });
+      }
+      // Members may have been archived, or gained another DM, while this channel was archived.
+      yield* requireValidChannelMembers({
+        readModel,
+        command,
+        projectId: channel.projectId,
+        kind: channel.kind,
+        memberAgentIds: channel.memberAgentIds,
+        exceptChannelId: channel.id,
+      });
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "channel",
+          aggregateId: command.channelId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "channel.unarchived",
+        payload: {
+          channelId: command.channelId,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "channel.message.post": {
+      const channel = yield* requireChannel({
+        readModel,
+        command,
+        channelId: command.channelId,
+      });
+      if (channel.archivedAt !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Channel '${command.channelId}' is archived and cannot receive messages.`,
+        });
+      }
+      const projectAgents = (readModel.agents ?? []).filter(
+        (agent) => agent.projectId === channel.projectId,
+      );
+      const mentions = parseMentions(command.body, projectAgents);
+      const channelEventBase = () =>
+        withEventBase({
+          aggregateKind: "channel",
+          aggregateId: command.channelId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        });
+      const messageEvent: PlannedOrchestrationEvent = {
+        ...(yield* channelEventBase()),
+        type: "channel.message-posted",
+        payload: {
+          channelId: command.channelId,
+          messageId: command.messageId,
+          authorKind: "human",
+          authorId: CHANNEL_HUMAN_AUTHOR_ID,
+          body: command.body,
+          createdAt: command.createdAt,
+          ...(mentions.length > 0 ? { mentions } : {}),
+        },
+      };
+
+      // Invariant 3: only a mention, or a message in an agent's DM, wakes anyone.
+      const targets = channel.kind === "dm" ? channel.memberAgentIds : mentions;
+      const events: PlannedOrchestrationEvent[] = [messageEvent];
+      let newRuns = 0;
+      for (const agentId of targets) {
+        const agent = projectAgents.find((candidate) => candidate.id === agentId);
+        if (agent === undefined) {
+          continue;
+        }
+        const decision = decideWake({ readModel, channel, agent, newRuns });
+        if (decision.kind === "refuse") {
+          // Invariant 4: a refused wake is said in the channel, never dropped silently.
+          events.push({
+            ...(yield* channelEventBase()),
+            type: "channel.message-posted",
+            payload: {
+              channelId: command.channelId,
+              messageId: MessageId.make(`${command.messageId}:system:${agent.id}`),
+              authorKind: "system",
+              authorId: CHANNEL_SYSTEM_AUTHOR_ID,
+              body: decision.reason,
+              createdAt: command.createdAt,
+            },
+          });
+          continue;
+        }
+        if (decision.liveRunThreadId === undefined) {
+          newRuns += 1;
+        }
+        events.push({
+          ...(yield* channelEventBase()),
+          type: "channel.agent-wake-requested",
+          payload: {
+            channelId: command.channelId,
+            agentId: agent.id,
+            triggerMessageId: command.messageId,
+            requestedAt: command.createdAt,
+            ...(decision.liveRunThreadId !== undefined
+              ? { liveRunThreadId: decision.liveRunThreadId }
+              : {}),
+          },
+        });
+      }
+      return events.length === 1 ? messageEvent : events;
+    }
+
+    case "channel.agent.wake": {
+      const channel = yield* requireChannel({
+        readModel,
+        command,
+        channelId: command.channelId,
+      });
+      const agent = yield* requireAgent({
+        readModel,
+        command,
+        agentId: command.agentId,
+      });
+      if (channel.archivedAt !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Channel '${channel.id}' is archived and cannot wake agents.`,
+        });
+      }
+      const decision = decideWake({ readModel, channel, agent, newRuns: 0 });
+      if (decision.kind === "refuse") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: decision.reason,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "channel",
+          aggregateId: command.channelId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "channel.agent-wake-requested",
+        payload: {
+          channelId: command.channelId,
+          agentId: command.agentId,
+          triggerMessageId: command.triggerMessageId,
+          requestedAt: command.createdAt,
+          ...(decision.liveRunThreadId !== undefined
+            ? { liveRunThreadId: decision.liveRunThreadId }
+            : {}),
+        },
+      };
+    }
+
+    case "channel.run.start": {
+      yield* requireChannel({
+        readModel,
+        command,
+        channelId: command.channelId,
+      });
+      yield* requireAgent({
+        readModel,
+        command,
+        agentId: command.agentId,
+      });
+      // Invariant 1: a conversation run never writes. Writing needs a card.
+      if (command.capabilities.some((capability) => capability !== "read")) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A channel conversation run is read-only; writing requires a card.",
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "channel",
+          aggregateId: command.channelId,
+          occurredAt: command.startedAt,
+          commandId: command.commandId,
+        })),
+        type: "channel.run-started",
+        payload: {
+          threadId: command.threadId,
+          channelId: command.channelId,
+          agentId: command.agentId,
+          triggerMessageId: command.triggerMessageId,
+          capabilities: command.capabilities,
+          context: command.context,
+          rendered: command.rendered,
+          startedAt: command.startedAt,
+        },
+      };
+    }
+
+    case "channel.delivery.update": {
+      yield* requireChannel({
+        readModel,
+        command,
+        channelId: command.channelId,
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "channel",
+          aggregateId: command.channelId,
+          occurredAt: command.updatedAt,
+          commandId: command.commandId,
+        })),
+        type: "channel.delivery-updated",
+        payload: {
+          channelId: command.channelId,
+          agentId: command.agentId,
+          messageIds: command.messageIds,
+          status: command.status,
+          runThreadId: command.runThreadId,
+          updatedAt: command.updatedAt,
+        },
+      };
+    }
+
+    case "channel.message.agent.post": {
+      const channel = yield* requireChannel({
+        readModel,
+        command,
+        channelId: command.channelId,
+      });
+      yield* requireAgent({
+        readModel,
+        command,
+        agentId: command.agentId,
+      });
+      if (channel.archivedAt !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Channel '${command.channelId}' is archived and cannot receive messages.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "channel",
+          aggregateId: command.channelId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "channel.message-posted",
+        payload: {
+          channelId: command.channelId,
+          messageId: command.messageId,
+          authorKind: "agent",
+          authorId: command.agentId,
+          body: command.body,
+          createdAt: command.createdAt,
+          runThreadId: command.runThreadId,
+        },
+      };
     }
 
     default: {

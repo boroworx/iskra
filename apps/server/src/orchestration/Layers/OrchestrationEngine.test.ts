@@ -4,7 +4,9 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import {
+  AgentId,
   ApprovalRequestId,
+  ChannelId,
   EventId,
   CheckpointRef,
   CommandId,
@@ -20,6 +22,7 @@ import {
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it as effectIt } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Metric from "effect/Metric";
@@ -33,6 +36,8 @@ import { PersistenceSqlError } from "../../persistence/Errors.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
 import * as OrchestrationCommandReceipts from "../../persistence/Services/OrchestrationCommandReceipts.ts";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
+import { ProjectionChannelRepositoryLive } from "../../persistence/Layers/ProjectionChannels.ts";
+import { ProjectionChannelRepository } from "../../persistence/Services/ProjectionChannels.ts";
 import {
   makeSqlitePersistenceLive,
   SqlitePersistenceMemory,
@@ -48,6 +53,7 @@ import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQu
 import * as ThreadBackgroundLiveness from "../ThreadBackgroundLiveness.ts";
 import * as ThreadPlanProgress from "../ThreadPlanProgress.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
+import { createEmptyReadModel, projectEvent } from "../projector.ts";
 import {
   OrchestrationProjectionPipeline,
   type OrchestrationProjectionPipelineShape,
@@ -76,6 +82,7 @@ function makeOrchestrationLayer(
       Layer.provide(OrchestrationProjectionPipelineLive),
     ),
     OrchestrationProjectionSnapshotQueryLive,
+    ProjectionChannelRepositoryLive,
   ).pipe(
     Layer.provideMerge(ThreadBackgroundLiveness.layer),
     Layer.provide(ThreadPlanProgress.layer),
@@ -107,6 +114,9 @@ async function createOrchestrationSystem(
   return {
     engine,
     readModel: () => runtime.runPromise(snapshotQuery.getSnapshot()),
+    commandReadModel: () => runtime.runPromise(snapshotQuery.getCommandReadModel()),
+    shellSnapshot: () => runtime.runPromise(snapshotQuery.getShellSnapshot()),
+    channelRepository: () => runtime.runPromise(Effect.service(ProjectionChannelRepository)),
     readThread: (threadId: ThreadId) =>
       runtime.runPromise(snapshotQuery.getThreadDetailById(threadId)),
     run: <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect),
@@ -420,6 +430,12 @@ describe("OrchestrationEngine", () => {
       Layer.provide(
         Layer.succeed(ProjectionSnapshotQuery, {
           getUserInputActivity: () => Effect.die("unused"),
+          getRunByThreadId: () => Effect.die("unused"),
+          getAgentShellById: () => Effect.die("unused"),
+          getChannelShellById: () => Effect.die("unused"),
+          listChannelMessages: () => Effect.die("unused"),
+          listRunsByAgent: () => Effect.die("unused"),
+          getAgentById: () => Effect.die("unused"),
           getCommandReadModel: () => Effect.succeed(commandReadModel),
           getSnapshot: () =>
             Effect.sync(() => {
@@ -849,6 +865,304 @@ describe("OrchestrationEngine", () => {
     ).toBe("Archive me");
 
     await system.dispose();
+  });
+
+  it("keeps agents across a restart, matching a replay of the event log", async () => {
+    const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-agents-"));
+    const databasePath = NodePath.join(directory, "state.sqlite");
+    const projectId = asProjectId("agents-project");
+    const createBackendAgent = (id: string): OrchestrationCommand => ({
+      type: "agent.create",
+      commandId: CommandId.make(`cmd-${id}`),
+      agentId: AgentId.make(id),
+      projectId,
+      name: "backend",
+      roleTags: ["api"],
+      rolePrompt: "",
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-haiku-4-5",
+      },
+      capabilities: ["read"],
+      createdAt: now(),
+    });
+    let system = await createOrchestrationSystem(databasePath);
+    try {
+      await system.run(
+        system.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.make("cmd-agents-project"),
+          projectId,
+          title: "Agents",
+          workspaceRoot: "/tmp/agents-project",
+          createdAt: now(),
+        }),
+      );
+      await system.run(system.engine.dispatch(createBackendAgent("agent-backend")));
+      await system.run(
+        system.engine.dispatch({
+          type: "agent.update",
+          commandId: CommandId.make("cmd-agent-backend-update"),
+          agentId: AgentId.make("agent-backend"),
+          rolePrompt: "Own the API.",
+        }),
+      );
+      await system.dispose();
+
+      system = await createOrchestrationSystem(databasePath);
+      const restored = await system.commandReadModel();
+      const events = await system.run(
+        Stream.runCollect(system.engine.readEvents(0)).pipe(
+          Effect.map((chunk): OrchestrationEvent[] => Array.from(chunk)),
+        ),
+      );
+      const replayed = await system.run(
+        Effect.gen(function* () {
+          let model = createEmptyReadModel(now());
+          for (const event of events) {
+            model = yield* projectEvent(model, event);
+          }
+          return model;
+        }),
+      );
+
+      expect(restored.agents).toEqual(replayed.agents);
+      expect(restored.agents).toMatchObject([
+        { id: "agent-backend", name: "backend", rolePrompt: "Own the API.", archivedAt: null },
+      ]);
+
+      // The restarted decider still enforces unique names against persisted agents.
+      const duplicate = await system.run(
+        Effect.exit(system.engine.dispatch(createBackendAgent("agent-backend-2"))),
+      );
+      expect(Exit.isFailure(duplicate)).toBe(true);
+    } finally {
+      await system.dispose();
+      await NodeFSP.rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("pages channel messages and hands agents only the newest wake-depth of them", async () => {
+    const system = await createOrchestrationSystem();
+    const projectId = asProjectId("channels-project");
+    const channelId = ChannelId.make("channel-general");
+    const bodies = (messages: ReadonlyArray<{ readonly body: string }>) =>
+      messages.map((message) => message.body);
+    try {
+      await system.run(
+        system.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.make("cmd-channels-project"),
+          projectId,
+          title: "Channels",
+          workspaceRoot: "/tmp/channels-project",
+          createdAt: now(),
+        }),
+      );
+      await system.run(
+        system.engine.dispatch({
+          type: "channel.create",
+          commandId: CommandId.make("cmd-channel-general"),
+          channelId,
+          projectId,
+          kind: "channel",
+          name: "general",
+          wakeDepth: 3,
+          memberAgentIds: [],
+          createdAt: now(),
+        }),
+      );
+      for (const index of [1, 2, 3, 4, 5]) {
+        await system.run(
+          system.engine.dispatch({
+            type: "channel.message.post",
+            commandId: CommandId.make(`cmd-message-${index}`),
+            channelId,
+            messageId: MessageId.make(`message-${index}`),
+            body: `message ${index}`,
+            createdAt: now(),
+          }),
+        );
+      }
+      const channels = await system.channelRepository();
+
+      const newest = await system.run(channels.listMessages({ channelId, limit: 2 }));
+      expect(bodies(newest)).toEqual(["message 4", "message 5"]);
+      const older = await system.run(
+        channels.listMessages({ channelId, beforeSequence: newest[0]?.sequence ?? 0, limit: 2 }),
+      );
+      expect(bodies(older)).toEqual(["message 2", "message 3"]);
+
+      expect(bodies(await system.run(channels.listWakeHistory({ channelId })))).toEqual([
+        "message 3",
+        "message 4",
+        "message 5",
+      ]);
+      await system.run(
+        system.engine.dispatch({
+          type: "channel.update",
+          commandId: CommandId.make("cmd-channel-general-depth"),
+          channelId,
+          wakeDepth: 1,
+        }),
+      );
+      expect(bodies(await system.run(channels.listWakeHistory({ channelId })))).toEqual([
+        "message 5",
+      ]);
+    } finally {
+      await system.dispose();
+    }
+  });
+
+  it("lists agents and channels in the shell with presence from their live runs", async () => {
+    const system = await createOrchestrationSystem();
+    const projectId = asProjectId("presence-project");
+    const agentId = AgentId.make("agent-presence");
+    const channelId = ChannelId.make("channel-presence");
+    const threadId = ThreadId.make("run-presence");
+    const modelSelection = {
+      instanceId: ProviderInstanceId.make("claudeAgent"),
+      model: "claude-haiku-4-5",
+    };
+    const presence = async () =>
+      (await system.shellSnapshot()).agents?.find((agent) => agent.id === agentId)?.presence;
+    const setSession = (status: "running" | "stopped") =>
+      system.run(
+        system.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.make(`cmd-presence-session-${status}`),
+          threadId,
+          session: {
+            threadId,
+            status,
+            providerName: "claudeAgent",
+            runtimeMode: "approval-required",
+            activeTurnId: status === "running" ? TurnId.make("turn-presence") : null,
+            lastError: null,
+            updatedAt: now(),
+          },
+          createdAt: now(),
+        }),
+      );
+    try {
+      await system.run(
+        system.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.make("cmd-presence-project"),
+          projectId,
+          title: "Presence",
+          workspaceRoot: "/tmp/presence-project",
+          createdAt: now(),
+        }),
+      );
+      await system.run(
+        system.engine.dispatch({
+          type: "agent.create",
+          commandId: CommandId.make("cmd-presence-agent"),
+          agentId,
+          projectId,
+          name: "backend",
+          roleTags: [],
+          rolePrompt: "",
+          modelSelection,
+          capabilities: ["read"],
+          createdAt: now(),
+        }),
+      );
+      await system.run(
+        system.engine.dispatch({
+          type: "channel.create",
+          commandId: CommandId.make("cmd-presence-channel"),
+          channelId,
+          projectId,
+          kind: "channel",
+          name: "general",
+          memberAgentIds: [agentId],
+          createdAt: now(),
+        }),
+      );
+
+      expect((await system.shellSnapshot()).channels).toMatchObject([
+        { id: channelId, name: "general", memberAgentIds: [agentId] },
+      ]);
+      expect(await presence()).toBe("idle");
+
+      await system.run(
+        system.engine.dispatch({
+          type: "channel.run.start",
+          commandId: CommandId.make("cmd-presence-run"),
+          threadId,
+          channelId,
+          agentId,
+          triggerMessageId: asMessageId("presence-trigger"),
+          capabilities: ["read"],
+          context: {
+            agent: { id: agentId, name: "backend", rolePrompt: "" },
+            channel: { id: channelId, kind: "channel", name: "general", topic: "" },
+            pinnedSpec: "",
+            wakeDepth: 30,
+            history: [],
+            trigger: {
+              messageId: asMessageId("presence-trigger"),
+              authorKind: "human",
+              authorName: "user",
+              body: "hi",
+              createdAt: now(),
+            },
+          },
+          rendered: { systemPrompt: "", firstMessage: "hi" },
+          startedAt: now(),
+        }),
+      );
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make("cmd-presence-thread"),
+          threadId,
+          projectId,
+          title: "@backend in #general",
+          modelSelection,
+          runtimeMode: "approval-required",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          branch: null,
+          worktreePath: null,
+          createdAt: now(),
+        }),
+      );
+      await setSession("running");
+      expect(await presence()).toBe("running");
+
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.activity.append",
+          commandId: CommandId.make("cmd-presence-question"),
+          threadId,
+          createdAt: now(),
+          activity: {
+            id: EventId.make("presence-question"),
+            kind: "user-input.requested",
+            summary: "User input requested",
+            tone: "info",
+            turnId: TurnId.make("turn-presence"),
+            createdAt: now(),
+            payload: {
+              requestId: ApprovalRequestId.make("presence-request"),
+              responseMode: "message",
+              questions: [
+                { id: "0", header: "Question", question: "Which API style?", options: [] },
+              ],
+            },
+          },
+        }),
+      );
+      expect(await presence()).toBe("blocked");
+
+      // The run ends with its session, even with the question still open.
+      await setSession("stopped");
+      expect(await presence()).toBe("idle");
+    } finally {
+      await system.dispose();
+    }
   });
 
   it("replays append-only events from sequence", async () => {

@@ -1,4 +1,6 @@
 import type {
+  OrchestrationAgent,
+  OrchestrationChannel,
   OrchestrationEvent,
   OrchestrationProject,
   OrchestrationReadModel,
@@ -9,6 +11,7 @@ import type {
 } from "@t3tools/contracts";
 import {
   isImportedAgentSessionMessageId,
+  isRunEndingSessionStatus,
   OrchestrationCheckpointSummary,
   OrchestrationMessage,
   OrchestrationSession,
@@ -26,6 +29,15 @@ import * as Predicate from "effect/Predicate";
 
 import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from "./Errors.ts";
 import {
+  AgentArchivedPayload,
+  AgentCreatedPayload,
+  AgentUnarchivedPayload,
+  AgentUpdatedPayload,
+  ChannelArchivedPayload,
+  ChannelCreatedPayload,
+  ChannelRunStartedPayload,
+  ChannelUnarchivedPayload,
+  ChannelUpdatedPayload,
   MessageSentPayloadSchema,
   ProjectCreatedPayload,
   ProjectDeletedPayload,
@@ -305,11 +317,30 @@ function compareThreadActivities(
   return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
 }
 
+function updateAgent(
+  agents: ReadonlyArray<OrchestrationAgent>,
+  agentId: string,
+  patch: Partial<Omit<OrchestrationAgent, "id" | "projectId">>,
+): ReadonlyArray<OrchestrationAgent> {
+  return agents.map((agent) => (agent.id === agentId ? { ...agent, ...patch } : agent));
+}
+
+function updateChannel(
+  channels: ReadonlyArray<OrchestrationChannel>,
+  channelId: string,
+  patch: Partial<Omit<OrchestrationChannel, "id" | "projectId" | "kind">>,
+): ReadonlyArray<OrchestrationChannel> {
+  return channels.map((channel) => (channel.id === channelId ? { ...channel, ...patch } : channel));
+}
+
 export function createEmptyReadModel(nowIso: string): OrchestrationReadModel {
   return {
     snapshotSequence: 0,
     projects: [],
     threads: [],
+    agents: [],
+    channels: [],
+    liveRuns: [],
     updatedAt: nowIso,
   };
 }
@@ -809,24 +840,32 @@ export function projectEvent(
           event.type,
           "payload",
         );
-        const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
-        if (!thread) {
-          return nextBase;
-        }
-
         const session: OrchestrationSession = yield* decodeForEvent(
           OrchestrationSession,
           payload.session,
           event.type,
           "session",
         );
+        // A run ends when its session stops or fails; its agent may then wake again.
+        const base = isRunEndingSessionStatus(session.status)
+          ? {
+              ...nextBase,
+              liveRuns: (nextBase.liveRuns ?? []).filter(
+                (run) => run.threadId !== payload.threadId,
+              ),
+            }
+          : nextBase;
+        const thread = base.threads.find((entry) => entry.id === payload.threadId);
+        if (!thread) {
+          return base;
+        }
 
         // Leaving the "running" session status is the turn-end signal: settle
         // a still-running latest turn so its duration reflects the whole turn.
         const settledTurnState = settledTurnStateForSessionStatus(session.status);
         return {
-          ...nextBase,
-          threads: updateThread(nextBase.threads, payload.threadId, {
+          ...base,
+          threads: updateThread(base.threads, payload.threadId, {
             session,
             latestTurn:
               session.status === "running" && session.activeTurnId !== null
@@ -1055,6 +1094,159 @@ export function projectEvent(
           };
         }),
       );
+
+    case "agent.created":
+      return decodeForEvent(AgentCreatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const agents = nextBase.agents ?? [];
+          const nextAgent: OrchestrationAgent = {
+            id: payload.agentId,
+            projectId: payload.projectId,
+            name: payload.name,
+            avatar: payload.avatar,
+            roleTags: payload.roleTags,
+            rolePrompt: payload.rolePrompt,
+            modelSelection: payload.modelSelection,
+            capabilities: payload.capabilities,
+            createdAt: payload.createdAt,
+            updatedAt: payload.updatedAt,
+            archivedAt: null,
+          };
+          return {
+            ...nextBase,
+            agents: agents.some((agent) => agent.id === payload.agentId)
+              ? agents.map((agent) => (agent.id === payload.agentId ? nextAgent : agent))
+              : [...agents, nextAgent],
+          };
+        }),
+      );
+
+    case "agent.updated":
+      return decodeForEvent(AgentUpdatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          agents: updateAgent(nextBase.agents ?? [], payload.agentId, {
+            ...(payload.name !== undefined ? { name: payload.name } : {}),
+            ...(payload.avatar !== undefined ? { avatar: payload.avatar } : {}),
+            ...(payload.roleTags !== undefined ? { roleTags: payload.roleTags } : {}),
+            ...(payload.rolePrompt !== undefined ? { rolePrompt: payload.rolePrompt } : {}),
+            ...(payload.modelSelection !== undefined
+              ? { modelSelection: payload.modelSelection }
+              : {}),
+            ...(payload.capabilities !== undefined ? { capabilities: payload.capabilities } : {}),
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "agent.archived":
+      return decodeForEvent(AgentArchivedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          agents: updateAgent(nextBase.agents ?? [], payload.agentId, {
+            archivedAt: payload.archivedAt,
+            updatedAt: payload.archivedAt,
+          }),
+        })),
+      );
+
+    case "agent.unarchived":
+      return decodeForEvent(AgentUnarchivedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          agents: updateAgent(nextBase.agents ?? [], payload.agentId, {
+            archivedAt: null,
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "channel.created":
+      return decodeForEvent(ChannelCreatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const channels = nextBase.channels ?? [];
+          const nextChannel: OrchestrationChannel = {
+            id: payload.channelId,
+            projectId: payload.projectId,
+            kind: payload.kind,
+            name: payload.name,
+            topic: payload.topic,
+            pinnedSpec: payload.pinnedSpec,
+            wakeDepth: payload.wakeDepth,
+            memberAgentIds: payload.memberAgentIds,
+            createdAt: payload.createdAt,
+            updatedAt: payload.updatedAt,
+            archivedAt: null,
+          };
+          return {
+            ...nextBase,
+            channels: channels.some((channel) => channel.id === payload.channelId)
+              ? channels.map((channel) =>
+                  channel.id === payload.channelId ? nextChannel : channel,
+                )
+              : [...channels, nextChannel],
+          };
+        }),
+      );
+
+    case "channel.updated":
+      return decodeForEvent(ChannelUpdatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          channels: updateChannel(nextBase.channels ?? [], payload.channelId, {
+            ...(payload.name !== undefined ? { name: payload.name } : {}),
+            ...(payload.topic !== undefined ? { topic: payload.topic } : {}),
+            ...(payload.pinnedSpec !== undefined ? { pinnedSpec: payload.pinnedSpec } : {}),
+            ...(payload.wakeDepth !== undefined ? { wakeDepth: payload.wakeDepth } : {}),
+            ...(payload.memberAgentIds !== undefined
+              ? { memberAgentIds: payload.memberAgentIds }
+              : {}),
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "channel.archived":
+      return decodeForEvent(ChannelArchivedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          channels: updateChannel(nextBase.channels ?? [], payload.channelId, {
+            archivedAt: payload.archivedAt,
+            updatedAt: payload.archivedAt,
+          }),
+        })),
+      );
+
+    case "channel.unarchived":
+      return decodeForEvent(ChannelUnarchivedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          channels: updateChannel(nextBase.channels ?? [], payload.channelId, {
+            archivedAt: null,
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "channel.run-started":
+      return decodeForEvent(ChannelRunStartedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          liveRuns: [
+            ...(nextBase.liveRuns ?? []).filter((run) => run.threadId !== payload.threadId),
+            {
+              threadId: payload.threadId,
+              channelId: payload.channelId,
+              agentId: payload.agentId,
+              startedAt: payload.startedAt,
+            },
+          ],
+        })),
+      );
+
+    // Channel messages are paged from their projection, never held in the read model.
+    case "channel.message-posted":
+      return Effect.succeed(nextBase);
 
     default:
       return Effect.succeed(nextBase);

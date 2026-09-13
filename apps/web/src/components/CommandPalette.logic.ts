@@ -61,7 +61,7 @@ export function browseInputEndPaddingClass(input: {
 export type SearchOverlayMode = "command" | "files" | "content";
 
 export type CommandPaletteOpenIntent =
-  | { readonly kind: "add-project" | "new-thread-in" }
+  | { readonly kind: "add-project" }
   | {
       readonly kind: "search";
       readonly query: string;
@@ -83,7 +83,6 @@ export type CommandPaletteUiAction =
       readonly linkedThreads?: CommandPaletteLinkedThreads;
     }
   | { readonly _tag: "OpenAddProject" }
-  | { readonly _tag: "OpenNewThreadIn" }
   | { readonly _tag: "ClearOpenIntent" };
 
 export function reduceCommandPaletteUiState(
@@ -111,8 +110,6 @@ export function reduceCommandPaletteUiState(
       };
     case "OpenAddProject":
       return { open: true, mode: "command", openIntent: { kind: "add-project" } };
-    case "OpenNewThreadIn":
-      return { open: true, mode: "command", openIntent: { kind: "new-thread-in" } };
     case "ClearOpenIntent":
       return state.openIntent ? { ...state, openIntent: null } : state;
   }
@@ -524,7 +521,7 @@ export function buildRootGroups(input: {
   if (input.recentThreadItems.length > 0) {
     groups.push({
       value: "recent-threads",
-      label: "Recent Threads",
+      label: "Recent DMs",
       items: input.recentThreadItems,
     });
   }
@@ -534,7 +531,7 @@ export function buildRootGroups(input: {
 export function getCommandPaletteInputPlaceholder(mode: CommandPaletteMode): string {
   switch (mode) {
     case "root":
-      return "Search commands, projects, and threads...";
+      return "Search commands, projects, and DMs...";
     case "root-browse":
       return "Enter project path (e.g. ~/projects/my-app)";
     case "submenu":

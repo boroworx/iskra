@@ -45,7 +45,7 @@ describe("DesktopEnvironment", () => {
       const environment = yield* makeEnvironment(
         {},
         {
-          T3CODE_HOME: " /tmp/t3 ",
+          ISKRA_HOME: " /tmp/t3 ",
           T3CODE_COMMIT_HASH: " 0123456789abcdef ",
           T3CODE_PORT: "4949",
           VITE_DEV_SERVER_URL: "http://localhost:5173",
@@ -73,9 +73,9 @@ describe("DesktopEnvironment", () => {
       assert.equal(environment.serverRoot, "/repo");
       assert.equal(environment.backendEntryPath, "/repo/apps/server/dist/bin.mjs");
       assert.equal(environment.backendCwd, "/repo");
-      assert.equal(environment.appUserModelId, "com.t3tools.t3code.dev");
-      assert.equal(environment.linuxWmClass, "t3code-dev");
-      assert.equal(environment.linuxDesktopEntryName, "com.t3tools.T3Code.Development.desktop");
+      assert.equal(environment.appUserModelId, "sh.iskra.app.dev");
+      assert.equal(environment.linuxWmClass, "iskra-dev");
+      assert.equal(environment.linuxDesktopEntryName, "sh.iskra.Iskra.Development.desktop");
       assert.deepEqual(
         Option.map(environment.devServerUrl, (url) => url.href),
         Option.some("http://localhost:5173/"),
@@ -93,7 +93,7 @@ describe("DesktopEnvironment", () => {
       const environment = yield* makeEnvironment(
         {},
         {
-          T3CODE_HOME: "/tmp/t3",
+          ISKRA_HOME: "/tmp/t3",
         },
       );
 
@@ -132,7 +132,7 @@ describe("DesktopEnvironment", () => {
         resourcesPath: "/tmp/.mount_t3code/resources",
       });
 
-      assert.equal(environment.linuxDesktopEntryName, "com.t3tools.T3Code.desktop");
+      assert.equal(environment.linuxDesktopEntryName, "sh.iskra.Iskra.desktop");
     }),
   );
 
@@ -144,8 +144,8 @@ describe("DesktopEnvironment", () => {
       );
       const production = yield* makeEnvironment();
 
-      assert.equal(development.stateDir, "/Users/alice/.t3/dev");
-      assert.equal(production.stateDir, "/Users/alice/.t3/userdata");
+      assert.equal(development.stateDir, "/Users/alice/.iskra/dev");
+      assert.equal(production.stateDir, "/Users/alice/.iskra/userdata");
     }),
   );
 

@@ -44,6 +44,8 @@ import {
   WS_METHODS,
   WsRpcGroup,
   EditorId,
+  AgentId,
+  ChannelId,
 } from "@t3tools/contracts";
 import {
   computeDpopAccessTokenHash,
@@ -995,6 +997,7 @@ const buildAppUnderTest = (options?: {
           searchThreads: () => Effect.succeed({ matches: [] }),
           getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 0 }),
           getProjectShellById: () => Effect.succeed(Option.none()),
+          getRunByThreadId: () => Effect.succeed(Option.none()),
           getThreadShellById: () => Effect.succeed(Option.none()),
           getThreadDetailById: () => Effect.succeed(Option.none()),
           getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
@@ -4300,7 +4303,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  for (const desktopOrigin of ["t3code://app", "t3code-dev://app"]) {
+  for (const desktopOrigin of ["iskra://app", "iskra-dev://app"]) {
     it.effect(`allows credentialed preflights from ${desktopOrigin} in development`, () =>
       Effect.gen(function* () {
         yield* buildAppUnderTest({
@@ -8500,6 +8503,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             projectionSnapshotQuery: {
               getThreadDetailSnapshot: () =>
                 Effect.succeed(Option.some({ snapshotSequence: 1, thread })),
+              getRunByThreadId: () => Effect.succeed(Option.none()),
               getThreadShellById: (threadId) =>
                 Effect.succeed(
                   Option.some({
@@ -9648,6 +9652,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             },
           },
           projectionSnapshotQuery: {
+            getRunByThreadId: () => Effect.succeed(Option.none()),
             getThreadShellById: (threadId) =>
               Effect.sync(() => {
                 shellFetches.push(threadId);
@@ -9678,6 +9683,194 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(collected[2]?.kind, "synchronized");
       assert.equal(shellFetches.filter((id) => id === busyThreadId).length, 1);
       assert.equal(replayLimit, 50);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("subscribeShell sends agent and channel updates only to subscribers that ask", () =>
+    Effect.gen(function* () {
+      const now = "2026-01-01T00:00:00.000Z";
+      const projectId = ProjectId.make("project-agent-channels");
+      const agentId = AgentId.make("agent-shell");
+      const channelId = ChannelId.make("channel-shell");
+      const threadId = ThreadId.make("thread-shell");
+      const eventBase = {
+        occurredAt: now,
+        commandId: null,
+        causationEventId: null,
+        correlationId: null,
+        metadata: {},
+        payload: {} as never,
+      };
+      const events: ReadonlyArray<OrchestrationEvent> = [
+        {
+          ...eventBase,
+          sequence: 1,
+          eventId: EventId.make("event-agent"),
+          aggregateKind: "agent",
+          aggregateId: agentId,
+          type: "agent.created",
+        },
+        {
+          ...eventBase,
+          sequence: 2,
+          eventId: EventId.make("event-channel"),
+          aggregateKind: "channel",
+          aggregateId: channelId,
+          type: "channel.created",
+        },
+        {
+          ...eventBase,
+          sequence: 3,
+          eventId: EventId.make("event-thread"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          type: "thread.created",
+        },
+      ];
+
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            latestSequence: Effect.succeed(3),
+            readEvents: () => Stream.fromIterable(events),
+          },
+          projectionSnapshotQuery: {
+            getAgentShellById: () =>
+              Effect.succeed(
+                Option.some({
+                  id: agentId,
+                  projectId,
+                  name: "backend",
+                  avatar: null,
+                  roleTags: [],
+                  modelSelection: {
+                    instanceId: ProviderInstanceId.make("claudeAgent"),
+                    model: "claude-haiku-4-5",
+                  },
+                  presence: "running" as const,
+                }),
+              ),
+            getChannelShellById: () =>
+              Effect.succeed(
+                Option.some({
+                  id: channelId,
+                  projectId,
+                  kind: "channel" as const,
+                  name: "general",
+                  topic: "",
+                  memberAgentIds: [agentId],
+                }),
+              ),
+            getRunByThreadId: () => Effect.succeed(Option.none()),
+            getThreadShellById: (id) =>
+              Effect.succeed(Option.some(makeDefaultOrchestrationThreadShell({ id }))),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const subscribeKinds = (includeAgentChannels: boolean, count: number) =>
+        Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.subscribeShell]({
+              afterSequence: 0,
+              requestCompletionMarker: true,
+              ...(includeAgentChannels ? { includeAgentChannels: true } : {}),
+            }).pipe(Stream.take(count), Stream.runCollect),
+          ),
+        ).pipe(Effect.map((items) => Array.from(items, (item) => item.kind)));
+
+      // A client that does not ask, such as an older build, never sees kinds it cannot decode.
+      assert.deepEqual(yield* subscribeKinds(false, 2), ["thread-upserted", "synchronized"]);
+      assert.deepEqual(yield* subscribeKinds(true, 4), [
+        "agent-upserted",
+        "channel-upserted",
+        "thread-upserted",
+        "synchronized",
+      ]);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("subscribeChannel sends a channel's recent messages, then messages posted to it", () =>
+    Effect.gen(function* () {
+      const now = "2026-01-01T00:00:00.000Z";
+      const channelId = ChannelId.make("channel-general");
+      const liveEvents = yield* PubSub.unbounded<OrchestrationEvent>();
+      const posted = (sequence: number, postedTo: ChannelId, body: string) =>
+        ({
+          sequence,
+          eventId: EventId.make(`event-posted-${sequence}`),
+          aggregateKind: "channel",
+          aggregateId: postedTo,
+          occurredAt: now,
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          type: "channel.message-posted",
+          payload: {
+            channelId: postedTo,
+            messageId: MessageId.make(`message-${sequence}`),
+            authorKind: "human",
+            authorId: "human",
+            body,
+            createdAt: now,
+          },
+        }) satisfies OrchestrationEvent;
+
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            streamDomainEvents: Stream.fromPubSub(liveEvents),
+          },
+          projectionSnapshotQuery: {
+            listChannelMessages: () =>
+              Effect.succeed([
+                {
+                  id: MessageId.make("message-earlier"),
+                  channelId,
+                  authorKind: "human" as const,
+                  authorId: "human",
+                  body: "earlier",
+                  createdAt: now,
+                },
+              ]),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const items = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.subscribeChannel]({ channelId }).pipe(
+            // Post only once the snapshot is out, so the message must arrive live.
+            Stream.tap((item) =>
+              item.kind === "snapshot"
+                ? Effect.forEach(
+                    [
+                      posted(1, ChannelId.make("channel-other"), "elsewhere"),
+                      posted(2, channelId, "later"),
+                    ],
+                    (event) => PubSub.publish(liveEvents, event),
+                  )
+                : Effect.void,
+            ),
+            Stream.take(2),
+            Stream.runCollect,
+          ),
+        ),
+      ).pipe(Effect.timeout("2 seconds"));
+
+      assert.deepEqual(
+        Array.from(items, (item) =>
+          item.kind === "snapshot"
+            ? item.messages.map((message) => message.body)
+            : item.kind === "message"
+              ? [item.message.body]
+              : [],
+        ),
+        [["earlier"], ["later"]],
+      );
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -9726,6 +9919,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             streamDomainEvents: Stream.fromPubSub(liveEvents),
           },
           projectionSnapshotQuery: {
+            getRunByThreadId: () => Effect.succeed(Option.none()),
             getThreadShellById: (threadId) =>
               Effect.sync(() => {
                 shellFetches.push(threadId);
@@ -9820,6 +10014,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               ]),
           },
           projectionSnapshotQuery: {
+            getRunByThreadId: () => Effect.succeed(Option.none()),
             getThreadShellById: () => Effect.succeed(Option.none()),
           },
         },
@@ -9868,6 +10063,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             readEvents: () => Stream.make(event),
           },
           projectionSnapshotQuery: {
+            getRunByThreadId: () => Effect.succeed(Option.none()),
             getThreadShellById: () =>
               Effect.suspend(() => {
                 attempts += 1;
@@ -9985,6 +10181,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               }),
           },
           projectionSnapshotQuery: {
+            getRunByThreadId: () => Effect.succeed(Option.none()),
             getThreadShellById: () =>
               Effect.succeed(
                 Option.some(
@@ -10060,6 +10257,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               }),
           },
           projectionSnapshotQuery: {
+            getRunByThreadId: () => Effect.succeed(Option.none()),
             getThreadShellById: () =>
               Effect.sync(() => {
                 effects.push(`query:thread-shell:${archived ? "archived" : "active"}`);
@@ -10133,6 +10331,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               }),
           },
           projectionSnapshotQuery: {
+            getRunByThreadId: () => Effect.succeed(Option.none()),
             getThreadShellById: () =>
               Effect.succeed(
                 Option.some(makeDefaultOrchestrationThreadShell({ id: threadId, session: null })),
@@ -10187,6 +10386,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 }),
             },
             projectionSnapshotQuery: {
+              getRunByThreadId: () => Effect.succeed(Option.none()),
               getThreadShellById: () =>
                 Effect.succeed(
                   Option.some(
@@ -10253,6 +10453,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               }),
           },
           projectionSnapshotQuery: {
+            getRunByThreadId: () => Effect.succeed(Option.none()),
             getThreadShellById: () =>
               Effect.succeed(
                 Option.some(
@@ -10356,6 +10557,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             },
           },
           projectionSnapshotQuery: {
+            getRunByThreadId: () => Effect.succeed(Option.none()),
             getThreadShellById: () =>
               Effect.succeed(
                 Option.some(
@@ -10428,6 +10630,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             },
           },
           projectionSnapshotQuery: {
+            getRunByThreadId: () => Effect.succeed(Option.none()),
             getThreadShellById: () =>
               Effect.succeed(
                 Option.some(

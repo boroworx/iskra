@@ -21,6 +21,7 @@ import {
   ProviderUserInputAnswers,
   UserInputAttachments,
   RuntimeMode,
+  RunCapabilities,
 } from "./orchestration.ts";
 import { ProviderInstanceId, ProviderDriverKind } from "./providerInstance.ts";
 
@@ -51,8 +52,22 @@ export const ProviderSession = Schema.Struct({
 });
 export type ProviderSession = typeof ProviderSession.Type;
 
+/**
+ * Restrictions for an Iskra run. When present, the adapter starts a fresh
+ * session that may use only the tools its capabilities grant: nothing is
+ * inherited from settings files or launch args, and it never resumes.
+ */
+export const ProviderRunRestrictions = Schema.Struct({
+  systemPrompt: Schema.String,
+  capabilities: RunCapabilities,
+});
+export type ProviderRunRestrictions = typeof ProviderRunRestrictions.Type;
+
 export const ProviderSessionStartInput = Schema.Struct({
   threadId: ThreadId,
+  run: Schema.optional(ProviderRunRestrictions),
+  // An agent DM's role instructions, appended to the harness's own runtime instructions.
+  agentPrompt: Schema.optional(Schema.String),
   provider: Schema.optional(ProviderDriverKind),
   // See ProviderSession for the migration story.
   providerInstanceId: Schema.optional(ProviderInstanceId),

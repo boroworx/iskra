@@ -4,6 +4,7 @@ import {
   type ProjectScript,
   type ResolvedKeybindingsConfig,
   type ThreadId,
+  agentIdOfDmThread,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
@@ -64,7 +65,6 @@ interface ChatHeaderProps {
   rightPanelOpen: boolean;
   gitCwd: string | null;
   readonly onOpenPullRequest?: ((number: number) => void) | undefined;
-  onNewThreadInProject: () => void;
   onOpenProjectSettings?: (() => void) | undefined;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
@@ -133,7 +133,6 @@ export const ChatHeader = memo(function ChatHeader({
   rightPanelOpen,
   gitCwd,
   onOpenPullRequest,
-  onNewThreadInProject,
   onOpenProjectSettings,
   onRunProjectScript,
   onAddProjectScript,
@@ -156,6 +155,8 @@ export const ChatHeader = memo(function ChatHeader({
     });
   }, [panelAnimationDurationMs, panelAnimationsActive]);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  // An agent's DM is named for its agent and lasts as long as it does: no rename or thread actions.
+  const threadActionsAvailable = isServerThread && agentIdOfDmThread(activeThreadId) === null;
   const activeProjectName = activeProject?.title;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
   const fileScripts = useT3ProjectFileScripts(
@@ -215,7 +216,7 @@ export const ChatHeader = memo(function ChatHeader({
     [activeThreadEnvironmentId, activeThreadId, activeThreadTitle, updateThreadMetadata],
   );
   const { openMenu, closeMenu } = useThreadActionMenu({
-    threadRef: isServerThread ? activeThreadRef : null,
+    threadRef: threadActionsAvailable ? activeThreadRef : null,
     projectCwd: activeProjectCwd,
     onStartRename: startRename,
   });
@@ -279,10 +280,10 @@ export const ChatHeader = memo(function ChatHeader({
       // The right-side controls (git, scripts, open-in) keep their own
       // behavior; only the breadcrumb area opens the thread menu.
       if ((event.target as HTMLElement).closest("[data-chat-header-actions]")) return;
-      if (!isServerThread && onOpenProjectSettings === undefined) return;
+      if (!threadActionsAvailable && onOpenProjectSettings === undefined) return;
       cancelPendingTitleMenu();
       event.preventDefault();
-      if (!isServerThread) {
+      if (!threadActionsAvailable) {
         const api = readLocalApi();
         if (!api) return;
         void api.contextMenu
@@ -297,7 +298,13 @@ export const ChatHeader = memo(function ChatHeader({
       }
       openMenu({ x: event.clientX, y: event.clientY });
     },
-    [cancelPendingTitleMenu, isServerThread, onOpenProjectSettings, openMenu, renamingTitle],
+    [
+      cancelPendingTitleMenu,
+      threadActionsAvailable,
+      onOpenProjectSettings,
+      openMenu,
+      renamingTitle,
+    ],
   );
   const handleRenameKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLInputElement>) => {
@@ -327,22 +334,10 @@ export const ChatHeader = memo(function ChatHeader({
         {activeProject ? (
           <>
             <WorkspaceBreadcrumbItem className="shrink">
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      aria-label={`New thread in ${activeProjectName}`}
-                      onClick={onNewThreadInProject}
-                      className="inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
-                    />
-                  }
-                >
-                  <ProjectFavicon project={activeProject} className="size-3.5" />
-                  <span className="max-w-40 truncate">{activeProjectName}</span>
-                </TooltipTrigger>
-                <TooltipPopup side="top">New thread in {activeProjectName}</TooltipPopup>
-              </Tooltip>
+              <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 text-muted-foreground">
+                <ProjectFavicon project={activeProject} className="size-3.5" />
+                <span className="max-w-40 truncate">{activeProjectName}</span>
+              </span>
             </WorkspaceBreadcrumbItem>
             <WorkspaceBreadcrumbSeparator />
           </>
@@ -361,7 +356,7 @@ export const ChatHeader = memo(function ChatHeader({
               onFocus={(event) => event.currentTarget.select()}
               onKeyDown={handleRenameKeyDown}
             />
-          ) : isServerThread ? (
+          ) : threadActionsAvailable ? (
             <Tooltip>
               <TooltipTrigger
                 render={

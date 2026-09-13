@@ -6,7 +6,7 @@ also lists the command IDs and defaults available in your version.
 ## Edit the configuration file
 
 Keybindings live on the environment's machine, in
-`~/.t3/userdata/keybindings.json` by default. You can edit this file directly.
+`~/.iskra/userdata/keybindings.json` by default. You can edit this file directly.
 It is a JSON array of rules:
 
 ```json
@@ -55,10 +55,6 @@ a shortcut.
 
 `thread.stop` interrupts the running turn in the focused thread. It has no default
 shortcut; assign one in **Settings → Keybindings**.
-
-`chat.new` may ask you to choose a project when there is more than one.
-`chat.newLocal` skips that chooser. Both use your
-[new-thread defaults](./thread-sidebar.md#start-a-thread).
 
 ## Reserved shortcuts
 

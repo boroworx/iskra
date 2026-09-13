@@ -8,12 +8,18 @@ import {
   type EnvironmentThreadStatus,
   mergeEnvironmentThread,
 } from "@t3tools/client-runtime/state/threads";
-import type { ScopedProjectRef, ScopedThreadRef, ServerConfig } from "@t3tools/contracts";
+import type {
+  OrchestrationAgentShell,
+  OrchestrationChannelShell,
+  ScopedProjectRef,
+  ScopedThreadRef,
+  ServerConfig,
+} from "@t3tools/contracts";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
 import { useMemo } from "react";
 import { appAtomRegistry } from "../rpc/atomRegistry";
-import { environmentProjects } from "./projects";
+import { environmentAgentChannels, environmentProjects } from "./projects";
 import { environmentServerConfigsAtom } from "./server";
 import {
   allEnvironmentProjectSnapshotsReadyAtom,
@@ -37,6 +43,12 @@ const EMPTY_THREAD_DETAIL_ATOM = Atom.make<EnvironmentThread | null>(null).pipe(
 );
 const EMPTY_THREAD_STATUS_ATOM = Atom.make<EnvironmentThreadStatus>("empty").pipe(
   Atom.withLabel("web-thread-status:empty"),
+);
+const EMPTY_AGENTS_ATOM = Atom.make<ReadonlyArray<OrchestrationAgentShell>>([]).pipe(
+  Atom.withLabel("web-agents:empty"),
+);
+const EMPTY_CHANNELS_ATOM = Atom.make<ReadonlyArray<OrchestrationChannelShell>>([]).pipe(
+  Atom.withLabel("web-channels:empty"),
 );
 
 const activeEnvironmentIdAtom = Atom.make<EnvironmentId | null>(null).pipe(
@@ -68,6 +80,28 @@ export function useEnvironmentThreadRefs(
 
 export function useProjects(): ReadonlyArray<EnvironmentProject> {
   return useAtomValue(environmentProjects.projectsAtom);
+}
+
+/** An environment's active agents, with presence; empty when it has none or cannot send them. */
+export function useEnvironmentAgents(
+  environmentId: EnvironmentId | null,
+): ReadonlyArray<OrchestrationAgentShell> {
+  return useAtomValue(
+    environmentId === null
+      ? EMPTY_AGENTS_ATOM
+      : environmentAgentChannels.environmentAgentsAtom(environmentId),
+  );
+}
+
+/** An environment's active channels; empty when it has none or cannot send them. */
+export function useEnvironmentChannels(
+  environmentId: EnvironmentId | null,
+): ReadonlyArray<OrchestrationChannelShell> {
+  return useAtomValue(
+    environmentId === null
+      ? EMPTY_CHANNELS_ATOM
+      : environmentAgentChannels.environmentChannelsAtom(environmentId),
+  );
 }
 
 export function useServerConfigs(): ReadonlyMap<EnvironmentId, ServerConfig> {

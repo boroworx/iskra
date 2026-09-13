@@ -7,7 +7,9 @@
  * @module ProjectionSnapshotQuery
  */
 import type {
+  AgentId,
   AgentSessionImportSource,
+  ChannelId,
   ApprovalRequestId,
   CheckpointRef,
   MessageId,
@@ -16,6 +18,12 @@ import type {
   OrchestrationProject,
   OrchestrationProjectShell,
   OrchestrationReadModel,
+  OrchestrationAgentShell,
+  OrchestrationAgent,
+  OrchestrationAgentRun,
+  OrchestrationChannelMessage,
+  OrchestrationChannelShell,
+  OrchestrationRun,
   OrchestrationSearchThreadsInput,
   OrchestrationSearchThreadsResult,
   OrchestrationShellSnapshot,
@@ -208,6 +216,41 @@ export interface ProjectionSnapshotQueryShape {
   readonly getThreadShellById: (
     threadId: ThreadId,
   ) => Effect.Effect<Option.Option<OrchestrationThreadShell>, ProjectionRepositoryError>;
+
+  /**
+   * Read the run a thread backs, if it is one. Run threads are left out of the
+   * thread list; they surface through their channel instead.
+   */
+  readonly getRunByThreadId: (
+    threadId: ThreadId,
+  ) => Effect.Effect<Option.Option<OrchestrationRun>, ProjectionRepositoryError>;
+
+  /** Read one active agent as clients list it, presence included. */
+  readonly getAgentShellById: (
+    agentId: AgentId,
+  ) => Effect.Effect<Option.Option<OrchestrationAgentShell>, ProjectionRepositoryError>;
+
+  /** Read one active channel as clients list it. */
+  readonly getChannelShellById: (
+    channelId: ChannelId,
+  ) => Effect.Effect<Option.Option<OrchestrationChannelShell>, ProjectionRepositoryError>;
+
+  /** A channel's newest `limit` messages, oldest first. */
+  readonly listChannelMessages: (
+    channelId: ChannelId,
+    limit: number,
+  ) => Effect.Effect<ReadonlyArray<OrchestrationChannelMessage>, ProjectionRepositoryError>;
+
+  /** An agent's newest `limit` runs, newest first, live or ended. */
+  readonly listRunsByAgent: (
+    agentId: AgentId,
+    limit: number,
+  ) => Effect.Effect<ReadonlyArray<OrchestrationAgentRun>, ProjectionRepositoryError>;
+
+  /** Read one agent, archived or not, with its role prompt. */
+  readonly getAgentById: (
+    agentId: AgentId,
+  ) => Effect.Effect<Option.Option<OrchestrationAgent>, ProjectionRepositoryError>;
 
   /** Read the active thread and session facts used to ingest provider events. */
   readonly getThreadRuntimeContext: (

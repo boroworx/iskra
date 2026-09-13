@@ -4228,7 +4228,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       }
 
       const startedAt = yield* nowIso;
-      const resumeState = readClaudeResumeState(input.resumeCursor);
+      // A run is rebuilt from its context on every wake, so it never resumes.
+      const resumeState = input.run ? undefined : readClaudeResumeState(input.resumeCursor);
       const threadId = input.threadId;
       const existingResumeSessionId = resumeState?.resume;
       const newSessionId = existingResumeSessionId === undefined ? yield* randomUUIDv4 : undefined;
@@ -4489,6 +4490,16 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         // Handle AskUserQuestion: surface clarifying questions to the
         // user via the user-input runtime event channel, regardless of
         // runtime mode (plan mode relies on this heavily).
+        // In `dontAsk` mode the SDK refuses tools outside the allowlist before
+        // asking, and emits `permission_denied` for them. Anything that still
+        // reaches the callback during a run is refused too.
+        if (input.run) {
+          return {
+            behavior: "deny",
+            message: `This run may not use ${toolName}.`,
+          } satisfies PermissionResult;
+        }
+
         if (toolName === "AskUserQuestion") {
           return yield* handleAskUserQuestion(context, toolInput, callbackOptions);
         }
@@ -4692,11 +4703,32 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       // A permission launch arg is folded into the mode T3 sends rather than
       // passed through: the CLI resolves both inputs together, so argv order
       // never let the user's flag win.
-      const permissionMode =
-        (launchArgPermissionMode as PermissionMode | null | undefined) ??
-        (launchArgSkipPermissions === null || launchArgSkipPermissions === "true"
-          ? "bypassPermissions"
-          : runtimeModeToPermission[input.runtimeMode]);
+      // A run ignores launch args entirely, since any of them could widen what it may do.
+      const permissionMode: PermissionMode | undefined = input.run
+        ? "dontAsk"
+        : ((launchArgPermissionMode as PermissionMode | null | undefined) ??
+          (launchArgSkipPermissions === null || launchArgSkipPermissions === "true"
+            ? "bypassPermissions"
+            : runtimeModeToPermission[input.runtimeMode]));
+      const passthroughArgs = input.run ? {} : extraArgs;
+      const settingSources = input.run ? [] : [...CLAUDE_SETTING_SOURCES];
+      // Bash can write, so `shell` is only honored together with `write`.
+      const claudeToolsByCapability = {
+        read: ["Read", "Glob", "Grep"],
+        write: ["Edit", "Write", "NotebookEdit"],
+        shell: ["Bash"],
+        network: ["WebFetch", "WebSearch"],
+      } as const;
+      const runCapabilities = input.run?.capabilities ?? [];
+      const allowedTools = [
+        ...new Set(
+          runCapabilities.flatMap((capability) =>
+            capability === "shell" && !runCapabilities.includes("write")
+              ? []
+              : claudeToolsByCapability[capability],
+          ),
+        ),
+      ];
       const settings = {
         ...(typeof thinking === "boolean" ? { alwaysThinkingEnabled: thinking } : {}),
         ...(fastMode ? { fastMode: true } : {}),
@@ -4705,7 +4737,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           ? { autoCompactWindow: Number(claudeSettings.autoCompactWindow) }
           : {}),
       };
-      const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
+      const mcpSession = input.run
+        ? undefined
+        : McpProviderSession.readMcpProviderSession(input.threadId);
       // The attachments dir grant lets the agent Read/copy pasted images at
       // the paths ProviderService injects into the turn text, without an
       // approval prompt. It is a leaf directory holding only attachment
@@ -4722,9 +4756,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           type: "preset",
           preset: "claude_code",
           // Model and effort can change after this session-level prompt is set.
-          append: buildRuntimeInstructions({ harness: "Claude Code" }),
+          append:
+            input.run?.systemPrompt ??
+            buildRuntimeInstructions({ harness: "Claude Code", agentPrompt: input.agentPrompt }),
         },
-        settingSources: [...CLAUDE_SETTING_SOURCES],
+        settingSources,
+        ...(input.run ? { allowedTools } : {}),
         // `ultracode` is a Claude Code setting, not an API effort level. It is
         // normalized to `xhigh` above and paired with `settings.ultracode`.
         ...(effectiveEffort
@@ -4745,7 +4782,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         supportedDialogKinds: ["resume_return"],
         env: McpProviderSession.withAgentDeviceEnvironment(claudeEnvironment, mcpSession),
         additionalDirectories,
-        ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {}),
+        ...(Object.keys(passthroughArgs).length > 0 ? { extraArgs: passthroughArgs } : {}),
         ...(mcpSession
           ? {
               mcpServers: {
@@ -4780,9 +4817,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         "claude.query.session_id": newSessionId ?? "",
         "claude.query.include_partial_messages": true,
         "claude.query.additional_directories": additionalDirectories,
-        "claude.query.setting_sources": [...CLAUDE_SETTING_SOURCES],
+        "claude.query.setting_sources": settingSources,
         "claude.query.settings_json": encodeJsonStringForDiagnostics(settings) ?? "",
-        "claude.query.extra_args_json": encodeJsonStringForDiagnostics(extraArgs) ?? "",
+        "claude.query.extra_args_json": encodeJsonStringForDiagnostics(passthroughArgs) ?? "",
         "claude.query.path_to_executable": claudeBinaryPath,
       });
 
@@ -4984,7 +5021,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     // "plan" maps directly to the SDK's "plan" permission mode;
     // "default" restores the session's original permission mode.
     // When interactionMode is absent we leave the current mode unchanged.
-    if (input.interactionMode === "plan") {
+    // A run keeps `dontAsk` for its whole life: nothing mid-session may widen it.
+    if (context.startInput.run) {
+      // Intentionally no permission mode change.
+    } else if (input.interactionMode === "plan") {
       yield* Effect.tryPromise({
         try: () => context.query.setPermissionMode("plan"),
         catch: (cause) => toRequestError(input.threadId, "turn/setPermissionMode", cause),

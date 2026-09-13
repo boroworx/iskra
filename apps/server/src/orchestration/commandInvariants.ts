@@ -1,4 +1,8 @@
 import type {
+  AgentId,
+  ChannelId,
+  OrchestrationAgent,
+  OrchestrationChannel,
   OrchestrationCommand,
   OrchestrationProject,
   OrchestrationReadModel,
@@ -37,6 +41,164 @@ export function listThreadsByProjectId(
   projectId: ProjectId,
 ): ReadonlyArray<OrchestrationThread> {
   return readModel.threads.filter((thread) => thread.projectId === projectId);
+}
+
+function findAgentById(
+  readModel: OrchestrationReadModel,
+  agentId: AgentId,
+): OrchestrationAgent | undefined {
+  return (readModel.agents ?? []).find((agent) => agent.id === agentId);
+}
+
+export function requireAgent(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly agentId: AgentId;
+}): Effect.Effect<OrchestrationAgent, OrchestrationCommandInvariantError> {
+  const agent = findAgentById(input.readModel, input.agentId);
+  if (agent) {
+    return Effect.succeed(agent);
+  }
+  return Effect.fail(
+    invariantError(
+      input.command.type,
+      `Agent '${input.agentId}' does not exist for command '${input.command.type}'.`,
+    ),
+  );
+}
+
+export function requireAgentAbsent(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly agentId: AgentId;
+}): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  if (!findAgentById(input.readModel, input.agentId)) {
+    return Effect.void;
+  }
+  return Effect.fail(
+    invariantError(
+      input.command.type,
+      `Agent '${input.agentId}' already exists and cannot be created twice.`,
+    ),
+  );
+}
+
+/** Names are `@mention` handles: unique per project, archived agents included. */
+export function requireAgentNameAvailable(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly projectId: ProjectId;
+  readonly name: string;
+  readonly exceptAgentId?: AgentId;
+}): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  const taken = (input.readModel.agents ?? []).some(
+    (agent) =>
+      agent.projectId === input.projectId &&
+      agent.name === input.name &&
+      agent.id !== input.exceptAgentId,
+  );
+  if (!taken) {
+    return Effect.void;
+  }
+  return Effect.fail(
+    invariantError(
+      input.command.type,
+      `Agent name '${input.name}' is already taken in project '${input.projectId}'.`,
+    ),
+  );
+}
+
+function findChannelById(
+  readModel: OrchestrationReadModel,
+  channelId: ChannelId,
+): OrchestrationChannel | undefined {
+  return (readModel.channels ?? []).find((channel) => channel.id === channelId);
+}
+
+export function requireChannel(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly channelId: ChannelId;
+}): Effect.Effect<OrchestrationChannel, OrchestrationCommandInvariantError> {
+  const channel = findChannelById(input.readModel, input.channelId);
+  if (channel) {
+    return Effect.succeed(channel);
+  }
+  return Effect.fail(
+    invariantError(
+      input.command.type,
+      `Channel '${input.channelId}' does not exist for command '${input.command.type}'.`,
+    ),
+  );
+}
+
+export function requireChannelAbsent(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly channelId: ChannelId;
+}): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  if (!findChannelById(input.readModel, input.channelId)) {
+    return Effect.void;
+  }
+  return Effect.fail(
+    invariantError(
+      input.command.type,
+      `Channel '${input.channelId}' already exists and cannot be created twice.`,
+    ),
+  );
+}
+
+/**
+ * Members are active agents of the channel's project, listed once. A DM has
+ * exactly one agent, and an agent has at most one active DM.
+ */
+export function requireValidChannelMembers(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly projectId: ProjectId;
+  readonly kind: OrchestrationChannel["kind"];
+  readonly memberAgentIds: ReadonlyArray<AgentId>;
+  readonly exceptChannelId?: ChannelId;
+}): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  if (new Set(input.memberAgentIds).size !== input.memberAgentIds.length) {
+    return Effect.fail(invariantError(input.command.type, "Channel members must be unique."));
+  }
+  for (const agentId of input.memberAgentIds) {
+    const agent = findAgentById(input.readModel, agentId);
+    if (!agent || agent.projectId !== input.projectId || agent.archivedAt !== null) {
+      return Effect.fail(
+        invariantError(
+          input.command.type,
+          `Agent '${agentId}' is not an active agent of project '${input.projectId}'.`,
+        ),
+      );
+    }
+  }
+  if (input.kind !== "dm") {
+    return Effect.void;
+  }
+  const [agentId, ...rest] = input.memberAgentIds;
+  if (agentId === undefined || rest.length > 0) {
+    return Effect.fail(
+      invariantError(input.command.type, "A DM channel must have exactly one agent member."),
+    );
+  }
+  const existingDm = (input.readModel.channels ?? []).find(
+    (channel) =>
+      channel.kind === "dm" &&
+      channel.archivedAt === null &&
+      channel.id !== input.exceptChannelId &&
+      channel.memberAgentIds.includes(agentId),
+  );
+  if (existingDm === undefined) {
+    return Effect.void;
+  }
+  return Effect.fail(
+    invariantError(
+      input.command.type,
+      `Agent '${agentId}' already has DM channel '${existingDm.id}'.`,
+    ),
+  );
 }
 
 export function requireProject(input: {

@@ -80,6 +80,7 @@ import { ThreadDeletionReactorLive } from "./orchestration/Layers/ThreadDeletion
 import * as ThreadSettlementReactor from "./orchestration/ThreadSettlementReactor.ts";
 import * as PullRequestSyncReactor from "./orchestration/PullRequestSyncReactor.ts";
 import * as ThreadPullRequestReactor from "./orchestration/ThreadPullRequestReactor.ts";
+import * as RunReactor from "./orchestration/RunReactor.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry.ts";
@@ -291,6 +292,7 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(ThreadSettlementReactor.layer),
   Layer.provideMerge(PullRequestSyncReactor.layer),
   Layer.provideMerge(ThreadPullRequestReactor.layer),
+  Layer.provideMerge(RunReactor.layer),
   Layer.provideMerge(AgentAwarenessRelay.layer.pipe(Layer.provide(ServerSecretStore.layer))),
   Layer.provideMerge(RuntimeReceiptBusLive),
 );
@@ -545,9 +547,8 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // `ProviderService` (canonical stream, written after event normalization).
   // Provided once at the runtime level so every consumer sees the same
   // logger instances.
-  // `ModelManifest.layer` is the legacy-model classification data, refreshed
-  // from the repo's `model-manifest.json` on `main` and applied by the
-  // Codex/Claude drivers.
+  // `ModelManifest.layer` is the bundled legacy-model classification data
+  // applied by the Codex/Claude drivers.
   Layer.provideMerge(
     Layer.mergeAll(ProviderEventLoggers.layer, ModelManifest.layer, CodexResetCredit.layer),
   ),

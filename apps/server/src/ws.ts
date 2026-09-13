@@ -73,6 +73,11 @@ import {
   type PullRequestRef,
   WS_METHODS,
   WsRpcGroup,
+  AgentId,
+  ChannelId,
+  AGENT_RUNS_LIMIT,
+  CHANNEL_SUBSCRIBE_MESSAGE_LIMIT,
+  type OrchestrationChannelStreamItem,
 } from "@t3tools/contracts";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
@@ -805,10 +810,17 @@ const makeWsRpcLayer = (
           case "thread.unarchived":
             return threadUpsertOrRemove(ThreadId.make(event.aggregateId), event.sequence);
           default:
-            if (event.aggregateKind !== "thread") {
-              return Effect.succeed(Option.none());
+            switch (event.aggregateKind) {
+              // Every agent or channel event refetches, so coalescing to the latest loses nothing.
+              case "agent":
+                return agentUpsertOrRemove(AgentId.make(event.aggregateId), event.sequence);
+              case "channel":
+                return channelUpsertOrRemove(ChannelId.make(event.aggregateId), event.sequence);
+              case "thread":
+                return threadOrRunPresence(ThreadId.make(event.aggregateId), event.sequence);
+              default:
+                return Effect.succeed(Option.none());
             }
-            return threadUpsertOrRemove(ThreadId.make(event.aggregateId), event.sequence);
         }
       };
 
@@ -818,7 +830,7 @@ const makeWsRpcLayer = (
       // If both attempts fail, log and drop the stream item; treating an error as
       // a missing row would incorrectly remove a still-active aggregate.
       const retryShellProjectionRead = <A, E>(
-        aggregateKind: "project" | "thread",
+        aggregateKind: OrchestrationEvent["aggregateKind"],
         aggregateId: string,
         read: Effect.Effect<A, E>,
       ): Effect.Effect<Option.Option<A>, never, never> =>
@@ -864,6 +876,77 @@ const makeWsRpcLayer = (
           ),
         );
 
+      const agentUpsertOrRemove = (
+        agentId: AgentId,
+        sequence: number,
+      ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> =>
+        retryShellProjectionRead(
+          "agent",
+          agentId,
+          projectionSnapshotQuery.getAgentShellById(agentId),
+        ).pipe(
+          Effect.map(
+            Option.map((agent) =>
+              Option.match(agent, {
+                onNone: (): OrchestrationShellStreamEvent => ({
+                  kind: "agent-removed",
+                  sequence,
+                  agentId,
+                }),
+                onSome: (nextAgent): OrchestrationShellStreamEvent => ({
+                  kind: "agent-upserted",
+                  sequence,
+                  agent: nextAgent,
+                }),
+              }),
+            ),
+          ),
+        );
+
+      const channelUpsertOrRemove = (
+        channelId: ChannelId,
+        sequence: number,
+      ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> =>
+        retryShellProjectionRead(
+          "channel",
+          channelId,
+          projectionSnapshotQuery.getChannelShellById(channelId),
+        ).pipe(
+          Effect.map(
+            Option.map((channel) =>
+              Option.match(channel, {
+                onNone: (): OrchestrationShellStreamEvent => ({
+                  kind: "channel-removed",
+                  sequence,
+                  channelId,
+                }),
+                onSome: (nextChannel): OrchestrationShellStreamEvent => ({
+                  kind: "channel-upserted",
+                  sequence,
+                  channel: nextChannel,
+                }),
+              }),
+            ),
+          ),
+        );
+
+      // A run thread never reaches the thread list; its activity changes its agent's presence.
+      const threadOrRunPresence = (
+        threadId: ThreadId,
+        sequence: number,
+      ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> =>
+        retryShellProjectionRead(
+          "thread",
+          threadId,
+          projectionSnapshotQuery.getRunByThreadId(threadId),
+        ).pipe(
+          Effect.flatMap((run) =>
+            Option.isSome(run) && Option.isSome(run.value)
+              ? agentUpsertOrRemove(run.value.value.agentId, sequence)
+              : threadUpsertOrRemove(threadId, sequence),
+          ),
+        );
+
       // Refetch a thread's shell and emit an upsert if it is still active, or a
       // `thread-removed` if the projection has no active row for it. Emitting a
       // removal on a `none` (rather than dropping the event) is what keeps
@@ -881,7 +964,15 @@ const makeWsRpcLayer = (
         retryShellProjectionRead(
           "thread",
           threadId,
-          projectionSnapshotQuery.getThreadShellById(threadId),
+          // Run threads are hidden from the thread list; they surface through their channel.
+          Effect.gen(function* () {
+            const thread = yield* projectionSnapshotQuery.getThreadShellById(threadId);
+            if (Option.isNone(thread)) {
+              return thread;
+            }
+            const run = yield* projectionSnapshotQuery.getRunByThreadId(threadId);
+            return Option.isSome(run) ? Option.none<typeof thread.value>() : thread;
+          }),
         ).pipe(
           Effect.map(
             Option.flatMap((thread) =>
@@ -1307,6 +1398,7 @@ const makeWsRpcLayer = (
             },
             settings,
             shellResumeCompletionMarker: true,
+            shellAgentChannels: true,
             ...(fileManagerRevealKind === undefined
               ? {}
               : {
@@ -1469,6 +1561,21 @@ const makeWsRpcLayer = (
               // sequence but the live subscription is not attached yet). Every
               // path below emits from this same buffered live tail. Overlapping
               // events are deduped by sequence on the client.
+              // Agent and channel kinds reach only subscribers that asked for them:
+              // older clients reject stream kinds they do not know.
+              const agentChannelKinds = new Set([
+                "agent-upserted",
+                "agent-removed",
+                "channel-upserted",
+                "channel-removed",
+              ]);
+              const withoutUnrequestedKinds = <A extends { readonly kind: string }, E, R>(
+                stream: Stream.Stream<A, E, R>,
+              ): Stream.Stream<A, E, R> =>
+                input.includeAgentChannels === true
+                  ? stream
+                  : stream.pipe(Stream.filter((item) => !agentChannelKinds.has(item.kind)));
+
               const liveBudget = yield* makeLiveStreamBudget();
               const liveBuffer = yield* Queue.unbounded<
                 RetainedLiveItem<ShellLiveInput>,
@@ -1536,21 +1643,23 @@ const makeWsRpcLayer = (
               // Offer the completion marker into the same queue as live events.
               // Anything buffered while snapshot/replay work was in flight is
               // therefore delivered before the client is told it is synchronized.
-              const synchronizedThenLive = liveBudget.deliver(
-                input.requestCompletionMarker === true
-                  ? Stream.concat(
-                      Stream.fromEffect(
-                        liveBudget.retain({ kind: "synchronized" as const }).pipe(
-                          Effect.flatMap((item) => Queue.offer(liveBuffer, item)),
-                          Effect.uninterruptible,
-                          Effect.andThen(Queue.takeAll(liveBuffer)),
-                          Effect.flatMap(coalesceRetainedInputs),
-                        ),
-                      ).pipe(Stream.flatMap((items) => Stream.fromIterable(items))),
-                      bufferedLiveStream,
-                    )
-                  : bufferedLiveStream,
-              );
+              const synchronizedThenLive = liveBudget
+                .deliver(
+                  input.requestCompletionMarker === true
+                    ? Stream.concat(
+                        Stream.fromEffect(
+                          liveBudget.retain({ kind: "synchronized" as const }).pipe(
+                            Effect.flatMap((item) => Queue.offer(liveBuffer, item)),
+                            Effect.uninterruptible,
+                            Effect.andThen(Queue.takeAll(liveBuffer)),
+                            Effect.flatMap(coalesceRetainedInputs),
+                          ),
+                        ).pipe(Stream.flatMap((items) => Stream.fromIterable(items))),
+                        bufferedLiveStream,
+                      )
+                    : bufferedLiveStream,
+                )
+                .pipe(withoutUnrequestedKinds);
 
               // When the client already holds a shell snapshot (cached, or loaded
               // over HTTP) it passes that snapshot's sequence, and we resume by
@@ -1588,6 +1697,7 @@ const makeWsRpcLayer = (
                   // buffer indefinitely while waiting for an empty page.
                   orchestrationEngine.readEvents(afterSequence, replayGap),
                 ).pipe(
+                  withoutUnrequestedKinds,
                   Stream.mapError(
                     (cause) =>
                       new OrchestrationGetSnapshotError({
@@ -1786,6 +1896,95 @@ const makeWsRpcLayer = (
                 afterSnapshot,
               );
             }),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.subscribeChannel]: (input) =>
+          observeRpcStreamEffect(
+            ORCHESTRATION_WS_METHODS.subscribeChannel,
+            Effect.gen(function* () {
+              // Attach live delivery before reading the snapshot so nothing posted
+              // meanwhile is lost; an item can then arrive twice, and clients keep one.
+              const live = yield* Queue.unbounded<OrchestrationChannelStreamItem>();
+              yield* Effect.forkScoped(
+                orchestrationEngine.streamDomainEvents.pipe(
+                  Stream.runForEach((event) => {
+                    if (
+                      event.aggregateKind !== "channel" ||
+                      event.aggregateId !== input.channelId
+                    ) {
+                      return Effect.void;
+                    }
+                    switch (event.type) {
+                      case "channel.message-posted":
+                        return Queue.offer(live, {
+                          kind: "message",
+                          message: {
+                            id: event.payload.messageId,
+                            channelId: event.payload.channelId,
+                            authorKind: event.payload.authorKind,
+                            authorId: event.payload.authorId,
+                            body: event.payload.body,
+                            createdAt: event.payload.createdAt,
+                            ...(event.payload.runThreadId === undefined
+                              ? {}
+                              : { runThreadId: event.payload.runThreadId }),
+                          },
+                        });
+                      case "channel.agent-wake-requested":
+                        return Queue.offer(live, {
+                          kind: "delivery",
+                          messageId: event.payload.triggerMessageId,
+                          delivery: { agentId: event.payload.agentId, status: "pending" },
+                        });
+                      case "channel.delivery-updated": {
+                        const { agentId, status } = event.payload;
+                        return Queue.offerAll(
+                          live,
+                          event.payload.messageIds.map((messageId) => ({
+                            kind: "delivery" as const,
+                            messageId,
+                            delivery: { agentId, status },
+                          })),
+                        );
+                      }
+                      default:
+                        return Effect.void;
+                    }
+                  }),
+                ),
+                { startImmediately: true },
+              );
+              const messages = yield* projectionSnapshotQuery
+                .listChannelMessages(input.channelId, CHANNEL_SUBSCRIBE_MESSAGE_LIMIT)
+                .pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new OrchestrationGetSnapshotError({
+                        message: `Failed to load channel ${input.channelId}`,
+                        cause,
+                      }),
+                  ),
+                );
+              return Stream.concat(
+                Stream.make({ kind: "snapshot" as const, messages }),
+                Stream.fromQueue(live),
+              );
+            }),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.listAgentRuns]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.listAgentRuns,
+            projectionSnapshotQuery.listRunsByAgent(input.agentId, AGENT_RUNS_LIMIT).pipe(
+              Effect.map((runs) => ({ runs })),
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationGetSnapshotError({
+                    message: `Failed to load runs for agent ${input.agentId}`,
+                    cause,
+                  }),
+              ),
+            ),
             { "rpc.aggregate": "orchestration" },
           ),
         [WS_METHODS.serverProbe]: (_input) =>

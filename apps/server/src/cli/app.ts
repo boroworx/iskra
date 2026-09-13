@@ -178,7 +178,7 @@ function sendDesktopAppActivationRequest(input: {
 }
 
 const appEnvironment = Config.all({
-  t3Home: Config.string("T3CODE_HOME").pipe(Config.option, Config.map(Option.getOrUndefined)),
+  t3Home: Config.string("ISKRA_HOME").pipe(Config.option, Config.map(Option.getOrUndefined)),
   sshConnection: Config.string("SSH_CONNECTION").pipe(Config.option),
   sshTty: Config.string("SSH_TTY").pipe(Config.option),
 });

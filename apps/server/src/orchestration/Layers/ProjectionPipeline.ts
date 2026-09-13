@@ -1,6 +1,7 @@
 import {
   ApprovalRequestId,
   isImportedAgentSessionMessageId,
+  isRunEndingSessionStatus,
   UserInputAttachmentAnswerPayload,
   type ChatAttachment,
   type OrchestrationEvent,
@@ -24,6 +25,8 @@ import {
 import { toPersistenceSqlError, type ProjectionRepositoryError } from "../../persistence/Errors.ts";
 import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
 import { ProjectionPendingApprovalRepository } from "../../persistence/Services/ProjectionPendingApprovals.ts";
+import { ProjectionAgentRepository } from "../../persistence/Services/ProjectionAgents.ts";
+import { ProjectionChannelRepository } from "../../persistence/Services/ProjectionChannels.ts";
 import { ProjectionProjectRepository } from "../../persistence/Services/ProjectionProjects.ts";
 import { ProjectionStateRepository } from "../../persistence/Services/ProjectionState.ts";
 import { ProjectionThreadActivityRepository } from "../../persistence/Services/ProjectionThreadActivities.ts";
@@ -44,6 +47,8 @@ import {
 } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionThreadRepository } from "../../persistence/Services/ProjectionThreads.ts";
 import { ProjectionPendingApprovalRepositoryLive } from "../../persistence/Layers/ProjectionPendingApprovals.ts";
+import { ProjectionAgentRepositoryLive } from "../../persistence/Layers/ProjectionAgents.ts";
+import { ProjectionChannelRepositoryLive } from "../../persistence/Layers/ProjectionChannels.ts";
 import { ProjectionProjectRepositoryLive } from "../../persistence/Layers/ProjectionProjects.ts";
 import { ProjectionStateRepositoryLive } from "../../persistence/Layers/ProjectionState.ts";
 import { ProjectionThreadActivityRepositoryLive } from "../../persistence/Layers/ProjectionThreadActivities.ts";
@@ -66,6 +71,8 @@ import {
 
 export const ORCHESTRATION_PROJECTOR_NAMES = {
   projects: "projection.projects",
+  agents: "projection.agents",
+  channels: "projection.channels",
   threads: "projection.threads",
   threadMessages: "projection.thread-messages",
   threadProposedPlans: "projection.thread-proposed-plans",
@@ -491,6 +498,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const projectionThreadSessionRepository = yield* ProjectionThreadSessionRepository;
     const projectionTurnRepository = yield* ProjectionTurnRepository;
     const projectionPendingApprovalRepository = yield* ProjectionPendingApprovalRepository;
+    const projectionAgentRepository = yield* ProjectionAgentRepository;
+    const projectionChannelRepository = yield* ProjectionChannelRepository;
 
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -563,6 +572,183 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           });
           return;
         }
+
+        default:
+          return;
+      }
+    });
+
+    const applyAgentsProjection: ProjectorDefinition["apply"] = Effect.fn("applyAgentsProjection")(
+      function* (event, _attachmentSideEffects) {
+        switch (event.type) {
+          case "agent.created":
+            yield* projectionAgentRepository.upsert({
+              agentId: event.payload.agentId,
+              projectId: event.payload.projectId,
+              name: event.payload.name,
+              avatar: event.payload.avatar,
+              roleTags: event.payload.roleTags,
+              rolePrompt: event.payload.rolePrompt,
+              modelSelection: event.payload.modelSelection,
+              capabilities: event.payload.capabilities,
+              createdAt: event.payload.createdAt,
+              updatedAt: event.payload.updatedAt,
+              archivedAt: null,
+            });
+            return;
+
+          case "agent.updated": {
+            const existingRow = yield* projectionAgentRepository.getById({
+              agentId: event.payload.agentId,
+            });
+            if (Option.isNone(existingRow)) {
+              return;
+            }
+            yield* projectionAgentRepository.upsert({
+              ...existingRow.value,
+              ...(event.payload.name !== undefined ? { name: event.payload.name } : {}),
+              ...(event.payload.avatar !== undefined ? { avatar: event.payload.avatar } : {}),
+              ...(event.payload.roleTags !== undefined ? { roleTags: event.payload.roleTags } : {}),
+              ...(event.payload.rolePrompt !== undefined
+                ? { rolePrompt: event.payload.rolePrompt }
+                : {}),
+              ...(event.payload.modelSelection !== undefined
+                ? { modelSelection: event.payload.modelSelection }
+                : {}),
+              ...(event.payload.capabilities !== undefined
+                ? { capabilities: event.payload.capabilities }
+                : {}),
+              updatedAt: event.payload.updatedAt,
+            });
+            return;
+          }
+
+          case "agent.archived":
+          case "agent.unarchived": {
+            const existingRow = yield* projectionAgentRepository.getById({
+              agentId: event.payload.agentId,
+            });
+            if (Option.isNone(existingRow)) {
+              return;
+            }
+            yield* projectionAgentRepository.upsert({
+              ...existingRow.value,
+              ...(event.type === "agent.archived"
+                ? { archivedAt: event.payload.archivedAt, updatedAt: event.payload.archivedAt }
+                : { archivedAt: null, updatedAt: event.payload.updatedAt }),
+            });
+            return;
+          }
+
+          default:
+            return;
+        }
+      },
+    );
+
+    const applyChannelsProjection: ProjectorDefinition["apply"] = Effect.fn(
+      "applyChannelsProjection",
+    )(function* (event, _attachmentSideEffects) {
+      switch (event.type) {
+        case "channel.created":
+          yield* projectionChannelRepository.upsertChannel({
+            channelId: event.payload.channelId,
+            projectId: event.payload.projectId,
+            kind: event.payload.kind,
+            name: event.payload.name,
+            topic: event.payload.topic,
+            pinnedSpec: event.payload.pinnedSpec,
+            wakeDepth: event.payload.wakeDepth,
+            memberAgentIds: event.payload.memberAgentIds,
+            createdAt: event.payload.createdAt,
+            updatedAt: event.payload.updatedAt,
+            archivedAt: null,
+          });
+          return;
+
+        case "channel.updated": {
+          const existingRow = yield* projectionChannelRepository.getChannelById({
+            channelId: event.payload.channelId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionChannelRepository.upsertChannel({
+            ...existingRow.value,
+            ...(event.payload.name !== undefined ? { name: event.payload.name } : {}),
+            ...(event.payload.topic !== undefined ? { topic: event.payload.topic } : {}),
+            ...(event.payload.pinnedSpec !== undefined
+              ? { pinnedSpec: event.payload.pinnedSpec }
+              : {}),
+            ...(event.payload.wakeDepth !== undefined
+              ? { wakeDepth: event.payload.wakeDepth }
+              : {}),
+            ...(event.payload.memberAgentIds !== undefined
+              ? { memberAgentIds: event.payload.memberAgentIds }
+              : {}),
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "channel.archived":
+        case "channel.unarchived": {
+          const existingRow = yield* projectionChannelRepository.getChannelById({
+            channelId: event.payload.channelId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionChannelRepository.upsertChannel({
+            ...existingRow.value,
+            ...(event.type === "channel.archived"
+              ? { archivedAt: event.payload.archivedAt, updatedAt: event.payload.archivedAt }
+              : { archivedAt: null, updatedAt: event.payload.updatedAt }),
+          });
+          return;
+        }
+
+        case "channel.message-posted":
+          yield* projectionChannelRepository.appendMessage({
+            messageId: event.payload.messageId,
+            channelId: event.payload.channelId,
+            sequence: event.sequence,
+            authorKind: event.payload.authorKind,
+            authorId: event.payload.authorId,
+            body: event.payload.body,
+            createdAt: event.payload.createdAt,
+            runThreadId: event.payload.runThreadId ?? null,
+          });
+          return;
+
+        case "channel.run-started":
+          yield* projectionChannelRepository.insertRun(event.payload);
+          return;
+
+        // A wake leaves its message pending with the agent until a turn carries it.
+        case "channel.agent-wake-requested":
+          yield* projectionChannelRepository.upsertDelivery({
+            messageId: event.payload.triggerMessageId,
+            agentId: event.payload.agentId,
+            channelId: event.payload.channelId,
+            runThreadId: event.payload.liveRunThreadId ?? null,
+            status: "pending",
+            updatedAt: event.payload.requestedAt,
+          });
+          return;
+
+        case "channel.delivery-updated":
+          yield* projectionChannelRepository.updateDeliveries(event.payload);
+          return;
+
+        case "thread.session-set":
+          if (isRunEndingSessionStatus(event.payload.session.status)) {
+            yield* projectionChannelRepository.endRun({
+              threadId: event.payload.threadId,
+              endedAt: event.payload.session.updatedAt,
+            });
+          }
+          return;
 
         default:
           return;
@@ -1925,6 +2111,14 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         apply: applyProjectsProjection,
       },
       {
+        name: ORCHESTRATION_PROJECTOR_NAMES.agents,
+        apply: applyAgentsProjection,
+      },
+      {
+        name: ORCHESTRATION_PROJECTOR_NAMES.channels,
+        apply: applyChannelsProjection,
+      },
+      {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadMessages,
         apply: applyThreadMessagesProjection,
       },
@@ -2180,6 +2374,8 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
   makeOrchestrationProjectionPipeline(),
 ).pipe(
   Layer.provideMerge(ProjectionProjectRepositoryLive),
+  Layer.provideMerge(ProjectionAgentRepositoryLive),
+  Layer.provideMerge(ProjectionChannelRepositoryLive),
   Layer.provideMerge(ProjectionThreadRepositoryLive),
   Layer.provideMerge(ProjectionThreadMessageRepositoryLive),
   Layer.provideMerge(ProjectionThreadProposedPlanRepositoryLive),

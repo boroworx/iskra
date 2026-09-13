@@ -20,7 +20,7 @@ describe("electron development launcher", () => {
     const environmentScript = makeDevelopmentEnvironmentScript({
       VITE_DEV_SERVER_URL: "http://127.0.0.1:8526",
       T3CODE_PORT: "16566",
-      T3CODE_HOME: "/tmp/t3",
+      ISKRA_HOME: "/tmp/t3",
     });
 
     assert.include(
@@ -71,18 +71,18 @@ describe("electron development launcher", () => {
 
   it("keeps the native Electron executable name inside the branded macOS bundle", () => {
     const paths = resolveMacLauncherPaths(
-      "/repo/apps/desktop/.electron-runtime/T3 Code (Dev).app",
-      "T3 Code (Dev)",
+      "/repo/apps/desktop/.electron-runtime/Iskra (Dev).app",
+      "Iskra (Dev)",
     );
 
-    assert.equal(paths.launcherExecutableName, "T3 Code (Dev) Launcher");
+    assert.equal(paths.launcherExecutableName, "Iskra (Dev) Launcher");
     assert.equal(
       paths.launcherBinaryPath,
-      "/repo/apps/desktop/.electron-runtime/T3 Code (Dev).app/Contents/MacOS/T3 Code (Dev) Launcher",
+      "/repo/apps/desktop/.electron-runtime/Iskra (Dev).app/Contents/MacOS/Iskra (Dev) Launcher",
     );
     assert.equal(
       paths.runtimeElectronBinaryPath,
-      "/repo/apps/desktop/.electron-runtime/T3 Code (Dev).app/Contents/MacOS/Electron",
+      "/repo/apps/desktop/.electron-runtime/Iskra (Dev).app/Contents/MacOS/Electron",
     );
 
     const script = makeDevelopmentLauncherScript({
@@ -93,32 +93,32 @@ describe("electron development launcher", () => {
     });
     assert.include(
       script,
-      "exec '/repo/apps/desktop/.electron-runtime/T3 Code (Dev).app/Contents/MacOS/Electron'",
+      "exec '/repo/apps/desktop/.electron-runtime/Iskra (Dev).app/Contents/MacOS/Electron'",
     );
     assert.notInclude(script, "node_modules/electron");
   });
 
   it("declares why the macOS app needs protected access", () => {
-    const values = resolveMacBundleInfoPlistStrings("T3 Code (Dev) Launcher");
+    const values = resolveMacBundleInfoPlistStrings("Iskra (Dev) Launcher");
 
     assert.equal(
       values.NSScreenCaptureUsageDescription,
-      "T3 Code captures the active window when you use the snapshot shortcut.",
+      "Iskra captures the active window when you use the snapshot shortcut.",
     );
     assert.equal(
       values.NSDocumentsFolderUsageDescription,
-      "T3 Code reads project files you open in the desktop app.",
+      "Iskra reads project files you open in the desktop app.",
     );
   });
 
   it("ad-hoc signs the complete development app bundle", () => {
-    assert.deepEqual(resolveMacCodeSignArguments("/runtime/T3 Code (Dev).app"), [
+    assert.deepEqual(resolveMacCodeSignArguments("/runtime/Iskra (Dev).app"), [
       "--force",
       "--deep",
       "--sign",
       "-",
       "--timestamp=none",
-      "/runtime/T3 Code (Dev).app",
+      "/runtime/Iskra (Dev).app",
     ]);
   });
 
