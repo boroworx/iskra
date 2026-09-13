@@ -397,10 +397,20 @@ state, not an error state. _Accept when:_ a single run visibly produces both gre
 message sent mid-turn shows pending and resolves when read; a message whose turn ends without
 consuming it does not silently disappear; and no continuously repainting animation appears in a
 GPU profile.
+_Accepted:_ in a paired browser, a DM shows the agent's runs labelled by channel, each with tool
+activity and a denied Write in grey and the answer in white. A follow-up mentioning a working agent
+showed "Waiting for @agent", went in as the run's next turn, and cleared once that turn ran.
+`RunReactor` tests cover the next-turn delivery, a re-wake when a run ends with messages waiting,
+and `undelivered` when the carrying turn never ran. The new views use no animation; a GPU profile
+was not recorded.
 
 **M1.8 — Context inspector.** For any run, show exactly the payload M1.3 produced.
 _Accept when:_ the inspector is reachable from the DM view, shows the structured record and both
 rendered strings, and the rendered strings match what the adapter sent byte for byte.
+_Accepted:_ each run in a DM has a Context button showing the system prompt, first message and
+context record. For every run in the test database, the stored first message equals the run
+thread's first user message and the stored system prompt equals the one its provider session was
+started with.
 
 ### M2–M5 (not yet briefed)
 
