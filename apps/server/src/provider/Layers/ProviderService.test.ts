@@ -2884,6 +2884,27 @@ routing.layer("ProviderServiceLive routing", (it) => {
       }),
   );
 
+  it.effect("refuses to start a run on a provider that cannot enforce its restrictions", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      routing.codex.startSession.mockClear();
+
+      const error = yield* provider
+        .startSession(asThreadId("thread-codex-run"), {
+          provider: CODEX_DRIVER,
+          providerInstanceId: codexInstanceId,
+          threadId: asThreadId("thread-codex-run"),
+          cwd: fixtureCwd("project-codex-run"),
+          runtimeMode: "full-access",
+          run: { systemPrompt: "You are @backend.", capabilities: ["read" as const] },
+        })
+        .pipe(Effect.flip);
+
+      assert.equal(error._tag, "ProviderValidationError");
+      assert.equal(routing.codex.startSession.mock.calls.length, 0);
+    }),
+  );
+
   it.effect("recovers stale claudeAgent sessions for sendTurn using persisted cwd", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService.ProviderService;
@@ -5003,6 +5024,7 @@ describe("agent browser access", () => {
         getRunByThreadId: () => Effect.die("unused"),
         getAgentShellById: () => Effect.die("unused"),
         getChannelShellById: () => Effect.die("unused"),
+        listChannelMessages: () => Effect.die("unused"),
         getCommandReadModel: () => Effect.die("unused"),
         getSnapshot: () => Effect.die("unused"),
         getShellSnapshot: () => Effect.die("unused"),

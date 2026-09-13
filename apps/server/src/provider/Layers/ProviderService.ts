@@ -1524,6 +1524,14 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           }
         }
         const adapter = yield* registry.getByInstance(resolvedInstanceId);
+        // Only the Claude adapter enforces a run's restrictions (tool allowlist, no
+        // MCP, no resume). Any other adapter would ignore them and run unrestricted.
+        if (input.run !== undefined && adapter.provider !== "claudeAgent") {
+          return yield* toValidationError(
+            "ProviderService.startSession",
+            `Agent runs need a Claude provider; '${adapter.provider}' cannot enforce run restrictions.`,
+          );
+        }
         yield* clearTurnAnalyticsSession(resolvedInstanceId, threadId);
         yield* prepareMcpSession(threadId, resolvedInstanceId);
         const session = yield* adapter
