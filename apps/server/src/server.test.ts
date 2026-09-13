@@ -44,6 +44,8 @@ import {
   WS_METHODS,
   WsRpcGroup,
   EditorId,
+  AgentId,
+  ChannelId,
 } from "@t3tools/contracts";
 import {
   computeDpopAccessTokenHash,
@@ -9681,6 +9683,107 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(collected[2]?.kind, "synchronized");
       assert.equal(shellFetches.filter((id) => id === busyThreadId).length, 1);
       assert.equal(replayLimit, 50);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("subscribeShell sends agent and channel updates only to subscribers that ask", () =>
+    Effect.gen(function* () {
+      const now = "2026-01-01T00:00:00.000Z";
+      const projectId = ProjectId.make("project-agent-channels");
+      const agentId = AgentId.make("agent-shell");
+      const channelId = ChannelId.make("channel-shell");
+      const threadId = ThreadId.make("thread-shell");
+      const eventBase = {
+        occurredAt: now,
+        commandId: null,
+        causationEventId: null,
+        correlationId: null,
+        metadata: {},
+        payload: {} as never,
+      };
+      const events: ReadonlyArray<OrchestrationEvent> = [
+        {
+          ...eventBase,
+          sequence: 1,
+          eventId: EventId.make("event-agent"),
+          aggregateKind: "agent",
+          aggregateId: agentId,
+          type: "agent.created",
+        },
+        {
+          ...eventBase,
+          sequence: 2,
+          eventId: EventId.make("event-channel"),
+          aggregateKind: "channel",
+          aggregateId: channelId,
+          type: "channel.created",
+        },
+        {
+          ...eventBase,
+          sequence: 3,
+          eventId: EventId.make("event-thread"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          type: "thread.created",
+        },
+      ];
+
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            latestSequence: Effect.succeed(3),
+            readEvents: () => Stream.fromIterable(events),
+          },
+          projectionSnapshotQuery: {
+            getAgentShellById: () =>
+              Effect.succeed(
+                Option.some({
+                  id: agentId,
+                  projectId,
+                  name: "backend",
+                  avatar: null,
+                  roleTags: [],
+                  presence: "running" as const,
+                }),
+              ),
+            getChannelShellById: () =>
+              Effect.succeed(
+                Option.some({
+                  id: channelId,
+                  projectId,
+                  kind: "channel" as const,
+                  name: "general",
+                  topic: "",
+                  memberAgentIds: [agentId],
+                }),
+              ),
+            getRunByThreadId: () => Effect.succeed(Option.none()),
+            getThreadShellById: (id) =>
+              Effect.succeed(Option.some(makeDefaultOrchestrationThreadShell({ id }))),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const subscribeKinds = (includeAgentChannels: boolean, count: number) =>
+        Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.subscribeShell]({
+              afterSequence: 0,
+              requestCompletionMarker: true,
+              ...(includeAgentChannels ? { includeAgentChannels: true } : {}),
+            }).pipe(Stream.take(count), Stream.runCollect),
+          ),
+        ).pipe(Effect.map((items) => Array.from(items, (item) => item.kind)));
+
+      // A client that does not ask, such as an older build, never sees kinds it cannot decode.
+      assert.deepEqual(yield* subscribeKinds(false, 2), ["thread-upserted", "synchronized"]);
+      assert.deepEqual(yield* subscribeKinds(true, 4), [
+        "agent-upserted",
+        "channel-upserted",
+        "thread-upserted",
+        "synchronized",
+      ]);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
