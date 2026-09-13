@@ -19,6 +19,7 @@ import type {
   OrchestrationProjectShell,
   OrchestrationReadModel,
   OrchestrationAgentShell,
+  OrchestrationAgent,
   OrchestrationAgentRun,
   OrchestrationChannelMessage,
   OrchestrationChannelShell,
@@ -245,6 +246,11 @@ export interface ProjectionSnapshotQueryShape {
     agentId: AgentId,
     limit: number,
   ) => Effect.Effect<ReadonlyArray<OrchestrationAgentRun>, ProjectionRepositoryError>;
+
+  /** Read one agent, archived or not, with its role prompt. */
+  readonly getAgentById: (
+    agentId: AgentId,
+  ) => Effect.Effect<Option.Option<OrchestrationAgent>, ProjectionRepositoryError>;
 
   /** Read the active thread and session facts used to ingest provider events. */
   readonly getThreadRuntimeContext: (

@@ -4012,6 +4012,39 @@ pending_approval_requests AS (
       }),
     );
 
+  const getAgentRowById = SqlSchema.findOneOption({
+    Request: Schema.Struct({ agentId: Schema.String }),
+    Result: ProjectionAgentDbRow,
+    execute: ({ agentId }) =>
+      sql`
+        SELECT
+          agent_id AS "agentId",
+          project_id AS "projectId",
+          name,
+          avatar,
+          role_tags_json AS "roleTags",
+          role_prompt AS "rolePrompt",
+          model_selection_json AS "modelSelection",
+          capabilities_json AS "capabilities",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt",
+          archived_at AS "archivedAt"
+        FROM projection_agents
+        WHERE agent_id = ${agentId}
+      `,
+  });
+
+  const getAgentById: ProjectionSnapshotQueryShape["getAgentById"] = (agentId) =>
+    getAgentRowById({ agentId }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.getAgentById:query",
+          "ProjectionSnapshotQuery.getAgentById:decodeRow",
+        ),
+      ),
+      Effect.map(Option.map(({ agentId: id, ...agent }) => ({ id, ...agent }))),
+    );
+
   const listRunRowsByAgent = SqlSchema.findAll({
     Request: Schema.Struct({ agentId: Schema.String, limit: Schema.Number }),
     Result: ProjectionAgentRunDbRow,
@@ -4077,6 +4110,7 @@ pending_approval_requests AS (
     getChannelShellById,
     listChannelMessages,
     listRunsByAgent,
+    getAgentById,
     getThreadRuntimeContext,
     getTurnStartMessage,
     getThreadDetailById,

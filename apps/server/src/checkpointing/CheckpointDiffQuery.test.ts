@@ -81,6 +81,7 @@ describe("CheckpointDiffQuery.layer", () => {
             getChannelShellById: () => Effect.die("unused"),
             listChannelMessages: () => Effect.die("unused"),
             listRunsByAgent: () => Effect.die("unused"),
+            getAgentById: () => Effect.die("unused"),
             getCommandReadModel: () =>
               Effect.die("CheckpointDiffQuery should not request the command read model"),
             getSnapshot: () =>
@@ -201,6 +202,7 @@ describe("CheckpointDiffQuery.layer", () => {
             getChannelShellById: () => Effect.die("unused"),
             listChannelMessages: () => Effect.die("unused"),
             listRunsByAgent: () => Effect.die("unused"),
+            getAgentById: () => Effect.die("unused"),
             getCommandReadModel: () =>
               Effect.die("CheckpointDiffQuery should not request the command read model"),
             getSnapshot: () =>
@@ -296,6 +298,7 @@ describe("CheckpointDiffQuery.layer", () => {
             getChannelShellById: () => Effect.die("unused"),
             listChannelMessages: () => Effect.die("unused"),
             listRunsByAgent: () => Effect.die("unused"),
+            getAgentById: () => Effect.die("unused"),
             getCommandReadModel: () =>
               Effect.die("CheckpointDiffQuery should not request the command read model"),
             getSnapshot: () =>
@@ -376,6 +379,7 @@ describe("CheckpointDiffQuery.layer", () => {
             getChannelShellById: () => Effect.die("unused"),
             listChannelMessages: () => Effect.die("unused"),
             listRunsByAgent: () => Effect.die("unused"),
+            getAgentById: () => Effect.die("unused"),
             getCommandReadModel: () =>
               Effect.die("CheckpointDiffQuery should not request the command read model"),
             getSnapshot: () =>
@@ -441,6 +445,7 @@ describe("CheckpointDiffQuery.layer", () => {
             getChannelShellById: () => Effect.die("unused"),
             listChannelMessages: () => Effect.die("unused"),
             listRunsByAgent: () => Effect.die("unused"),
+            getAgentById: () => Effect.die("unused"),
             getCommandReadModel: () =>
               Effect.die("CheckpointDiffQuery should not request the command read model"),
             getSnapshot: () =>

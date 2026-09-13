@@ -661,6 +661,18 @@ export const DEFAULT_PROJECT_RUN_CAP = 3;
 export const isRunEndingSessionStatus = (status: OrchestrationSessionStatus): boolean =>
   status === "stopped" || status === "error";
 
+const AGENT_DM_THREAD_PREFIX = "dm:";
+
+/** An agent's DM: one continuous coding thread per agent, with a fixed id. */
+export const agentDmThreadId = (agentId: AgentId): ThreadId =>
+  ThreadId.make(`${AGENT_DM_THREAD_PREFIX}${agentId}`);
+
+/** The agent whose DM this thread is, or null for any other thread. */
+export const agentIdOfDmThread = (threadId: ThreadId): AgentId | null =>
+  threadId.startsWith(AGENT_DM_THREAD_PREFIX)
+    ? AgentId.make(threadId.slice(AGENT_DM_THREAD_PREFIX.length))
+    : null;
+
 export const OrchestrationMessageRole = Schema.Literals(["user", "assistant", "system"]);
 export type OrchestrationMessageRole = typeof OrchestrationMessageRole.Type;
 

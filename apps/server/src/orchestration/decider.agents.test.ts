@@ -1,6 +1,7 @@
 import {
   AgentId,
   AgentName,
+  agentDmThreadId,
   CommandId,
   ProjectId,
   ProviderInstanceId,
@@ -66,6 +67,56 @@ const applyCommands = Effect.fn("applyCommands")(function* (
 });
 
 it.layer(NodeServices.layer)("decider agents", (it) => {
+  it.effect("creates an agent's DM thread only for that agent, in its own project", () =>
+    Effect.gen(function* () {
+      const otherProjectId = ProjectId.make("project-other");
+      const dmThread = (inProject: ProjectId): OrchestrationCommand => ({
+        type: "thread.create",
+        commandId: CommandId.make(`cmd-dm-${inProject}`),
+        threadId: agentDmThreadId(AgentId.make("agent-1")),
+        projectId: inProject,
+        title: "@backend",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          model: "claude-haiku-4-5",
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdAt: now,
+      });
+      const createOtherProject: OrchestrationCommand = {
+        type: "project.create",
+        commandId: CommandId.make("cmd-project-other"),
+        projectId: otherProjectId,
+        title: "Other",
+        workspaceRoot: "/tmp/other",
+        createdAt: now,
+      };
+
+      const readModel = yield* applyCommands([
+        createProject,
+        createAgent("agent-1", "backend"),
+        dmThread(projectId),
+      ]);
+      expect(readModel.threads.map((thread) => thread.id)).toContain("dm:agent-1");
+
+      const inOtherProject = yield* Effect.flip(
+        applyCommands([
+          createProject,
+          createOtherProject,
+          createAgent("agent-1", "backend"),
+          dmThread(otherProjectId),
+        ]),
+      );
+      expect(inOtherProject.message).toContain("@backend");
+
+      const withoutAgent = yield* Effect.flip(applyCommands([createProject, dmThread(projectId)]));
+      expect(withoutAgent._tag).toBe("OrchestrationCommandInvariantError");
+    }),
+  );
+
   it.effect("creates an agent in an existing project", () =>
     Effect.gen(function* () {
       const readModel = yield* applyCommands([createProject, createAgent("agent-1", "backend")]);

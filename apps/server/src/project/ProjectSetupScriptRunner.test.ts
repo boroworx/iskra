@@ -33,6 +33,7 @@ const makeProjectionSnapshotQueryLayer = (project: OrchestrationProject) =>
     getChannelShellById: () => Effect.die("unused"),
     listChannelMessages: () => Effect.die("unused"),
     listRunsByAgent: () => Effect.die("unused"),
+    getAgentById: () => Effect.die("unused"),
     getCommandReadModel: () => Effect.die("unused"),
     getSnapshot: () => Effect.die("unused"),
     getShellSnapshot: () => Effect.die("unused"),

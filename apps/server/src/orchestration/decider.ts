@@ -8,6 +8,7 @@ import {
   MessageId,
   ThreadLinkedPullRequest,
   UserInputRequestedPayload,
+  agentIdOfDmThread,
   isImportedAgentSessionMessageId,
   type OrchestrationCommand,
   type OrchestrationEvent,
@@ -381,6 +382,17 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         projectId: command.projectId,
       });
+      // An agent's DM exists only for a real agent, inside that agent's project.
+      const dmAgentId = agentIdOfDmThread(command.threadId);
+      if (dmAgentId !== null) {
+        const dmAgent = yield* requireAgent({ readModel, command, agentId: dmAgentId });
+        if (dmAgent.projectId !== command.projectId) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `A DM with @${dmAgent.name} belongs to that agent's own project.`,
+          });
+        }
+      }
       yield* requireThreadAbsent({
         readModel,
         command,

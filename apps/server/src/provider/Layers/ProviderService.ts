@@ -388,6 +388,7 @@ function toRuntimePayloadFromSession(
     readonly lastRuntimeEvent?: string;
     readonly lastRuntimeEventAt?: string;
     readonly run?: ProviderSessionStartInput["run"];
+    readonly agentPrompt?: string;
   },
 ): Record<string, unknown> {
   return {
@@ -397,6 +398,8 @@ function toRuntimePayloadFromSession(
     lastError: session.lastError ?? null,
     // Directory upserts merge payloads, so a run marker written at start survives later writes.
     ...(extra?.run !== undefined ? { run: extra.run } : {}),
+    // Kept so a recovered agent DM resumes with its role.
+    ...(extra?.agentPrompt !== undefined ? { agentPrompt: extra.agentPrompt } : {}),
     ...(extra?.continueAfterServerUpdate !== undefined
       ? { continueAfterServerUpdate: extra.continueAfterServerUpdate }
       : {}),
@@ -418,6 +421,16 @@ function isPersistedRun(
     "run" in runtimePayload &&
     runtimePayload.run != null
   );
+}
+
+function readPersistedAgentPrompt(
+  runtimePayload: ProviderSessionDirectory.ProviderRuntimeBinding["runtimePayload"],
+): string | undefined {
+  if (!runtimePayload || typeof runtimePayload !== "object" || Array.isArray(runtimePayload)) {
+    return undefined;
+  }
+  const raw = "agentPrompt" in runtimePayload ? runtimePayload.agentPrompt : undefined;
+  return typeof raw === "string" ? raw : undefined;
 }
 
 function readPersistedModelSelection(
@@ -1293,6 +1306,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
       const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
       const persistedModelSelection = readPersistedModelSelection(input.binding.runtimePayload);
+      const persistedAgentPrompt = readPersistedAgentPrompt(input.binding.runtimePayload);
 
       yield* prepareMcpSession(input.binding.threadId, bindingInstanceId);
       const resumed = yield* adapter
@@ -1302,6 +1316,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           providerInstanceId: bindingInstanceId,
           ...(persistedCwd ? { cwd: persistedCwd } : {}),
           ...(persistedModelSelection ? { modelSelection: persistedModelSelection } : {}),
+          ...(persistedAgentPrompt !== undefined ? { agentPrompt: persistedAgentPrompt } : {}),
           ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
           runtimeMode: input.binding.runtimeMode ?? "full-access",
         })
@@ -1562,6 +1577,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         yield* upsertSessionBinding(sessionWithInstance, threadId, {
           modelSelection: input.modelSelection,
           ...(input.run !== undefined ? { run: input.run } : {}),
+          ...(input.agentPrompt !== undefined ? { agentPrompt: input.agentPrompt } : {}),
         });
         yield* analytics.record("provider.session.started", {
           provider: sessionWithInstance.provider,
