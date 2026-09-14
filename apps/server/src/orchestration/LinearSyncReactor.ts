@@ -3,7 +3,7 @@ import {
   CardId,
   CommandId,
   MessageId,
-  type CardLinearIssue,
+  CardLinearIssue,
   type CardStatus,
   type OrchestrationCard,
   type OrchestrationCardShell,
@@ -23,6 +23,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Schedule from "effect/Schedule";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import type * as Scope from "effect/Scope";
 
@@ -31,6 +32,7 @@ import * as LinearClient from "../linear/LinearClient.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { isFinishedCardStatus } from "./cardRules.ts";
+import { liveOwnerRun } from "./decider.ts";
 import * as OrchestrationEngine from "./Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts";
 
@@ -109,14 +111,7 @@ const linkOf = (issue: LinearClient.LinearIssue): CardLinearIssue => ({
   promptsSyncedAt: null,
 });
 
-const linksEqual = (left: CardLinearIssue, right: CardLinearIssue) =>
-  left.title === right.title &&
-  left.description === right.description &&
-  left.stateId === right.stateId &&
-  left.priority === right.priority &&
-  left.commentsSyncedAt === right.commentsSyncedAt &&
-  left.agentSessionId === right.agentSessionId &&
-  left.promptsSyncedAt === right.promptsSyncedAt;
+const linksEqual = Schema.toEquivalence(CardLinearIssue);
 
 /**
  * Two-way sync between cards and Linear issues, by polling so a server without a public URL works.
@@ -153,8 +148,19 @@ export const make = Effect.gen(function* () {
       Cause.hasInterruptsOnly(cause)
         ? Effect.failCause(cause)
         : Effect.logWarning(message, { ...fields, cause: Cause.pretty(cause) });
+  /** Logs a skipped step and carries on with `fallback`. */
+  const orSkipped =
+    <A>(fallback: A, message: string, fields: Record<string, unknown>) =>
+    <E>(cause: Cause.Cause<E>) =>
+      logSkipped(message, fields)(cause).pipe(Effect.as(fallback));
 
   const dispatch = (command: OrchestrationCommand) => engine.dispatch(command).pipe(Effect.asVoid);
+  /** Dispatches a command; false when the decider refuses it. */
+  const tryDispatch = (command: OrchestrationCommand) =>
+    dispatch(command).pipe(
+      Effect.as(true),
+      Effect.catchTag("OrchestrationCommandInvariantError", () => Effect.succeed(false)),
+    );
 
   /** The oldest message-mode question the session asked and nobody has answered yet. */
   const openQuestion = Effect.fn("LinearSyncReactor.openQuestion")(function* (threadId: ThreadId) {
@@ -214,14 +220,11 @@ export const make = Effect.gen(function* () {
       const decided =
         decision === null
           ? false
-          : yield* dispatch({
+          : yield* tryDispatch({
               type: decision,
               commandId: yield* freshCommandId("decision"),
               cardId: card.id,
-            }).pipe(
-              Effect.as(true),
-              Effect.catchTag("OrchestrationCommandInvariantError", () => Effect.succeed(false)),
-            );
+            });
       if (!decided) restoreStateId = expected.id;
     }
 
@@ -258,11 +261,7 @@ export const make = Effect.gen(function* () {
       link.agentSessionId === null
         ? []
         : yield* linear.agentPrompts(link.agentSessionId).pipe(
-            Effect.catchCause((cause) =>
-              logSkipped("Linear agent prompts skipped", { cardId: card.id })(cause).pipe(
-                Effect.as<ReadonlyArray<LinearClient.LinearAgentPrompt>>([]),
-              ),
-            ),
+            Effect.catchCause(orSkipped([], "Linear agent prompts skipped", { cardId: card.id })),
           );
     // A prompt written as a comment already arrives with the comments.
     const freshPrompts = prompts.filter(
@@ -279,17 +278,14 @@ export const make = Effect.gen(function* () {
     let question = input.ownerThreadId === null ? null : yield* openQuestion(input.ownerThreadId);
     for (const reply of replies) {
       if (question !== null && input.ownerThreadId !== null) {
-        const answered = yield* dispatch({
+        const answered = yield* tryDispatch({
           type: "thread.user-input.respond",
           commandId: CommandId.make(`server:linear-answer:${reply.key}`),
           threadId: input.ownerThreadId,
           requestId: question,
           answers: { answer: reply.body },
           createdAt: input.nowIso,
-        }).pipe(
-          Effect.as(true),
-          Effect.catchTag("OrchestrationCommandInvariantError", () => Effect.succeed(false)),
-        );
+        });
         question = null;
         if (answered) continue;
       }
@@ -384,11 +380,7 @@ export const make = Effect.gen(function* () {
       const teamId = teamByProject.get(projectId);
       if (teamId === undefined) continue;
       const labeled = yield* linear.labeledIssues(teamId, label).pipe(
-        Effect.catchCause((cause) =>
-          logSkipped("Linear label intake skipped", { projectId, label })(cause).pipe(
-            Effect.as<ReadonlyArray<LinearClient.LinearIssue>>([]),
-          ),
-        ),
+        Effect.catchCause(orSkipped([], "Linear label intake skipped", { projectId, label })),
       );
       for (const issue of labeled) yield* intake(issue, projectId);
     }
@@ -428,9 +420,7 @@ export const make = Effect.gen(function* () {
       const link = card.linearIssue!;
       const issue = issuesById.get(link.id);
       if (issue === undefined) continue;
-      const ownerThreadId =
-        (readModel.liveRuns ?? []).find((run) => run.cardId === card.id && run.role === "owner")
-          ?.threadId ?? null;
+      const ownerThreadId = liveOwnerRun(readModel, card.id)?.threadId ?? null;
       yield* statesOf(link.teamId).pipe(
         Effect.flatMap((states) =>
           syncLinkedCard({ card, link, issue, states, viewerId, ownerThreadId, nowIso }),
@@ -460,11 +450,8 @@ export const make = Effect.gen(function* () {
     if (link.agentSessionId !== null) return link.agentSessionId;
     if (sessionless.has(link.id)) return null;
     const opened = yield* linear.createAgentSession(link.id).pipe(
-      Effect.map((id): string | null => id),
-      Effect.catchCause((cause) =>
-        logSkipped("Linear agent session unavailable; using comments", { cardId: card.id })(
-          cause,
-        ).pipe(Effect.as(null)),
+      Effect.catchCause(
+        orSkipped(null, "Linear agent session unavailable; using comments", { cardId: card.id }),
       ),
     );
     if (opened === null) {
