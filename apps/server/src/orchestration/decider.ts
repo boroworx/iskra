@@ -349,7 +349,7 @@ const decideCommandSequence = Effect.fn("decideCommandSequence")(function* ({
 });
 
 /** The card whose budget a card spends from: an attempt or a builder's sub-card spends from its parent's. */
-const budgetCardOf = (readModel: OrchestrationReadModel, card: OrchestrationCard) =>
+export const budgetCardOf = (readModel: OrchestrationReadModel, card: OrchestrationCard) =>
   (card.attemptGroupId !== null || card.createdBy.kind === "agent") && card.parentCardId !== null
     ? (readModel.cards?.find((candidate) => candidate.id === card.parentCardId) ?? card)
     : card;
