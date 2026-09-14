@@ -12,6 +12,7 @@ import {
 import { makeDrainableWorker } from "@iskra/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
+import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -68,6 +69,7 @@ const make = Effect.gen(function* () {
   const snapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const cards = yield* ProjectionCardRepository;
   const workspace = yield* CardWorkspace.CardWorkspace;
+  const crypto = yield* Crypto.Crypto;
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
   // ponytail: reads the whole command read model per request, like RunReactor; add
@@ -258,7 +260,11 @@ const make = Effect.gen(function* () {
     }
     const model = yield* readModel();
     const messageIds = waiting.map((message) => message.messageId);
-    const key = `${owner.threadId}:${messageIds.join(",")}`;
+    // Each attempt gets its own id: a turn refused at the budget cap is tried again after a
+    // raise, and the engine never re-decides a rejected command id. Sent messages are skipped,
+    // so a repeated attempt cannot deliver twice.
+    const attempt = yield* crypto.randomUUIDv4.pipe(Effect.orDie);
+    const key = `${owner.threadId}:${messageIds.join(",")}:${attempt}`;
     const createdAt = yield* nowIso;
     yield* engine.dispatch({
       type: "thread.turn.start",
@@ -481,6 +487,16 @@ const make = Effect.gen(function* () {
         return event.payload.forOwner
           ? worker.enqueue({ kind: "deliver", cardId: event.payload.cardId })
           : Effect.void;
+      // A raised cap or an accepted model lets the card spend again: restart and deliver.
+      case "card.budget-set":
+      case "card.unpriced-accepted":
+        return Effect.all(
+          [
+            worker.enqueue({ kind: "assigned", cardId: event.payload.cardId, key: event.eventId }),
+            worker.enqueue({ kind: "deliver", cardId: event.payload.cardId }),
+          ],
+          { discard: true },
+        );
       case "card.status-changed":
         if (isFinishedCardStatus(event.payload.to)) {
           return worker.enqueue({ kind: "finished", cardId: event.payload.cardId, key: event.eventId });

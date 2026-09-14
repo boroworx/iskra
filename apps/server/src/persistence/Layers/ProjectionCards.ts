@@ -12,6 +12,7 @@ import {
   ProjectionCardDecisionDbRow,
   ProjectionCardMessage,
   ProjectionCardRepository,
+  ProjectionCardSpend,
   UpdateProjectionCardDeliveriesInput,
   type ProjectionCardRepositoryShape,
 } from "../Services/ProjectionCards.ts";
@@ -44,6 +45,11 @@ const makeProjectionCardRepository = Effect.gen(function* () {
           activity_at,
           diff_stat_json,
           checks_json,
+          spent_usd,
+          budget_cap_usd,
+          unpriced_turns,
+          accepts_unpriced_json,
+          review_returns,
           relations_json,
           created_by_json,
           created_at,
@@ -70,6 +76,11 @@ const makeProjectionCardRepository = Effect.gen(function* () {
           ${row.activityAt},
           ${JSON.stringify(row.diffStat)},
           ${JSON.stringify(row.checks)},
+          ${row.spentUsd},
+          ${row.budgetCapUsd},
+          ${row.unpricedTurns},
+          ${JSON.stringify(row.acceptsUnpriced)},
+          ${row.reviewReturns},
           ${JSON.stringify(row.relations)},
           ${JSON.stringify(row.createdBy)},
           ${row.createdAt},
@@ -96,6 +107,11 @@ const makeProjectionCardRepository = Effect.gen(function* () {
           activity_at = excluded.activity_at,
           diff_stat_json = excluded.diff_stat_json,
           checks_json = excluded.checks_json,
+          spent_usd = excluded.spent_usd,
+          budget_cap_usd = excluded.budget_cap_usd,
+          unpriced_turns = excluded.unpriced_turns,
+          accepts_unpriced_json = excluded.accepts_unpriced_json,
+          review_returns = excluded.review_returns,
           relations_json = excluded.relations_json,
           created_by_json = excluded.created_by_json,
           created_at = excluded.created_at,
@@ -129,6 +145,11 @@ const makeProjectionCardRepository = Effect.gen(function* () {
           activity_at AS "activityAt",
           COALESCE(diff_stat_json, 'null') AS "diffStat",
           COALESCE(checks_json, 'null') AS "checks",
+          spent_usd AS "spentUsd",
+          budget_cap_usd AS "budgetCapUsd",
+          unpriced_turns AS "unpricedTurns",
+          accepts_unpriced_json AS "acceptsUnpriced",
+          review_returns AS "reviewReturns",
           relations_json AS "relations",
           created_by_json AS "createdBy",
           created_at AS "createdAt",
@@ -157,6 +178,32 @@ const makeProjectionCardRepository = Effect.gen(function* () {
           ${row.createdAt}
         )
         ON CONFLICT (decision_id) DO NOTHING
+      `,
+  });
+
+  const insertSpendRow = SqlSchema.void({
+    Request: ProjectionCardSpend,
+    execute: (row) =>
+      sql`
+        INSERT INTO projection_card_spend (
+          spend_id,
+          card_id,
+          agent_id,
+          thread_id,
+          cost_usd,
+          cost_source,
+          recorded_at
+        )
+        VALUES (
+          ${row.spendId},
+          ${row.cardId},
+          ${row.agentId},
+          ${row.threadId},
+          ${row.costUsd},
+          ${row.costSource},
+          ${row.recordedAt}
+        )
+        ON CONFLICT (spend_id) DO NOTHING
       `,
   });
 
@@ -255,6 +302,11 @@ const makeProjectionCardRepository = Effect.gen(function* () {
       Effect.mapError(toPersistenceSqlError("ProjectionCardRepository.appendDecision:query")),
     );
 
+  const recordSpend: ProjectionCardRepositoryShape["recordSpend"] = (row) =>
+    insertSpendRow(row).pipe(
+      Effect.mapError(toPersistenceSqlError("ProjectionCardRepository.recordSpend:query")),
+    );
+
   const listDecisions: ProjectionCardRepositoryShape["listDecisions"] = (input) =>
     listDecisionRows(input).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionCardRepository.listDecisions:query")),
@@ -283,6 +335,7 @@ const makeProjectionCardRepository = Effect.gen(function* () {
     upsert,
     getById,
     appendDecision,
+    recordSpend,
     listDecisions,
     appendMessage,
     updateDeliveries,

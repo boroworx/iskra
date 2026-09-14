@@ -976,6 +976,19 @@ const makeWsRpcLayer = (
           ),
         );
 
+      // A card's change (its spend, above all) moves its agent's shell too; the agent goes first.
+      const delegateAgentUpsert = (
+        cardId: CardId,
+        sequence: number,
+      ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> =>
+        retryShellProjectionRead("card", cardId, projectionSnapshotQuery.getCardShellById(cardId)).pipe(
+          Effect.flatMap((card) =>
+            Option.isSome(card) && Option.isSome(card.value) && card.value.value.delegateAgentId !== null
+              ? agentUpsertOrRemove(card.value.value.delegateAgentId, sequence)
+              : Effect.succeed(Option.none<OrchestrationShellStreamEvent>()),
+          ),
+        );
+
       // A run thread never reaches the thread list; its activity changes its agent's presence.
       const threadOrRunPresence = (
         threadId: ThreadId,
@@ -1075,8 +1088,13 @@ const makeWsRpcLayer = (
             (event) => ownerCardUpsert(ThreadId.make(event.aggregateId), event.sequence),
             { concurrency: SHELL_REFETCH_CONCURRENCY },
           );
+          const agentFollowUps = yield* Effect.forEach(
+            survivors.filter((event) => event.aggregateKind === "card"),
+            (event) => delegateAgentUpsert(CardId.make(event.aggregateId), event.sequence),
+            { concurrency: SHELL_REFETCH_CONCURRENCY },
+          );
           // A stable sort keeps a card's update after the agent update sharing its sequence.
-          return [...shellEvents, ...cardFollowUps]
+          return [...agentFollowUps, ...shellEvents, ...cardFollowUps]
             .flatMap((option) => (Option.isSome(option) ? [option.value] : []))
             .toSorted((left, right) => left.sequence - right.sequence);
         });

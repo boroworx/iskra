@@ -156,3 +156,19 @@ export function withoutRelation(
 ): ReadonlyArray<CardRelation> {
   return relations.filter((existing) => !sameRelation(existing, relation));
 }
+
+/**
+ * Why a card's turns cannot start (invariant 13): its spend reached the cap, or
+ * its model has no known price and no person accepted running it uncapped.
+ */
+export function cardBudgetRefusal(
+  card: Pick<OrchestrationCard, "spentUsd" | "budgetCapUsd" | "unpricedTurns" | "acceptsUnpriced">,
+): string | null {
+  if (card.spentUsd >= card.budgetCapUsd) {
+    return `The card has spent $${card.spentUsd.toFixed(2)} of its $${card.budgetCapUsd.toFixed(2)} budget; raise the cap to continue.`;
+  }
+  if (card.unpricedTurns > 0 && !card.acceptsUnpriced) {
+    return "The card's model has no known price; accept running it uncapped to continue.";
+  }
+  return null;
+}

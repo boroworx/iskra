@@ -125,6 +125,7 @@ import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionRe
 import * as PullRequestSyncReactor from "./orchestration/PullRequestSyncReactor.ts";
 import * as AgentDefinitionSync from "./orchestration/AgentDefinitionSync.ts";
 import * as CardReviewReactor from "./orchestration/CardReviewReactor.ts";
+import * as CardSpendReactor from "./orchestration/CardSpendReactor.ts";
 import * as CardSessionReactor from "./orchestration/CardSessionReactor.ts";
 import * as CardWorkspace from "./orchestration/CardWorkspace.ts";
 import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
@@ -988,6 +989,9 @@ const buildAppUnderTest = (options?: {
             start: () => Effect.void,
           }),
           Layer.mock(CardReviewReactor.CardReviewReactor)({
+            start: () => Effect.void,
+          }),
+          Layer.mock(CardSpendReactor.CardSpendReactor)({
             start: () => Effect.void,
           }),
         ),
@@ -9886,6 +9890,11 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   activityAt: now,
                   diffStat: null,
                   checks: null,
+                  spentUsd: 0,
+                  budgetCapUsd: 10,
+                  unpricedTurns: 0,
+                  acceptsUnpriced: false,
+                  reviewReturns: 0,
                   createdBy: { kind: "human" as const, id: "human" },
                   createdAt: now,
                   updatedAt: now,
@@ -9972,7 +9981,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         "card-upserted",
         "synchronized",
       ]);
-      assert.deepEqual(yield* subscribeKinds({ agentChannels: true, cards: true }, 4), [
+      assert.deepEqual(yield* subscribeKinds({ agentChannels: true, cards: true }, 5), [
+        "agent-upserted",
         "card-upserted",
         "agent-upserted",
         "card-upserted",

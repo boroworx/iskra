@@ -107,6 +107,10 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "card.checks.record":
     case "card.overlap.flag":
     case "card.review.comment":
+    case "card.spend.record":
+    case "card.budget.set":
+    case "card.unpriced.accept":
+    case "card.unpriced.refuse":
       return {
         aggregateKind: "card",
         aggregateId: command.cardId,

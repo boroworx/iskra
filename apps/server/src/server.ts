@@ -79,6 +79,7 @@ import * as ThreadPullRequestReactor from "./orchestration/ThreadPullRequestReac
 import * as RunReactor from "./orchestration/RunReactor.ts";
 import * as AgentDefinitionSync from "./orchestration/AgentDefinitionSync.ts";
 import * as CardReviewReactor from "./orchestration/CardReviewReactor.ts";
+import * as CardSpendReactor from "./orchestration/CardSpendReactor.ts";
 import * as CardSessionReactor from "./orchestration/CardSessionReactor.ts";
 import * as CardWorkspace from "./orchestration/CardWorkspace.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
@@ -296,6 +297,7 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(AgentDefinitionSync.layer),
   Layer.provideMerge(CardSessionReactor.layer),
   Layer.provideMerge(CardReviewReactor.layer),
+  Layer.provideMerge(CardSpendReactor.layer),
   Layer.provideMerge(
     CardWorkspace.layer.pipe(Layer.provide(ProcessRunner.layer), Layer.provide(NetService.layer)),
   ),

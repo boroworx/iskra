@@ -1,10 +1,23 @@
-import { MessageId, type AgentId, type EnvironmentId, type ThreadId } from "@iskra/contracts";
+import { needsYouItems } from "@iskra/client-runtime/cards";
+import {
+  MessageId,
+  type AgentId,
+  type EnvironmentId,
+  type OrchestrationAgentShell,
+  type OrchestrationCardShell,
+  type ThreadId,
+} from "@iskra/contracts";
 import { AtSignIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { randomUUID } from "~/lib/utils";
 import { channelEnvironment } from "~/state/channels";
-import { useEnvironmentAgents, useEnvironmentChannels, useProjects } from "~/state/entities";
+import {
+  useEnvironmentAgents,
+  useEnvironmentCards,
+  useEnvironmentChannels,
+  useProjects,
+} from "~/state/entities";
 import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { SidebarInset } from "../ui/sidebar";
@@ -25,6 +38,7 @@ export function AgentView(props: {
 }) {
   const agents = useEnvironmentAgents(props.environmentId);
   const channels = useEnvironmentChannels(props.environmentId);
+  const cards = useEnvironmentCards(props.environmentId);
   const projects = useProjects();
   const agent = agents.find((entry) => entry.id === props.agentId) ?? null;
   const project =
@@ -75,6 +89,7 @@ export function AgentView(props: {
               <AtSignIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
               <h1 className="truncate text-sm font-semibold">{agent.name}</h1>
               <PresenceBadge presence={agent.presence} />
+              <AgentStats agent={agent} cards={cards} />
             </div>
           )}
         </WorkspacePageHeader>
@@ -151,5 +166,31 @@ export function AgentView(props: {
         )}
       </div>
     </SidebarInset>
+  );
+}
+
+/** What the agent has cost and done on its cards: spend, landings, returns, and what waits on a person. */
+function AgentStats(props: {
+  readonly agent: OrchestrationAgentShell;
+  readonly cards: ReadonlyArray<OrchestrationCardShell>;
+}) {
+  const [now] = useState(() => Date.now());
+  const own = props.cards.filter((card) => card.delegateAgentId === props.agent.id);
+  const landed = own.filter((card) => card.status === "landed").length;
+  const returns = own.reduce((total, card) => total + card.reviewReturns, 0);
+  const waiting = needsYouItems({
+    cards: own,
+    sessions: own.flatMap((card) =>
+      card.ownerSession === null
+        ? []
+        : [{ cardId: card.id, state: card.ownerSession.state, since: card.ownerSession.since }],
+    ),
+    now,
+  }).length;
+  return (
+    <span className="hidden truncate text-xs tabular-nums text-muted-foreground sm:inline">
+      ${(props.agent.spentUsd ?? 0).toFixed(2)} spent · {landed} landed · {returns} sent back ·{" "}
+      {waiting} waiting on you
+    </span>
   );
 }

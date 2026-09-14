@@ -26,6 +26,7 @@ import {
   type UsageSummary,
   type UsageSummaryInput,
   UsageReadError,
+  type UsageTokenTotals,
 } from "@iskra/contracts";
 import { HostProcessEnvironment } from "@iskra/shared/hostProcess";
 import * as Cause from "effect/Cause";
@@ -48,7 +49,13 @@ import * as ServerSettings from "../serverSettings.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
 import { mergeProviderInstanceEnvironment } from "../provider/ProviderInstanceEnvironment.ts";
 import { UsageAggregator } from "./usageAggregation.ts";
-import { createOverrideRateTable, parseRateTable, type RateTable } from "./usagePricing.ts";
+import {
+  createOverrideRateTable,
+  parseRateTable,
+  priceUsage,
+  type PricedUsage,
+  type RateTable,
+} from "./usagePricing.ts";
 import {
   listTranscriptFiles,
   readDirectoryVolumeId,
@@ -108,6 +115,15 @@ export class UsageService extends Context.Service<
     readonly readSummary: (input: UsageSummaryInput) => Effect.Effect<UsageSummary, UsageReadError>;
     /** Refetches the rate table ahead of its TTL. See `ensureRates`. */
     readonly refreshRates: Effect.Effect<UsagePricing>;
+    /**
+     * Prices one turn the way the usage page prices a bucket: a reported cost,
+     * else the rate table with the user's overrides, else unpriced.
+     */
+    readonly priceTurn: (input: {
+      readonly model: string;
+      readonly totals: UsageTokenTotals | null;
+      readonly reportedCostUsd: number | null;
+    }) => Effect.Effect<PricedUsage>;
   }
 >()("@iskra/cli/usage/UsageService") {}
 
@@ -135,6 +151,7 @@ export const layerTest = Layer.succeed(
         scanDurationMs: 0,
       }),
     refreshRates: Effect.succeed(EMPTY_PRICING),
+    priceTurn: () => Effect.succeed({ costUsd: 0, costSource: "unpriced" as const }),
   }),
 );
 
@@ -628,7 +645,22 @@ export const make = Effect.gen(function* () {
     return yield* Deferred.await(deferred);
   });
 
-  return { readSummary, refreshRates } as const;
+  const priceTurn: UsageService["Service"]["priceTurn"] = (input) =>
+    Effect.gen(function* () {
+      yield* ensureRates(false);
+      const settings = yield* Effect.option(settingsService.getSettings);
+      const overrides = Option.isSome(settings)
+        ? createOverrideRateTable(settings.value.usagePriceOverrides)
+        : undefined;
+      if (input.totals === null) {
+        return input.reportedCostUsd !== null && Number.isFinite(input.reportedCostUsd)
+          ? { costUsd: input.reportedCostUsd, costSource: "providerReported" as const }
+          : { costUsd: 0, costSource: "unpriced" as const };
+      }
+      return priceUsage(rates, input.model, input.totals, input.reportedCostUsd, overrides);
+    });
+
+  return { readSummary, refreshRates, priceTurn } as const;
 });
 
 export const layer = Layer.effect(UsageService, make);

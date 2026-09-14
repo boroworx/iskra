@@ -12,6 +12,7 @@ import type {
   ThreadPullRequestLink,
 } from "@iskra/contracts";
 import {
+  DEFAULT_CARD_BUDGET_USD,
   isImportedAgentSessionMessageId,
   isRunEndingSessionStatus,
   OrchestrationCheckpointSummary,
@@ -1253,6 +1254,11 @@ export function projectEvent(
             activityAt: payload.createdAt,
             diffStat: null,
             checks: null,
+            spentUsd: 0,
+            budgetCapUsd: DEFAULT_CARD_BUDGET_USD,
+            unpricedTurns: 0,
+            acceptsUnpriced: false,
+            reviewReturns: 0,
             createdBy: payload.createdBy,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
@@ -1291,6 +1297,7 @@ export function projectEvent(
             status: payload.to,
             updatedAt: payload.updatedAt,
             activityAt: payload.updatedAt,
+            reviewReturns: card.reviewReturns + (payload.move === "returnToWork" ? 1 : 0),
           })),
         })),
       );
@@ -1481,6 +1488,34 @@ export function projectEvent(
           ...card,
           snoozedUntil: event.payload.snoozedUntil,
           snoozedAt: event.payload.snoozedAt,
+        })),
+      });
+
+    case "card.spend-recorded":
+      return Effect.succeed({
+        ...nextBase,
+        cards: updateCard(nextBase.cards ?? [], event.payload.cardId, (card) => ({
+          ...card,
+          spentUsd: card.spentUsd + event.payload.costUsd,
+          unpricedTurns: card.unpricedTurns + (event.payload.costSource === "unpriced" ? 1 : 0),
+        })),
+      });
+
+    case "card.budget-set":
+      return Effect.succeed({
+        ...nextBase,
+        cards: updateCard(nextBase.cards ?? [], event.payload.cardId, (card) => ({
+          ...card,
+          budgetCapUsd: event.payload.capUsd,
+        })),
+      });
+
+    case "card.unpriced-accepted":
+      return Effect.succeed({
+        ...nextBase,
+        cards: updateCard(nextBase.cards ?? [], event.payload.cardId, (card) => ({
+          ...card,
+          acceptsUnpriced: event.payload.accepts,
         })),
       });
 

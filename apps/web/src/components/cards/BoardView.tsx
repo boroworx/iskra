@@ -205,6 +205,8 @@ const CardFace = memo(function CardFace(props: {
         : card.checks.state === "passed"
           ? "Checks passed"
           : `Checks failed ${card.checks.failedRuns}/${CARD_AUTOFIX_ATTEMPTS}`,
+    card.spentUsd >= card.budgetCapUsd && card.status !== "landed" ? "Budget reached" : null,
+    card.unpricedTurns > 0 && !card.acceptsUnpriced ? "Unpriced model" : null,
   ].filter((badge): badge is string => badge !== null);
 
   return (
@@ -234,7 +236,9 @@ const CardFace = memo(function CardFace(props: {
                 badge === "Needs you" ||
                   badge === "Failed" ||
                   badge === "Blocked" ||
-                  badge.startsWith("Checks failed")
+                  badge.startsWith("Checks failed") ||
+                  badge === "Budget reached" ||
+                  badge === "Unpriced model"
                   ? "bg-destructive/15 text-destructive-foreground"
                   : "bg-muted text-muted-foreground",
               )}
@@ -257,6 +261,11 @@ const CardFace = memo(function CardFace(props: {
         {session?.planProgress != null ? (
           <dd className="tabular-nums">
             {session.planProgress.completedSteps}/{session.planProgress.totalSteps} steps
+          </dd>
+        ) : null}
+        {card.spentUsd > 0 ? (
+          <dd className="tabular-nums">
+            ${card.spentUsd.toFixed(2)} of ${card.budgetCapUsd.toFixed(0)}
           </dd>
         ) : null}
         {children.length > 0 ? (

@@ -106,7 +106,9 @@ export type NeedsYouKind =
   | "awaitingInput"
   | "sessionFailed"
   | "readyToMerge"
-  | "checksExhausted";
+  | "checksExhausted"
+  | "budgetReached"
+  | "unpricedModel";
 
 export interface NeedsYouItem {
   readonly key: string;
@@ -127,6 +129,8 @@ export const NEEDS_YOU_LABEL: Record<NeedsYouKind, string> = {
   sessionFailed: "Its session stopped without finishing",
   readyToMerge: "Checks passed; approve the merge",
   checksExhausted: "Checks kept failing; its agent stopped retrying",
+  budgetReached: "It reached its budget; raise the cap to continue",
+  unpricedModel: "Its model has no known price; accept running it uncapped",
 };
 
 /**
@@ -167,6 +171,14 @@ export function needsYouItems(input: {
           kind: "checksExhausted",
           since: card.checks.updatedAt,
         });
+      }
+    }
+    // Invariant 13: a card that may not spend waits on a person.
+    if (card.status !== "landed" && card.status !== "abandoned") {
+      if (card.spentUsd >= card.budgetCapUsd) {
+        items.push({ ...base, key: `budget:${card.id}`, kind: "budgetReached", since: card.activityAt });
+      } else if (card.unpricedTurns > 0 && !card.acceptsUnpriced) {
+        items.push({ ...base, key: `unpriced:${card.id}`, kind: "unpricedModel", since: card.activityAt });
       }
     }
   }

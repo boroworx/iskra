@@ -4,7 +4,7 @@ import {
   needsYouItems,
   waitingLabel,
 } from "@iskra/client-runtime/cards";
-import type { CardId, EnvironmentId } from "@iskra/contracts";
+import { DEFAULT_CARD_BUDGET_USD, type CardId, type EnvironmentId } from "@iskra/contracts";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
@@ -29,6 +29,8 @@ export function NeedsYouView() {
   const projects = useProjects();
   const snooze = useAtomCommand(cardEnvironment.snooze);
   const unsnooze = useAtomCommand(cardEnvironment.unsnooze);
+  const decide = useAtomCommand(cardEnvironment.decide);
+  const setBudget = useAtomCommand(cardEnvironment.setBudget);
   // Waiting times read in minutes, so a minute's tick keeps them honest without animating.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -84,6 +86,37 @@ export function NeedsYouView() {
                   <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
                     waiting {waitingLabel(item.since, now)}
                   </span>
+                  {item.kind === "budgetReached" ? (
+                    <Button
+                      size="sm"
+                      variant="ghost-muted"
+                      onClick={() => {
+                        const capUsd =
+                          (cards.find((card) => card.id === item.cardId)?.budgetCapUsd ?? 0) +
+                          DEFAULT_CARD_BUDGET_USD;
+                        if (environmentId !== null) {
+                          void setBudget({ environmentId, input: { cardId: item.cardId, capUsd } });
+                        }
+                      }}
+                    >
+                      Raise the cap by ${DEFAULT_CARD_BUDGET_USD}
+                    </Button>
+                  ) : item.kind === "unpricedModel" ? (
+                    <Button
+                      size="sm"
+                      variant="ghost-muted"
+                      onClick={() => {
+                        if (environmentId !== null) {
+                          void decide({
+                            environmentId,
+                            input: { type: "card.unpriced.accept", cardId: item.cardId },
+                          });
+                        }
+                      }}
+                    >
+                      Run uncapped
+                    </Button>
+                  ) : null}
                   {item.snoozable ? (
                     <div className="flex shrink-0 gap-1">
                       <Button

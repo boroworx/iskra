@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   canChangeDelegate,
+  cardBudgetRefusal,
   cardFactsOf,
   inverseRelationKind,
   nextCardStatus,
@@ -146,5 +147,21 @@ describe("relations", () => {
     });
     expect(added).toEqual([{ kind: "blocks", cardId: other }]);
     expect(withoutRelation(added, { kind: "blocks", cardId: other })).toEqual([]);
+  });
+});
+
+describe("cardBudgetRefusal", () => {
+  const budget = { spentUsd: 4, budgetCapUsd: 10, unpricedTurns: 0, acceptsUnpriced: false };
+
+  it("lets turns start under the cap, and stops them at it", () => {
+    expect(cardBudgetRefusal(budget)).toBeNull();
+    expect(cardBudgetRefusal({ ...budget, spentUsd: 10 })).toBe(
+      "The card has spent $10.00 of its $10.00 budget; raise the cap to continue.",
+    );
+  });
+
+  it("holds an unpriced model until a person accepts running it uncapped", () => {
+    expect(cardBudgetRefusal({ ...budget, unpricedTurns: 1 })).toContain("no known price");
+    expect(cardBudgetRefusal({ ...budget, unpricedTurns: 1, acceptsUnpriced: true })).toBeNull();
   });
 });

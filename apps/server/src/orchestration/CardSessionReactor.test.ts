@@ -425,6 +425,53 @@ it.layer(layer)("CardSessionReactor", (it) => {
     ),
   );
 
+  it.effect("holds a card's messages at its budget cap and delivers them once a person raises it", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const world = yield* makeWorld("budget");
+        yield* world.assign("backend");
+        const owner = yield* world.nextSession();
+        yield* world.setSession(owner.payload.threadId, "ready", null);
+        yield* world.engine.dispatch({
+          type: "card.spend.record",
+          commandId: CommandId.make("cmd-budget-spend"),
+          cardId: world.cardId,
+          threadId: owner.payload.threadId,
+          agentId: world.agent("backend"),
+          turnId: TurnId.make("turn-expensive"),
+          costUsd: 10,
+          costSource: "providerReported",
+          recordedAt: now,
+        });
+        yield* world.engine.dispatch({
+          type: "card.message.post",
+          commandId: CommandId.make("cmd-budget-message"),
+          cardId: world.cardId,
+          messageId: MessageId.make("message-budget"),
+          body: "Also handle bursts.",
+          createdAt: now,
+        });
+        yield* world.nextEvent("card.message-posted", (event) => event.payload.forOwner);
+        yield* world.reactor.drain;
+        // At the cap the owner's next turn is refused, so the message waits.
+        expect(
+          (yield* world.userMessages(owner.payload.threadId)).map((message) => message.text),
+        ).toEqual([owner.payload.rendered.firstMessage]);
+
+        yield* world.engine.dispatch({
+          type: "card.budget.set",
+          commandId: CommandId.make("cmd-budget-raise"),
+          cardId: world.cardId,
+          capUsd: 20,
+        });
+        yield* world.nextEvent("card.delivery-updated", (event) => event.payload.status === "sent");
+        expect(
+          (yield* world.userMessages(owner.payload.threadId)).map((message) => message.text),
+        ).toContainEqual(expect.stringContaining("Also handle bursts."));
+      }),
+    ),
+  );
+
   it.effect("shows a session lost across a restart as stale", () =>
     Effect.scoped(
       Effect.gen(function* () {

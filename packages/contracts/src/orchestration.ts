@@ -27,6 +27,7 @@ import {
   TurnId,
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
+import { UsageCostSource } from "./usage.ts";
 import {
   PullRequestActor,
   PullRequestChecksState,
@@ -635,6 +636,9 @@ export type CardChecks = typeof CardChecks.Type;
 /** Failed check runs in a row after which a card stops going back to its agent and waits for a person. */
 export const CARD_AUTOFIX_ATTEMPTS = 3;
 
+/** A card's spending cap until a person raises it. */
+export const DEFAULT_CARD_BUDGET_USD = 10;
+
 /** Ports reserved for each card's worktree, starting at its `portBase` (ISKRA_PORT). */
 export const CARD_PORT_BLOCK_SIZE = 10;
 
@@ -670,6 +674,14 @@ export const OrchestrationCard = Schema.Struct({
   diffStat: Schema.NullOr(CardDiffStat),
   // The last run of the project's check scripts, from review or landing.
   checks: Schema.NullOr(CardChecks),
+  // What the card's sessions have cost, priced like the usage page; no turn starts past the cap.
+  spentUsd: Schema.Number,
+  budgetCapUsd: Schema.Number,
+  // Turns on a model with no known price, which run only once a person accepts running uncapped.
+  unpricedTurns: NonNegativeInt,
+  acceptsUnpriced: Schema.Boolean,
+  // Times checks, a review comment or landing sent the card back to work.
+  reviewReturns: NonNegativeInt,
   relations: Schema.Array(CardRelation),
   createdBy: CardAuthor,
   createdAt: IsoDateTime,
@@ -1306,6 +1318,8 @@ export const OrchestrationAgentShell = Schema.Struct({
   modelSelection: ModelSelection,
   // Derived from the agent's live run: running while it has one, blocked while that run waits on the user.
   presence: AgentPresence,
+  // What the agent's card sessions have cost across every card. Optional for older servers.
+  spentUsd: Schema.optional(Schema.Number),
 });
 export type OrchestrationAgentShell = typeof OrchestrationAgentShell.Type;
 
@@ -1733,6 +1747,31 @@ const CardOverlapFlagCommand = Schema.Struct({
   commandId: CommandId,
   cardId: CardId,
   otherCardId: CardId,
+});
+
+/** A person's cap on what a card may spend; setting it above the spend lets turns start again. */
+const CardBudgetSetCommand = Schema.Struct({
+  type: Schema.Literal("card.budget.set"),
+  commandId: CommandId,
+  cardId: CardId,
+  capUsd: Schema.Number,
+});
+
+/** A person accepting, or taking back, running a card's unpriced model without a cap. */
+const CardUnpricedAcceptCommand = cardStatusCommand("card.unpriced.accept");
+const CardUnpricedRefuseCommand = cardStatusCommand("card.unpriced.refuse");
+
+// Server-only: the spend reactor records each priced turn of a card's sessions.
+const CardSpendRecordCommand = Schema.Struct({
+  type: Schema.Literal("card.spend.record"),
+  commandId: CommandId,
+  cardId: CardId,
+  threadId: ThreadId,
+  agentId: AgentId,
+  turnId: TurnId,
+  costUsd: Schema.Number,
+  costSource: UsageCostSource,
+  recordedAt: IsoDateTime,
 });
 
 /** A person's review comment: it goes to the card's agent, and a card in review goes back to work. */
@@ -2227,6 +2266,9 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   CardSnoozeCommand,
   CardUnsnoozeCommand,
   CardReviewCommentCommand,
+  CardBudgetSetCommand,
+  CardUnpricedAcceptCommand,
+  CardUnpricedRefuseCommand,
   ChannelCreateCommand,
   ChannelUpdateCommand,
   ChannelArchiveCommand,
@@ -2293,6 +2335,9 @@ export const ClientOrchestrationCommand = Schema.Union([
   CardSnoozeCommand,
   CardUnsnoozeCommand,
   CardReviewCommentCommand,
+  CardBudgetSetCommand,
+  CardUnpricedAcceptCommand,
+  CardUnpricedRefuseCommand,
   ChannelCreateCommand,
   ChannelUpdateCommand,
   ChannelArchiveCommand,
@@ -2455,6 +2500,7 @@ const InternalOrchestrationCommand = Schema.Union([
   CardDiffRecordCommand,
   CardChecksRecordCommand,
   CardOverlapFlagCommand,
+  CardSpendRecordCommand,
   ChannelAgentWakeCommand,
   ChannelRunStartCommand,
   ChannelMessageAgentPostCommand,
@@ -2510,6 +2556,9 @@ export const OrchestrationEventType = Schema.Literals([
   "card.unsnoozed",
   "card.diff-measured",
   "card.checks-updated",
+  "card.spend-recorded",
+  "card.budget-set",
+  "card.unpriced-accepted",
   "channel.created",
   "channel.updated",
   "channel.archived",
@@ -2770,6 +2819,28 @@ export const CardDiffMeasuredPayload = Schema.Struct({
 export const CardChecksUpdatedPayload = Schema.Struct({
   cardId: CardId,
   checks: CardChecks,
+});
+
+export const CardSpendRecordedPayload = Schema.Struct({
+  cardId: CardId,
+  threadId: ThreadId,
+  agentId: AgentId,
+  turnId: TurnId,
+  costUsd: Schema.Number,
+  costSource: UsageCostSource,
+  recordedAt: IsoDateTime,
+});
+
+export const CardBudgetSetPayload = Schema.Struct({
+  cardId: CardId,
+  capUsd: Schema.Number,
+  updatedAt: IsoDateTime,
+});
+
+export const CardUnpricedAcceptedPayload = Schema.Struct({
+  cardId: CardId,
+  accepts: Schema.Boolean,
+  updatedAt: IsoDateTime,
 });
 
 /** A plan gate decision and who made it; each also joins the card's decision log. */
@@ -3246,6 +3317,21 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("card.checks-updated"),
     payload: CardChecksUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.spend-recorded"),
+    payload: CardSpendRecordedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.budget-set"),
+    payload: CardBudgetSetPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.unpriced-accepted"),
+    payload: CardUnpricedAcceptedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

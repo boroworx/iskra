@@ -7,6 +7,7 @@ import {
   type OrchestrationEvent,
   type OrchestrationSessionStatus,
   ThreadId,
+  DEFAULT_CARD_BUDGET_USD,
 } from "@iskra/contracts";
 import { compareDateTimeStrings } from "@iskra/shared/dateTime";
 import * as Effect from "effect/Effect";
@@ -692,6 +693,11 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               activityAt: event.payload.createdAt,
               diffStat: null,
               checks: null,
+              spentUsd: 0,
+              budgetCapUsd: DEFAULT_CARD_BUDGET_USD,
+              unpricedTurns: 0,
+              acceptsUnpriced: false,
+              reviewReturns: 0,
               createdBy: event.payload.createdBy,
               createdAt: event.payload.createdAt,
               updatedAt: event.payload.updatedAt,
@@ -719,6 +725,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               status: payload.to,
               updatedAt: payload.updatedAt,
               activityAt: payload.updatedAt,
+              reviewReturns: row.reviewReturns + (payload.move === "returnToWork" ? 1 : 0),
             }));
             return;
           }
@@ -785,6 +792,37 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               snoozedUntil: payload.snoozedUntil,
               snoozedAt: payload.snoozedAt,
             }));
+            return;
+          }
+
+          case "card.spend-recorded": {
+            const payload = event.payload;
+            yield* patchCard(payload.cardId, (row) => ({
+              ...row,
+              spentUsd: row.spentUsd + payload.costUsd,
+              unpricedTurns: row.unpricedTurns + (payload.costSource === "unpriced" ? 1 : 0),
+            }));
+            yield* projectionCardRepository.recordSpend({
+              spendId: `${payload.threadId}:${payload.turnId}`,
+              cardId: payload.cardId,
+              agentId: payload.agentId,
+              threadId: payload.threadId,
+              costUsd: payload.costUsd,
+              costSource: payload.costSource,
+              recordedAt: payload.recordedAt,
+            });
+            return;
+          }
+
+          case "card.budget-set": {
+            const payload = event.payload;
+            yield* patchCard(payload.cardId, (row) => ({ ...row, budgetCapUsd: payload.capUsd }));
+            return;
+          }
+
+          case "card.unpriced-accepted": {
+            const payload = event.payload;
+            yield* patchCard(payload.cardId, (row) => ({ ...row, acceptsUnpriced: payload.accepts }));
             return;
           }
 

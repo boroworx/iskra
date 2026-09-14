@@ -696,6 +696,22 @@ checks on cards in review. A side-by-side diff review view comes with M2.8.
 raising it, accepting unpriced models. _Accept when:_ a turn is refused at the cap and resumes after
 a raise; spend on the card matches the priced usage of its sessions and runs; each agent's page
 shows its spend, cards landed, review returns and Needs you items raised.
+_Accepted:_ `CardSpendReactor` listens for finished turns on the provider runtime stream and, for
+a card's sessions, records `card.spend-recorded` against the card and the session's agent. A turn
+is priced by `UsageService.priceTurn` the way the usage page prices a bucket: the provider's
+reported cost, else its tokens at the model's rate with the user's price overrides, else unpriced;
+`cardSpend.ts` turns a turn's token usage into those totals. `CardSpendReactor.test.ts` records a
+reported cost once however often its turn completes, prices tokens when no cost is reported, counts
+a turn on an unpriced model, and ignores threads outside cards, with the agent's shell summing its
+spend. The decider refuses a card session's turn, and any new session on the card, once its spend
+reaches `budgetCapUsd` (10 by default) or an unpriced turn ran without a person accepting it;
+`card.budget.set` and `card.unpriced.accept` (with its reverse, `card.unpriced.refuse`) are human
+commands (`decider.budget.test.ts`, `cardRules.test.ts`). In `CardSessionReactor.test.ts` a message
+for the owner waits while the card is at its cap and goes in as the owner's next turn once a person
+raises it. Needs you lists cards that reached their budget or wait on an unpriced model, with a
+button to raise the cap or run uncapped; the board shows spend against the cap. The agent's page
+shows its spend, the cards it landed, how often its cards were sent back to work and what on them
+waits on a person; the review count is kept per card and credited to the card's current agent.
 
 **M2.8 — Best-of-N attempts.** _Accept when:_ three attempts run in parallel on separate branches;
 review shows their diffs side by side; promoting one removes the others' worktrees and branches;

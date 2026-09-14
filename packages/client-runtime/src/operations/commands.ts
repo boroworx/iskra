@@ -175,7 +175,9 @@ export type CardDecisionInput = CommandInput<"card.approve"> & {
     | "card.merge.approve"
     | "card.merge.cancel"
     | "card.abandon"
-    | "card.reopen";
+    | "card.reopen"
+    | "card.unpriced.accept"
+    | "card.unpriced.refuse";
 };
 
 export const decideCard: (input: CardDecisionInput) => CommandEffect = Effect.fn(
@@ -195,7 +197,18 @@ export const decideCard: (input: CardDecisionInput) => CommandEffect = Effect.fn
       return yield* dispatch({ ...base, type: "card.abandon" });
     case "card.reopen":
       return yield* dispatch({ ...base, type: "card.reopen" });
+    case "card.unpriced.accept":
+      return yield* dispatch({ ...base, type: "card.unpriced.accept" });
+    case "card.unpriced.refuse":
+      return yield* dispatch({ ...base, type: "card.unpriced.refuse" });
   }
+});
+
+export type SetCardBudgetInput = CommandInput<"card.budget.set">;
+export const setCardBudget: (input: SetCardBudgetInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.setCardBudget",
+)(function* (input) {
+  return yield* dispatch({ ...input, type: "card.budget.set", commandId: yield* commandId(input) });
 });
 
 export type SnoozeCardInput = CommandInput<"card.snooze">;

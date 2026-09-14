@@ -22,6 +22,7 @@ import {
   ThreadId,
   CardDiffStat,
   CardChecks,
+  UsageCostSource,
 } from "@iskra/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
@@ -52,6 +53,11 @@ export const ProjectionCard = Schema.Struct({
   activityAt: IsoDateTime,
   diffStat: Schema.NullOr(CardDiffStat),
   checks: Schema.NullOr(CardChecks),
+  spentUsd: Schema.Number,
+  budgetCapUsd: Schema.Number,
+  unpricedTurns: Schema.Number,
+  acceptsUnpriced: Schema.Boolean,
+  reviewReturns: Schema.Number,
   relations: Schema.Array(CardRelation),
   createdBy: CardAuthor,
   createdAt: IsoDateTime,
@@ -67,6 +73,7 @@ export const ProjectionCardDbRow = ProjectionCard.mapFields(
     createdBy: Schema.fromJsonString(CardAuthor),
     diffStat: Schema.fromJsonString(Schema.NullOr(CardDiffStat)),
     checks: Schema.fromJsonString(Schema.NullOr(CardChecks)),
+    acceptsUnpriced: Schema.fromJsonString(Schema.Boolean),
   }),
 );
 
@@ -110,6 +117,18 @@ export const UpdateProjectionCardDeliveriesInput = Schema.Struct({
 });
 export type UpdateProjectionCardDeliveriesInput = typeof UpdateProjectionCardDeliveriesInput.Type;
 
+/** One priced turn of a card session, so spend sums by card and by agent. */
+export const ProjectionCardSpend = Schema.Struct({
+  spendId: Schema.String,
+  cardId: CardId,
+  agentId: AgentId,
+  threadId: ThreadId,
+  costUsd: Schema.Number,
+  costSource: UsageCostSource,
+  recordedAt: IsoDateTime,
+});
+export type ProjectionCardSpend = typeof ProjectionCardSpend.Type;
+
 export const GetProjectionCardInput = Schema.Struct({
   cardId: CardId,
 });
@@ -127,6 +146,11 @@ export interface ProjectionCardRepositoryShape {
   /** Append one decision to a card's log; replaying the same decision is a no-op. */
   readonly appendDecision: (
     row: ProjectionCardDecision,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /** Record a priced turn; recording the same turn again is a no-op. */
+  readonly recordSpend: (
+    row: ProjectionCardSpend,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
 
   /** A card's decision log, oldest first. */

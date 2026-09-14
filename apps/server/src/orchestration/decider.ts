@@ -61,6 +61,7 @@ import {
 } from "./commandInvariants.ts";
 import {
   canChangeDelegate,
+  cardBudgetRefusal,
   cardFactsOf,
   isFinishedCardStatus,
   nextCardStatus,
@@ -1363,6 +1364,21 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      // Invariant 13: a card's session starts no turn past its budget or on an unaccepted unpriced model.
+      const budgetRun = (readModel.liveRuns ?? []).find(
+        (run) => run.threadId === command.threadId && run.cardId !== null,
+      );
+      const budgetCard =
+        budgetRun === undefined
+          ? undefined
+          : readModel.cards?.find((candidate) => candidate.id === budgetRun.cardId);
+      const budgetRefusal = budgetCard === undefined ? null : cardBudgetRefusal(budgetCard);
+      if (budgetRefusal !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: budgetRefusal,
+        });
+      }
       const sourceProposedPlan = command.sourceProposedPlan;
       const sourceThread = sourceProposedPlan
         ? yield* requireThread({
@@ -2537,6 +2553,81 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "card.spend.record": {
+      yield* requireCard({ readModel, command, cardId: command.cardId });
+      if (!Number.isFinite(command.costUsd) || command.costUsd < 0) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A turn's cost must be a finite amount of zero or more.",
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "card",
+          aggregateId: command.cardId,
+          occurredAt: command.recordedAt,
+          commandId: command.commandId,
+        })),
+        type: "card.spend-recorded",
+        payload: {
+          cardId: command.cardId,
+          threadId: command.threadId,
+          agentId: command.agentId,
+          turnId: command.turnId,
+          costUsd: command.costUsd,
+          costSource: command.costSource,
+          recordedAt: command.recordedAt,
+        },
+      };
+    }
+
+    // Only a person raises a card's cap (invariant 13).
+    case "card.budget.set": {
+      yield* requireCard({ readModel, command, cardId: command.cardId });
+      if (!Number.isFinite(command.capUsd) || command.capUsd <= 0) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A budget cap must be a positive amount.",
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "card",
+          aggregateId: command.cardId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "card.budget-set",
+        payload: { cardId: command.cardId, capUsd: command.capUsd, updatedAt: occurredAt },
+      };
+    }
+
+    case "card.unpriced.accept":
+    case "card.unpriced.refuse": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      const accepts = command.type === "card.unpriced.accept";
+      if (card.acceptsUnpriced === accepts) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: accepts
+            ? "The card already runs its unpriced model uncapped."
+            : "The card already holds its unpriced model for a person to accept.",
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "card",
+          aggregateId: command.cardId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "card.unpriced-accepted",
+        payload: { cardId: command.cardId, accepts, updatedAt: occurredAt },
+      };
+    }
+
     case "card.checks.record": {
       const card = yield* requireCard({ readModel, command, cardId: command.cardId });
       const previousFailures = card.checks?.failedRuns ?? 0;
@@ -2943,6 +3034,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       }
       if (projectLiveRunCount(readModel, card.projectId) >= DEFAULT_PROJECT_RUN_CAP) {
         return yield* refuse(sessionCapReason);
+      }
+      const overBudget = cardBudgetRefusal(card);
+      if (overBudget !== null) {
+        return yield* refuse(overBudget);
       }
       return {
         ...(yield* withEventBase({

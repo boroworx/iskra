@@ -39,6 +39,11 @@ const card = (id: string, overrides: Partial<OrchestrationCard> = {}): Orchestra
   activityAt: at(0),
   diffStat: null,
   checks: null,
+  spentUsd: 0,
+  budgetCapUsd: 10,
+  unpricedTurns: 0,
+  acceptsUnpriced: false,
+  reviewReturns: 0,
   ...overrides,
 });
 
@@ -151,6 +156,31 @@ describe("needsYouItems in review", () => {
     expect(items.map((item) => [item.kind, item.cardId])).toEqual([
       ["readyToMerge", "passing"],
       ["checksExhausted", "exhausted"],
+    ]);
+  });
+});
+
+describe("needsYouItems on budget", () => {
+  it("asks a person to raise a spent card's cap, or to accept an unpriced model", () => {
+    const items = needsYouItems({
+      cards: [
+        card("spent", { status: "inProgress", specState: "approved", spentUsd: 10 }),
+        card("unpriced", { status: "inProgress", specState: "approved", unpricedTurns: 2 }),
+        card("accepted", {
+          status: "inProgress",
+          specState: "approved",
+          unpricedTurns: 2,
+          acceptsUnpriced: true,
+        }),
+        card("landed", { status: "landed", specState: "approved", spentUsd: 12 }),
+      ],
+      sessions: [],
+      now: Date.parse(at(10)),
+    });
+
+    expect(items.map((item) => [item.kind, item.cardId])).toEqual([
+      ["budgetReached", "spent"],
+      ["unpricedModel", "unpriced"],
     ]);
   });
 });

@@ -656,6 +656,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           activity_at AS "activityAt",
           COALESCE(diff_stat_json, 'null') AS "diffStat",
           COALESCE(checks_json, 'null') AS "checks",
+          spent_usd AS "spentUsd",
+          budget_cap_usd AS "budgetCapUsd",
+          unpriced_turns AS "unpricedTurns",
+          accepts_unpriced_json AS "acceptsUnpriced",
+          review_returns AS "reviewReturns",
           relations_json AS "relations",
           created_by_json AS "createdBy",
           created_at AS "createdAt",
@@ -696,6 +701,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           cards.updated_at AS "updatedAt",
           COALESCE(cards.diff_stat_json, 'null') AS "diffStat",
           COALESCE(cards.checks_json, 'null') AS "checks",
+          cards.spent_usd AS "spentUsd",
+          cards.budget_cap_usd AS "budgetCapUsd",
+          cards.unpriced_turns AS "unpricedTurns",
+          cards.accepts_unpriced_json AS "acceptsUnpriced",
+          cards.review_returns AS "reviewReturns",
           runs.thread_id AS "ownerThreadId",
           runs.agent_id AS "ownerAgentId",
           runs.started_at AS "ownerStartedAt",
@@ -743,6 +753,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     activityAt: row.activityAt,
     diffStat: row.diffStat,
     checks: row.checks,
+    spentUsd: row.spentUsd,
+    budgetCapUsd: row.budgetCapUsd,
+    unpricedTurns: row.unpricedTurns,
+    acceptsUnpriced: row.acceptsUnpriced,
+    reviewReturns: row.reviewReturns,
     createdBy: row.createdBy,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -817,7 +832,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 AND runs.ended_at IS NULL
             ) THEN 'running'
             ELSE 'idle'
-          END AS "presence"
+          END AS "presence",
+          (
+            SELECT COALESCE(SUM(spend.cost_usd), 0)
+            FROM projection_card_spend AS spend
+            WHERE spend.agent_id = agents.agent_id
+          ) AS "spentUsd"
         FROM projection_agents AS agents
         WHERE agents.archived_at IS NULL
           AND ${filter === undefined ? sql`1 = 1` : sql`agents.agent_id = ${filter.agentId}`}
@@ -2920,6 +2940,11 @@ pending_approval_requests AS (
                   activityAt: row.activityAt,
                   diffStat: row.diffStat,
                   checks: row.checks,
+                  spentUsd: row.spentUsd,
+                  budgetCapUsd: row.budgetCapUsd,
+                  unpricedTurns: row.unpricedTurns,
+                  acceptsUnpriced: row.acceptsUnpriced,
+                  reviewReturns: row.reviewReturns,
                   relations: row.relations,
                   createdBy: row.createdBy,
                   createdAt: row.createdAt,
