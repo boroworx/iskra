@@ -3414,6 +3414,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           capabilities: command.capabilities,
           context: command.context,
           rendered: command.rendered,
+          ...(command.restarts === undefined ? {} : { restarts: command.restarts }),
           startedAt: command.startedAt,
         },
       });
