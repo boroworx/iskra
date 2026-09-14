@@ -1,6 +1,11 @@
 import {
+  CHANNEL_HUMAN_AUTHOR_ID,
+  CHANNEL_SYSTEM_AUTHOR_ID,
   DEFAULT_CARD_BUDGET_USD,
   LEGACY_CARD_CONTRACT,
+  type CardActivity,
+  type CardAuthor,
+  type CardEvidenceSummary,
   type CardId,
   type CardMove,
   type CardRelation,
@@ -251,6 +256,215 @@ export function newCard(
   };
 }
 
+type CardEventPayload<Type extends OrchestrationEvent["type"]> = Extract<
+  OrchestrationEvent,
+  { type: Type }
+>["payload"];
+
+/** What the latest evidence shows on the card's face. */
+export function evidenceSummaryOf(
+  payload: CardEventPayload<"card.evidence-recorded">,
+): CardEvidenceSummary {
+  const checks = payload.items.filter((item) => item.kind === "check");
+  return {
+    evidenceId: payload.evidenceId,
+    headSha: payload.headSha,
+    purpose: payload.purpose,
+    passed: payload.passed,
+    checkCount: checks.length,
+    failedChecks: checks
+      .filter((check) => check.exitCode !== 0 || check.timedOut)
+      .map((check) => check.name),
+    unavailable: payload.items.filter((item) => item.unavailable !== null).map((item) => item.name),
+    flags: payload.flags,
+    flagsAcknowledgedAt: null,
+    recordedAt: payload.recordedAt,
+  };
+}
+
+/** How the plan gate's decisions read in a card's log. */
+export const SPEC_STATE_DECISION_TEXT = {
+  approved: "Approved the spec.",
+  skipped: "Skipped the plan gate.",
+  draft: "Returned the spec to draft.",
+} as const;
+
+/** The answers a checkpoint offers, continue recommended. */
+export const CHECKPOINT_OPTIONS = [
+  { id: "continue", label: "Continue" },
+  { id: "redirect", label: "Redirect" },
+  { id: "stop", label: "Stop" },
+] as const;
+
+/** A card author as the activity stream names it: a channel's lead is an agent there. */
+export const activityAuthorOf = (author: CardAuthor): CardActivity["author"] => ({
+  kind: author.kind === "lead" ? "agent" : author.kind,
+  id: author.id,
+});
+
+const SYSTEM_AUTHOR = { kind: "system", id: CHANNEL_SYSTEM_AUTHOR_ID } as const;
+
+const activity = (
+  entry: Pick<CardActivity, "activityId" | "cardId" | "kind" | "author" | "body" | "createdAt"> &
+    Partial<CardActivity>,
+): CardActivity => ({
+  runThreadId: null,
+  deliverTo: null,
+  delivery: null,
+  elicitation: null,
+  answers: null,
+  status: null,
+  evidenceId: null,
+  reason: null,
+  ...entry,
+});
+
+function evidenceText(summary: CardEvidenceSummary): string {
+  if (summary.checkCount === 0) return "No checks ran.";
+  return summary.failedChecks.length === 0
+    ? `Checks passed on ${summary.headSha.slice(0, 7)}.`
+    : `${summary.failedChecks.length} of ${summary.checkCount} checks failed: ${summary.failedChecks.join(", ")}.`;
+}
+
+/**
+ * The entries an event adds to its card's activity stream. Events from before the stream
+ * (messages, decisions, plan gate decisions, status moves) map exactly as migration 070
+ * backfilled them, so a replay and the backfill agree.
+ */
+export function cardActivitiesOf(event: OrchestrationEvent): ReadonlyArray<CardActivity> {
+  switch (event.type) {
+    case "card.activity-recorded":
+      return [event.payload];
+    case "card.message-posted": {
+      const { payload } = event;
+      return [
+        activity({
+          activityId: payload.messageId,
+          cardId: payload.cardId,
+          kind: "message",
+          author: { kind: payload.authorKind, id: payload.authorId },
+          body: payload.body,
+          runThreadId: payload.runThreadId,
+          deliverTo: payload.forOwner ? "builder" : null,
+          delivery: payload.forOwner ? "pending" : null,
+          createdAt: payload.createdAt,
+        }),
+      ];
+    }
+    case "card.decision-recorded": {
+      const { payload } = event;
+      return [
+        activity({
+          activityId: payload.decisionId,
+          cardId: payload.cardId,
+          kind: "decision",
+          author: activityAuthorOf(payload.author),
+          body: payload.text,
+          createdAt: payload.createdAt,
+        }),
+      ];
+    }
+    case "card.spec-state-changed": {
+      const { payload } = event;
+      return [
+        activity({
+          activityId: `spec-state:${event.eventId}`,
+          cardId: payload.cardId,
+          kind: "decision",
+          author: activityAuthorOf(payload.by),
+          body: SPEC_STATE_DECISION_TEXT[payload.to],
+          createdAt: payload.updatedAt,
+        }),
+      ];
+    }
+    case "card.status-changed": {
+      const { payload } = event;
+      return [
+        activity({
+          activityId: `status:${event.eventId}`,
+          cardId: payload.cardId,
+          kind: "status",
+          author: SYSTEM_AUTHOR,
+          body: "",
+          status: { from: payload.from, to: payload.to },
+          reason:
+            payload.reason === undefined ? null : { code: payload.move, text: payload.reason },
+          createdAt: payload.updatedAt,
+        }),
+      ];
+    }
+    case "card.checkpoint-requested": {
+      const { cardId, checkpoint } = event.payload;
+      return [
+        activity({
+          activityId: checkpoint.checkpointId,
+          cardId,
+          kind: "elicitation",
+          author: SYSTEM_AUTHOR,
+          body: checkpoint.whatToTry,
+          elicitation: {
+            question: checkpoint.question ?? "Is this going the right way?",
+            options: CHECKPOINT_OPTIONS,
+            recommendedOptionId: "continue",
+            allowText: true,
+          },
+          evidenceId: checkpoint.evidenceId,
+          createdAt: checkpoint.requestedAt,
+        }),
+      ];
+    }
+    case "card.checkpoint-resolved": {
+      const { payload } = event;
+      const forBuilder = payload.decision !== "stop";
+      return [
+        activity({
+          activityId: `${payload.checkpointId}:resolved`,
+          cardId: payload.cardId,
+          kind: "response",
+          author: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
+          body:
+            payload.note ??
+            CHECKPOINT_OPTIONS.find((option) => option.id === payload.decision)?.label ??
+            payload.decision,
+          answers: { questionId: payload.checkpointId, optionId: payload.decision },
+          deliverTo: forBuilder ? "builder" : null,
+          delivery: forBuilder ? "pending" : null,
+          createdAt: payload.resolvedAt,
+        }),
+      ];
+    }
+    case "card.evidence-recorded": {
+      const { payload } = event;
+      return [
+        activity({
+          activityId: `evidence:${payload.evidenceId}`,
+          cardId: payload.cardId,
+          kind: "evidence",
+          author: SYSTEM_AUTHOR,
+          body: evidenceText(evidenceSummaryOf(payload)),
+          evidenceId: payload.evidenceId,
+          createdAt: payload.recordedAt,
+        }),
+      ];
+    }
+    case "card.landing-linked": {
+      const { cardId, landing } = event.payload;
+      return [
+        activity({
+          activityId: `landing:${event.eventId}`,
+          cardId,
+          kind: "landing",
+          author: SYSTEM_AUTHOR,
+          body: landing.url ?? "Lands by a local fast-forward.",
+          createdAt: landing.linkedAt,
+        }),
+      ];
+    }
+    default:
+      return [];
+  }
+}
+
 /** Marks something happening on a card, which also wakes it from a snooze. */
 export const touchCard =
   (activityAt: string): CardPatch =>
@@ -285,6 +499,7 @@ export function cardPatches(
     }
     case "card.status-changed": {
       const { payload } = event;
+      const { round } = payload;
       return [
         [
           payload.cardId,
@@ -294,10 +509,125 @@ export function cardPatches(
             updatedAt: payload.updatedAt,
             activityAt: payload.updatedAt,
             reviewReturns: card.reviewReturns + (payload.move === "returnToWork" ? 1 : 0),
+            fixRounds:
+              round === undefined
+                ? card.fixRounds
+                : { ...card.fixRounds, [round]: card.fixRounds[round] + 1 },
+            // A card joins the queue when it becomes ready or goes back to work.
+            queuedAt:
+              payload.to === "ready" || payload.move === "returnToWork"
+                ? payload.updatedAt
+                : card.queuedAt,
+            // Reopening sends a card's criteria back to a person; a card without any has none to redo.
+            acceptance:
+              payload.move === "reopen" && card.acceptance.criteria.length > 0
+                ? { ...card.acceptance, state: "draft" as const }
+                : card.acceptance,
+            ...(isFinishedCardStatus(payload.to) ? { checkpoint: null, waitReason: null } : {}),
           }),
         ],
       ];
     }
+    case "card.acceptance-set": {
+      const { payload } = event;
+      return [
+        [
+          payload.cardId,
+          (card) => ({
+            ...card,
+            acceptance: payload.acceptance,
+            updatedAt: payload.updatedAt,
+            activityAt: payload.updatedAt,
+          }),
+        ],
+      ];
+    }
+    case "card.paused": {
+      const { cardId, reason, by, pausedAt } = event.payload;
+      return [[cardId, (card) => ({ ...card, paused: { reason, by, pausedAt }, activityAt: pausedAt })]];
+    }
+    case "card.resumed": {
+      const { cardId, resumedAt } = event.payload;
+      return [[cardId, (card) => ({ ...card, paused: null, activityAt: resumedAt })]];
+    }
+    case "card.wait-noted": {
+      const { cardId, reason, notedAt } = event.payload;
+      return [
+        [
+          cardId,
+          (card) => ({
+            ...card,
+            // The same reason again keeps when the wait began.
+            waitReason:
+              reason === null
+                ? null
+                : card.waitReason?.code === reason.code && card.waitReason.text === reason.text
+                  ? card.waitReason
+                  : { ...reason, since: notedAt },
+          }),
+        ],
+      ];
+    }
+    case "card.checkpoint-requested": {
+      const { cardId, checkpoint } = event.payload;
+      return [[cardId, (card) => ({ ...card, checkpoint, activityAt: checkpoint.requestedAt })]];
+    }
+    case "card.checkpoint-resolved": {
+      const { cardId, checkpointId, resolvedAt } = event.payload;
+      return [
+        [
+          cardId,
+          (card) => ({
+            ...card,
+            checkpoint: card.checkpoint?.checkpointId === checkpointId ? null : card.checkpoint,
+            activityAt: resolvedAt,
+          }),
+        ],
+      ];
+    }
+    case "card.evidence-recorded": {
+      const { payload } = event;
+      return [
+        [
+          payload.cardId,
+          (card) => ({
+            ...card,
+            evidence: evidenceSummaryOf(payload),
+            // Failing review evidence sends the owner a fix while the card stays in progress: a CI round.
+            fixRounds:
+              !payload.passed && payload.purpose === "review" && card.status === "inProgress"
+                ? { ...card.fixRounds, ci: card.fixRounds.ci + 1 }
+                : card.fixRounds,
+            activityAt: payload.recordedAt,
+          }),
+        ],
+      ];
+    }
+    case "card.flags-acknowledged": {
+      const { cardId, evidenceId, acknowledgedAt } = event.payload;
+      return [
+        [
+          cardId,
+          (card) => ({
+            ...card,
+            evidence:
+              card.evidence?.evidenceId === evidenceId
+                ? { ...card.evidence, flagsAcknowledgedAt: acknowledgedAt }
+                : card.evidence,
+          }),
+        ],
+      ];
+    }
+    case "card.fix-rounds-reset": {
+      const { cardId, resetAt } = event.payload;
+      return [[cardId, (card) => ({ ...card, fixRounds: { ci: 0, review: 0 }, activityAt: resetAt })]];
+    }
+    case "card.landing-linked": {
+      const { cardId, landing } = event.payload;
+      return [[cardId, (card) => ({ ...card, landing })]];
+    }
+    case "card.activity-recorded":
+      return [[event.payload.cardId, touchCard(event.payload.createdAt)]];
     case "card.delegate-changed": {
       const { payload } = event;
       return [

@@ -147,6 +147,13 @@ export const EndProjectionRunInput = Schema.Struct({
 });
 export type EndProjectionRunInput = typeof EndProjectionRunInput.Type;
 
+export const MarkProjectionChannelMessageAnsweredInput = Schema.Struct({
+  messageId: MessageId,
+  answeredAt: IsoDateTime,
+});
+export type MarkProjectionChannelMessageAnsweredInput =
+  typeof MarkProjectionChannelMessageAnsweredInput.Type;
+
 export const SetProjectionRunWaitReasonInput = Schema.Struct({
   threadId: ThreadId,
   waitReason: Schema.NullOr(Schema.fromJsonString(CardWaitReason)),
@@ -210,6 +217,11 @@ export interface ProjectionChannelRepositoryShape {
 
   /** Mark a run ended. Ending a thread that is not a live run is a no-op. */
   readonly endRun: (input: EndProjectionRunInput) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /** Mark a lead's question answered; the first answer's time stays. */
+  readonly markMessageAnswered: (
+    input: MarkProjectionChannelMessageAnsweredInput,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
 
   /** Record why a run waits, or clear it. A thread that is not a run is a no-op. */
   readonly setRunWaitReason: (

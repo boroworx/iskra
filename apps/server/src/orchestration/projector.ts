@@ -40,6 +40,7 @@ import {
   ProjectCreatedPayload,
   ProjectDeletedPayload,
   ProjectMetaUpdatedPayload,
+  ProjectOrchestrationSetPayload,
   ThreadActivityAppendedPayload,
   ThreadArchivedPayload,
   ThreadCreatedPayload,
@@ -421,6 +422,24 @@ export function channelPatch(
     case "channel.unarchived":
       return { archivedAt: null, updatedAt: event.payload.updatedAt };
   }
+}
+
+/** A channel's open lead questions after a message: a question opens one and an answer closes it. */
+export function withChannelElicitations(
+  openElicitations: OrchestrationChannel["openElicitations"],
+  payload: Extract<OrchestrationEvent, { type: "channel.message-posted" }>["payload"],
+): NonNullable<OrchestrationChannel["openElicitations"]> {
+  const open = openElicitations ?? [];
+  const { elicitation, answers } = payload;
+  if (elicitation !== undefined) {
+    return [
+      ...open.filter((question) => question.messageId !== payload.messageId),
+      { messageId: payload.messageId, optionIds: elicitation.options.map((option) => option.id) },
+    ];
+  }
+  return answers === undefined
+    ? open
+    : open.filter((question) => question.messageId !== answers.questionId);
 }
 
 /** Replaces the entry with the same id, or appends it. */
@@ -1387,16 +1406,55 @@ export function projectEvent(
     case "card.checks-updated":
     case "card.diff-measured":
     case "card.unsnoozed":
+    case "card.activity-recorded":
+    case "card.acceptance-set":
+    case "card.paused":
+    case "card.resumed":
+    case "card.wait-noted":
+    case "card.checkpoint-requested":
+    case "card.checkpoint-resolved":
+    case "card.evidence-recorded":
+    case "card.flags-acknowledged":
+    case "card.fix-rounds-reset":
+    case "card.landing-linked":
       return Effect.succeed(withCardPatches(nextBase, cardPatches(event)));
+
+    case "project.orchestration-set":
+      return decodeForEvent(
+        ProjectOrchestrationSetPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          projects: nextBase.projects.map((project) =>
+            project.id === payload.projectId
+              ? { ...project, orchestration: payload.orchestration, updatedAt: payload.updatedAt }
+              : project,
+          ),
+        })),
+      );
 
     case "card.spec-state-changed":
       return decodeForEvent(CardSpecStateChangedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => withCardPatches(nextBase, cardPatches({ ...event, payload }))),
       );
 
-    // Channel messages are paged from their projection, never held in the read model.
-    case "channel.message-posted":
-      return Effect.succeed(nextBase);
+    // Channel messages are paged from their projection; only a lead's open questions stay here.
+    case "channel.message-posted": {
+      const { payload } = event;
+      if (payload.elicitation === undefined && payload.answers === undefined) {
+        return Effect.succeed(nextBase);
+      }
+      return Effect.succeed({
+        ...nextBase,
+        channels: patchById(nextBase.channels, payload.channelId, (channel) => ({
+          ...channel,
+          openElicitations: withChannelElicitations(channel.openElicitations, payload),
+        })),
+      });
+    }
 
     default:
       return Effect.succeed(nextBase);

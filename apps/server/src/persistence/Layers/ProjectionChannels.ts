@@ -16,6 +16,7 @@ import {
   ProjectionChannelMessage,
   ProjectionChannelRepository,
   ProjectionOpenChannelDelivery,
+  MarkProjectionChannelMessageAnsweredInput,
   ProjectionRunDbRow,
   SetProjectionRunWaitReasonInput,
   type ProjectionChannelRepositoryShape,
@@ -180,6 +181,16 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
       `,
   });
 
+  const markMessageAnsweredRow = SqlSchema.void({
+    Request: MarkProjectionChannelMessageAnsweredInput,
+    execute: ({ messageId, answeredAt }) =>
+      sql`
+        UPDATE projection_channel_messages
+        SET answered_at = COALESCE(answered_at, ${answeredAt})
+        WHERE message_id = ${messageId}
+      `,
+  });
+
   const setRunWaitReasonRow = SqlSchema.void({
     Request: SetProjectionRunWaitReasonInput,
     execute: ({ threadId, waitReason }) =>
@@ -283,6 +294,8 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
     insertRun: (row) => insertRunRow(row).pipe(query("insertRun")),
     endRun: (input) => endRunRow(input).pipe(query("endRun")),
     setRunWaitReason: (input) => setRunWaitReasonRow(input).pipe(query("setRunWaitReason")),
+    markMessageAnswered: (input) =>
+      markMessageAnsweredRow(input).pipe(query("markMessageAnswered")),
     listWakeHistory: (input) =>
       listWakeHistoryRows(input).pipe(
         Effect.map((rows) => rows.toReversed()),

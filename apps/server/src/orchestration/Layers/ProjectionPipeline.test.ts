@@ -6,6 +6,7 @@ import {
   CheckpointRef,
   CommandId,
   CorrelationId,
+  DEFAULT_PROJECT_ORCHESTRATION,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
   MessageId,
@@ -38,6 +39,7 @@ import {
 import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
 import { ProjectionCardRepository } from "../../persistence/Services/ProjectionCards.ts";
 import { ProjectionChannelRepository } from "../../persistence/Services/ProjectionChannels.ts";
+import { ProjectionProjectRepository } from "../../persistence/Services/ProjectionProjects.ts";
 import { ProjectionStateRepository } from "../../persistence/Services/ProjectionState.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
@@ -4665,7 +4667,32 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
       const snapshotQuery = yield* ProjectionSnapshotQuery;
       const cardRepository = yield* ProjectionCardRepository;
       const channelRepository = yield* ProjectionChannelRepository;
-      const at = (minute: number) => `2026-03-01T00:${String(minute).padStart(2, "0")}:00.000Z`;
+      const projectRepository = yield* ProjectionProjectRepository;
+      const at = (minute: number) => new Date(Date.UTC(2026, 2, 1, 0, minute)).toISOString();
+      const [question, answer, openQuestion] = [
+        MessageId.make("message-question"),
+        MessageId.make("message-answer"),
+        MessageId.make("message-open-question"),
+      ];
+      const storeQuestion = {
+        question: "Which store?",
+        options: [
+          { id: "redis", label: "Redis" },
+          { id: "memory", label: "Memory" },
+        ],
+        recommendedOptionId: "redis",
+        allowText: true,
+      };
+      const noActivityParts = {
+        runThreadId: null,
+        deliverTo: null,
+        delivery: null,
+        elicitation: null,
+        answers: null,
+        status: null,
+        evidenceId: null,
+        reason: null,
+      };
       const projectId = ProjectId.make("project-cards");
       const [api, web] = [AgentId.make("agent-api"), AgentId.make("agent-web")];
       const [general, old] = [ChannelId.make("channel-general"), ChannelId.make("channel-old")];
@@ -5147,6 +5174,267 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
           },
         ],
         ["card.workspace-cleared", card2, { cardId: card2, updatedAt: at(49) }],
+        [
+          "project.created",
+          projectId,
+          {
+            projectId,
+            title: "Cards",
+            workspaceRoot: "/tmp/project-cards",
+            defaultModelSelection: null,
+            scripts: [],
+            createdAt: at(50),
+            updatedAt: at(50),
+          },
+        ],
+        [
+          "project.orchestration-set",
+          projectId,
+          {
+            projectId,
+            orchestration: { ...DEFAULT_PROJECT_ORCHESTRATION, sessionCap: 2, checksWaived: true },
+            updatedAt: at(51),
+          },
+        ],
+        [
+          "card.acceptance-set",
+          card1,
+          {
+            cardId: card1,
+            acceptance: {
+              criteria: [{ id: "c1", text: "Bursts over 100 get a 429.", verification: "automated" }],
+              state: "confirmed",
+            },
+            updatedAt: at(52),
+          },
+        ],
+        [
+          "card.activity-recorded",
+          card1,
+          {
+            ...noActivityParts,
+            activityId: "activity-question",
+            cardId: card1,
+            kind: "elicitation",
+            author: { kind: "agent", id: api },
+            body: "Which store?",
+            runThreadId: owner,
+            elicitation: storeQuestion,
+            createdAt: at(53),
+          },
+        ],
+        [
+          "card.activity-recorded",
+          card1,
+          {
+            ...noActivityParts,
+            activityId: "activity-answer",
+            cardId: card1,
+            kind: "response",
+            author: human,
+            body: "Redis",
+            deliverTo: "builder",
+            delivery: "pending",
+            answers: { questionId: "activity-question", optionId: "redis" },
+            createdAt: at(54),
+          },
+        ],
+        [
+          "card.delivery-updated",
+          card1,
+          {
+            cardId: card1,
+            messageIds: [MessageId.make("activity-answer")],
+            status: "sent",
+            threadId: owner,
+            updatedAt: at(55),
+          },
+        ],
+        [
+          "card.wait-noted",
+          card1,
+          {
+            cardId: card1,
+            threadId: owner,
+            reason: { code: "waitingForCapacity", text: "Waiting for machine capacity" },
+            notedAt: at(56),
+          },
+        ],
+        [
+          "card.checkpoint-requested",
+          card1,
+          {
+            cardId: card1,
+            checkpoint: {
+              checkpointId: "checkpoint-1",
+              whatToTry: "Open the limits page.",
+              question: null,
+              evidenceId: null,
+              requestedAt: at(57),
+            },
+          },
+        ],
+        [
+          "card.checkpoint-resolved",
+          card1,
+          {
+            cardId: card1,
+            checkpointId: "checkpoint-1",
+            decision: "redirect",
+            note: "Limit per key.",
+            resolvedAt: at(58),
+          },
+        ],
+        [
+          "card.evidence-recorded",
+          card1,
+          {
+            cardId: card1,
+            evidenceId: "evidence-1",
+            headSha: "abc1234def",
+            purpose: "review",
+            items: [
+              {
+                itemId: "typecheck",
+                kind: "check",
+                source: "local",
+                name: "typecheck",
+                criterionId: null,
+                exitCode: 0,
+                timedOut: false,
+                durationMs: 1200,
+                logTail: "ok",
+                artifactPath: null,
+                unavailable: null,
+              },
+              {
+                itemId: "test",
+                kind: "check",
+                source: "local",
+                name: "test",
+                criterionId: "c1",
+                exitCode: 1,
+                timedOut: false,
+                durationMs: 3000,
+                logTail: "1 failed",
+                artifactPath: null,
+                unavailable: null,
+              },
+              {
+                itemId: "limits-page",
+                kind: "screenshot",
+                source: "preview",
+                name: "limits page",
+                criterionId: "c1",
+                exitCode: null,
+                timedOut: false,
+                durationMs: null,
+                logTail: "",
+                artifactPath: null,
+                unavailable: { code: "noPreviewHost", text: "No desktop preview host is connected." },
+              },
+            ],
+            flags: [{ kind: "deletedTest", path: "limits.test.ts", detail: "Deleted.", hard: true }],
+            risks: { sideEffect: "low", performance: "medium", compatibility: "low", notes: "" },
+            passed: false,
+            recordedAt: at(59),
+          },
+        ],
+        [
+          "card.flags-acknowledged",
+          card1,
+          { cardId: card1, evidenceId: "evidence-1", acknowledgedAt: at(60) },
+        ],
+        [
+          "card.paused",
+          card1,
+          {
+            cardId: card1,
+            reason: { code: "pausedByPerson", text: "Paused by a person." },
+            by: "human",
+            pausedAt: at(61),
+          },
+        ],
+        ["card.resumed", card1, { cardId: card1, resumedAt: at(62) }],
+        ["card.fix-rounds-reset", card1, { cardId: card1, resetAt: at(63) }],
+        [
+          "card.status-changed",
+          card1,
+          {
+            cardId: card1,
+            from: "inProgress",
+            to: "inReview",
+            move: "requestReview",
+            updatedAt: at(64),
+          },
+        ],
+        [
+          "card.status-changed",
+          card1,
+          {
+            cardId: card1,
+            from: "inReview",
+            to: "inProgress",
+            move: "returnToWork",
+            reason: "CI failed.",
+            round: "ci",
+            updatedAt: at(65),
+          },
+        ],
+        [
+          "card.landing-linked",
+          card1,
+          {
+            cardId: card1,
+            landing: {
+              mode: "pullRequest",
+              url: "https://github.com/acme/api/pull/7",
+              number: 7,
+              headSha: "abc1234def",
+              draft: true,
+              linkedAt: at(66),
+            },
+          },
+        ],
+        [
+          "channel.message-posted",
+          general,
+          {
+            channelId: general,
+            messageId: question,
+            authorKind: "agent",
+            authorId: api,
+            body: "Which store?",
+            createdAt: at(67),
+            elicitation: storeQuestion,
+          },
+        ],
+        [
+          "channel.message-posted",
+          general,
+          {
+            channelId: general,
+            messageId: answer,
+            authorKind: "human",
+            authorId: "human",
+            body: "Redis",
+            createdAt: at(68),
+            answers: { questionId: question, optionId: "redis" },
+          },
+        ],
+        [
+          "channel.message-posted",
+          general,
+          {
+            channelId: general,
+            messageId: openQuestion,
+            authorKind: "agent",
+            authorId: api,
+            body: "Which region?",
+            createdAt: at(69),
+            elicitation: { ...storeQuestion, question: "Which region?" },
+          },
+        ],
       ];
 
       let model = createEmptyReadModel(at(0));
@@ -5158,7 +5446,9 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
             ? "card"
             : type.startsWith("agent.")
               ? "agent"
-              : "channel",
+              : type.startsWith("project.")
+                ? "project"
+                : "channel",
           aggregateId,
           occurredAt: at(index + 1),
           commandId: null,
@@ -5193,6 +5483,13 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
         cardRow: yield* cardRepository.getById({ cardId: card1 }),
         decisions: yield* cardRepository.listDecisions({ cardId: card1 }),
         openOwnerMessages: yield* cardRepository.listOpenOwnerMessages({ cardId: card1 }),
+        activities: yield* cardRepository.listActivities({ cardId: card1, limit: 50 }),
+        openBuilderActivities: yield* cardRepository.listOpenBuilderActivities({ cardId: card1 }),
+        evidenceItems: yield* cardRepository.listEvidenceItems({
+          cardId: card1,
+          evidenceId: "evidence-1",
+        }),
+        projectRow: yield* projectRepository.getById({ projectId }),
         channelRow: yield* channelRepository.getChannelById({ channelId: old }),
         message: yield* channelRepository.getMessageById({ messageId: message }),
         wakeHistory: yield* channelRepository.listWakeHistory({ channelId: general }),

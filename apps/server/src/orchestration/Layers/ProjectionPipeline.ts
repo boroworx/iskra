@@ -7,6 +7,7 @@ import {
   type OrchestrationEvent,
   type OrchestrationSessionStatus,
   ThreadId,
+  MessageId,
 } from "@iskra/contracts";
 import { compareDateTimeStrings } from "@iskra/shared/dateTime";
 import * as Effect from "effect/Effect";
@@ -50,8 +51,20 @@ import { ProjectionPendingApprovalRepositoryLive } from "../../persistence/Layer
 import { ProjectionAgentRepositoryLive } from "../../persistence/Layers/ProjectionAgents.ts";
 import { ProjectionCardRepositoryLive } from "../../persistence/Layers/ProjectionCards.ts";
 import { ProjectionCardRepository } from "../../persistence/Services/ProjectionCards.ts";
-import { cardPatches, newCard, touchCard } from "../cardRules.ts";
-import { agentPatch, channelPatch, newAgent, newChannel } from "../projector.ts";
+import {
+  SPEC_STATE_DECISION_TEXT,
+  cardActivitiesOf,
+  cardPatches,
+  newCard,
+  touchCard,
+} from "../cardRules.ts";
+import {
+  agentPatch,
+  channelPatch,
+  newAgent,
+  newChannel,
+  withChannelElicitations,
+} from "../projector.ts";
 import { ProjectionChannelRepositoryLive } from "../../persistence/Layers/ProjectionChannels.ts";
 import { ProjectionProjectRepositoryLive } from "../../persistence/Layers/ProjectionProjects.ts";
 import { ProjectionStateRepositoryLive } from "../../persistence/Layers/ProjectionState.ts";
@@ -591,6 +604,21 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "project.orchestration-set": {
+          const existingRow = yield* projectionProjectRepository.getById({
+            projectId: event.payload.projectId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionProjectRepository.upsert({
+            ...existingRow.value,
+            orchestration: event.payload.orchestration,
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
         default:
           return;
       }
@@ -642,7 +670,25 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         for (const [cardId, patch] of cardPatches(event)) {
           yield* patchCard({ cardId }, patch);
         }
+        for (const entry of cardActivitiesOf(event)) {
+          yield* projectionCardRepository.appendActivity({ ...entry, deliveryThreadId: null });
+        }
         switch (event.type) {
+          case "card.evidence-recorded": {
+            const { cardId, evidenceId, headSha, purpose, items, recordedAt } = event.payload;
+            yield* projectionCardRepository.appendEvidenceItems(
+              items.map((item) => ({
+                ...item,
+                evidenceId,
+                cardId,
+                headSha,
+                purpose,
+                createdAt: recordedAt,
+              })),
+            );
+            return;
+          }
+
           case "card.spend-recorded": {
             const payload = event.payload;
             yield* projectionCardRepository.recordSpend({
@@ -682,11 +728,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               decisionId: `spec-state:${event.eventId}`,
               cardId: payload.cardId,
               author: payload.by,
-              text: {
-                approved: "Approved the spec.",
-                skipped: "Skipped the plan gate.",
-                draft: "Returned the spec to draft.",
-              }[payload.to],
+              text: SPEC_STATE_DECISION_TEXT[payload.to],
               createdAt: payload.updatedAt,
             });
             return;
@@ -744,7 +786,31 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             answers: event.payload.answers ?? null,
             answeredAt: null,
           });
+          if (event.payload.elicitation !== undefined || event.payload.answers !== undefined) {
+            const { payload } = event;
+            yield* patchChannel({ channelId: payload.channelId }, (row) => ({
+              ...row,
+              openElicitations: withChannelElicitations(row.openElicitations, payload),
+            }));
+          }
+          if (event.payload.answers !== undefined) {
+            yield* projectionChannelRepository.markMessageAnswered({
+              messageId: MessageId.make(event.payload.answers.questionId),
+              answeredAt: event.payload.createdAt,
+            });
+          }
           return;
+
+        case "card.wait-noted": {
+          const { threadId, reason, notedAt } = event.payload;
+          if (threadId !== null) {
+            yield* projectionChannelRepository.setRunWaitReason({
+              threadId,
+              waitReason: reason === null ? null : { ...reason, since: notedAt },
+            });
+          }
+          return;
+        }
 
         case "channel.run-started":
           yield* projectionChannelRepository.insertRun({
