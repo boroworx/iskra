@@ -31,6 +31,7 @@ import { ProjectionCardRepository } from "../persistence/Services/ProjectionCard
 import { ProcessRunner } from "../processRunner.ts";
 import { PullRequestService } from "../pullRequest/PullRequestService.ts";
 import { forkParked } from "../serverActivation.ts";
+import { CI_ONLY_NO_PULL_REQUEST_REASON, landsByPullRequest } from "./cardRules.ts";
 import { SourceControlProviderRegistry } from "../sourceControl/SourceControlProviderRegistry.ts";
 import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
 import * as CardWorkspace from "./CardWorkspace.ts";
@@ -192,7 +193,6 @@ const make = Effect.gen(function* () {
     if (card === undefined || project === undefined || card.status !== "inReview" || card.landing !== null) {
       return;
     }
-    const policy = projectOrchestrationOf(project);
     const linkedAt = yield* nowIso;
     const linkLocal = engine.dispatch({
       type: "card.landing.link",
@@ -200,9 +200,7 @@ const make = Effect.gen(function* () {
       cardId,
       landing: { mode: "local", url: null, number: null, headSha: null, draft: false, linkedAt },
     });
-    const wantsPullRequest =
-      policy.landing === "pullRequest" ||
-      (policy.landing === null && (project.repositoryIdentity?.provider ?? null) !== null);
+    const wantsPullRequest = landsByPullRequest(project);
     if (!wantsPullRequest || card.worktreePath === null || card.branch === null) {
       return yield* linkLocal;
     }
@@ -241,6 +239,16 @@ const make = Effect.gen(function* () {
       ),
     );
     if (opened === null || "failed" in opened) {
+      const { checks } = yield* workspace.projectFile(cardId);
+      if (checks.length > 0 && checks.every((check) => check.source === "ci")) {
+        // Checks that only run in CI can't be verified by a local landing: the card waits.
+        return yield* record(cardId, `pr-open-failed:${cardId}`, {
+          kind: "error",
+          body: `The pull request couldn't be opened${opened === null ? "" : `: ${opened.failed}`}. ${CI_ONLY_NO_PULL_REQUEST_REASON}`,
+          deliverTo: null,
+          reason: { code: "pullRequestOpenFailed", text: "The pull request couldn't be opened." },
+        });
+      }
       // Without a pull request the card still lands, locally.
       yield* record(cardId, `pr-open-failed:${cardId}`, {
         kind: "error",
@@ -491,7 +499,10 @@ const make = Effect.gen(function* () {
           .listEvidenceItems({ cardId: card.id, evidenceId: card.evidence.evidenceId })
           .pipe(Effect.orElseSucceed(() => []));
         const items: Array<CardEvidenceItem> = [
-          ...local.map(({ evidenceId: _e, cardId: _c, headSha: _h, purpose: _p, createdAt: _t, ...item }) => item),
+          // The host's results replace the pending CI items review entered with.
+          ...local
+            .filter((item) => item.source !== "ci")
+            .map(({ evidenceId: _e, cardId: _c, headSha: _h, purpose: _p, createdAt: _t, ...item }) => item),
           ...hostChecks.map(({ check, host }) => ({
             itemId: `ci:${check.id}`,
             kind: "check" as const,

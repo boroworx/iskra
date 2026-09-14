@@ -32,6 +32,7 @@ import { OrchestrationEngineLive } from "./Layers/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./Layers/ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./Layers/ProjectionSnapshotQuery.ts";
 import { nextEventOn, now } from "./reactor.testkit.ts";
+import { PENDING_CI_REASON } from "./cardRules.ts";
 import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
 import * as ThreadBackgroundLiveness from "./ThreadBackgroundLiveness.ts";
@@ -64,6 +65,7 @@ const host = {
   permissions: {} as Record<string, string>,
   landResult: { kind: "landed", baseBranch: "main", files: [] } as CardWorkspace.CardLandResult,
   openCards: [] as ReadonlyArray<{ readonly cardId: CardId; readonly files: ReadonlyArray<string> }>,
+  checks: [] as CardWorkspace.CardProjectFile["checks"],
 };
 
 const resetHost = () =>
@@ -77,6 +79,7 @@ const resetHost = () =>
     permissions: {},
     landResult: { kind: "landed", baseBranch: "main", files: [] },
     openCards: [],
+    checks: [],
   });
 
 const provider = {
@@ -114,7 +117,12 @@ const ghOutput = (args: ReadonlyArray<string>): ProcessRunOutput => {
 const fakes = Layer.mergeAll(
   Layer.mock(CardWorkspace.CardWorkspace)({
     projectFile: () =>
-      Effect.succeed({ baseBranch: "staging", baseRef: "origin/staging", file: null, checks: [] }),
+      Effect.sync(() => ({
+        baseBranch: "staging",
+        baseRef: "origin/staging",
+        file: null,
+        checks: host.checks,
+      })),
     land: () => Effect.sync(() => host.landResult),
     changedFiles: () => Effect.succeed([]),
     openCardChangedFiles: () => Effect.sync(() => host.openCards),
@@ -336,6 +344,69 @@ it.layer(layer)("CardLandingReactor", (it) => {
         status: "inProgress",
         fixRounds: { ci: 1, review: 0 },
       });
+    }),
+  );
+
+  it.effect("holds the merge until CI reports on a card whose checks only run there", () =>
+    Effect.gen(function* () {
+      const engine = yield* OrchestrationEngineService;
+      const world = yield* makeWorld("cipending");
+      const { cardId } = yield* world.cardInReview("api");
+      host.checks = [
+        {
+          id: "build",
+          name: "build",
+          command: "",
+          timeoutMinutes: 10,
+          source: "ci",
+          ciName: "build",
+          targetedCommand: null,
+          heavy: true,
+        },
+      ];
+      yield* engine.dispatch({
+        type: "card.evidence.record",
+        commandId: CommandId.make("cmd-cipending-evidence"),
+        cardId,
+        evidenceId: "evidence-cipending",
+        headSha: "abc1234",
+        purpose: "review",
+        items: [
+          {
+            itemId: "ci:build",
+            kind: "check",
+            source: "ci",
+            name: "build",
+            criterionId: null,
+            exitCode: null,
+            timedOut: false,
+            durationMs: null,
+            logTail: "",
+            artifactPath: null,
+            unavailable: { code: "pendingCi", text: "Waiting for CI on the pull request." },
+          },
+        ],
+        flags: [],
+        risks: null,
+        recordedAt: now,
+      });
+      const early = yield* engine
+        .dispatch({ type: "card.merge.approve", commandId: CommandId.make("cmd-cipending-early"), cardId })
+        .pipe(Effect.flip);
+      expect(early).toMatchObject({ detail: PENDING_CI_REASON });
+
+      host.detail = {
+        ...host.detail,
+        checks: [{ name: "build", status: "success", description: null, url: null }],
+      };
+      yield* world.reactor.pollNow;
+      expect((yield* world.cardOf(cardId)).evidence).toMatchObject({
+        evidenceId: `evidence-ci-${cardId}-abc1234`,
+        passed: true,
+        failedChecks: [],
+      });
+      yield* world.approveMerge(cardId);
+      expect((yield* world.cardOf(cardId)).status).toBe("landed");
     }),
   );
 

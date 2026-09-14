@@ -934,6 +934,8 @@ export const CardEvidenceSummary = Schema.Struct({
   checkCount: NonNegativeInt,
   failedChecks: Schema.Array(TrimmedNonEmptyString),
   unavailable: Schema.Array(TrimmedNonEmptyString),
+  // CI checks on the pull request with no result yet; a merge waits for them.
+  pendingCi: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   flags: Schema.Array(CardScopeFlag),
   flagsAcknowledgedAt: Schema.NullOr(IsoDateTime),
   recordedAt: IsoDateTime,

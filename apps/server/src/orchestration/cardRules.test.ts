@@ -11,6 +11,7 @@ import {
   AUTO_MERGE_OFF_REASON,
   BLOCKED_REASON,
   NO_CHECKS_REASON,
+  PENDING_CI_REASON,
   PLAN_CHILD_LANDING_REASON,
   REVIEW_EVIDENCE_REASON,
   UNACKNOWLEDGED_FLAGS_REASON,
@@ -49,6 +50,7 @@ const facts = (status: CardStatus, overrides: Partial<CardFacts> = {}): CardFact
   openBlockerCount: 0,
   criteriaConfirmed: true,
   unacknowledgedHardFlags: false,
+  pendingCiChecks: false,
   ...overrides,
 });
 
@@ -226,6 +228,10 @@ describe("card contract gates", () => {
         ok: false,
         reason: UNACKNOWLEDGED_FLAGS_REASON,
       });
+      expect(nextCardStatus(facts("inReview", { pendingCiChecks: true }), move)).toEqual({
+        ok: false,
+        reason: PENDING_CI_REASON,
+      });
     }
   });
 
@@ -233,6 +239,10 @@ describe("card contract gates", () => {
     const check = { kind: "check" as const, exitCode: 0, timedOut: false };
     const capture = { kind: "screenshot" as const, exitCode: null, timedOut: false };
     expect(evidencePassed([check, capture])).toBe(true);
+    // A CI check that hasn't reported holds the merge, not review.
+    expect(
+      evidencePassed([check, { ...check, exitCode: null, unavailable: { code: "pendingCi" } }]),
+    ).toBe(true);
     expect(evidencePassed([check, { ...check, exitCode: 1 }])).toBe(false);
     expect(evidencePassed([{ ...check, timedOut: true }])).toBe(false);
     expect(evidencePassed([check, { ...check, exitCode: null }])).toBe(false);

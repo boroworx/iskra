@@ -178,6 +178,7 @@ const makeWorld = Effect.fn("makeWorld")(function* (
     readonly ciFixRounds?: number;
     readonly checksWaived?: boolean;
     readonly startReactor?: boolean;
+    readonly landing?: "pullRequest" | "local";
   } = {},
 ) {
   const engine = yield* OrchestrationEngineService;
@@ -210,6 +211,7 @@ const makeWorld = Effect.fn("makeWorld")(function* (
       ...DEFAULT_PROJECT_ORCHESTRATION,
       ciFixRounds: options.ciFixRounds ?? 2,
       checksWaived: options.checksWaived ?? false,
+      landing: options.landing ?? null,
       sideEffectGuard: { acknowledgedAt: now, killSwitchEnv: null },
     },
   });
@@ -428,6 +430,30 @@ it.layer(layer)("CardReviewReactor", (it) => {
       yield* waived.write("a.ts", "export const a = 3;\n");
       yield* waived.requestReview();
       yield* waived.enteredReview();
+    }),
+  );
+
+  it.effect("enters review with CI-only checks pending when a pull request can open, and refuses without one", () =>
+    Effect.gen(function* () {
+      const build: ProjectCheck = { ...check("build"), source: "ci", ciName: "build" };
+      yield* setFakes({ checks: [build], passes: true, webPort: null, admitted: [] });
+      const world = yield* makeWorld("cionly", { landing: "pullRequest" });
+      yield* world.write("a.ts", "export const a = 4;\n");
+      yield* world.requestReview();
+      const evidence = yield* world.evidenceRecorded();
+      expect(evidence.payload).toMatchObject({
+        passed: true,
+        items: [{ itemId: "ci:build", source: "ci", exitCode: null, unavailable: { code: "pendingCi" } }],
+      });
+      yield* world.enteredReview();
+      expect((yield* world.cardOf()).evidence?.pendingCi).toEqual(["build"]);
+      expect(fakes.admitted).not.toContain("checks");
+
+      const local = yield* makeWorld("cionly-local", { landing: "local" });
+      yield* local.write("a.ts", "export const a = 5;\n");
+      yield* local.requestReview();
+      expect((yield* local.feedback()).payload.body).toContain("checks all run in CI");
+      expect((yield* local.cardOf()).status).toBe("inProgress");
     }),
   );
 

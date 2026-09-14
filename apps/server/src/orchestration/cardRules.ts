@@ -17,6 +17,8 @@ import {
   type CardStatus,
   type OrchestrationCard,
   type OrchestrationEvent,
+  type OrchestrationProject,
+  projectOrchestrationOf,
 } from "@iskra/contracts";
 import * as Predicate from "effect/Predicate";
 
@@ -39,6 +41,8 @@ export interface CardFacts {
   readonly criteriaConfirmed: boolean;
   /** The latest evidence has hard scope flags nobody acknowledged. */
   readonly unacknowledgedHardFlags: boolean;
+  /** The latest evidence waits on CI checks that haven't reported. */
+  readonly pendingCiChecks: boolean;
 }
 
 export const NO_CRITERIA_REASON = "Add at least one acceptance criterion.";
@@ -63,6 +67,17 @@ export const OPEN_CHECKPOINT_REASON = "Only an open checkpoint can be resolved."
 export const PAUSED_REASON = "The card is paused; resume it first.";
 export const ALREADY_ANSWERED_REASON = "This question was already answered.";
 export const ANSWER_OPTION_REASON = "Choose one of the offered answers or write your own.";
+export const PENDING_CI_REASON = "CI hasn't reported on the pull request yet; the merge waits for it.";
+export const CI_ONLY_NO_PULL_REQUEST_REASON =
+  "This project's checks all run in CI, but this card can't open a pull request for them. Add a local check, or a remote the server can push to.";
+/** The unavailable code of a CI check that hasn't reported yet. */
+export const PENDING_CI_CODE = "pendingCi";
+
+/** Whether a project's cards land through a pull request: its policy says so, or it has a host remote. */
+export const landsByPullRequest = (project: OrchestrationProject): boolean => {
+  const { landing } = projectOrchestrationOf(project);
+  return landing === "pullRequest" || (landing === null && (project.repositoryIdentity?.provider ?? null) !== null);
+};
 export const NO_OPEN_QUESTION_REASON =
   "This card has no open question with that id; it may already be answered.";
 
@@ -89,9 +104,18 @@ export function elicitationRefusal(elicitation: {
 
 /** Checks pass when every check exited 0 without timing out; captures never fail a recording. */
 export const evidencePassed = (
-  items: ReadonlyArray<Pick<CardEvidenceItem, "kind" | "exitCode" | "timedOut">>,
+  items: ReadonlyArray<
+    Pick<CardEvidenceItem, "kind" | "exitCode" | "timedOut"> & {
+      readonly unavailable?: { readonly code: string } | null;
+    }
+  >,
 ): boolean =>
-  items.every((item) => item.kind !== "check" || (item.exitCode === 0 && !item.timedOut));
+  items.every(
+    (item) =>
+      item.kind !== "check" ||
+      item.unavailable?.code === PENDING_CI_CODE ||
+      (item.exitCode === 0 && !item.timedOut),
+  );
 
 /** Passing review evidence whose checks ran, or that the project waived checks for. */
 const hasPassingReviewEvidence = (
@@ -243,6 +267,9 @@ export function nextCardStatus(card: CardFacts, move: CardMove): CardMoveResult 
       if (card.unacknowledgedHardFlags) {
         return reject(UNACKNOWLEDGED_FLAGS_REASON);
       }
+      if (card.pendingCiChecks) {
+        return reject(PENDING_CI_REASON);
+      }
       return card.openBlockerCount > 0 ? reject(BLOCKED_REASON) : to("landing");
     case "cancelLanding":
       return from === "landing"
@@ -310,6 +337,7 @@ export function cardFactsOf(
       card.evidence !== null &&
       card.evidence.flagsAcknowledgedAt === null &&
       card.evidence.flags.some((flag) => flag.hard),
+    pendingCiChecks: (card.evidence?.pendingCi?.length ?? 0) > 0,
   };
 }
 
@@ -438,6 +466,9 @@ export function evidenceSummaryOf(
   payload: CardEventPayload<"card.evidence-recorded">,
 ): CardEvidenceSummary {
   const checks = payload.items.filter((item) => item.kind === "check");
+  const pendingCi = checks
+    .filter((check) => check.unavailable?.code === PENDING_CI_CODE)
+    .map((check) => check.name);
   return {
     evidenceId: payload.evidenceId,
     headSha: payload.headSha,
@@ -445,9 +476,15 @@ export function evidenceSummaryOf(
     passed: payload.passed,
     checkCount: checks.length,
     failedChecks: checks
-      .filter((check) => check.exitCode !== 0 || check.timedOut)
+      .filter(
+        (check) =>
+          check.unavailable?.code !== PENDING_CI_CODE && (check.exitCode !== 0 || check.timedOut),
+      )
       .map((check) => check.name),
-    unavailable: payload.items.filter((item) => item.unavailable !== null).map((item) => item.name),
+    unavailable: payload.items
+      .filter((item) => item.unavailable !== null && item.unavailable.code !== PENDING_CI_CODE)
+      .map((item) => item.name),
+    ...(pendingCi.length > 0 ? { pendingCi } : {}),
     flags: payload.flags,
     flagsAcknowledgedAt: null,
     recordedAt: payload.recordedAt,

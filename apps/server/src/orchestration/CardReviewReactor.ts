@@ -36,7 +36,13 @@ import {
   runScriptOf,
   uiEvidenceRequired,
 } from "./CardEvidence.ts";
-import { fixRoundRefusal, NO_CHECKS_REASON } from "./cardRules.ts";
+import {
+  CI_ONLY_NO_PULL_REQUEST_REASON,
+  fixRoundRefusal,
+  landsByPullRequest,
+  NO_CHECKS_REASON,
+  PENDING_CI_CODE,
+} from "./cardRules.ts";
 import * as CardWorkspace from "./CardWorkspace.ts";
 import * as HostAdmission from "./HostAdmission.ts";
 import * as OrchestrationEngine from "./Services/OrchestrationEngine.ts";
@@ -80,6 +86,21 @@ const checkItem = (result: CardWorkspace.CardCheckResult): CardEvidenceItem => (
   logTail: result.logTail,
   artifactPath: result.logArtifactPath,
   unavailable: null,
+});
+
+/** A CI check that hasn't reported: it passes review entry and holds the merge until it does. */
+const pendingCiItem = (check: CardWorkspace.CardProjectFile["checks"][number]): CardEvidenceItem => ({
+  itemId: `ci:${check.id}`,
+  kind: "check",
+  source: "ci",
+  name: check.name,
+  criterionId: null,
+  exitCode: null,
+  timedOut: false,
+  durationMs: null,
+  logTail: "",
+  artifactPath: null,
+  unavailable: { code: PENDING_CI_CODE, text: "Waiting for CI on the pull request." },
 });
 
 /** What the owner reads when its checks fail: which failed, and each failing tail. */
@@ -179,6 +200,22 @@ const make = Effect.gen(function* () {
 
     const heavy = { cardId, projectId: card.projectId, priority: card.priority, label: card.title };
     const localChecks = checks.filter((check) => check.source !== "ci");
+    // Checks that only run in CI are verified on the pull request, so review needs one to open.
+    const ciOnly = checks.length > 0 && localChecks.length === 0;
+    if (ciOnly && purpose === "review" && !landsByPullRequest(project)) {
+      yield* record(cardId, `review-ci-only:${key}`, {
+        kind: "error",
+        body: CI_ONLY_NO_PULL_REQUEST_REASON,
+        deliverTo: null,
+        reason: { code: "ciChecksNeedPullRequest", text: CI_ONLY_NO_PULL_REQUEST_REASON },
+      });
+      return yield* tellBuilder(
+        cardId,
+        key,
+        "reviewRefused",
+        `The card didn't enter review: ${CI_ONLY_NO_PULL_REQUEST_REASON}`,
+      );
+    }
     const run =
       localChecks.length === 0
         ? { passed: true, summary: "", results: [] }
@@ -242,7 +279,7 @@ const make = Effect.gen(function* () {
       evidenceId,
       headSha: changes.headSha,
       purpose,
-      items: [...run.results.map(checkItem), ...ui],
+      items: [...run.results.map(checkItem), ...(ciOnly ? checks.map(pendingCiItem) : []), ...ui],
       flags,
       risks: job.risks,
       recordedAt: yield* nowIso,
