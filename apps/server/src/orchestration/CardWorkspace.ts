@@ -176,9 +176,14 @@ const make = Effect.gen(function* () {
       Effect.mapError(toError(cardId, "Could not read the project's scripts.")),
     );
 
+  /** A git run whose exit code the caller reads. */
+  const gitRun = (cardId: string, cwd: string, args: ReadonlyArray<string>) =>
+    processRunner
+      .run({ command: "git", args: ["-C", cwd, ...args], timeout: "2 minutes" })
+      .pipe(Effect.mapError(toError(cardId, `git ${args[0]} could not run.`)));
+
   const git = (cardId: string, cwd: string, args: ReadonlyArray<string>) =>
-    processRunner.run({ command: "git", args: ["-C", cwd, ...args], timeout: "2 minutes" }).pipe(
-      Effect.mapError(toError(cardId, `git ${args[0]} could not run.`)),
+    gitRun(cardId, cwd, args).pipe(
       Effect.flatMap((output) =>
         output.code === 0
           ? Effect.succeed(output.stdout.trim())
@@ -190,12 +195,6 @@ const make = Effect.gen(function* () {
             ),
       ),
     );
-
-  /** A git run whose exit code the caller reads. */
-  const gitRun = (cardId: string, cwd: string, args: ReadonlyArray<string>) =>
-    processRunner
-      .run({ command: "git", args: ["-C", cwd, ...args], timeout: "2 minutes" })
-      .pipe(Effect.mapError(toError(cardId, `git ${args[0]} could not run.`)));
 
   const lines = (text: string) => text.split("\n").filter((line) => line.length > 0);
 

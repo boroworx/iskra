@@ -39,9 +39,7 @@ export class CardReviewReactor extends Context.Service<
   }
 >()("@iskra/cli/orchestration/CardReviewReactor") {}
 
-type ReviewRequest =
-  | { readonly kind: "checks"; readonly cardId: CardId; readonly key: string }
-  | { readonly kind: "land"; readonly cardId: CardId; readonly key: string };
+type ReviewRequest = { readonly kind: "checks" | "land"; readonly cardId: CardId; readonly key: string };
 
 const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngine.OrchestrationEngineService;
