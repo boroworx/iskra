@@ -40,6 +40,14 @@ const SESSION_STATE_LABEL: Record<RunSessionState, string> = {
   ended: "Ended",
 };
 
+const ROLE_HEADING: Record<OrchestrationAgentRun["role"], string> = {
+  owner: "Building",
+  helper: "Helping on",
+  critic: "Reviewing",
+  lead: "Leading",
+  conversation: "In",
+};
+
 /**
  * One session of an agent, as its DM shows it: the channel or card it works on,
  * where it stands, its work in grey and what it says to people in full white,
@@ -68,16 +76,7 @@ export const RunBlock = memo(function RunBlock(props: {
     awaitingInput: pending !== null && pending.approvals.length + pending.userInputs.length > 0,
   });
   const where = sessionWhere(props.run, props.channels);
-  const heading =
-    props.run.role === "owner"
-      ? `Building ${where}`
-      : props.run.role === "helper"
-        ? `Helping on ${where}`
-        : props.run.role === "critic"
-          ? `Reviewing ${where}`
-          : props.run.role === "lead"
-            ? `Leading ${where}`
-            : `In ${where}`;
+  const heading = `${ROLE_HEADING[props.run.role]} ${where}`;
 
   return (
     <section aria-label={heading} className="min-w-0 border-l-2 border-border pl-3">
