@@ -44,8 +44,8 @@ export function NeedsYouView() {
     [cards, now],
   );
   const snoozed = useMemo(() => cards.filter((card) => isCardSnoozed(card, now)), [cards, now]);
-  const proposalReasoningOf = (cardId: CardId) =>
-    cards.find((card) => card.id === cardId)?.proposalReasoning ?? null;
+  const cardById = useMemo(() => new Map(cards.map((card) => [card.id, card])), [cards]);
+  const proposalReasoningOf = (cardId: CardId) => cardById.get(cardId)?.proposalReasoning ?? null;
   const projectTitle = (projectId: string) =>
     projects.find((project) => project.environmentId === environmentId && project.id === projectId)
       ?.title ?? "";
@@ -91,7 +91,7 @@ export function NeedsYouView() {
                       variant="ghost-muted"
                       onClick={() => {
                         const capUsd =
-                          (cards.find((card) => card.id === item.cardId)?.budgetCapUsd ?? 0) +
+                          (cardById.get(item.cardId)?.budgetCapUsd ?? 0) +
                           DEFAULT_CARD_BUDGET_USD;
                         if (environmentId !== null) {
                           void setBudget({ environmentId, input: { cardId: item.cardId, capUsd } });
