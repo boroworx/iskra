@@ -647,7 +647,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       sql`
         SELECT
           thread_id AS "threadId",
+          role,
           channel_id AS "channelId",
+          card_id AS "cardId",
           agent_id AS "agentId",
           started_at AS "startedAt"
         FROM projection_runs
@@ -720,7 +722,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       sql`
         SELECT
           thread_id AS "threadId",
+          role,
           channel_id AS "channelId",
+          card_id AS "cardId",
           agent_id AS "agentId",
           trigger_message_id AS "triggerMessageId",
           capabilities_json AS "capabilities",
@@ -4114,18 +4118,22 @@ pending_approval_requests AS (
     execute: ({ agentId, limit }) =>
       sql`
         SELECT
-          thread_id AS "threadId",
-          channel_id AS "channelId",
-          agent_id AS "agentId",
-          trigger_message_id AS "triggerMessageId",
-          capabilities_json AS "capabilities",
-          context_json AS "context",
-          rendered_json AS "rendered",
-          started_at AS "startedAt",
-          ended_at AS "endedAt"
-        FROM projection_runs
-        WHERE agent_id = ${agentId}
-        ORDER BY started_at DESC, rowid DESC
+          runs.thread_id AS "threadId",
+          runs.role,
+          runs.channel_id AS "channelId",
+          runs.card_id AS "cardId",
+          runs.agent_id AS "agentId",
+          runs.trigger_message_id AS "triggerMessageId",
+          runs.capabilities_json AS "capabilities",
+          runs.context_json AS "context",
+          runs.rendered_json AS "rendered",
+          runs.started_at AS "startedAt",
+          runs.ended_at AS "endedAt",
+          cards.title AS "cardTitle"
+        FROM projection_runs AS runs
+        LEFT JOIN projection_cards AS cards ON cards.card_id = runs.card_id
+        WHERE runs.agent_id = ${agentId}
+        ORDER BY runs.started_at DESC, runs.rowid DESC
         LIMIT ${limit}
       `,
   });

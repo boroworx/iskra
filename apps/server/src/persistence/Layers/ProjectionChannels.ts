@@ -144,7 +144,9 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
       sql`
         INSERT INTO projection_runs (
           thread_id,
+          role,
           channel_id,
+          card_id,
           agent_id,
           trigger_message_id,
           capabilities_json,
@@ -154,7 +156,9 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
         )
         VALUES (
           ${row.threadId},
+          ${row.role},
           ${row.channelId},
+          ${row.cardId},
           ${row.agentId},
           ${row.triggerMessageId},
           ${JSON.stringify(row.capabilities)},

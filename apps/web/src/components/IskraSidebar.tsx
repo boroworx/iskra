@@ -1,10 +1,10 @@
 import type { EnvironmentProject } from "@iskra/client-runtime/state/models";
-import {
-  agentIdOfDmThread,
-  type ChannelId,
-  type EnvironmentId,
-  type ProjectId,
-  type ThreadId,
+import type {
+  AgentId,
+  ChannelId,
+  EnvironmentId,
+  ProjectId,
+  ThreadId,
 } from "@iskra/contracts";
 import { Link, useParams } from "@tanstack/react-router";
 import { AtSignIcon, HashIcon, PlusIcon } from "lucide-react";
@@ -16,7 +16,6 @@ import {
   useEnvironmentAgents,
   useEnvironmentChannels,
   useProjects,
-  useThreadShells,
 } from "../state/entities";
 import {
   agentListEntries,
@@ -26,7 +25,6 @@ import {
 } from "./channels/channels.logic";
 import { CreateAgentDialog } from "./channels/CreateAgentDialog";
 import { CreateChannelDialog } from "./channels/CreateChannelDialog";
-import { useOpenAgentDm } from "./channels/useOpenAgentDm";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import {
   SidebarContent,
@@ -69,14 +67,17 @@ export default function IskraSidebar() {
     strict: false,
     select: (params) => (params.threadId ?? null) as ThreadId | null,
   });
-  const routeAgentId = routeThreadId === null ? null : agentIdOfDmThread(routeThreadId);
+  const routeAgentId = useParams({
+    strict: false,
+    select: (params) => (params.agentId ?? null) as AgentId | null,
+  });
   const routeChannels = useEnvironmentChannels(routeChannelId === null ? null : routeEnvironmentId);
   const routeAgents = useEnvironmentAgents(routeAgentId === null ? null : routeEnvironmentId);
   const routeProjectId =
     routeChannels.find((channel) => channel.id === routeChannelId)?.projectId ??
     routeAgents.find((agent) => agent.id === routeAgentId)?.projectId ??
     null;
-  const routeKey = routeChannelId ?? routeThreadId;
+  const routeKey = routeChannelId ?? routeAgentId ?? routeThreadId;
   const [picked, setPicked] = useState<{
     readonly key: string;
     readonly routeKey: string | null;
@@ -137,7 +138,7 @@ export default function IskraSidebar() {
               key={selectedKey}
               project={selected}
               activeChannelId={routeChannelId}
-              activeThreadId={routeThreadId}
+              activeAgentId={routeAgentId}
             />
           )}
         </SidebarContent>
@@ -150,27 +151,17 @@ export default function IskraSidebar() {
 const ProjectChannels = memo(function ProjectChannels(props: {
   readonly project: EnvironmentProject;
   readonly activeChannelId: ChannelId | null;
-  readonly activeThreadId: ThreadId | null;
+  readonly activeAgentId: AgentId | null;
 }) {
   const { environmentId, id: projectId } = props.project;
   const channels = useEnvironmentChannels(environmentId);
   const agents = useEnvironmentAgents(environmentId);
-  const threads = useThreadShells();
-  const openAgentDm = useOpenAgentDm();
   const [openDialog, setOpenDialog] = useState<"channel" | "agent" | null>(null);
   const channelEntries = useMemo(
     () => channelListEntries(channels, projectId),
     [channels, projectId],
   );
-  const agentEntries = useMemo(
-    () =>
-      agentListEntries(
-        agents,
-        threads.filter((thread) => thread.environmentId === environmentId),
-        projectId,
-      ),
-    [agents, threads, environmentId, projectId],
-  );
+  const agentEntries = useMemo(() => agentListEntries(agents, projectId), [agents, projectId]);
 
   return (
     <>
@@ -208,15 +199,15 @@ const ProjectChannels = memo(function ProjectChannels(props: {
       >
         {agentEntries.map((entry) => (
           <SidebarMenuItem key={entry.id}>
-            {/* An agent's row opens its DM, creating it on first open. */}
+            {/* An agent's row opens its DM: a window onto its sessions. */}
             <SidebarMenuButton
-              isActive={entry.dmThreadId === props.activeThreadId}
-              onClick={() => {
-                const agent = agents.find((candidate) => candidate.id === entry.id);
-                if (agent !== undefined) {
-                  void openAgentDm(environmentId, agent);
-                }
-              }}
+              isActive={entry.id === props.activeAgentId}
+              render={
+                <Link
+                  to="/agents/$environmentId/$agentId"
+                  params={{ environmentId, agentId: entry.id }}
+                />
+              }
             >
               <AtSignIcon />
               <span className="truncate">{entry.name}</span>

@@ -386,36 +386,6 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
-  it.effect("appends an agent DM's role after the shared runtime instructions", () => {
-    const harness = makeHarness();
-    return Effect.gen(function* () {
-      const adapter = yield* ClaudeAdapter;
-      yield* adapter.startSession({
-        threadId: THREAD_ID,
-        provider: ProviderDriverKind.make("claudeAgent"),
-        runtimeMode: "full-access",
-        agentPrompt: "You are @backend.",
-      });
-
-      const systemPrompt = harness.getLastCreateQueryInput()?.options.systemPrompt;
-      const append = buildRuntimeInstructions({
-        harness: "Claude Code",
-        agentPrompt: "You are @backend.",
-      });
-      assert.deepEqual(systemPrompt, { type: "preset", preset: "claude_code", append });
-      assert.isTrue(append.endsWith("<agent_role>\nYou are @backend.\n</agent_role>"));
-      // A DM codes: unlike a run, it keeps the user's normal permissions and settings.
-      assert.deepEqual(harness.getLastCreateQueryInput()?.options.settingSources, [
-        "user",
-        "project",
-        "local",
-      ]);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
-  });
-
   it.effect("derives bypass permission mode from full-access runtime policy", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

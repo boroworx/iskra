@@ -8,7 +8,6 @@ import {
   MessageId,
   ThreadLinkedPullRequest,
   UserInputRequestedPayload,
-  agentIdOfDmThread,
   isImportedAgentSessionMessageId,
   type AgentId,
   type CardId,
@@ -20,6 +19,7 @@ import {
   type ThreadPullRequestKey,
   type ThreadPullRequestLink,
   type OrchestrationThreadActivity,
+  DEFAULT_PROJECT_RUN_CAP,
 } from "@iskra/contracts";
 import {
   legacyLinkedPullRequestOf,
@@ -67,7 +67,7 @@ import {
 } from "./cardRules.ts";
 import { parseMentions } from "./mentions.ts";
 import { projectEvent } from "./projector.ts";
-import { decideWake } from "./wakeRouting.ts";
+import { decideWake, projectLiveRunCount } from "./wakeRouting.ts";
 import { threadHasQueuedTurnStart } from "./ThreadSettlementPolicy.ts";
 
 const isScriptRunCommand = Schema.is(SCRIPT_RUN_COMMAND_PATTERN);
@@ -272,6 +272,15 @@ const decideCommandSequence = Effect.fn("decideCommandSequence")(function* ({
   return plannedEvents;
 });
 
+/** The card's live owner session, if it has one. */
+const liveOwnerRun = (readModel: OrchestrationReadModel, cardId: CardId) =>
+  (readModel.liveRuns ?? []).find((run) => run.cardId === cardId && run.role === "owner");
+
+const FINISHED_CARD_SESSION_REASON = "A card that has landed or been abandoned takes no new sessions.";
+const SECOND_WRITER_REASON =
+  "The card already has a live session writing to it; one session writes at a time.";
+const sessionCapReason = `${DEFAULT_PROJECT_RUN_CAP} sessions are already live in this project.`;
+
 export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand")(function* ({
   command,
   readModel,
@@ -436,17 +445,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         projectId: command.projectId,
       });
-      // An agent's DM exists only for a real agent, inside that agent's project.
-      const dmAgentId = agentIdOfDmThread(command.threadId);
-      if (dmAgentId !== null) {
-        const dmAgent = yield* requireAgent({ readModel, command, agentId: dmAgentId });
-        if (dmAgent.projectId !== command.projectId) {
-          return yield* new OrchestrationCommandInvariantError({
-            commandType: command.type,
-            detail: `A DM with @${dmAgent.name} belongs to that agent's own project.`,
-          });
-        }
-      }
       yield* requireThreadAbsent({
         readModel,
         command,
@@ -2377,8 +2375,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: "No agent is assigned to this card.",
         });
       }
-      // Card sessions arrive in M2.3; until then no card has a live write session.
-      const allowed = canChangeDelegate(card, false);
+      // An idle owner session is stopped and handed off; one mid-turn holds the card.
+      const owner = liveOwnerRun(readModel, card.id);
+      const ownerThread =
+        owner === undefined
+          ? undefined
+          : readModel.threads.find((thread) => thread.id === owner.threadId);
+      const allowed = canChangeDelegate(card, (ownerThread?.session?.activeTurnId ?? null) !== null);
       if (!allowed.ok) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
@@ -2519,6 +2522,266 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           createdAt: command.createdAt,
         },
       };
+    }
+
+    case "card.session.start": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      const refuse = (detail: string) =>
+        new OrchestrationCommandInvariantError({ commandType: command.type, detail });
+      if (isFinishedCardStatus(card.status)) {
+        return yield* refuse(FINISHED_CARD_SESSION_REASON);
+      }
+      if (card.delegateAgentId === null) {
+        return yield* refuse("Assign an agent before starting a session.");
+      }
+      // Invariant 11: one writer per card.
+      if (liveOwnerRun(readModel, card.id) !== undefined) {
+        return yield* refuse(SECOND_WRITER_REASON);
+      }
+      if (projectLiveRunCount(readModel, card.projectId) >= DEFAULT_PROJECT_RUN_CAP) {
+        return yield* refuse(sessionCapReason);
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "card",
+          aggregateId: command.cardId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "card.session-requested",
+        payload: {
+          cardId: command.cardId,
+          agentId: card.delegateAgentId,
+          requestedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "card.helper.request": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      const agent = yield* requireAgent({ readModel, command, agentId: command.agentId });
+      const refuse = (detail: string) =>
+        new OrchestrationCommandInvariantError({ commandType: command.type, detail });
+      if (agent.projectId !== card.projectId || agent.archivedAt !== null) {
+        return yield* refuse(`@${agent.name} isn't an active agent of this card's project.`);
+      }
+      if (isFinishedCardStatus(card.status)) {
+        return yield* refuse(FINISHED_CARD_SESSION_REASON);
+      }
+      if (projectLiveRunCount(readModel, card.projectId) >= DEFAULT_PROJECT_RUN_CAP) {
+        return yield* refuse(sessionCapReason);
+      }
+      const cardEventBase = () =>
+        withEventBase({
+          aggregateKind: "card",
+          aggregateId: command.cardId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        });
+      return [
+        {
+          ...(yield* cardEventBase()),
+          type: "card.message-posted",
+          payload: {
+            cardId: command.cardId,
+            messageId: command.messageId,
+            authorKind: "human",
+            authorId: CHANNEL_HUMAN_AUTHOR_ID,
+            body: `@${agent.name} ${command.question}`,
+            runThreadId: null,
+            forOwner: false,
+            createdAt: command.createdAt,
+          },
+        },
+        {
+          ...(yield* cardEventBase()),
+          type: "card.helper-requested",
+          payload: {
+            cardId: command.cardId,
+            agentId: agent.id,
+            messageId: command.messageId,
+            question: command.question,
+            requestedAt: command.createdAt,
+          },
+        },
+      ];
+    }
+
+    case "card.message.post": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      if (isFinishedCardStatus(card.status)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A card that has landed or been abandoned takes no new messages.",
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "card",
+          aggregateId: command.cardId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "card.message-posted",
+        payload: {
+          cardId: command.cardId,
+          messageId: command.messageId,
+          authorKind: "human",
+          authorId: CHANNEL_HUMAN_AUTHOR_ID,
+          body: command.body,
+          runThreadId: null,
+          forOwner: true,
+          createdAt: command.createdAt,
+        },
+      };
+    }
+
+    case "card.session.record": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      const agent = yield* requireAgent({ readModel, command, agentId: command.agentId });
+      const refuse = (detail: string) =>
+        new OrchestrationCommandInvariantError({ commandType: command.type, detail });
+      if (isFinishedCardStatus(card.status)) {
+        return yield* refuse(FINISHED_CARD_SESSION_REASON);
+      }
+      if (agent.projectId !== card.projectId || agent.archivedAt !== null) {
+        return yield* refuse(`@${agent.name} isn't an active agent of this card's project.`);
+      }
+      if (command.role === "owner") {
+        if (card.delegateAgentId !== agent.id) {
+          return yield* refuse(`Only the card's assigned agent writes to it, not @${agent.name}.`);
+        }
+        // Invariant 11: one writer per card.
+        if (liveOwnerRun(readModel, card.id) !== undefined) {
+          return yield* refuse(SECOND_WRITER_REASON);
+        }
+        if (card.worktreePath === null) {
+          return yield* refuse("An owner session works in the card's worktree, which is missing.");
+        }
+        const beyond = command.capabilities.filter(
+          (capability) => !agent.capabilities.includes(capability),
+        );
+        if (beyond.length > 0) {
+          return yield* refuse(`@${agent.name} is not allowed ${beyond.join(", ")}.`);
+        }
+      } else if (command.capabilities.some((capability) => capability !== "read")) {
+        // Invariant 11: helpers are read-only.
+        return yield* refuse("A helper session is read-only.");
+      }
+      if (projectLiveRunCount(readModel, card.projectId) >= DEFAULT_PROJECT_RUN_CAP) {
+        return yield* refuse(sessionCapReason);
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "card",
+          aggregateId: command.cardId,
+          occurredAt: command.startedAt,
+          commandId: command.commandId,
+        })),
+        type: "card.session-started",
+        payload: {
+          threadId: command.threadId,
+          cardId: command.cardId,
+          agentId: command.agentId,
+          role: command.role,
+          capabilities: command.capabilities,
+          context: command.context,
+          rendered: command.rendered,
+          startedAt: command.startedAt,
+        },
+      };
+    }
+
+    case "card.message.record": {
+      yield* requireCard({ readModel, command, cardId: command.cardId });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "card",
+          aggregateId: command.cardId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "card.message-posted",
+        payload: {
+          cardId: command.cardId,
+          messageId: command.messageId,
+          authorKind: command.authorKind,
+          authorId: command.authorId,
+          body: command.body,
+          runThreadId: command.runThreadId,
+          forOwner: command.forOwner,
+          createdAt: command.createdAt,
+        },
+      };
+    }
+
+    case "card.delivery.update": {
+      yield* requireCard({ readModel, command, cardId: command.cardId });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "card",
+          aggregateId: command.cardId,
+          occurredAt: command.updatedAt,
+          commandId: command.commandId,
+        })),
+        type: "card.delivery-updated",
+        payload: {
+          cardId: command.cardId,
+          messageIds: command.messageIds,
+          status: command.status,
+          threadId: command.threadId,
+          updatedAt: command.updatedAt,
+        },
+      };
+    }
+
+    // A DM writes into one of the agent's live sessions under its delivery rules,
+    // and never starts one.
+    case "agent.session.message": {
+      const run = (readModel.liveRuns ?? []).find(
+        (candidate) => candidate.threadId === command.threadId,
+      );
+      const refuse = (detail: string) =>
+        new OrchestrationCommandInvariantError({ commandType: command.type, detail });
+      if (run === undefined) {
+        return yield* refuse("That session has ended; a DM message never starts a session.");
+      }
+      if (run.role === "helper") {
+        return yield* refuse("A helper takes no messages; write to the card's owner session.");
+      }
+      if (run.cardId !== null) {
+        return yield* decideOrchestrationCommand({
+          command: {
+            type: "card.message.post",
+            commandId: command.commandId,
+            cardId: run.cardId,
+            messageId: command.messageId,
+            body: command.body,
+            createdAt: command.createdAt,
+          },
+          readModel,
+        });
+      }
+      if (run.channelId === null) {
+        return yield* refuse("That session belongs to no channel or card.");
+      }
+      const agent = yield* requireAgent({ readModel, command, agentId: run.agentId });
+      const projectAgents = (readModel.agents ?? []).filter(
+        (candidate) => candidate.projectId === agent.projectId,
+      );
+      // Posted in the session's channel, addressed to the agent so it joins its live run.
+      const addressed = parseMentions(command.body, projectAgents).includes(agent.id);
+      return yield* decideOrchestrationCommand({
+        command: {
+          type: "channel.message.post",
+          commandId: command.commandId,
+          channelId: run.channelId,
+          messageId: command.messageId,
+          body: addressed ? command.body : `@${agent.name} ${command.body}`,
+          createdAt: command.createdAt,
+        },
+        readModel,
+      });
     }
 
     case "channel.create": {

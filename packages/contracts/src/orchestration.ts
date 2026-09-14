@@ -741,10 +741,71 @@ export const RenderedRunContext = Schema.Struct({
 export type RenderedRunContext = typeof RenderedRunContext.Type;
 
 /**
- * A run: one provider session backing a single agent wake. It lives in a
- * hidden thread and records exactly what the agent was handed.
+ * What a run is for: a conversation in a channel, the one session writing a
+ * card (its owner), or a read-only helper answering a question on a card.
+ */
+export const RunRole = Schema.Literals(["conversation", "owner", "helper"]);
+export type RunRole = typeof RunRole.Type;
+
+export const CardSessionRole = Schema.Literals(["owner", "helper"]);
+export type CardSessionRole = typeof CardSessionRole.Type;
+
+/** A decision on a card as a session is handed it, with its author named. */
+export const CardBriefDecision = Schema.Struct({
+  authorName: TrimmedNonEmptyString,
+  text: Schema.String,
+  createdAt: IsoDateTime,
+});
+export type CardBriefDecision = typeof CardBriefDecision.Type;
+
+/**
+ * The handoff brief: everything a card session is handed when it starts, before
+ * rendering. Stored with the session so the inspector shows what it saw.
+ */
+export const CardBriefPayload = Schema.Struct({
+  agent: Schema.Struct({
+    id: AgentId,
+    name: AgentName,
+    rolePrompt: Schema.String,
+  }),
+  role: CardSessionRole,
+  card: Schema.Struct({
+    id: CardId,
+    title: TrimmedNonEmptyString,
+    spec: Schema.String,
+    branch: Schema.NullOr(TrimmedNonEmptyString),
+    baseBranch: TrimmedNonEmptyString,
+  }),
+  decisions: Schema.Array(CardBriefDecision),
+  // The worktree's changes against the base branch, cut short when `diffTruncated`.
+  diff: Schema.String,
+  diffTruncated: Schema.Boolean,
+  // What a helper was asked; null for an owner session.
+  question: Schema.NullOr(Schema.String),
+});
+export type CardBriefPayload = typeof CardBriefPayload.Type;
+
+/**
+ * A run: one provider session backing an agent's work. It lives in a hidden
+ * thread and records exactly what the agent was handed. A conversation run
+ * has a channel and the message that woke it; a card session has a card.
  */
 export const OrchestrationRun = Schema.Struct({
+  threadId: ThreadId,
+  role: RunRole,
+  channelId: Schema.NullOr(ChannelId),
+  cardId: Schema.NullOr(CardId),
+  agentId: AgentId,
+  triggerMessageId: Schema.NullOr(MessageId),
+  capabilities: RunCapabilities,
+  context: Schema.Union([RunContextPayload, CardBriefPayload]),
+  rendered: RenderedRunContext,
+  startedAt: IsoDateTime,
+});
+export type OrchestrationRun = typeof OrchestrationRun.Type;
+
+/** A conversation run as `channel.run-started` records it. */
+export const ChannelRun = Schema.Struct({
   threadId: ThreadId,
   channelId: ChannelId,
   agentId: AgentId,
@@ -754,16 +815,77 @@ export const OrchestrationRun = Schema.Struct({
   rendered: RenderedRunContext,
   startedAt: IsoDateTime,
 });
-export type OrchestrationRun = typeof OrchestrationRun.Type;
+export type ChannelRun = typeof ChannelRun.Type;
 
-/** A run whose session has not yet stopped. An agent has at most one. */
+/** A card session as `card.session-started` records it. */
+export const CardSession = Schema.Struct({
+  threadId: ThreadId,
+  cardId: CardId,
+  agentId: AgentId,
+  role: CardSessionRole,
+  capabilities: RunCapabilities,
+  context: CardBriefPayload,
+  rendered: RenderedRunContext,
+  startedAt: IsoDateTime,
+});
+export type CardSession = typeof CardSession.Type;
+
+/**
+ * A run whose session has not yet stopped. An agent has at most one per
+ * channel, and a card at most one owner.
+ */
 export const OrchestrationLiveRun = Schema.Struct({
   threadId: ThreadId,
-  channelId: ChannelId,
+  role: RunRole,
+  channelId: Schema.NullOr(ChannelId),
+  cardId: Schema.NullOr(CardId),
   agentId: AgentId,
   startedAt: IsoDateTime,
 });
 export type OrchestrationLiveRun = typeof OrchestrationLiveRun.Type;
+
+/** The error a session is settled with when it did not survive a server restart. */
+export const ORPHANED_PROVIDER_SESSION_ERROR =
+  "Provider session did not survive a server restart. Send a new message to continue.";
+
+/**
+ * Where a run's session stands (Linear's agent session states): `pending` while
+ * it starts, `active` while a turn runs, `awaitingInput` on an approval or a
+ * question, `complete` when settled and waiting, `error` when it failed, `stale`
+ * when it was lost across a restart without finishing, and `ended` once stopped.
+ * Silence during a long tool call is `active`, not stale.
+ */
+export const RunSessionState = Schema.Literals([
+  "pending",
+  "active",
+  "awaitingInput",
+  "complete",
+  "error",
+  "stale",
+  "ended",
+]);
+export type RunSessionState = typeof RunSessionState.Type;
+
+export function runSessionState(input: {
+  readonly endedAt: string | null;
+  readonly session: Pick<OrchestrationSession, "status" | "activeTurnId" | "lastError"> | null;
+  readonly awaitingInput: boolean;
+}): RunSessionState {
+  const { session } = input;
+  if (session?.status === "error") {
+    return session.lastError === ORPHANED_PROVIDER_SESSION_ERROR ? "stale" : "error";
+  }
+  if (input.endedAt !== null || session?.status === "stopped") {
+    return "ended";
+  }
+  if (session === null || session.status === "starting") {
+    return "pending";
+  }
+  if (input.awaitingInput) {
+    return "awaitingInput";
+  }
+  return session.status === "running" || session.activeTurnId !== null ? "active" : "complete";
+}
 
 /** Live runs allowed at once in one project. */
 export const DEFAULT_PROJECT_RUN_CAP = 3;
@@ -771,18 +893,6 @@ export const DEFAULT_PROJECT_RUN_CAP = 3;
 /** A run ends when its session stops or fails; a finished turn alone leaves it live. */
 export const isRunEndingSessionStatus = (status: OrchestrationSessionStatus): boolean =>
   status === "stopped" || status === "error";
-
-const AGENT_DM_THREAD_PREFIX = "dm:";
-
-/** An agent's DM: one continuous coding thread per agent, with a fixed id. */
-export const agentDmThreadId = (agentId: AgentId): ThreadId =>
-  ThreadId.make(`${AGENT_DM_THREAD_PREFIX}${agentId}`);
-
-/** The agent whose DM this thread is, or null for any other thread. */
-export const agentIdOfDmThread = (threadId: ThreadId): AgentId | null =>
-  threadId.startsWith(AGENT_DM_THREAD_PREFIX)
-    ? AgentId.make(threadId.slice(AGENT_DM_THREAD_PREFIX.length))
-    : null;
 
 export const OrchestrationMessageRole = Schema.Literals(["user", "assistant", "system"]);
 export type OrchestrationMessageRole = typeof OrchestrationMessageRole.Type;
@@ -1511,6 +1621,78 @@ const CardWorkspaceSetCommand = Schema.Struct({
 
 const CardWorkspaceClearCommand = cardStatusCommand("card.workspace.clear");
 
+/** Starts a fresh owner session for the card's agent, as after a lost or stopped one. */
+const CardSessionStartCommand = Schema.Struct({
+  type: Schema.Literal("card.session.start"),
+  commandId: CommandId,
+  cardId: CardId,
+  createdAt: IsoDateTime,
+});
+
+/** Asks an agent a question about a card in a read-only session; the answer goes to the owner. */
+const CardHelperRequestCommand = Schema.Struct({
+  type: Schema.Literal("card.helper.request"),
+  commandId: CommandId,
+  cardId: CardId,
+  agentId: AgentId,
+  messageId: MessageId,
+  question: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
+/** A person's message for the card's owner session, delivered as its next turn. */
+const CardMessagePostCommand = Schema.Struct({
+  type: Schema.Literal("card.message.post"),
+  commandId: CommandId,
+  cardId: CardId,
+  messageId: MessageId,
+  body: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
+/**
+ * A message from an agent's DM into one of its live sessions. It follows that
+ * session's delivery rules and never starts a session.
+ */
+const AgentSessionMessageCommand = Schema.Struct({
+  type: Schema.Literal("agent.session.message"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  messageId: MessageId,
+  body: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
+// Server-only: the card session reactor records sessions, replies and deliveries.
+const CardSessionRecordCommand = Schema.Struct({
+  type: Schema.Literal("card.session.record"),
+  commandId: CommandId,
+  ...CardSession.fields,
+});
+
+const CardMessageRecordCommand = Schema.Struct({
+  type: Schema.Literal("card.message.record"),
+  commandId: CommandId,
+  cardId: CardId,
+  messageId: MessageId,
+  authorKind: Schema.Literals(["agent", "system"]),
+  authorId: TrimmedNonEmptyString,
+  body: Schema.String,
+  runThreadId: Schema.NullOr(ThreadId),
+  forOwner: Schema.Boolean,
+  createdAt: IsoDateTime,
+});
+
+const CardDeliveryUpdateCommand = Schema.Struct({
+  type: Schema.Literal("card.delivery.update"),
+  commandId: CommandId,
+  cardId: CardId,
+  messageIds: Schema.Array(MessageId),
+  status: ChannelDeliveryStatus,
+  threadId: Schema.NullOr(ThreadId),
+  updatedAt: IsoDateTime,
+});
+
 const ChannelCreateCommand = Schema.Struct({
   type: Schema.Literal("channel.create"),
   commandId: CommandId,
@@ -1569,7 +1751,7 @@ const ChannelAgentWakeCommand = Schema.Struct({
 const ChannelRunStartCommand = Schema.Struct({
   type: Schema.Literal("channel.run.start"),
   commandId: CommandId,
-  ...OrchestrationRun.fields,
+  ...ChannelRun.fields,
 });
 
 const ChannelMessageAgentPostCommand = Schema.Struct({
@@ -1898,6 +2080,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   AgentUpdateCommand,
   AgentArchiveCommand,
   AgentUnarchiveCommand,
+  AgentSessionMessageCommand,
   CardCreateCommand,
   CardUpdateCommand,
   CardApproveCommand,
@@ -1911,6 +2094,9 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   CardRelationAddCommand,
   CardRelationRemoveCommand,
   CardDecisionRecordCommand,
+  CardSessionStartCommand,
+  CardHelperRequestCommand,
+  CardMessagePostCommand,
   ChannelCreateCommand,
   ChannelUpdateCommand,
   ChannelArchiveCommand,
@@ -1953,6 +2139,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   AgentUpdateCommand,
   AgentArchiveCommand,
   AgentUnarchiveCommand,
+  AgentSessionMessageCommand,
   CardCreateCommand,
   CardUpdateCommand,
   CardApproveCommand,
@@ -1966,6 +2153,9 @@ export const ClientOrchestrationCommand = Schema.Union([
   CardRelationAddCommand,
   CardRelationRemoveCommand,
   CardDecisionRecordCommand,
+  CardSessionStartCommand,
+  CardHelperRequestCommand,
+  CardMessagePostCommand,
   ChannelCreateCommand,
   ChannelUpdateCommand,
   ChannelArchiveCommand,
@@ -2122,6 +2312,9 @@ const InternalOrchestrationCommand = Schema.Union([
   CardLandCommand,
   CardWorkspaceSetCommand,
   CardWorkspaceClearCommand,
+  CardSessionRecordCommand,
+  CardMessageRecordCommand,
+  CardDeliveryUpdateCommand,
   ChannelAgentWakeCommand,
   ChannelRunStartCommand,
   ChannelMessageAgentPostCommand,
@@ -2166,6 +2359,11 @@ export const OrchestrationEventType = Schema.Literals([
   "card.decision-recorded",
   "card.workspace-set",
   "card.workspace-cleared",
+  "card.session-requested",
+  "card.session-started",
+  "card.helper-requested",
+  "card.message-posted",
+  "card.delivery-updated",
   "channel.created",
   "channel.updated",
   "channel.archived",
@@ -2361,6 +2559,45 @@ export const CardWorkspaceClearedPayload = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 
+export const CardSessionRequestedPayload = Schema.Struct({
+  cardId: CardId,
+  agentId: AgentId,
+  requestedAt: IsoDateTime,
+});
+
+export const CardSessionStartedPayload = CardSession;
+
+export const CardHelperRequestedPayload = Schema.Struct({
+  cardId: CardId,
+  agentId: AgentId,
+  messageId: MessageId,
+  question: TrimmedNonEmptyString,
+  requestedAt: IsoDateTime,
+});
+
+export const CardMessageAuthorKind = Schema.Literals(["human", "agent", "system"]);
+export type CardMessageAuthorKind = typeof CardMessageAuthorKind.Type;
+
+/** A message in a card's activity. `forOwner` messages wait for the owner session's next turn. */
+export const CardMessagePostedPayload = Schema.Struct({
+  cardId: CardId,
+  messageId: MessageId,
+  authorKind: CardMessageAuthorKind,
+  authorId: TrimmedNonEmptyString,
+  body: Schema.String,
+  runThreadId: Schema.NullOr(ThreadId),
+  forOwner: Schema.Boolean,
+  createdAt: IsoDateTime,
+});
+
+export const CardDeliveryUpdatedPayload = Schema.Struct({
+  cardId: CardId,
+  messageIds: Schema.Array(MessageId),
+  status: ChannelDeliveryStatus,
+  threadId: Schema.NullOr(ThreadId),
+  updatedAt: IsoDateTime,
+});
+
 export const ChannelCreatedPayload = Schema.Struct({
   channelId: ChannelId,
   projectId: ProjectId,
@@ -2415,7 +2652,7 @@ export const ChannelAgentWakeRequestedPayload = Schema.Struct({
   liveRunThreadId: Schema.optional(ThreadId),
 });
 
-export const ChannelRunStartedPayload = OrchestrationRun;
+export const ChannelRunStartedPayload = ChannelRun;
 
 export const ChannelDeliveryUpdatedPayload = Schema.Struct({
   channelId: ChannelId,
@@ -2771,6 +3008,31 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("card.workspace-cleared"),
     payload: CardWorkspaceClearedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.session-requested"),
+    payload: CardSessionRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.session-started"),
+    payload: CardSessionStartedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.helper-requested"),
+    payload: CardHelperRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.message-posted"),
+    payload: CardMessagePostedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.delivery-updated"),
+    payload: CardDeliveryUpdatedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,
@@ -3134,13 +3396,15 @@ export class OrchestrationGetWorkflowScriptError extends Schema.TaggedError<Orch
   }
 }
 
-/** How many of an agent's newest runs a DM shows. */
-export const AGENT_RUNS_LIMIT = 10;
+/** How many of an agent's newest sessions its DM shows. */
+export const AGENT_RUNS_LIMIT = 20;
 
 /** A run with when it ended; `endedAt` is null while the run is live. */
 export const OrchestrationAgentRun = Schema.Struct({
   ...OrchestrationRun.fields,
   endedAt: Schema.NullOr(IsoDateTime),
+  // The card a card session works on, to label it.
+  cardTitle: Schema.NullOr(TrimmedNonEmptyString),
 });
 export type OrchestrationAgentRun = typeof OrchestrationAgentRun.Type;
 

@@ -11,11 +11,9 @@ import {
   ProviderInstanceId,
   ProviderSetupError,
 } from "@iskra/contracts";
-import { renderAgentDmPrompt } from "../runContext.ts";
 import { createModelSelection } from "@iskra/shared/model";
 import {
   AgentId,
-  agentDmThreadId,
   ApprovalRequestId,
   ChannelId,
   CommandId,
@@ -886,68 +884,6 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.status).toBe("starting");
     expect(thread?.session?.runtimeMode).toBe("approval-required");
-  });
-
-  it("starts an agent DM's provider session with the agent's role and no run restrictions", async () => {
-    const harness = await createHarness();
-    const now = "2026-01-01T00:00:00.000Z";
-    const projectId = asProjectId("project-1");
-    const agentId = AgentId.make("agent-reviewer");
-    const threadId = agentDmThreadId(agentId);
-    const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" };
-    const dispatch = (command: OrchestrationCommand) =>
-      Effect.runPromise(harness.engine.dispatch(command));
-
-    await dispatch({
-      type: "agent.create",
-      commandId: CommandId.make("cmd-agent-reviewer"),
-      agentId,
-      projectId,
-      name: "reviewer",
-      roleTags: [],
-      rolePrompt: "You review changes.",
-      modelSelection,
-      capabilities: ["read"],
-      createdAt: now,
-    });
-    await dispatch({
-      type: "thread.create",
-      commandId: CommandId.make("cmd-dm-reviewer"),
-      threadId,
-      projectId,
-      title: "@reviewer",
-      modelSelection,
-      runtimeMode: "full-access",
-      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-      branch: null,
-      worktreePath: null,
-      createdAt: now,
-    });
-    await dispatch({
-      type: "thread.turn.start",
-      commandId: CommandId.make("cmd-dm-turn"),
-      threadId,
-      message: {
-        messageId: asMessageId("dm-first-message"),
-        role: "user",
-        text: "Review the last commit.",
-        attachments: [],
-      },
-      // A seed matching the title would let an ordinary thread be renamed.
-      titleSeed: "@reviewer",
-      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-      runtimeMode: "full-access",
-      createdAt: now,
-    });
-
-    await waitFor(() => harness.startSession.mock.calls.length === 1);
-    const startInput = harness.startSession.mock.calls[0]?.[1];
-    expect(startInput).toMatchObject({
-      agentPrompt: renderAgentDmPrompt({ name: "reviewer", rolePrompt: "You review changes." }),
-    });
-    expect(startInput).not.toHaveProperty("run");
-    await harness.drain();
-    expect(harness.generateThreadTitle).not.toHaveBeenCalled();
   });
 
   it("starts a run thread's provider session with the run's read-only restrictions", async () => {

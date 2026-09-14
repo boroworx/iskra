@@ -185,10 +185,10 @@ const make = Effect.gen(function* () {
 
   const settleTurn = Effect.fn("RunReactor.settleTurn")(function* (threadId: ThreadId) {
     const run = yield* snapshotQuery.getRunByThreadId(threadId);
-    if (Option.isNone(run)) {
+    if (Option.isNone(run) || run.value.channelId === null) {
       return;
     }
-    const { channelId, agentId } = run.value;
+    const { channelId, agentId } = { ...run.value, channelId: run.value.channelId };
     const thread = yield* snapshotQuery.getThreadDetailById(threadId, { activityKinds: [] });
     const turnId = Option.isSome(thread) ? thread.value.latestTurn?.turnId : undefined;
     if (Option.isNone(thread) || turnId === undefined) {
@@ -267,10 +267,10 @@ const make = Effect.gen(function* () {
 
   const markDelivered = Effect.fn("RunReactor.markDelivered")(function* (threadId: ThreadId) {
     const run = yield* snapshotQuery.getRunByThreadId(threadId);
-    if (Option.isNone(run)) {
+    if (Option.isNone(run) || run.value.channelId === null) {
       return;
     }
-    const { channelId, agentId } = run.value;
+    const { channelId, agentId } = { ...run.value, channelId: run.value.channelId };
     // A turn is running in this run: the provider has what was sent into it.
     const sent = (yield* channels.listOpenDeliveries({ agentId, channelId })).filter(
       (delivery) => delivery.status === "sent" && delivery.deliveryRunThreadId === threadId,
@@ -286,10 +286,10 @@ const make = Effect.gen(function* () {
 
   const endRun = Effect.fn("RunReactor.endRun")(function* (threadId: ThreadId) {
     const run = yield* snapshotQuery.getRunByThreadId(threadId);
-    if (Option.isNone(run)) {
+    if (Option.isNone(run) || run.value.channelId === null) {
       return;
     }
-    const { channelId, agentId } = run.value;
+    const { channelId, agentId } = { ...run.value, channelId: run.value.channelId };
     const open = yield* channels.listOpenDeliveries({ agentId, channelId });
     // Sent into a turn that never ran: the agent did not read them.
     yield* updateDeliveries({

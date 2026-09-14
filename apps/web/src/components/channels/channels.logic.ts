@@ -1,16 +1,15 @@
-import {
-  agentDmThreadId,
-  type AgentId,
-  type AgentPresence,
-  type ChannelId,
-  type OrchestrationAgentShell,
-  type OrchestrationChannelMessage,
-  type OrchestrationChannelShell,
-  type OrchestrationMessage,
-  type OrchestrationThreadActivity,
-  type OrchestrationThreadShell,
-  type ProjectId,
-  type ThreadId,
+import type {
+  AgentId,
+  AgentPresence,
+  ChannelId,
+  OrchestrationAgentRun,
+  OrchestrationAgentShell,
+  OrchestrationChannelMessage,
+  OrchestrationChannelShell,
+  OrchestrationMessage,
+  OrchestrationThreadActivity,
+  ProjectId,
+  ThreadId,
 } from "@iskra/contracts";
 
 export interface ChannelListEntry {
@@ -22,15 +21,13 @@ export interface AgentListEntry {
   readonly id: AgentId;
   readonly name: string;
   readonly presence: AgentPresence;
-  /** The agent's DM thread, whether or not it has been opened yet. */
-  readonly dmThreadId: ThreadId;
 }
 
-/** The parts of a DM thread's shell that say whether the agent is busy in it. */
-export type DmThreadStatus = Pick<
-  OrchestrationThreadShell,
-  "id" | "session" | "hasPendingApprovals" | "hasPendingUserInput"
->;
+/** A live session an agent's DM can write into. */
+export interface DmTarget {
+  readonly threadId: ThreadId;
+  readonly label: string;
+}
 
 export interface ChannelMemberEntry {
   readonly id: AgentId;
@@ -70,45 +67,42 @@ export function channelListEntries(
     .toSorted((left, right) => left.name.localeCompare(right.name));
 }
 
-const PRESENCE_ATTENTION: Record<AgentPresence, number> = { idle: 0, running: 1, blocked: 2 };
+/** A project's agents by name, with their presence across all their sessions. */
+export function agentListEntries(
+  agents: ReadonlyArray<OrchestrationAgentShell>,
+  projectId: ProjectId,
+): ReadonlyArray<AgentListEntry> {
+  return agents
+    .filter((agent) => agent.projectId === projectId)
+    .map((agent) => ({ id: agent.id, name: agent.name, presence: agent.presence }))
+    .toSorted((left, right) => left.name.localeCompare(right.name));
+}
 
-/** An agent's presence in its DM: waiting on the person, working on a turn, or idle. */
-function dmPresence(thread: DmThreadStatus | undefined): AgentPresence {
-  if (thread === undefined) {
-    return "idle";
+/** Where a session works: the channel it talks in, or the card it builds or helps on. */
+export function sessionWhere(
+  run: Pick<OrchestrationAgentRun, "role" | "channelId" | "cardTitle">,
+  channels: ReadonlyArray<OrchestrationChannelShell>,
+): string {
+  if (run.role !== "conversation") {
+    return run.cardTitle ?? "a card";
   }
-  if (thread.hasPendingApprovals || thread.hasPendingUserInput) {
-    return "blocked";
-  }
-  return thread.session?.status === "running" ? "running" : "idle";
+  const channel = channels.find((candidate) => candidate.id === run.channelId);
+  return channel === undefined ? "a channel" : `#${channel.name}`;
 }
 
 /**
- * A project's agents by name. Presence is whichever needs more attention: the
- * agent's channel runs or its DM.
+ * The live sessions an agent's DM can write into, most recently started first:
+ * its conversations and the cards it owns. A helper takes no messages.
  */
-export function agentListEntries(
-  agents: ReadonlyArray<OrchestrationAgentShell>,
-  dmThreads: ReadonlyArray<DmThreadStatus>,
-  projectId: ProjectId,
-): ReadonlyArray<AgentListEntry> {
-  const dmThreadsById = new Map<string, DmThreadStatus>(
-    dmThreads.map((thread) => [thread.id, thread]),
-  );
-  return agents
-    .filter((agent) => agent.projectId === projectId)
-    .map((agent) => {
-      const dmThreadId = agentDmThreadId(agent.id);
-      const inDm = dmPresence(dmThreadsById.get(dmThreadId));
-      return {
-        id: agent.id,
-        name: agent.name,
-        presence:
-          PRESENCE_ATTENTION[inDm] > PRESENCE_ATTENTION[agent.presence] ? inDm : agent.presence,
-        dmThreadId,
-      };
-    })
-    .toSorted((left, right) => left.name.localeCompare(right.name));
+export function dmTargets(
+  runs: ReadonlyArray<OrchestrationAgentRun>,
+  channels: ReadonlyArray<OrchestrationChannelShell>,
+): ReadonlyArray<DmTarget> {
+  // ponytail: "most recently active" is approximated by start time; use the thread's last activity if it misleads.
+  return runs
+    .filter((run) => run.endedAt === null && run.role !== "helper")
+    .toSorted((left, right) => right.startedAt.localeCompare(left.startedAt))
+    .map((run) => ({ threadId: run.threadId, label: sessionWhere(run, channels) }));
 }
 
 /** A channel's member agents in name order. */

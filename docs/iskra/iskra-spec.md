@@ -611,6 +611,22 @@ message is the brief (spec, decisions, diff), checked byte for byte in the inspe
 write is denied and its reply reaches the owner's next turn; a session lost across a restart shows
 `stale`; an agent's DM lists its sessions by card and channel with their context, a message sent
 from it reaches the chosen session, and the `dm:` coding thread is gone.
+_Accepted:_ a card session is a run with a card and a role (`owner` or `helper`) instead of a
+channel. Assigning an agent starts its owner session in the card's worktree from a handoff brief
+of the spec, decision log and diff (`cardBrief.ts`, exact text under test); reassigning stops the
+idle owner session and starts the new agent's once it has ended. `CardSessionReactor.test.ts`
+runs against a real git repository: the brief carries the recorded decision, the second agent's
+brief carries the first agent's uncommitted diff, and each session's first user message equals
+the stored rendered brief the inspector shows. A helper is recorded with `read` only, its answer
+joins the card's activity and goes in as the owner's next turn once the owner is idle, `sent` then
+`delivered` when that turn runs. A session settled with the restart error derives `stale`, and a
+fresh `card.session.start` then succeeds. Decider tests refuse a second owner, a writing helper,
+an owner beyond its agent's capabilities and a reassignment mid-turn; count card sessions toward
+the run cap without making the agent busy in channels; and send a DM message into a live owner
+session as a card message, into a live conversation as a channel message joining that run, and
+refuse it for a helper or an ended session. The web DM opens at `/agents/<environment>/<agent>`,
+lists the agent's sessions labelled by channel or card with state and inspector, and writes into
+the chosen live session. `agentDmThreadId`, the DM prompt and its persisted recovery are removed.
 
 **M2.4 — Plan gate.** Spec states, the critic run, approval and skip. _Accept when:_ a write
 session is refused on a `draft` spec; the critic's findings appear on the card; a skip is recorded

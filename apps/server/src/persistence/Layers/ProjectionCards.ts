@@ -9,7 +9,10 @@ import {
   ProjectionCard,
   ProjectionCardDbRow,
   ProjectionCardDecision,
+  ProjectionCardDecisionDbRow,
+  ProjectionCardMessage,
   ProjectionCardRepository,
+  UpdateProjectionCardDeliveriesInput,
   type ProjectionCardRepositoryShape,
 } from "../Services/ProjectionCards.ts";
 
@@ -137,6 +140,86 @@ const makeProjectionCardRepository = Effect.gen(function* () {
       `,
   });
 
+  const listDecisionRows = SqlSchema.findAll({
+    Request: GetProjectionCardInput,
+    Result: ProjectionCardDecisionDbRow,
+    execute: ({ cardId }) =>
+      sql`
+        SELECT
+          decision_id AS "decisionId",
+          card_id AS "cardId",
+          author_json AS "author",
+          text,
+          created_at AS "createdAt"
+        FROM projection_card_decisions
+        WHERE card_id = ${cardId}
+        ORDER BY created_at ASC, rowid ASC
+      `,
+  });
+
+  const insertMessageRow = SqlSchema.void({
+    Request: ProjectionCardMessage,
+    execute: (row) =>
+      sql`
+        INSERT INTO projection_card_messages (
+          message_id,
+          card_id,
+          author_kind,
+          author_id,
+          body,
+          run_thread_id,
+          delivery_status,
+          delivery_thread_id,
+          created_at
+        )
+        VALUES (
+          ${row.messageId},
+          ${row.cardId},
+          ${row.authorKind},
+          ${row.authorId},
+          ${row.body},
+          ${row.runThreadId},
+          ${row.deliveryStatus},
+          ${row.deliveryThreadId},
+          ${row.createdAt}
+        )
+        ON CONFLICT (message_id) DO NOTHING
+      `,
+  });
+
+  const updateDeliveryRows = SqlSchema.void({
+    Request: UpdateProjectionCardDeliveriesInput,
+    execute: ({ messageIds, status, threadId }) =>
+      sql`
+        UPDATE projection_card_messages
+        SET delivery_status = ${status}, delivery_thread_id = ${threadId}
+        WHERE ${sql.in("message_id", messageIds)}
+          AND delivery_status IS NOT NULL
+      `,
+  });
+
+  const listOpenOwnerMessageRows = SqlSchema.findAll({
+    Request: GetProjectionCardInput,
+    Result: ProjectionCardMessage,
+    execute: ({ cardId }) =>
+      sql`
+        SELECT
+          message_id AS "messageId",
+          card_id AS "cardId",
+          author_kind AS "authorKind",
+          author_id AS "authorId",
+          body,
+          run_thread_id AS "runThreadId",
+          delivery_status AS "deliveryStatus",
+          delivery_thread_id AS "deliveryThreadId",
+          created_at AS "createdAt"
+        FROM projection_card_messages
+        WHERE card_id = ${cardId}
+          AND delivery_status IN ('pending', 'sent')
+        ORDER BY created_at ASC, rowid ASC
+      `,
+  });
+
   const upsert: ProjectionCardRepositoryShape["upsert"] = (row) =>
     upsertProjectionCardRow(row).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionCardRepository.upsert:query")),
@@ -152,10 +235,38 @@ const makeProjectionCardRepository = Effect.gen(function* () {
       Effect.mapError(toPersistenceSqlError("ProjectionCardRepository.appendDecision:query")),
     );
 
+  const listDecisions: ProjectionCardRepositoryShape["listDecisions"] = (input) =>
+    listDecisionRows(input).pipe(
+      Effect.mapError(toPersistenceSqlError("ProjectionCardRepository.listDecisions:query")),
+    );
+
+  const appendMessage: ProjectionCardRepositoryShape["appendMessage"] = (row) =>
+    insertMessageRow(row).pipe(
+      Effect.mapError(toPersistenceSqlError("ProjectionCardRepository.appendMessage:query")),
+    );
+
+  const updateDeliveries: ProjectionCardRepositoryShape["updateDeliveries"] = (input) =>
+    input.messageIds.length === 0
+      ? Effect.void
+      : updateDeliveryRows(input).pipe(
+          Effect.mapError(toPersistenceSqlError("ProjectionCardRepository.updateDeliveries:query")),
+        );
+
+  const listOpenOwnerMessages: ProjectionCardRepositoryShape["listOpenOwnerMessages"] = (input) =>
+    listOpenOwnerMessageRows(input).pipe(
+      Effect.mapError(
+        toPersistenceSqlError("ProjectionCardRepository.listOpenOwnerMessages:query"),
+      ),
+    );
+
   return {
     upsert,
     getById,
     appendDecision,
+    listDecisions,
+    appendMessage,
+    updateDeliveries,
+    listOpenOwnerMessages,
   } satisfies ProjectionCardRepositoryShape;
 });
 

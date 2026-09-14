@@ -1,6 +1,6 @@
 import { useLoadBalancedEnvironment } from "../hooks/useLoadBalancedEnvironment";
 import { visibleThreadPullRequests } from "@iskra/shared/threadPullRequests";
-import { agentIdOfDmThread, type UsageLimitSourceSnapshots } from "@iskra/contracts";
+import type { UsageLimitSourceSnapshots } from "@iskra/contracts";
 import {
   collectProviderUsageLimits,
   hasProviderUsageLimits,
@@ -7354,8 +7354,8 @@ export default function ChatView(props: ChatViewProps) {
     );
 
     let failure: AtomCommandResult<unknown, unknown> | null = null;
-    // Auto-title from first message; an agent's DM keeps its "@name" title.
-    if (isFirstMessage && isServerThread && agentIdOfDmThread(threadIdForSend) === null) {
+    // Auto-title from first message.
+    if (isFirstMessage && isServerThread) {
       const titleResult = await updateThreadMetadata({
         environmentId,
         input: {

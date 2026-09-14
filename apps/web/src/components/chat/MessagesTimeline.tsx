@@ -1,6 +1,4 @@
-import { agentIdOfDmThread } from "@iskra/contracts";
 import { APP_BASE_NAME } from "~/branding";
-import { useEnvironmentAgents } from "~/state/entities";
 import { ReadOnlySourcePreview } from "../files/AttachmentFilePreview";
 import { useRightPanelStore } from "~/rightPanelStore";
 import {
@@ -1851,7 +1849,7 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
 
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
-  const assistantName = useAssistantName(ctx.threadRef);
+  const assistantName = APP_BASE_NAME;
   const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
 
   return (
@@ -4232,9 +4230,3 @@ function QuestionAnswerHistory({
   );
 }
 
-/** Who signs a thread's replies: the agent in its DM, otherwise the app. */
-function useAssistantName(threadRef: ScopedThreadRef | null): string {
-  const agentId = threadRef === null ? null : agentIdOfDmThread(threadRef.threadId);
-  const agents = useEnvironmentAgents(agentId === null ? null : (threadRef?.environmentId ?? null));
-  return agents.find((agent) => agent.id === agentId)?.name ?? APP_BASE_NAME;
-}

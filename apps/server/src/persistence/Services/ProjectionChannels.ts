@@ -21,7 +21,6 @@ import {
   ProjectId,
   RenderedRunContext,
   RunCapabilities,
-  RunContextPayload,
   ThreadId,
 } from "@iskra/contracts";
 import * as Context from "effect/Context";
@@ -92,7 +91,7 @@ export function toOrchestrationChannelMessage(
 export const ProjectionRunDbRow = OrchestrationRun.mapFields(
   Struct.assign({
     capabilities: Schema.fromJsonString(RunCapabilities),
-    context: Schema.fromJsonString(RunContextPayload),
+    context: Schema.fromJsonString(OrchestrationRun.fields.context),
     rendered: Schema.fromJsonString(RenderedRunContext),
   }),
 );
@@ -101,7 +100,7 @@ export const ProjectionRunDbRow = OrchestrationRun.mapFields(
 export const ProjectionAgentRunDbRow = OrchestrationAgentRun.mapFields(
   Struct.assign({
     capabilities: Schema.fromJsonString(RunCapabilities),
-    context: Schema.fromJsonString(RunContextPayload),
+    context: Schema.fromJsonString(OrchestrationRun.fields.context),
     rendered: Schema.fromJsonString(RenderedRunContext),
   }),
 );

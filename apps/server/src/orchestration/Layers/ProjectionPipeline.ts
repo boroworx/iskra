@@ -770,6 +770,24 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             return;
           }
 
+          case "card.message-posted":
+            yield* projectionCardRepository.appendMessage({
+              messageId: event.payload.messageId,
+              cardId: event.payload.cardId,
+              authorKind: event.payload.authorKind,
+              authorId: event.payload.authorId,
+              body: event.payload.body,
+              runThreadId: event.payload.runThreadId,
+              deliveryStatus: event.payload.forOwner ? "pending" : null,
+              deliveryThreadId: null,
+              createdAt: event.payload.createdAt,
+            });
+            return;
+
+          case "card.delivery-updated":
+            yield* projectionCardRepository.updateDeliveries(event.payload);
+            return;
+
           case "card.decision-recorded":
             yield* projectionCardRepository.appendDecision({
               decisionId: event.payload.decisionId,
@@ -862,7 +880,19 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
 
         case "channel.run-started":
-          yield* projectionChannelRepository.insertRun(event.payload);
+          yield* projectionChannelRepository.insertRun({
+            ...event.payload,
+            role: "conversation",
+            cardId: null,
+          });
+          return;
+
+        case "card.session-started":
+          yield* projectionChannelRepository.insertRun({
+            ...event.payload,
+            channelId: null,
+            triggerMessageId: null,
+          });
           return;
 
         // A wake leaves its message pending with the agent until a turn carries it.

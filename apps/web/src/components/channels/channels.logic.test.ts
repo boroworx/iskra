@@ -1,13 +1,15 @@
 import {
   AgentId,
+  CardId,
   ChannelId,
   EventId,
   MessageId,
   ProjectId,
   ProviderInstanceId,
-  agentDmThreadId,
+  ThreadId,
 } from "@iskra/contracts";
 import type {
+  OrchestrationAgentRun,
   OrchestrationAgentShell,
   OrchestrationChannelMessage,
   OrchestrationChannelShell,
@@ -23,6 +25,7 @@ import {
   channelMemberEntries,
   channelMessageRows,
   deliveryNotes,
+  dmTargets,
   runOutputItems,
   presenceDotClassName,
   presenceLabel,
@@ -93,41 +96,69 @@ describe("channelListEntries", () => {
 });
 
 describe("agentListEntries", () => {
-  it("lists a project's agents by name, taking whichever of run or DM presence needs more attention", () => {
-    const dm = (
-      agentId: string,
-      overrides: Partial<
-        Pick<OrchestrationThreadShell, "session" | "hasPendingApprovals" | "hasPendingUserInput">
-      > = {},
-    ) => ({
-      id: agentDmThreadId(AgentId.make(agentId)),
-      session: null,
-      hasPendingApprovals: false,
-      hasPendingUserInput: false,
-      ...overrides,
-    });
-    const session = (status: "running" | "ready") =>
-      ({ status }) as unknown as OrchestrationThreadShell["session"];
-
+  it("lists a project's agents by name with their presence", () => {
     const entries = agentListEntries(
       [
-        agent("agent-writer", "writer"),
+        agent("agent-writer", "writer", { presence: "blocked" }),
         agent("agent-other", "other", { projectId: otherProjectId }),
         agent("agent-backend", "backend", { presence: "running" }),
-        agent("agent-reviewer", "reviewer"),
-      ],
-      [
-        dm("agent-writer", { hasPendingApprovals: true }),
-        dm("agent-reviewer", { session: session("running") }),
-        dm("agent-backend", { session: session("ready") }),
       ],
       projectId,
     );
 
-    expect(entries.map((entry) => [entry.name, entry.presence, entry.dmThreadId])).toEqual([
-      ["backend", "running", "dm:agent-backend"],
-      ["reviewer", "running", "dm:agent-reviewer"],
-      ["writer", "blocked", "dm:agent-writer"],
+    expect(entries.map((entry) => [entry.name, entry.presence])).toEqual([
+      ["backend", "running"],
+      ["writer", "blocked"],
+    ]);
+  });
+});
+
+describe("dmTargets", () => {
+  const run = (threadId: string, overrides: Partial<OrchestrationAgentRun>): OrchestrationAgentRun => ({
+    threadId: ThreadId.make(threadId),
+    role: "conversation",
+    channelId: null,
+    cardId: null,
+    agentId: AgentId.make("agent-backend"),
+    triggerMessageId: null,
+    capabilities: ["read"],
+    context: {
+      agent: { id: AgentId.make("agent-backend"), name: "backend", rolePrompt: "" },
+      role: "owner",
+      card: { id: CardId.make("card-limits"), title: "Rate limiting", spec: "", branch: null, baseBranch: "main" },
+      decisions: [],
+      diff: "",
+      diffTruncated: false,
+      question: null,
+    },
+    rendered: { systemPrompt: "", firstMessage: "" },
+    startedAt: "2026-01-01T00:00:00.000Z",
+    endedAt: null,
+    cardTitle: null,
+    ...overrides,
+  });
+
+  it("offers the agent's live conversations and owned cards, newest first, never a helper", () => {
+    const backend = channel("channel-backend", "backend");
+    const card = { cardId: CardId.make("card-limits"), cardTitle: "Rate limiting" };
+
+    const targets = dmTargets(
+      [
+        run("run-conversation", { channelId: backend.id, startedAt: "2026-01-01T00:00:00.000Z" }),
+        run("run-owner", { ...card, role: "owner", startedAt: "2026-01-02T00:00:00.000Z" }),
+        run("run-helper", { ...card, role: "helper", startedAt: "2026-01-03T00:00:00.000Z" }),
+        run("run-ended", {
+          channelId: backend.id,
+          startedAt: "2026-01-04T00:00:00.000Z",
+          endedAt: "2026-01-04T00:01:00.000Z",
+        }),
+      ],
+      [backend],
+    );
+
+    expect(targets).toEqual([
+      { threadId: "run-owner", label: "Rate limiting" },
+      { threadId: "run-conversation", label: "#backend" },
     ]);
   });
 });

@@ -91,6 +91,12 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "card.land":
     case "card.workspace.set":
     case "card.workspace.clear":
+    case "card.session.start":
+    case "card.helper.request":
+    case "card.message.post":
+    case "card.session.record":
+    case "card.message.record":
+    case "card.delivery.update":
       return {
         aggregateKind: "card",
         aggregateId: command.cardId,

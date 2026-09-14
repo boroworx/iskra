@@ -4758,7 +4758,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           // Model and effort can change after this session-level prompt is set.
           append:
             input.run?.systemPrompt ??
-            buildRuntimeInstructions({ harness: "Claude Code", agentPrompt: input.agentPrompt }),
+            buildRuntimeInstructions({ harness: "Claude Code" }),
         },
         settingSources,
         ...(input.run ? { allowedTools } : {}),

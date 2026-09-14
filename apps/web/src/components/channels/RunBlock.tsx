@@ -1,11 +1,15 @@
 import { scopeThreadRef } from "@iskra/client-runtime/environment";
-import type {
-  EnvironmentId,
-  OrchestrationAgentRun,
-  OrchestrationChannelShell,
+import { derivePendingRequests } from "@iskra/client-runtime/pending-requests";
+import {
+  runSessionState,
+  type EnvironmentId,
+  type OrchestrationAgentRun,
+  type OrchestrationChannelShell,
+  type RunSessionState,
 } from "@iskra/contracts";
 import { memo, useMemo, useState } from "react";
 
+import { cn } from "~/lib/utils";
 import { useThreadDetail } from "~/state/entities";
 import ChatMarkdown from "../ChatMarkdown";
 import { Button } from "../ui/button";
@@ -17,13 +21,24 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
-import { runOutputItems } from "./channels.logic";
+import { runOutputItems, sessionWhere } from "./channels.logic";
 
 const runTimeFormat = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
 
+const SESSION_STATE_LABEL: Record<RunSessionState, string> = {
+  pending: "Starting",
+  active: "Working",
+  awaitingInput: "Needs you",
+  complete: "Waiting",
+  error: "Failed",
+  stale: "Stale",
+  ended: "Ended",
+};
+
 /**
- * One run of an agent, as its DM shows it: where it ran, its work in grey and
- * what it says to people in full white, and the context it was given.
+ * One session of an agent, as its DM shows it: the channel or card it works on,
+ * where it stands, its work in grey and what it says to people in full white,
+ * and the context it started from.
  */
 export const RunBlock = memo(function RunBlock(props: {
   readonly run: OrchestrationAgentRun;
@@ -38,18 +53,37 @@ export const RunBlock = memo(function RunBlock(props: {
   );
   const thread = useThreadDetail(threadRef);
   const items = useMemo(() => (thread === null ? [] : runOutputItems(thread)), [thread]);
-  const channel = props.channels.find((candidate) => candidate.id === props.run.channelId);
-  const where =
-    channel === undefined ? "a channel" : channel.kind === "dm" ? "this DM" : `#${channel.name}`;
+  const state = useMemo(() => {
+    const pending = thread === null ? null : derivePendingRequests(thread.activities);
+    return runSessionState({
+      endedAt: props.run.endedAt,
+      session: thread?.session ?? null,
+      awaitingInput: pending !== null && pending.approvals.length + pending.userInputs.length > 0,
+    });
+  }, [props.run.endedAt, thread]);
+  const where = sessionWhere(props.run, props.channels);
+  const heading =
+    props.run.role === "owner"
+      ? `Building ${where}`
+      : props.run.role === "helper"
+        ? `Helping on ${where}`
+        : `In ${where}`;
 
   return (
-    <section aria-label={`Run in ${where}`} className="min-w-0 border-l-2 border-border pl-3">
+    <section aria-label={heading} className="min-w-0 border-l-2 border-border pl-3">
       <header className="flex h-7 items-center gap-2 text-xs text-muted-foreground">
-        <span>Run in {where}</span>
-        <time dateTime={props.run.startedAt}>
+        <span className="truncate">{heading}</span>
+        <time dateTime={props.run.startedAt} className="shrink-0">
           {runTimeFormat.format(new Date(props.run.startedAt))}
         </time>
-        {props.run.endedAt === null ? <span>Working</span> : null}
+        <span
+          className={cn(
+            "shrink-0",
+            (state === "awaitingInput" || state === "error") && "text-destructive-foreground",
+          )}
+        >
+          {SESSION_STATE_LABEL[state]}
+        </span>
         <Button
           className="ml-auto"
           size="sm"
@@ -75,17 +109,18 @@ export const RunBlock = memo(function RunBlock(props: {
   );
 });
 
-/** The context inspector: exactly what the run was given, as sent. */
+/** The context inspector: exactly what the session was given, as sent. */
 function RunContextDialog(props: {
   readonly run: OrchestrationAgentRun;
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
 }) {
+  const isCardSession = props.run.role !== "conversation";
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogPopup className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Run context</DialogTitle>
+          <DialogTitle>{isCardSession ? "Handoff brief" : "Run context"}</DialogTitle>
           <DialogDescription>
             The system prompt and first message sent to the provider, and the record they were
             rendered from.

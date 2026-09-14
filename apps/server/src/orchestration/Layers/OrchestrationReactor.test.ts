@@ -14,6 +14,7 @@ import * as PullRequestSyncReactor from "../PullRequestSyncReactor.ts";
 import * as ThreadPullRequestReactor from "../ThreadPullRequestReactor.ts";
 import * as RunReactor from "../RunReactor.ts";
 import * as AgentDefinitionSync from "../AgentDefinitionSync.ts";
+import * as CardSessionReactor from "../CardSessionReactor.ts";
 import * as CardWorkspace from "../CardWorkspace.ts";
 import { OrchestrationReactor } from "../Services/OrchestrationReactor.ts";
 import { makeOrchestrationReactor } from "./OrchestrationReactor.ts";
@@ -135,7 +136,17 @@ describe("OrchestrationReactor", () => {
             },
             ensure: () => Effect.die("not used"),
             teardown: () => Effect.die("not used"),
+            diff: () => Effect.die("not used"),
             runScript: () => Effect.die("not used"),
+            drain: Effect.void,
+          }),
+        ),
+        Layer.provideMerge(
+          Layer.succeed(CardSessionReactor.CardSessionReactor, {
+            start: () => {
+              started.push("card-session-reactor");
+              return Effect.void;
+            },
             drain: Effect.void,
           }),
         ),
@@ -158,6 +169,7 @@ describe("OrchestrationReactor", () => {
       "run-reactor",
       "agent-definition-sync",
       "card-workspace",
+      "card-session-reactor",
     ]);
 
     await Effect.runPromise(Scope.close(scope, Exit.void));

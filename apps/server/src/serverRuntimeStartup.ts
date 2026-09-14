@@ -10,6 +10,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   TurnId,
+  ORPHANED_PROVIDER_SESSION_ERROR,
 } from "@iskra/contracts";
 import { resolveProjectSettings } from "@iskra/shared/projectSettings";
 import * as Cause from "effect/Cause";
@@ -338,8 +339,6 @@ const runStartupPhase = <A, E, R>(phase: string, effect: Effect.Effect<A, E, R>)
     Effect.withSpan(`server.startup.${phase}`),
   );
 
-const ORPHANED_PROVIDER_SESSION_ERROR =
-  "Provider session did not survive a server restart. Send a new message to continue.";
 const SERVER_UPDATE_CONTINUATION_KEY = "continueAfterServerUpdate";
 const SERVER_UPDATE_CONTINUATION_PROMPT = "Continue where you left off.";
 

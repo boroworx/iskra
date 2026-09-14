@@ -1,5 +1,6 @@
 import type { EnvironmentProject } from "@iskra/client-runtime/state/models";
 import type { AgentId, ModelSelection, ServerProvider } from "@iskra/contracts";
+import { useNavigate } from "@tanstack/react-router";
 import { useId, useState } from "react";
 
 import {
@@ -23,7 +24,6 @@ import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
 import { toAgentName } from "./channels.logic";
-import { useOpenAgentDm } from "./useOpenAgentDm";
 
 const EMPTY_PROVIDERS: ReadonlyArray<ServerProvider> = [];
 
@@ -70,7 +70,7 @@ export function CreateAgentDialog(props: {
   const saveAgentDefinition = useAtomCommand(channelEnvironment.saveAgentDefinition);
   const importAgentDefinitions = useAtomCommand(channelEnvironment.importAgentDefinitions);
   const updateChannel = useAtomCommand(channelEnvironment.update);
-  const openAgentDm = useOpenAgentDm();
+  const navigate = useNavigate();
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
   const [busy, setBusy] = useState(false);
@@ -120,7 +120,7 @@ export function CreateAgentDialog(props: {
     setName("");
     setRole("");
     props.onOpenChange(false);
-    void openAgentDm(environmentId, { id: agentId, projectId, name: agentName, modelSelection });
+    void navigate({ to: "/agents/$environmentId/$agentId", params: { environmentId, agentId } });
   };
 
   const importAgents = async () => {

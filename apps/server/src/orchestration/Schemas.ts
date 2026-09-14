@@ -15,6 +15,7 @@ import {
   CardDecisionRecordedPayload as ContractsCardDecisionRecordedPayloadSchema,
   CardWorkspaceSetPayload as ContractsCardWorkspaceSetPayloadSchema,
   CardWorkspaceClearedPayload as ContractsCardWorkspaceClearedPayloadSchema,
+  CardSessionStartedPayload as ContractsCardSessionStartedPayloadSchema,
   ChannelCreatedPayload as ContractsChannelCreatedPayloadSchema,
   ChannelUpdatedPayload as ContractsChannelUpdatedPayloadSchema,
   ChannelArchivedPayload as ContractsChannelArchivedPayloadSchema,
@@ -69,6 +70,7 @@ export const CardRelationRemovedPayload = ContractsCardRelationRemovedPayloadSch
 export const CardDecisionRecordedPayload = ContractsCardDecisionRecordedPayloadSchema;
 export const CardWorkspaceSetPayload = ContractsCardWorkspaceSetPayloadSchema;
 export const CardWorkspaceClearedPayload = ContractsCardWorkspaceClearedPayloadSchema;
+export const CardSessionStartedPayload = ContractsCardSessionStartedPayloadSchema;
 
 export const ChannelCreatedPayload = ContractsChannelCreatedPayloadSchema;
 export const ChannelUpdatedPayload = ContractsChannelUpdatedPayloadSchema;

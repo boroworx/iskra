@@ -65,6 +65,10 @@ export class CardWorkspace extends Context.Service<
     readonly start: () => Effect.Effect<void, never, Scope.Scope>;
     readonly ensure: (cardId: CardId) => Effect.Effect<CardWorkspaceInfo, CardWorkspaceError>;
     readonly teardown: (cardId: CardId) => Effect.Effect<void, CardWorkspaceError>;
+    /** The card's changes against its base branch; empty before it has a worktree. */
+    readonly diff: (
+      cardId: CardId,
+    ) => Effect.Effect<{ readonly baseBranch: string; readonly diff: string }, CardWorkspaceError>;
     readonly runScript: (input: {
       readonly cardId: CardId;
       readonly scriptId: string;
@@ -262,6 +266,49 @@ const make = Effect.gen(function* () {
       });
     });
 
+  /** A sub-card starts from its parent's branch; otherwise the card's base or the repository default. */
+  const baseBranchOf = (
+    cardId: CardId,
+    model: OrchestrationReadModel,
+    card: OrchestrationCard,
+    root: string,
+  ) =>
+    Effect.gen(function* () {
+      const parent =
+        card.parentCardId === null
+          ? undefined
+          : (model.cards ?? []).find((candidate) => candidate.id === card.parentCardId);
+      return card.baseBranch ?? parent?.branch ?? (yield* defaultBranch(cardId, root));
+    });
+
+  const diff: CardWorkspace["Service"]["diff"] = (cardId) =>
+    Effect.gen(function* () {
+      const { model, card, project } = yield* readCard(cardId);
+      const baseBranch = yield* baseBranchOf(cardId, model, card, project.workspaceRoot);
+      if (card.worktreePath === null) {
+        return { baseBranch, diff: "" };
+      }
+      const mergeBase = yield* git(cardId, card.worktreePath, ["merge-base", baseBranch, "HEAD"]);
+      // Against the working tree, so uncommitted edits count.
+      // ponytail: untracked files are left out; add `git add -N` first if briefs miss new files.
+      const output = yield* processRunner
+        .run({
+          command: "git",
+          args: ["-C", card.worktreePath, "diff", mergeBase],
+          timeout: "2 minutes",
+          maxOutputBytes: 1_048_576,
+          outputMode: "truncate",
+        })
+        .pipe(Effect.mapError(toError(cardId, "git diff could not run.")));
+      if (output.code !== 0) {
+        return yield* new CardWorkspaceError({
+          cardId,
+          message: `git diff failed: ${output.stderr.trim().slice(-SCRIPT_OUTPUT_TAIL)}`,
+        });
+      }
+      return { baseBranch, diff: output.stdout };
+    });
+
   const ensureUnlocked = (cardId: CardId) =>
     Effect.gen(function* () {
       const { model, card, project } = yield* readCard(cardId);
@@ -275,12 +322,7 @@ const make = Effect.gen(function* () {
         });
       }
       const root = project.workspaceRoot;
-      const parent =
-        card.parentCardId === null
-          ? undefined
-          : (model.cards ?? []).find((candidate) => candidate.id === card.parentCardId);
-      // A sub-card starts from its parent's branch; otherwise the card's base or the repository default.
-      const base = card.baseBranch ?? parent?.branch ?? (yield* defaultBranch(cardId, root));
+      const base = yield* baseBranchOf(cardId, model, card, root);
       const branch = cardBranchName(card);
       const portBase = yield* allocatePortBase(cardId, model);
       const worktreePath = path.join(
@@ -430,6 +472,7 @@ const make = Effect.gen(function* () {
     start,
     ensure: (cardId) => semaphore.withPermits(1)(ensureUnlocked(cardId)),
     teardown: (cardId) => semaphore.withPermits(1)(teardownUnlocked(cardId)),
+    diff,
     runScript,
     drain: worker.drain,
   } satisfies CardWorkspace["Service"];

@@ -13,7 +13,6 @@ import {
   normalizePastedCloneUrl,
 } from "@iskra/client-runtime/operations/projects";
 import { connectionStatusText } from "@iskra/client-runtime/connection";
-import { threadSearchMatchKey } from "@iskra/client-runtime/state/thread-search";
 import { resolveThreadReferenceCopyTarget } from "@iskra/shared/threadReference";
 import {
   canPreloadBrowsePath,
@@ -35,13 +34,13 @@ import {
   type SourceControlProviderKind,
   type SourceControlRepositoryInfo,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
-  agentIdOfDmThread,
   resolveEnvironmentMachineKind,
 } from "@iskra/contracts";
 import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import {
   ArrowLeftIcon,
+  AtSignIcon,
   CornerLeftUpIcon,
   FileSearchIcon,
   FolderIcon,
@@ -84,6 +83,7 @@ import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import {
+  useEnvironmentAgents,
   useEnvironmentChannels,
   useProjects,
   useServerConfigs,
@@ -133,7 +133,6 @@ import {
   buildCommandPaletteProjectMetadata,
   buildProjectActionItems,
   buildRootGroups,
-  buildThreadActionItems,
   buildLinkedThreadActionItems,
   type CommandPaletteActionItem,
   type CommandPaletteOpenIntent,
@@ -144,7 +143,6 @@ import {
   getCommandPaletteInputPlaceholder,
   getCommandPaletteMode,
   ITEM_ICON_CLASS,
-  RECENT_THREAD_LIMIT,
   reduceCommandPaletteUiState,
   type SearchOverlayMode,
 } from "./CommandPalette.logic";
@@ -160,14 +158,8 @@ import { openLinkPullRequestDialog } from "./pullRequest/LinkPullRequestDialog";
 import { ProjectContentSearchDialog } from "./search/ProjectContentSearchDialog";
 import { toggleThemeEditorForTheme } from "./settings/themeEditorStore";
 import { searchSettings, SETTINGS_SECTION_LABELS } from "./settings/settingsSearch";
-import {
-  COMMAND_PALETTE_META_ICON_CLASS,
-  CommandPaletteMetaDot,
-  ThreadCommandSubtitle,
-} from "./ThreadCommandSubtitle";
-import { ThreadRowLeadingStatus, ThreadRowTrailingStatus } from "./ThreadStatusIndicators";
+import { COMMAND_PALETTE_META_ICON_CLASS, CommandPaletteMetaDot } from "./ThreadCommandSubtitle";
 import { primaryServerKeybindingsAtom, primaryServerProvidersAtom } from "../state/server";
-import { deriveProviderInstanceEntries, type ProviderInstanceEntry } from "../providerInstances";
 import { resolveShortcutCommand, threadJumpIndexFromCommand } from "../keybindings";
 import { CommandDialog, CommandDialogPopup, CommandFooterAction } from "./ui/command";
 import { Button } from "./ui/button";
@@ -701,18 +693,6 @@ function OpenCommandPaletteDialog(props: {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { theme, themeHalves, resolvedTheme } = useTheme();
   const providers = useAtomValue(primaryServerProvidersAtom);
-  const providerEntryByEnvironmentAndInstanceId = useMemo(() => {
-    const map = new Map<string, ProviderInstanceEntry>();
-    for (const environment of environments) {
-      const environmentProviders =
-        environment.serverConfig?.providers ??
-        (environment.environmentId === primaryEnvironmentId ? providers : []);
-      for (const entry of deriveProviderInstanceEntries(environmentProviders)) {
-        map.set(`${environment.environmentId}:${entry.instanceId}`, entry);
-      }
-    }
-    return map;
-  }, [environments, primaryEnvironmentId, providers]);
   const [viewStack, setViewStack] = useState<CommandPaletteView[]>([]);
   const currentView = viewStack.at(-1) ?? null;
   const environmentIds = useMemo(
@@ -724,17 +704,6 @@ function OpenCommandPaletteDialog(props: {
   );
   const threadSearchQuery = currentView === null && !isActionsOnly ? deferredQuery : "";
   const threadSearch = useThreadSearch(environmentIds, threadSearchQuery);
-  const threadContentMatchByKey = useMemo(
-    () =>
-      new Map(
-        threadSearch.matches.flatMap((match) =>
-          match.source === "user" || match.source === "assistant"
-            ? [[threadSearchMatchKey(match), match] as const]
-            : [],
-        ),
-      ),
-    [threadSearch.matches],
-  );
   const [browseGeneration, setBrowseGeneration] = useState(0);
   const browseNavigationRef = useRef<ReturnType<typeof createBrowseNavigationCoordinator> | null>(
     null,
@@ -979,16 +948,11 @@ function OpenCommandPaletteDialog(props: {
       new Map<ProjectId, string>(projects.map((project) => [project.id, project.workspaceRoot])),
     [projects],
   );
-  const projectByKey = useMemo(
-    () => new Map(projects.map((project) => [`${project.environmentId}:${project.id}`, project])),
-    [projects],
-  );
   const projectTitleById = useMemo(
     () => new Map<ProjectId, string>(projects.map((project) => [project.id, project.title])),
     [projects],
   );
 
-  const activeThreadId = activeThread?.id;
   const currentProjectEnvironmentId =
     activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null;
   const currentProjectId = activeThread?.projectId ?? activeDraftThread?.projectId ?? null;
@@ -1138,82 +1102,28 @@ function OpenCommandPaletteDialog(props: {
     ],
   );
 
-  // Every thread Iskra shows is an agent's DM; older free-standing threads stay out of search.
-  const dmThreads = useMemo(
-    () => threads.filter((thread) => agentIdOfDmThread(thread.id) !== null),
-    [threads],
+  // An agent is reached through its DM, a window onto its sessions; threads stay out of search.
+  const primaryAgents = useEnvironmentAgents(primaryEnvironmentId);
+  const agentItems = useMemo(
+    (): CommandPaletteActionItem[] =>
+      primaryEnvironmentId === null
+        ? []
+        : primaryAgents.map((agent) => ({
+            kind: "action",
+            value: `agent:${primaryEnvironmentId}:${agent.id}`,
+            searchTerms: [agent.name, `@${agent.name}`],
+            title: `@${agent.name}`,
+            description: projectTitleById.get(agent.projectId),
+            icon: <AtSignIcon className={ITEM_ICON_CLASS} />,
+            run: async () => {
+              await navigate({
+                to: "/agents/$environmentId/$agentId",
+                params: { environmentId: primaryEnvironmentId, agentId: agent.id },
+              });
+            },
+          })),
+    [navigate, primaryAgents, primaryEnvironmentId, projectTitleById],
   );
-
-  const allThreadItems = useMemo(
-    () =>
-      buildThreadActionItems({
-        threads: dmThreads,
-        ...(activeThreadId ? { activeThreadId } : {}),
-        projectTitleById,
-        sortOrder: clientSettings.sidebarThreadSortOrder,
-        icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
-        renderLeadingContent: (thread) => <ThreadRowLeadingStatus thread={thread} />,
-        renderTrailingContent: (thread) => <ThreadRowTrailingStatus thread={thread} />,
-        renderDescription: (thread, { projectTitle }) => {
-          const modelInstanceId =
-            thread.session?.providerInstanceId ?? thread.modelSelection.instanceId;
-          const providerEntry =
-            providerEntryByEnvironmentAndInstanceId.get(
-              `${thread.environmentId}:${modelInstanceId}`,
-            ) ?? null;
-          return (
-            <ThreadCommandSubtitle
-              project={projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null}
-              projectTitle={projectTitle ?? null}
-              environmentLabel={
-                projectEnvironmentLocationById.get(thread.environmentId)?.label ?? "Remote"
-              }
-              branch={thread.branch}
-              worktreePath={thread.worktreePath}
-              isCurrent={thread.id === activeThreadId}
-              driverKind={providerEntry?.driverKind ?? null}
-              providerDisplayName={
-                thread.session?.providerName ?? providerEntry?.displayName ?? modelInstanceId
-              }
-            />
-          );
-        },
-        getContentMatch: (thread) => {
-          const match = threadContentMatchByKey.get(
-            threadSearchMatchKey({
-              environmentId: thread.environmentId,
-              threadId: thread.id,
-            }),
-          );
-          return match && (match.source === "user" || match.source === "assistant")
-            ? {
-                source: match.source,
-                snippet: match.snippet,
-                query: threadSearchQuery,
-              }
-            : undefined;
-        },
-        runThread: async (thread) => {
-          await navigate({
-            to: "/$environmentId/$threadId",
-            params: buildThreadRouteParams(scopeThreadRef(thread.environmentId, thread.id)),
-          });
-        },
-      }),
-    [
-      activeThreadId,
-      clientSettings.sidebarThreadSortOrder,
-      navigate,
-      projectByKey,
-      projectEnvironmentLocationById,
-      projectTitleById,
-      providerEntryByEnvironmentAndInstanceId,
-      threadContentMatchByKey,
-      threadSearchQuery,
-      dmThreads,
-    ],
-  );
-  const recentThreadItems = allThreadItems.slice(0, RECENT_THREAD_LIMIT);
 
   const pushPaletteView = useCallback(
     (view: CommandPaletteView): void => {
@@ -1704,7 +1614,7 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  const rootGroups = buildRootGroups({ actionItems, recentThreadItems });
+  const rootGroups = buildRootGroups({ actionItems, agentItems });
   const settingsSearchItems: CommandPaletteActionItem[] = searchSettings(
     deferredQuery,
     availableSettingsSearchItems,
@@ -1755,7 +1665,7 @@ function OpenCommandPaletteDialog(props: {
               });
             },
           })
-        : allThreadItems,
+        : agentItems,
   });
 
   const handleAddProjectForEnvironment = useCallback(

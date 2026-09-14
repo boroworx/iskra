@@ -107,6 +107,7 @@ export const createProject: (input: CreateProjectInput) => CommandEffect = Effec
 export type CreateAgentInput = CommandInput<"agent.create">;
 export type CreateChannelInput = CommandInput<"channel.create">;
 export type PostChannelMessageInput = CommandInput<"channel.message.post">;
+export type SendAgentSessionMessageInput = CommandInput<"agent.session.message">;
 export type UpdateChannelInput = CommandInput<"channel.update">;
 
 export const updateChannel: (input: UpdateChannelInput) => CommandEffect = Effect.fn(
@@ -154,6 +155,17 @@ export const postChannelMessage: (input: PostChannelMessageInput) => CommandEffe
     createdAt: metadata.createdAt,
   });
 });
+
+export const sendAgentSessionMessage: (input: SendAgentSessionMessageInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.sendAgentSessionMessage")(function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "agent.session.message",
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    });
+  });
 
 export const updateProject: (input: UpdateProjectInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.updateProject",

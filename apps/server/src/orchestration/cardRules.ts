@@ -88,12 +88,13 @@ export function nextCardStatus(card: CardFacts, move: CardMove): CardMoveResult 
 
 /**
  * Assigning or changing the delegate. Not a status move: work starts when the
- * delegate's first write session does. The delegate cannot change during a live
- * write session (one writer per card), before approval, or once finished.
+ * delegate's first write session does. The delegate cannot change while the
+ * owner session is in a turn (one writer per card), before approval, or once
+ * finished. An idle owner session is stopped and handed off.
  */
 export function canChangeDelegate(
   card: Pick<CardFacts, "status">,
-  hasLiveWriteSession: boolean,
+  ownerTurnRunning: boolean,
 ): CardRuleCheck {
   if (isFinishedCardStatus(card.status)) {
     return { ok: false, reason: "A card that has landed or been abandoned keeps its agent." };
@@ -101,8 +102,8 @@ export function canChangeDelegate(
   if (card.status === "triage") {
     return { ok: false, reason: "Approve the card before assigning an agent." };
   }
-  if (hasLiveWriteSession) {
-    return { ok: false, reason: "Wait for the current session to end before changing the agent." };
+  if (ownerTurnRunning) {
+    return { ok: false, reason: "Wait for the agent's current turn to end before changing the agent." };
   }
   return { ok: true };
 }

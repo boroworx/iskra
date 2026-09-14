@@ -12,10 +12,12 @@ import {
   type CreateAgentInput,
   type CreateChannelInput,
   type PostChannelMessageInput,
+  type SendAgentSessionMessageInput,
   type UpdateChannelInput,
   createAgent,
   createChannel,
   postChannelMessage,
+  sendAgentSessionMessage,
   updateChannel,
 } from "../operations/commands.ts";
 import { request, subscribe, type EnvironmentRpcInput } from "../rpc/client.ts";
@@ -29,6 +31,7 @@ export type {
   CreateAgentInput,
   CreateChannelInput,
   PostChannelMessageInput,
+  SendAgentSessionMessageInput,
   UpdateChannelInput,
 } from "../operations/commands.ts";
 
@@ -89,6 +92,10 @@ export function createChannelEnvironmentAtoms<R, E>(
     postMessage: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:channel:post-message",
       execute: (input: PostChannelMessageInput) => postChannelMessage(input),
+    }),
+    sessionMessage: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:agent:session-message",
+      execute: (input: SendAgentSessionMessageInput) => sendAgentSessionMessage(input),
     }),
     create: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:channel:create",

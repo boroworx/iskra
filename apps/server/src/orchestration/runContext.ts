@@ -82,21 +82,6 @@ export function renderNewMessage(message: RunContextMessage): string {
   return `New message for you:\n${formatMessage(message)}`;
 }
 
-/**
- * The role an agent's DM session starts with. A DM is a continuous working
- * session with a person, not a read-only run, so it carries no channel context.
- */
-export function renderAgentDmPrompt(
-  agent: Pick<OrchestrationAgent, "name" | "rolePrompt">,
-): string {
-  return [
-    `You are @${agent.name}, an agent on this project's team, working directly with a person in this repository.`,
-    agent.rolePrompt.trim(),
-  ]
-    .filter((part) => part.length > 0)
-    .join("\n\n");
-}
-
 /** Renders a context payload into the exact text sent to the provider. */
 export function renderRunContext(payload: RunContextPayload): RenderedRunContext {
   const where =

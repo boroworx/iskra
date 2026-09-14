@@ -66,8 +66,6 @@ export type ProviderRunRestrictions = typeof ProviderRunRestrictions.Type;
 export const ProviderSessionStartInput = Schema.Struct({
   threadId: ThreadId,
   run: Schema.optional(ProviderRunRestrictions),
-  // An agent DM's role instructions, appended to the harness's own runtime instructions.
-  agentPrompt: Schema.optional(Schema.String),
   provider: Schema.optional(ProviderDriverKind),
   // See ProviderSession for the migration story.
   providerInstanceId: Schema.optional(ProviderInstanceId),

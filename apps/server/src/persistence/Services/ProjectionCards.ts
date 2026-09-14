@@ -12,10 +12,14 @@ import {
   CardId,
   CardRelation,
   CardSpecState,
+  CardMessageAuthorKind,
   CardStatus,
+  ChannelDeliveryStatus,
   ChannelId,
   IsoDateTime,
+  MessageId,
   ProjectId,
+  ThreadId,
 } from "@iskra/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
@@ -66,6 +70,37 @@ export const ProjectionCardDecision = Schema.Struct({
 });
 export type ProjectionCardDecision = typeof ProjectionCardDecision.Type;
 
+/** A decision row as selected, with its author decoded. */
+export const ProjectionCardDecisionDbRow = ProjectionCardDecision.mapFields(
+  Struct.assign({
+    author: Schema.fromJsonString(CardAuthor),
+  }),
+);
+
+/**
+ * A message in a card's activity. `deliveryStatus` is null for a message not
+ * meant for the owner; otherwise it tracks delivery into the owner's sessions.
+ */
+export const ProjectionCardMessage = Schema.Struct({
+  messageId: MessageId,
+  cardId: CardId,
+  authorKind: CardMessageAuthorKind,
+  authorId: Schema.String,
+  body: Schema.String,
+  runThreadId: Schema.NullOr(ThreadId),
+  deliveryStatus: Schema.NullOr(ChannelDeliveryStatus),
+  deliveryThreadId: Schema.NullOr(ThreadId),
+  createdAt: IsoDateTime,
+});
+export type ProjectionCardMessage = typeof ProjectionCardMessage.Type;
+
+export const UpdateProjectionCardDeliveriesInput = Schema.Struct({
+  messageIds: Schema.Array(MessageId),
+  status: ChannelDeliveryStatus,
+  threadId: Schema.NullOr(ThreadId),
+});
+export type UpdateProjectionCardDeliveriesInput = typeof UpdateProjectionCardDeliveriesInput.Type;
+
 export const GetProjectionCardInput = Schema.Struct({
   cardId: CardId,
 });
@@ -84,6 +119,26 @@ export interface ProjectionCardRepositoryShape {
   readonly appendDecision: (
     row: ProjectionCardDecision,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /** A card's decision log, oldest first. */
+  readonly listDecisions: (
+    input: GetProjectionCardInput,
+  ) => Effect.Effect<ReadonlyArray<ProjectionCardDecision>, ProjectionRepositoryError>;
+
+  /** Append a message to a card's activity; replaying the same message is a no-op. */
+  readonly appendMessage: (
+    row: ProjectionCardMessage,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /** Give these owner messages a new delivery status and session. */
+  readonly updateDeliveries: (
+    input: UpdateProjectionCardDeliveriesInput,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /** A card's owner messages still pending or sent, oldest first. */
+  readonly listOpenOwnerMessages: (
+    input: GetProjectionCardInput,
+  ) => Effect.Effect<ReadonlyArray<ProjectionCardMessage>, ProjectionRepositoryError>;
 }
 
 export class ProjectionCardRepository extends Context.Service<

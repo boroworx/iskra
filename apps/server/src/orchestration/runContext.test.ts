@@ -12,7 +12,7 @@ import {
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildRunContext, renderAgentDmPrompt, renderRunContext } from "./runContext.ts";
+import { buildRunContext, renderRunContext } from "./runContext.ts";
 
 const decodeRunContextPayload = Schema.decodeUnknownSync(RunContextPayload);
 const projectId = ProjectId.make("project-context");
@@ -34,15 +34,6 @@ const agent = (id: string, name: string, rolePrompt = ""): OrchestrationAgent =>
 
 const backend = agent("agent-backend", "backend", "You own the API.");
 const frontend = agent("agent-frontend", "frontend");
-
-describe("renderAgentDmPrompt", () => {
-  it("names the agent and adds its role, leaving out an empty role", () => {
-    expect(renderAgentDmPrompt(backend)).toBe(
-      "You are @backend, an agent on this project's team, working directly with a person in this repository.\n\nYou own the API.",
-    );
-    expect(renderAgentDmPrompt(frontend)).not.toContain("\n");
-  });
-});
 
 const channel = (overrides: Partial<OrchestrationChannel> = {}): OrchestrationChannel => ({
   id: channelId,

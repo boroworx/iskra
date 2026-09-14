@@ -14,6 +14,7 @@ import * as PullRequestSyncReactor from "../PullRequestSyncReactor.ts";
 import * as ThreadPullRequestReactor from "../ThreadPullRequestReactor.ts";
 import * as RunReactor from "../RunReactor.ts";
 import * as AgentDefinitionSync from "../AgentDefinitionSync.ts";
+import * as CardSessionReactor from "../CardSessionReactor.ts";
 import * as CardWorkspace from "../CardWorkspace.ts";
 import * as AgentAwarenessRelay from "../../relay/AgentAwarenessRelay.ts";
 
@@ -29,6 +30,7 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
   const runReactor = yield* RunReactor.RunReactor;
   const agentDefinitionSync = yield* AgentDefinitionSync.AgentDefinitionSync;
   const cardWorkspace = yield* CardWorkspace.CardWorkspace;
+  const cardSessionReactor = yield* CardSessionReactor.CardSessionReactor;
 
   const start: OrchestrationReactorShape["start"] = Effect.fn("start")(function* () {
     yield* providerRuntimeIngestion.start();
@@ -42,6 +44,7 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
     yield* runReactor.start();
     yield* agentDefinitionSync.start();
     yield* cardWorkspace.start();
+    yield* cardSessionReactor.start();
   });
 
   return {

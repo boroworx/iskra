@@ -4,7 +4,6 @@ import {
   type ProjectScript,
   type ResolvedKeybindingsConfig,
   type ThreadId,
-  agentIdOfDmThread,
 } from "@iskra/contracts";
 import { scopeThreadRef } from "@iskra/client-runtime/environment";
 import type { EnvironmentProject } from "@iskra/client-runtime/state/shell";
@@ -155,8 +154,7 @@ export const ChatHeader = memo(function ChatHeader({
     });
   }, [panelAnimationDurationMs, panelAnimationsActive]);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  // An agent's DM is named for its agent and lasts as long as it does: no rename or thread actions.
-  const threadActionsAvailable = isServerThread && agentIdOfDmThread(activeThreadId) === null;
+  const threadActionsAvailable = isServerThread;
   const activeProjectName = activeProject?.title;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
   const fileScripts = useIskraProjectFileScripts(

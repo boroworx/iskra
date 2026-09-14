@@ -61,6 +61,7 @@ export function ChannelView(props: {
     [channel, agents],
   );
   const title = channel?.name ?? "";
+  const postMessage = useAtomCommand(channelEnvironment.postMessage);
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
@@ -95,11 +96,20 @@ export function ChannelView(props: {
                 cwd={project?.workspaceRoot}
                 environmentId={props.environmentId}
               />
-              <ChannelComposer
+              <MessageComposer
                 key={props.channelId}
-                environmentId={props.environmentId}
-                channelId={props.channelId}
                 placeholder={`Message #${title}`}
+                onSend={async (body) => {
+                  const result = await postMessage({
+                    environmentId: props.environmentId,
+                    input: {
+                      channelId: props.channelId,
+                      messageId: MessageId.make(randomUUID()),
+                      body,
+                    },
+                  });
+                  return result._tag === "Success";
+                }}
               />
             </main>
             {channel.kind === "channel" ? <ChannelMemberList members={members} /> : null}
@@ -280,31 +290,29 @@ function RunWorkDetail(props: RunWorkProps) {
 
 /**
  * The thread composer's surface, editor and send button without its session
- * controls: channel runs are read-only, so there is no model or access to pick.
+ * controls: a channel or DM message has no model or access to pick. `onSend`
+ * resolves true once the message is accepted, which clears the editor.
  */
-function ChannelComposer(props: {
-  readonly environmentId: EnvironmentId;
-  readonly channelId: ChannelId;
+export function MessageComposer(props: {
   readonly placeholder: string;
+  readonly disabled?: boolean;
+  readonly onSend: (body: string) => Promise<boolean>;
 }) {
   const editorRef = useRef<ComposerPromptEditorHandle>(null);
   const [body, setBody] = useState("");
   const [cursor, setCursor] = useState(0);
   const [sending, setSending] = useState(false);
-  const postMessage = useAtomCommand(channelEnvironment.postMessage);
+  const disabled = props.disabled === true;
   const trimmed = body.trim();
 
   const send = async () => {
-    if (trimmed.length === 0 || sending) {
+    if (trimmed.length === 0 || sending || disabled) {
       return;
     }
     setSending(true);
-    const result = await postMessage({
-      environmentId: props.environmentId,
-      input: { channelId: props.channelId, messageId: MessageId.make(randomUUID()), body: trimmed },
-    });
+    const accepted = await props.onSend(trimmed);
     setSending(false);
-    if (result._tag === "Success") {
+    if (accepted) {
       setBody("");
       setCursor(0);
       editorRef.current?.focus();
@@ -330,7 +338,7 @@ function ChannelComposer(props: {
                   cursor={cursor}
                   contextRecords={EMPTY_COMPOSER_CONTEXT_RECORDS}
                   skills={EMPTY_SKILLS}
-                  disabled={false}
+                  disabled={disabled}
                   placeholder={props.placeholder}
                   onChange={(nextValue, nextCursor) => {
                     setBody(nextValue);
@@ -352,13 +360,13 @@ function ChannelComposer(props: {
                   pendingAction={null}
                   isRunning={false}
                   showPlanFollowUpPrompt={false}
-                  promptHasText={trimmed.length > 0}
+                  promptHasText={trimmed.length > 0 && !disabled}
                   isSendBusy={sending}
                   sendDisabledReason={null}
                   isConnecting={false}
                   isEnvironmentUnavailable={false}
                   isPreparingWorktree={false}
-                  hasSendableContent={trimmed.length > 0}
+                  hasSendableContent={trimmed.length > 0 && !disabled}
                   onPreviousPendingQuestion={noop}
                   onInterrupt={noop}
                   onImplementPlanInNewThread={noop}
@@ -400,7 +408,7 @@ const ChannelMemberList = memo(function ChannelMemberList(props: {
 });
 
 /** Static presence dot and label: no continuously repainting animation. */
-function PresenceBadge(props: {
+export function PresenceBadge(props: {
   readonly presence: ChannelMemberEntry["presence"];
   readonly className?: string;
 }) {

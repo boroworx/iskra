@@ -44,6 +44,7 @@ import {
   CardStatusChangedPayload,
   CardUpdatedPayload,
   CardWorkspaceClearedPayload,
+  CardSessionStartedPayload,
   CardWorkspaceSetPayload,
   ChannelArchivedPayload,
   ChannelCreatedPayload,
@@ -1411,13 +1412,40 @@ export function projectEvent(
             ...(nextBase.liveRuns ?? []).filter((run) => run.threadId !== payload.threadId),
             {
               threadId: payload.threadId,
+              role: "conversation" as const,
               channelId: payload.channelId,
+              cardId: null,
               agentId: payload.agentId,
               startedAt: payload.startedAt,
             },
           ],
         })),
       );
+
+    case "card.session-started":
+      return decodeForEvent(CardSessionStartedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          liveRuns: [
+            ...(nextBase.liveRuns ?? []).filter((run) => run.threadId !== payload.threadId),
+            {
+              threadId: payload.threadId,
+              role: payload.role,
+              channelId: null,
+              cardId: payload.cardId,
+              agentId: payload.agentId,
+              startedAt: payload.startedAt,
+            },
+          ],
+        })),
+      );
+
+    // A card's activity and requests live in projections and reactors, not the read model.
+    case "card.session-requested":
+    case "card.helper-requested":
+    case "card.message-posted":
+    case "card.delivery-updated":
+      return Effect.succeed(nextBase);
 
     // Channel messages are paged from their projection, never held in the read model.
     case "channel.message-posted":

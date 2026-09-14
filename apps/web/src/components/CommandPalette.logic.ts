@@ -512,18 +512,14 @@ export function getCommandPaletteMode(input: {
 
 export function buildRootGroups(input: {
   actionItems: ReadonlyArray<CommandPaletteActionItem | CommandPaletteSubmenuItem>;
-  recentThreadItems: ReadonlyArray<CommandPaletteActionItem>;
+  agentItems: ReadonlyArray<CommandPaletteActionItem>;
 }): CommandPaletteGroup[] {
   const groups: CommandPaletteGroup[] = [];
   if (input.actionItems.length > 0) {
     groups.push({ value: "actions", label: "Actions", items: input.actionItems });
   }
-  if (input.recentThreadItems.length > 0) {
-    groups.push({
-      value: "recent-threads",
-      label: "Recent DMs",
-      items: input.recentThreadItems,
-    });
+  if (input.agentItems.length > 0) {
+    groups.push({ value: "agents", label: "Agents", items: input.agentItems });
   }
   return groups;
 }
@@ -531,7 +527,7 @@ export function buildRootGroups(input: {
 export function getCommandPaletteInputPlaceholder(mode: CommandPaletteMode): string {
   switch (mode) {
     case "root":
-      return "Search commands, projects, and DMs...";
+      return "Search commands, projects, and agents...";
     case "root-browse":
       return "Enter project path (e.g. ~/projects/my-app)";
     case "submenu":
