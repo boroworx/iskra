@@ -1,20 +1,7 @@
 import type { EnvironmentProject } from "@iskra/client-runtime/state/models";
-import type {
-  AgentId,
-  ChannelId,
-  EnvironmentId,
-  ProjectId,
-  ThreadId,
-} from "@iskra/contracts";
+import type { AgentId, ChannelId, EnvironmentId, ProjectId } from "@iskra/contracts";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import {
-  ArchiveIcon,
-  AtSignIcon,
-  HashIcon,
-  InboxIcon,
-  PlusIcon,
-  SettingsIcon,
-} from "lucide-react";
+import { ArchiveIcon, AtSignIcon, HashIcon, InboxIcon, PlusIcon, SettingsIcon } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { isElectron } from "../env";
@@ -25,8 +12,10 @@ import {
   useEnvironmentChannels,
   useProjects,
 } from "../state/entities";
+import { appAtomRegistry } from "../rpc/atomRegistry";
 import { channelEnvironment } from "../state/channels";
 import { usePrimaryEnvironmentId } from "../state/environments";
+import { environmentAgentChannels } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
 import { useAtomCommand } from "../state/use-atom-command";
 import { cardOwnerSessions, needsYouItems } from "@iskra/client-runtime/cards";
@@ -40,6 +29,8 @@ import { AgentSettingsDialog, useAgentDefinitions } from "./channels/AgentSettin
 import { ChannelSettingsDialog } from "./channels/ChannelSettingsDialog";
 import { CreateAgentDialog } from "./channels/CreateAgentDialog";
 import { CreateChannelDialog } from "./channels/CreateChannelDialog";
+import { useProjectRailMemory, useRouteProject } from "./channels/IskraCreateDialogs";
+import { projectKey, railClickTarget } from "./projectRail.logic";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import {
   SidebarContent,
@@ -75,10 +66,6 @@ function NeedsYouEntry() {
   );
 }
 
-function projectKey(project: { readonly environmentId: EnvironmentId; readonly id: ProjectId }) {
-  return `${project.environmentId}:${project.id}`;
-}
-
 function projectInitials(title: string): string {
   const words = title.split(/[\s/_.-]+/).filter((word) => word.length > 0);
   const initials =
@@ -88,47 +75,40 @@ function projectInitials(title: string): string {
 
 /**
  * The Iskra sidebar: a rail of projects, and the selected project's channels
- * and agents. The open channel's or DM's project is selected unless the user
- * picked another project since opening it.
+ * and agents. The URL decides the selected project (see `useRouteProject`); a
+ * rail click navigates into that project rather than selecting it locally.
  */
 export default function IskraSidebar() {
   const projects = useProjects();
-  const routeEnvironmentId = useParams({
-    strict: false,
-    select: (params) => (params.environmentId ?? null) as EnvironmentId | null,
-  });
+  const navigate = useNavigate();
   const routeChannelId = useParams({
     strict: false,
     select: (params) => (params.channelId ?? null) as ChannelId | null,
-  });
-  const routeThreadId = useParams({
-    strict: false,
-    select: (params) => (params.threadId ?? null) as ThreadId | null,
   });
   const routeAgentId = useParams({
     strict: false,
     select: (params) => (params.agentId ?? null) as AgentId | null,
   });
-  const routeChannels = useEnvironmentChannels(routeChannelId === null ? null : routeEnvironmentId);
-  const routeAgents = useEnvironmentAgents(routeAgentId === null ? null : routeEnvironmentId);
-  const routeProjectId =
-    routeChannels.find((channel) => channel.id === routeChannelId)?.projectId ??
-    routeAgents.find((agent) => agent.id === routeAgentId)?.projectId ??
-    null;
-  const routeKey = routeChannelId ?? routeAgentId ?? routeThreadId;
-  const [picked, setPicked] = useState<{
-    readonly key: string;
-    readonly routeKey: string | null;
-  } | null>(null);
-  const pickedKey = picked !== null && picked.routeKey === routeKey ? picked.key : null;
-  const selected =
-    projects.find((project) => projectKey(project) === pickedKey) ??
-    projects.find(
-      (project) => project.environmentId === routeEnvironmentId && project.id === routeProjectId,
-    ) ??
-    projects[0] ??
-    null;
+  const selected = useRouteProject();
   const selectedKey = selected === null ? null : projectKey(selected);
+  const [memory] = useProjectRailMemory();
+  const openProject = (project: EnvironmentProject) => {
+    const { environmentId, id: projectId } = project;
+    // Read once on click: subscribing every rail square to its environment's channels would re-render the rail.
+    const channels = appAtomRegistry.get(
+      environmentAgentChannels.environmentChannelsAtom(environmentId),
+    );
+    const target = railClickTarget(
+      channelListEntries(channels, projectId).map((entry) => entry.id),
+      memory.lastChannelByProject[projectKey(project)],
+    );
+    void (target.kind === "channel"
+      ? navigate({
+          to: "/channels/$environmentId/$channelId",
+          params: { environmentId, channelId: target.channelId },
+        })
+      : navigate({ to: "/board/$environmentId/$projectId", params: { environmentId, projectId } }));
+  };
 
   return (
     <>
@@ -149,7 +129,7 @@ export default function IskraSidebar() {
                       type="button"
                       aria-label={project.title}
                       aria-current={active ? "true" : undefined}
-                      onClick={() => setPicked({ key, routeKey })}
+                      onClick={() => openProject(project)}
                       className={cn(
                         "flex size-10 shrink-0 items-center justify-center rounded-xl text-xs font-semibold outline-hidden ring-ring focus-visible:ring-2",
                         active
@@ -444,9 +424,15 @@ function ArchivedAgents(props: {
   return (
     <>
       <SidebarMenuItem>
-        <SidebarMenuButton size="sm" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        <SidebarMenuButton
+          size="sm"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+        >
           <ArchiveIcon />
-          <span className="truncate text-sidebar-muted-foreground">Archived ({archived.length})</span>
+          <span className="truncate text-sidebar-muted-foreground">
+            Archived ({archived.length})
+          </span>
         </SidebarMenuButton>
       </SidebarMenuItem>
       {open

@@ -8,6 +8,8 @@ import { isElectron } from "../env";
 import { agentListEntries } from "../components/channels/channels.logic";
 import { CreateAgentDialog } from "../components/channels/CreateAgentDialog";
 import { CreateChannelDialog } from "../components/channels/CreateChannelDialog";
+import { useProjectRailMemory } from "../components/channels/IskraCreateDialogs";
+import { projectKey, withStoredProjectFirst } from "../components/projectRail.logic";
 import { NoProjectsHero } from "../components/NoProjectsHero";
 import { sortScopedProjectsForSidebar } from "../components/Sidebar.logic";
 import { Button } from "../components/ui/button";
@@ -51,9 +53,18 @@ function IndexChannelLanding() {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const primaryChannels = useEnvironmentChannels(primaryEnvironmentId);
 
+  const [railMemory] = useProjectRailMemory();
+
+  // The project last opened comes first, then the most recently active.
   const sortedProjects = useMemo(
-    () => (bootstrapped ? sortScopedProjectsForSidebar(projects, threads, "updated_at") : []),
-    [bootstrapped, projects, threads],
+    () =>
+      bootstrapped
+        ? withStoredProjectFirst(
+            sortScopedProjectsForSidebar(projects, threads, "updated_at"),
+            railMemory.lastProjectKey,
+          )
+        : [],
+    [bootstrapped, projects, railMemory.lastProjectKey, threads],
   );
   const landingProject = sortedProjects.find(
     (project) =>
@@ -63,7 +74,12 @@ function IndexChannelLanding() {
   const landingProjectChannels = primaryChannels.filter(
     (channel) => channel.projectId === landingProject?.id,
   );
+  const lastChannelId =
+    landingProject === undefined
+      ? undefined
+      : railMemory.lastChannelByProject[projectKey(landingProject)];
   const landingChannel =
+    landingProjectChannels.find((channel) => channel.id === lastChannelId) ??
     landingProjectChannels.find((channel) => channel.kind === "channel") ??
     landingProjectChannels[0];
   const landingEnvironmentId = landingProject?.environmentId ?? null;

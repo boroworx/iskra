@@ -1,9 +1,25 @@
 import type { EnvironmentProject } from "@iskra/client-runtime/state/models";
-import type { EnvironmentId } from "@iskra/contracts";
+import type { ChannelId, EnvironmentId, ThreadId } from "@iskra/contracts";
 import { useParams } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
-import { useEnvironmentAgents, useEnvironmentChannels, useProjects } from "~/state/entities";
+import { useLocalStorage } from "~/hooks/useLocalStorage";
+import {
+  useEnvironmentAgents,
+  useEnvironmentCards,
+  useEnvironmentChannels,
+  useProjects,
+  useThreadShell,
+} from "~/state/entities";
+import {
+  EMPTY_PROJECT_RAIL_MEMORY,
+  PROJECT_RAIL_STORAGE_KEY,
+  ProjectRailMemory,
+  projectKey,
+  rememberRailRoute,
+  resolveRailProject,
+  routeProjectId,
+} from "../projectRail.logic";
 import { agentListEntries } from "./channels.logic";
 import { CreateAgentDialog } from "./CreateAgentDialog";
 import { CreateChannelDialog } from "./CreateChannelDialog";
@@ -17,24 +33,49 @@ export function openCreateDialog(kind: CreateDialogKind): void {
   window.dispatchEvent(new CustomEvent(OPEN_CREATE_DIALOG_EVENT, { detail: kind }));
 }
 
-/** The project the route is about: the open channel's, agent's or board's, else the first project. */
+/** The project rail's memory: the last project a route named and each project's last channel. */
+export function useProjectRailMemory() {
+  return useLocalStorage(PROJECT_RAIL_STORAGE_KEY, EMPTY_PROJECT_RAIL_MEMORY, ProjectRailMemory);
+}
+
+/**
+ * The project the route is about: the one its board, channel, agent, card or
+ * thread belongs to; else the last one a route named; else the first project.
+ * Remembers the route's project (and open channel) for routes that name none.
+ */
 export function useRouteProject(): EnvironmentProject | null {
   const params = useParams({ strict: false });
   const environmentId = (params.environmentId ?? null) as EnvironmentId | null;
-  const channels = useEnvironmentChannels(environmentId);
-  const agents = useEnvironmentAgents(environmentId);
-  const projects = useProjects();
-  const projectId =
-    params.projectId ??
-    channels.find((channel) => channel.id === params.channelId)?.projectId ??
-    agents.find((agent) => agent.id === params.agentId)?.projectId;
-  return (
-    projects.find(
-      (project) => project.environmentId === environmentId && project.id === projectId,
-    ) ??
-    projects[0] ??
-    null
+  const channels = useEnvironmentChannels(params.channelId === undefined ? null : environmentId);
+  const agents = useEnvironmentAgents(params.agentId === undefined ? null : environmentId);
+  const cards = useEnvironmentCards(params.cardId === undefined ? null : environmentId);
+  const thread = useThreadShell(
+    environmentId === null || params.threadId === undefined
+      ? null
+      : { environmentId, threadId: params.threadId as ThreadId },
   );
+  const projects = useProjects();
+  const [memory, setMemory] = useProjectRailMemory();
+  const { project, fromRoute } = resolveRailProject({
+    projects,
+    routeEnvironmentId: environmentId,
+    routeProjectId: routeProjectId({
+      params,
+      channels,
+      agents,
+      cards,
+      threadProjectId: thread?.projectId ?? null,
+    }),
+    storedProjectKey: memory.lastProjectKey,
+  });
+  const rememberKey = fromRoute && project !== null ? projectKey(project) : null;
+  const rememberChannelId = (params.channelId ?? null) as ChannelId | null;
+  useEffect(() => {
+    if (rememberKey === null) return;
+    const next = rememberRailRoute(memory, rememberKey, rememberChannelId);
+    if (next !== memory) setMemory(next);
+  }, [memory, rememberChannelId, rememberKey, setMemory]);
+  return project;
 }
 
 /** Hosts the create dialogs `openCreateDialog` asks for; mounted once in the chat layout. */
