@@ -31,9 +31,11 @@ import { Route as SettingsAppearanceRouteImport } from './routes/settings.appear
 import { Route as ProjectsProjectKeyRouteImport } from './routes/projects.$projectKey'
 import { Route as ConnectCallbackRouteImport } from './routes/connect_.callback'
 import { Route as ChatPullRequestsRouteImport } from './routes/_chat.pull-requests'
+import { Route as ChatNeedsYouRouteImport } from './routes/_chat.needs-you'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
 import { Route as ChatChannelsEnvironmentIdChannelIdRouteImport } from './routes/_chat.channels.$environmentId.$channelId'
+import { Route as ChatBoardEnvironmentIdProjectIdRouteImport } from './routes/_chat.board.$environmentId.$projectId'
 import { Route as ChatAgentsEnvironmentIdAgentIdRouteImport } from './routes/_chat.agents.$environmentId.$agentId'
 
 const WelcomeRoute = WelcomeRouteImport.update({
@@ -157,10 +159,32 @@ const ChatEnvironmentIdThreadIdRoute =
     path: '/$environmentId/$threadId',
     getParentRoute: () => ChatRoute,
   } as any)
+const ChatNeedsYouRoute = ChatNeedsYouRouteImport.update({
+  id: '/needs-you',
+  path: '/needs-you',
+  getParentRoute: () => ChatRoute,
+} as any)
+const ChatDraftDraftIdRoute = ChatDraftDraftIdRouteImport.update({
+  id: '/draft/$draftId',
+  path: '/draft/$draftId',
+  getParentRoute: () => ChatRoute,
+} as any)
+const ChatEnvironmentIdThreadIdRoute =
+  ChatEnvironmentIdThreadIdRouteImport.update({
+    id: '/$environmentId/$threadId',
+    path: '/$environmentId/$threadId',
+    getParentRoute: () => ChatRoute,
+  } as any)
 const ChatChannelsEnvironmentIdChannelIdRoute =
   ChatChannelsEnvironmentIdChannelIdRouteImport.update({
     id: '/channels/$environmentId/$channelId',
     path: '/channels/$environmentId/$channelId',
+    getParentRoute: () => ChatRoute,
+  } as any)
+const ChatBoardEnvironmentIdProjectIdRoute =
+  ChatBoardEnvironmentIdProjectIdRouteImport.update({
+    id: '/board/$environmentId/$projectId',
+    path: '/board/$environmentId/$projectId',
     getParentRoute: () => ChatRoute,
   } as any)
 const ChatAgentsEnvironmentIdAgentIdRoute =
@@ -178,6 +202,7 @@ export interface FileRoutesByFullPath {
   '/usage': typeof UsageRoute
   '/welcome': typeof WelcomeRoute
   '/pull-requests': typeof ChatPullRequestsRoute
+  '/needs-you': typeof ChatNeedsYouRoute
   '/connect/callback': typeof ConnectCallbackRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
@@ -195,6 +220,7 @@ export interface FileRoutesByFullPath {
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
   '/channels/$environmentId/$channelId': typeof ChatChannelsEnvironmentIdChannelIdRoute
+  '/board/$environmentId/$projectId': typeof ChatBoardEnvironmentIdProjectIdRoute
   '/agents/$environmentId/$agentId': typeof ChatAgentsEnvironmentIdAgentIdRoute
 }
 export interface FileRoutesByTo {
@@ -204,6 +230,7 @@ export interface FileRoutesByTo {
   '/usage': typeof UsageRoute
   '/welcome': typeof WelcomeRoute
   '/pull-requests': typeof ChatPullRequestsRoute
+  '/needs-you': typeof ChatNeedsYouRoute
   '/connect/callback': typeof ConnectCallbackRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
@@ -222,6 +249,7 @@ export interface FileRoutesByTo {
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
   '/channels/$environmentId/$channelId': typeof ChatChannelsEnvironmentIdChannelIdRoute
+  '/board/$environmentId/$projectId': typeof ChatBoardEnvironmentIdProjectIdRoute
   '/agents/$environmentId/$agentId': typeof ChatAgentsEnvironmentIdAgentIdRoute
 }
 export interface FileRoutesById {
@@ -233,6 +261,7 @@ export interface FileRoutesById {
   '/usage': typeof UsageRoute
   '/welcome': typeof WelcomeRoute
   '/_chat/pull-requests': typeof ChatPullRequestsRoute
+  '/_chat/needs-you': typeof ChatNeedsYouRoute
   '/connect_/callback': typeof ConnectCallbackRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
@@ -251,6 +280,7 @@ export interface FileRoutesById {
   '/_chat/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/_chat/draft/$draftId': typeof ChatDraftDraftIdRoute
   '/_chat/channels/$environmentId/$channelId': typeof ChatChannelsEnvironmentIdChannelIdRoute
+  '/_chat/board/$environmentId/$projectId': typeof ChatBoardEnvironmentIdProjectIdRoute
   '/_chat/agents/$environmentId/$agentId': typeof ChatAgentsEnvironmentIdAgentIdRoute
 }
 export interface FileRouteTypes {
@@ -263,6 +293,7 @@ export interface FileRouteTypes {
     | '/usage'
     | '/welcome'
     | '/pull-requests'
+    | '/needs-you'
     | '/connect/callback'
     | '/projects/$projectKey'
     | '/settings/appearance'
@@ -280,6 +311,7 @@ export interface FileRouteTypes {
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
     | '/channels/$environmentId/$channelId'
+    | '/board/$environmentId/$projectId'
     | '/agents/$environmentId/$agentId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -289,6 +321,7 @@ export interface FileRouteTypes {
     | '/usage'
     | '/welcome'
     | '/pull-requests'
+    | '/needs-you'
     | '/connect/callback'
     | '/projects/$projectKey'
     | '/settings/appearance'
@@ -307,6 +340,7 @@ export interface FileRouteTypes {
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
     | '/channels/$environmentId/$channelId'
+    | '/board/$environmentId/$projectId'
     | '/agents/$environmentId/$agentId'
   id:
     | '__root__'
@@ -317,6 +351,7 @@ export interface FileRouteTypes {
     | '/usage'
     | '/welcome'
     | '/_chat/pull-requests'
+    | '/_chat/needs-you'
     | '/connect_/callback'
     | '/projects/$projectKey'
     | '/settings/appearance'
@@ -335,6 +370,7 @@ export interface FileRouteTypes {
     | '/_chat/$environmentId/$threadId'
     | '/_chat/draft/$draftId'
     | '/_chat/channels/$environmentId/$channelId'
+    | '/_chat/board/$environmentId/$projectId'
     | '/_chat/agents/$environmentId/$agentId'
   fileRoutesById: FileRoutesById
 }
@@ -505,6 +541,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatPullRequestsRouteImport
       parentRoute: typeof ChatRoute
     }
+    '/_chat/needs-you': {
+      id: '/_chat/needs-you'
+      path: '/needs-you'
+      fullPath: '/needs-you'
+      preLoaderRoute: typeof ChatNeedsYouRouteImport
+      parentRoute: typeof ChatRoute
+    }
     '/_chat/draft/$draftId': {
       id: '/_chat/draft/$draftId'
       path: '/draft/$draftId'
@@ -526,6 +569,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatChannelsEnvironmentIdChannelIdRouteImport
       parentRoute: typeof ChatRoute
     }
+    '/_chat/board/$environmentId/$projectId': {
+      id: '/_chat/board/$environmentId/$projectId'
+      path: '/board/$environmentId/$projectId'
+      fullPath: '/board/$environmentId/$projectId'
+      preLoaderRoute: typeof ChatBoardEnvironmentIdProjectIdRouteImport
+      parentRoute: typeof ChatRoute
+    }
     '/_chat/agents/$environmentId/$agentId': {
       id: '/_chat/agents/$environmentId/$agentId'
       path: '/agents/$environmentId/$agentId'
@@ -538,20 +588,25 @@ declare module '@tanstack/react-router' {
 
 interface ChatRouteChildren {
   ChatPullRequestsRoute: typeof ChatPullRequestsRoute
+  ChatNeedsYouRoute: typeof ChatNeedsYouRoute
   ChatIndexRoute: typeof ChatIndexRoute
   ChatEnvironmentIdThreadIdRoute: typeof ChatEnvironmentIdThreadIdRoute
   ChatDraftDraftIdRoute: typeof ChatDraftDraftIdRoute
   ChatChannelsEnvironmentIdChannelIdRoute: typeof ChatChannelsEnvironmentIdChannelIdRoute
+  ChatBoardEnvironmentIdProjectIdRoute: typeof ChatBoardEnvironmentIdProjectIdRoute
   ChatAgentsEnvironmentIdAgentIdRoute: typeof ChatAgentsEnvironmentIdAgentIdRoute
 }
 
 const ChatRouteChildren: ChatRouteChildren = {
   ChatPullRequestsRoute: ChatPullRequestsRoute,
+  ChatNeedsYouRoute: ChatNeedsYouRoute,
   ChatIndexRoute: ChatIndexRoute,
   ChatEnvironmentIdThreadIdRoute: ChatEnvironmentIdThreadIdRoute,
   ChatDraftDraftIdRoute: ChatDraftDraftIdRoute,
   ChatChannelsEnvironmentIdChannelIdRoute:
     ChatChannelsEnvironmentIdChannelIdRoute,
+  ChatBoardEnvironmentIdProjectIdRoute:
+    ChatBoardEnvironmentIdProjectIdRoute,
   ChatAgentsEnvironmentIdAgentIdRoute:
     ChatAgentsEnvironmentIdAgentIdRoute,
 }

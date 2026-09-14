@@ -314,6 +314,9 @@ it.layer(layer)("CardSessionReactor", (it) => {
           "hello\nrate limits\n",
         );
         yield* world.setSession(first.payload.threadId, "ready", null);
+        // The settled turn measures the card's diff for its face on the board.
+        const measured = yield* world.nextEvent("card.diff-measured");
+        expect(measured.payload.diffStat).toEqual({ files: 1, additions: 1, deletions: 0 });
 
         yield* world.assign("frontend");
         yield* world.nextEvent(
@@ -443,6 +446,12 @@ it.layer(layer)("CardSessionReactor", (it) => {
             awaitingInput: thread.hasPendingApprovals || thread.hasPendingUserInput,
           }),
         ).toBe("stale");
+        // The board reads the same state from the card's shell.
+        const cardShell = Option.getOrThrow(yield* world.snapshotQuery.getCardShellById(world.cardId));
+        expect(cardShell.ownerSession).toMatchObject({
+          threadId: owner.payload.threadId,
+          state: "stale",
+        });
 
         // A lost session no longer holds the card: a fresh one can start.
         yield* world.engine.dispatch({

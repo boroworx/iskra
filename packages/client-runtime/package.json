@@ -15,6 +15,10 @@
       "types": "./src/pendingRequests.ts",
       "default": "./src/pendingRequests.ts"
     },
+    "./cards": {
+      "types": "./src/cards.ts",
+      "default": "./src/cards.ts"
+    },
     "./connection": {
       "types": "./src/connection/index.ts",
       "default": "./src/connection/index.ts"
@@ -102,6 +106,10 @@
     "./state/channels": {
       "types": "./src/state/channels.ts",
       "default": "./src/state/channels.ts"
+    },
+    "./state/cards": {
+      "types": "./src/state/cards.ts",
+      "default": "./src/state/cards.ts"
     },
     "./state/attachments": {
       "types": "./src/state/attachments.ts",

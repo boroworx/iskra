@@ -10,7 +10,7 @@ import {
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
-import { CARD_BRIEF_DIFF_LIMIT, buildCardBrief, renderCardBrief } from "./cardBrief.ts";
+import { CARD_BRIEF_DIFF_LIMIT, buildCardBrief, diffStatOf, renderCardBrief } from "./cardBrief.ts";
 
 const decodeCardBrief = Schema.decodeUnknownSync(CardBriefPayload);
 const projectId = ProjectId.make("project-brief");
@@ -49,6 +49,10 @@ const card: OrchestrationCard = {
   worktreePath: "/tmp/worktrees/rate-limiting",
   portBase: 42000,
   relations: [],
+  snoozedUntil: null,
+  snoozedAt: null,
+  activityAt: "2026-01-01T00:00:00.000Z",
+  diffStat: null,
   createdBy: { kind: "human", id: "human" },
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
@@ -113,6 +117,25 @@ describe("renderCardBrief", () => {
         "## Question\n\nIs the limit per key or per user?",
       ].join("\n\n"),
     );
+  });
+
+  it("counts a diff's files and changed lines, not its headers", () => {
+    expect(
+      diffStatOf(
+        [
+          "diff --git a/limits.ts b/limits.ts",
+          "--- a/limits.ts",
+          "+++ b/limits.ts",
+          "@@ -1,2 +1,2 @@",
+          "-export const LIMIT = 10;",
+          "+export const LIMIT = 100;",
+          "+export const WINDOW = 60;",
+          "diff --git a/README.md b/README.md",
+          "+Rate limits apply per key.",
+        ].join("\n"),
+      ),
+    ).toEqual({ files: 2, additions: 3, deletions: 1 });
+    expect(diffStatOf("")).toEqual({ files: 0, additions: 0, deletions: 0 });
   });
 
   it("cuts a diff past the limit and says so", () => {

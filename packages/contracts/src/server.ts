@@ -568,6 +568,8 @@ export const ServerConfig = Schema.Struct({
   shellResumeCompletionMarker: Schema.optionalKey(Schema.Boolean),
   /** Whether shell subscriptions can include agents and channels on request. */
   shellAgentChannels: Schema.optionalKey(Schema.Boolean),
+  /** Whether shell subscriptions can include cards on request. */
+  shellCards: Schema.optionalKey(Schema.Boolean),
   /** Whether shell.openInEditor honors `LaunchEditorInput.reveal` for the
       file-manager editor. */
   shellRevealInFileManager: Schema.optionalKey(Schema.Boolean),

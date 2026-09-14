@@ -9,6 +9,7 @@
 import type {
   AgentId,
   AgentSessionImportSource,
+  CardId,
   ChannelId,
   ApprovalRequestId,
   CheckpointRef,
@@ -22,6 +23,7 @@ import type {
   OrchestrationAgent,
   OrchestrationAgentRun,
   OrchestrationChannelMessage,
+  OrchestrationCardShell,
   OrchestrationChannelShell,
   OrchestrationRun,
   OrchestrationSearchThreadsInput,
@@ -229,6 +231,11 @@ export interface ProjectionSnapshotQueryShape {
   readonly getAgentShellById: (
     agentId: AgentId,
   ) => Effect.Effect<Option.Option<OrchestrationAgentShell>, ProjectionRepositoryError>;
+
+  /** Read one card as the board shows it, with its latest owner session. */
+  readonly getCardShellById: (
+    cardId: CardId,
+  ) => Effect.Effect<Option.Option<OrchestrationCardShell>, ProjectionRepositoryError>;
 
   /** Read one active channel as clients list it. */
   readonly getChannelShellById: (

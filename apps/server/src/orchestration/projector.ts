@@ -386,6 +386,18 @@ function updateChannel(
   return channels.map((channel) => (channel.id === channelId ? { ...channel, ...patch } : channel));
 }
 
+/** Marks something happening on a card, which also wakes it from a snooze. */
+function touchCard(
+  readModel: OrchestrationReadModel,
+  cardId: OrchestrationCard["id"],
+  at: string,
+): OrchestrationReadModel {
+  return {
+    ...readModel,
+    cards: updateCard(readModel.cards ?? [], cardId, (card) => ({ ...card, activityAt: at })),
+  };
+}
+
 export function createEmptyReadModel(nowIso: string): OrchestrationReadModel {
   return {
     snapshotSequence: 0,
@@ -1236,6 +1248,10 @@ export function projectEvent(
             worktreePath: null,
             portBase: null,
             relations: [],
+            snoozedUntil: null,
+            snoozedAt: null,
+            activityAt: payload.createdAt,
+            diffStat: null,
             createdBy: payload.createdBy,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
@@ -1260,6 +1276,7 @@ export function projectEvent(
             ...(payload.specState !== undefined ? { specState: payload.specState } : {}),
             ...(payload.tags !== undefined ? { tags: payload.tags } : {}),
             updatedAt: payload.updatedAt,
+            activityAt: payload.updatedAt,
           })),
         })),
       );
@@ -1272,6 +1289,7 @@ export function projectEvent(
             ...card,
             status: payload.to,
             updatedAt: payload.updatedAt,
+            activityAt: payload.updatedAt,
           })),
         })),
       );
@@ -1284,6 +1302,7 @@ export function projectEvent(
             ...card,
             delegateAgentId: payload.delegateAgentId,
             updatedAt: payload.updatedAt,
+            activityAt: payload.updatedAt,
           })),
         })),
       );
@@ -1335,7 +1354,7 @@ export function projectEvent(
     // A card's decision log is paged from its projection; the read model does not hold it.
     case "card.decision-recorded":
       return decodeForEvent(CardDecisionRecordedPayload, event.payload, event.type, "payload").pipe(
-        Effect.as(nextBase),
+        Effect.map((payload) => touchCard(nextBase, payload.cardId, payload.createdAt)),
       );
 
     case "channel.created":
@@ -1427,6 +1446,7 @@ export function projectEvent(
       return decodeForEvent(CardSessionStartedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => ({
           ...nextBase,
+          cards: touchCard(nextBase, payload.cardId, payload.startedAt).cards,
           liveRuns: [
             ...(nextBase.liveRuns ?? []).filter((run) => run.threadId !== payload.threadId),
             {
@@ -1444,10 +1464,43 @@ export function projectEvent(
     // A card's activity and requests live in projections and reactors, not the read model.
     case "card.session-requested":
     case "card.helper-requested":
-    case "card.message-posted":
     case "card.delivery-updated":
-    case "card.spec-submitted":
       return Effect.succeed(nextBase);
+
+    case "card.message-posted":
+      return Effect.succeed(touchCard(nextBase, event.payload.cardId, event.payload.createdAt));
+
+    case "card.spec-submitted":
+      return Effect.succeed(touchCard(nextBase, event.payload.cardId, event.payload.submittedAt));
+
+    case "card.snoozed":
+      return Effect.succeed({
+        ...nextBase,
+        cards: updateCard(nextBase.cards ?? [], event.payload.cardId, (card) => ({
+          ...card,
+          snoozedUntil: event.payload.snoozedUntil,
+          snoozedAt: event.payload.snoozedAt,
+        })),
+      });
+
+    case "card.diff-measured":
+      return Effect.succeed({
+        ...nextBase,
+        cards: updateCard(nextBase.cards ?? [], event.payload.cardId, (card) => ({
+          ...card,
+          diffStat: event.payload.diffStat,
+        })),
+      });
+
+    case "card.unsnoozed":
+      return Effect.succeed({
+        ...nextBase,
+        cards: updateCard(nextBase.cards ?? [], event.payload.cardId, (card) => ({
+          ...card,
+          snoozedUntil: null,
+          snoozedAt: null,
+        })),
+      });
 
     case "card.spec-state-changed":
       return decodeForEvent(CardSpecStateChangedPayload, event.payload, event.type, "payload").pipe(
@@ -1457,6 +1510,7 @@ export function projectEvent(
             ...card,
             specState: payload.to,
             updatedAt: payload.updatedAt,
+            activityAt: payload.updatedAt,
           })),
         })),
       );

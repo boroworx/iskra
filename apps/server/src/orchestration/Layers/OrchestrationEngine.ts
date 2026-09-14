@@ -101,6 +101,9 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "card.spec.skip":
     case "card.spec.reopen":
     case "card.spec.submit":
+    case "card.snooze":
+    case "card.unsnooze":
+    case "card.diff.record":
       return {
         aggregateKind: "card",
         aggregateId: command.cardId,

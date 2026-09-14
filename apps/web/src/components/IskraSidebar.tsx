@@ -7,16 +7,19 @@ import type {
   ThreadId,
 } from "@iskra/contracts";
 import { Link, useParams } from "@tanstack/react-router";
-import { AtSignIcon, HashIcon, PlusIcon } from "lucide-react";
+import { AtSignIcon, HashIcon, InboxIcon, PlusIcon } from "lucide-react";
 import { memo, useMemo, useState, type ReactNode } from "react";
 
 import { isElectron } from "../env";
 import { cn } from "../lib/utils";
 import {
   useEnvironmentAgents,
+  useEnvironmentCards,
   useEnvironmentChannels,
   useProjects,
 } from "../state/entities";
+import { usePrimaryEnvironmentId } from "../state/environments";
+import { needsYouItems } from "@iskra/client-runtime/cards";
 import {
   agentListEntries,
   channelListEntries,
@@ -36,6 +39,37 @@ import {
   SidebarMenuItem,
 } from "./ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
+
+/** The cross-project Needs you list, with how many items wait. */
+function NeedsYouEntry() {
+  const cards = useEnvironmentCards(usePrimaryEnvironmentId());
+  // Read once: the count follows card changes, and a snooze ending shows on the next one.
+  const [now] = useState(() => Date.now());
+  const count = needsYouItems({
+    cards,
+    sessions: cards.flatMap((card) =>
+      card.ownerSession === null
+        ? []
+        : [{ cardId: card.id, state: card.ownerSession.state, since: card.ownerSession.since }],
+    ),
+    now,
+  }).length;
+  return (
+    <SidebarMenu className="px-2 pt-2">
+      <SidebarMenuItem>
+        <SidebarMenuButton render={<Link to="/needs-you" />}>
+          <InboxIcon />
+          <span className="truncate">Needs you</span>
+          {count > 0 ? (
+            <span className="ml-auto text-xs tabular-nums text-sidebar-muted-foreground">
+              {count}
+            </span>
+          ) : null}
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    </SidebarMenu>
+  );
+}
 
 function projectKey(project: { readonly environmentId: EnvironmentId; readonly id: ProjectId }) {
   return `${project.environmentId}:${project.id}`;
@@ -129,6 +163,7 @@ export default function IskraSidebar() {
           })}
         </nav>
         <SidebarContent className="gap-0">
+          <NeedsYouEntry />
           {selected === null ? (
             <p className="px-4 py-3 text-xs text-sidebar-muted-foreground">
               Add a project to get started.
@@ -165,8 +200,15 @@ const ProjectChannels = memo(function ProjectChannels(props: {
 
   return (
     <>
-      <div className="flex h-10 shrink-0 items-center px-4 text-sm font-semibold">
+      <div className="flex h-10 shrink-0 items-center gap-2 px-4 text-sm font-semibold">
         <span className="truncate">{props.project.title}</span>
+        <Link
+          to="/board/$environmentId/$projectId"
+          params={{ environmentId, projectId }}
+          className="ml-auto shrink-0 rounded-md px-1.5 py-0.5 text-xs font-medium text-sidebar-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+        >
+          Board
+        </Link>
       </div>
       <SidebarListGroup
         label="Channels"

@@ -20,6 +20,7 @@ import {
   MessageId,
   ProjectId,
   ThreadId,
+  CardDiffStat,
 } from "@iskra/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
@@ -45,6 +46,10 @@ export const ProjectionCard = Schema.Struct({
   branch: Schema.NullOr(Schema.String),
   worktreePath: Schema.NullOr(Schema.String),
   portBase: Schema.NullOr(Schema.Number),
+  snoozedUntil: Schema.NullOr(IsoDateTime),
+  snoozedAt: Schema.NullOr(IsoDateTime),
+  activityAt: IsoDateTime,
+  diffStat: Schema.NullOr(CardDiffStat),
   relations: Schema.Array(CardRelation),
   createdBy: CardAuthor,
   createdAt: IsoDateTime,
@@ -58,6 +63,7 @@ export const ProjectionCardDbRow = ProjectionCard.mapFields(
     tags: Schema.fromJsonString(Schema.Array(Schema.String)),
     relations: Schema.fromJsonString(Schema.Array(CardRelation)),
     createdBy: Schema.fromJsonString(CardAuthor),
+    diffStat: Schema.fromJsonString(Schema.NullOr(CardDiffStat)),
   }),
 );
 

@@ -33,6 +33,11 @@ import {
   ThreadPullRequestSnapshot,
   ThreadPullRequestStack,
   type ThreadPullRequestLink,
+  AgentId,
+  OrchestrationSessionStatus,
+  TrimmedNonEmptyString,
+  runSessionState,
+  type OrchestrationCardShell,
 } from "@iskra/contracts";
 import { legacyLinkedPullRequestOf } from "@iskra/shared/threadPullRequests";
 import * as Arr from "effect/Array";
@@ -95,6 +100,21 @@ import {
 } from "../Services/ProjectionSnapshotQuery.ts";
 
 const decodeReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel);
+
+/** A card row with its latest owner session's run, session and open request count. */
+const ProjectionCardShellDbRow = ProjectionCardDbRow.mapFields(
+  Struct.assign({
+    ownerThreadId: Schema.NullOr(ThreadId),
+    ownerAgentId: Schema.NullOr(AgentId),
+    ownerStartedAt: Schema.NullOr(IsoDateTime),
+    ownerEndedAt: Schema.NullOr(IsoDateTime),
+    sessionStatus: Schema.NullOr(OrchestrationSessionStatus),
+    sessionActiveTurnId: Schema.NullOr(TurnId),
+    sessionLastError: Schema.NullOr(TrimmedNonEmptyString),
+    sessionUpdatedAt: Schema.NullOr(IsoDateTime),
+    pendingRequestCount: Schema.NullOr(Schema.Number),
+  }),
+);
 const decodeShellSnapshot = Schema.decodeUnknownEffect(OrchestrationShellSnapshot);
 const decodeThread = Schema.decodeUnknownEffect(OrchestrationThread);
 const decodeImportedTranscriptsPayload = Schema.decodeUnknownOption(
@@ -631,6 +651,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           branch,
           worktree_path AS "worktreePath",
           port_base AS "portBase",
+          snoozed_until AS "snoozedUntil",
+          snoozed_at AS "snoozedAt",
+          activity_at AS "activityAt",
+          COALESCE(diff_stat_json, 'null') AS "diffStat",
           relations_json AS "relations",
           created_by_json AS "createdBy",
           created_at AS "createdAt",
@@ -638,6 +662,108 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         FROM projection_cards
         ORDER BY created_at ASC, rowid ASC
       `,
+  });
+
+  // A card with its latest owner session: the run, its thread's session and open requests.
+  const listCardShellRows = SqlSchema.findAll({
+    Request: Schema.UndefinedOr(Schema.Struct({ cardId: Schema.String })),
+    Result: ProjectionCardShellDbRow,
+    execute: (filter) =>
+      sql`
+        SELECT
+          cards.card_id AS "cardId",
+          cards.project_id AS "projectId",
+          cards.channel_id AS "channelId",
+          cards.parent_card_id AS "parentCardId",
+          cards.title AS "title",
+          cards.spec AS "spec",
+          cards.spec_state AS "specState",
+          cards.tags_json AS "tags",
+          cards.status AS "status",
+          cards.owner_human_id AS "ownerHumanId",
+          cards.delegate_agent_id AS "delegateAgentId",
+          cards.base_branch AS "baseBranch",
+          cards.branch AS "branch",
+          cards.worktree_path AS "worktreePath",
+          cards.port_base AS "portBase",
+          cards.snoozed_until AS "snoozedUntil",
+          cards.snoozed_at AS "snoozedAt",
+          cards.activity_at AS "activityAt",
+          cards.relations_json AS "relations",
+          cards.created_by_json AS "createdBy",
+          cards.created_at AS "createdAt",
+          cards.updated_at AS "updatedAt",
+          COALESCE(cards.diff_stat_json, 'null') AS "diffStat",
+          runs.thread_id AS "ownerThreadId",
+          runs.agent_id AS "ownerAgentId",
+          runs.started_at AS "ownerStartedAt",
+          runs.ended_at AS "ownerEndedAt",
+          sessions.status AS "sessionStatus",
+          sessions.active_turn_id AS "sessionActiveTurnId",
+          sessions.last_error AS "sessionLastError",
+          sessions.updated_at AS "sessionUpdatedAt",
+          threads.pending_approval_count + threads.pending_user_input_count AS "pendingRequestCount"
+        FROM projection_cards AS cards
+        LEFT JOIN projection_runs AS runs
+          ON runs.thread_id = (
+            SELECT owner.thread_id
+            FROM projection_runs AS owner
+            WHERE owner.card_id = cards.card_id AND owner.role = 'owner'
+            ORDER BY owner.started_at DESC, owner.rowid DESC
+            LIMIT 1
+          )
+        LEFT JOIN projection_thread_sessions AS sessions ON sessions.thread_id = runs.thread_id
+        LEFT JOIN projection_threads AS threads ON threads.thread_id = runs.thread_id
+        WHERE ${filter === undefined ? sql`1 = 1` : sql`cards.card_id = ${filter.cardId}`}
+        ORDER BY cards.created_at ASC, cards.rowid ASC
+      `,
+  });
+
+  const toCardShell = (row: typeof ProjectionCardShellDbRow.Type): OrchestrationCardShell => ({
+    id: row.cardId,
+    projectId: row.projectId,
+    channelId: row.channelId,
+    parentCardId: row.parentCardId,
+    title: row.title,
+    spec: row.spec,
+    specState: row.specState,
+    tags: row.tags,
+    status: row.status,
+    ownerHumanId: row.ownerHumanId,
+    delegateAgentId: row.delegateAgentId,
+    baseBranch: row.baseBranch,
+    branch: row.branch,
+    worktreePath: row.worktreePath,
+    portBase: row.portBase,
+    relations: row.relations,
+    snoozedUntil: row.snoozedUntil,
+    snoozedAt: row.snoozedAt,
+    activityAt: row.activityAt,
+    diffStat: row.diffStat,
+    createdBy: row.createdBy,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    ownerSession:
+      row.ownerThreadId === null || row.ownerAgentId === null || row.ownerStartedAt === null
+        ? null
+        : {
+            threadId: row.ownerThreadId,
+            agentId: row.ownerAgentId,
+            state: runSessionState({
+              endedAt: row.ownerEndedAt,
+              session:
+                row.sessionStatus === null
+                  ? null
+                  : {
+                      status: row.sessionStatus,
+                      activeTurnId: row.sessionActiveTurnId,
+                      lastError: row.sessionLastError,
+                    },
+              awaitingInput: (row.pendingRequestCount ?? 0) > 0,
+            }),
+            since: row.sessionUpdatedAt ?? row.ownerStartedAt,
+            planProgress: threadPlanProgress.getThreadPlanProgress(row.ownerThreadId) ?? null,
+          },
   });
 
   const listLiveRunRows = SqlSchema.findAll({
@@ -2786,6 +2912,10 @@ pending_approval_requests AS (
                   branch: row.branch,
                   worktreePath: row.worktreePath,
                   portBase: row.portBase,
+                  snoozedUntil: row.snoozedUntil,
+                  snoozedAt: row.snoozedAt,
+                  activityAt: row.activityAt,
+                  diffStat: row.diffStat,
                   relations: row.relations,
                   createdBy: row.createdBy,
                   createdAt: row.createdAt,
@@ -2987,10 +3117,23 @@ pending_approval_requests AS (
               ),
             ),
           ),
+          listCardShellRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getShellSnapshot:listCards:query",
+                "ProjectionSnapshotQuery.getShellSnapshot:listCards:decodeRows",
+              ),
+            ),
+          ),
         ]),
       )
       .pipe(
-        Effect.map(([snapshot, agents, channels]) => ({ ...snapshot, agents, channels })),
+        Effect.map(([snapshot, agents, channels, cards]) => ({
+          ...snapshot,
+          agents,
+          channels,
+          cards: cards.map(toCardShell),
+        })),
         Effect.mapError((error) =>
           isPersistenceError(error)
             ? error
@@ -3991,6 +4134,17 @@ pending_approval_requests AS (
       Effect.map(Arr.head),
     );
 
+  const getCardShellById: ProjectionSnapshotQueryShape["getCardShellById"] = (cardId) =>
+    listCardShellRows({ cardId }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.getCardShellById:query",
+          "ProjectionSnapshotQuery.getCardShellById:decodeRows",
+        ),
+      ),
+      Effect.map((rows) => Option.map(Arr.head(rows), toCardShell)),
+    );
+
   const getChannelShellById: ProjectionSnapshotQueryShape["getChannelShellById"] = (channelId) =>
     listChannelShellRows({ channelId }).pipe(
       Effect.mapError(
@@ -4179,6 +4333,7 @@ pending_approval_requests AS (
     getRunByThreadId,
     getAgentShellById,
     getChannelShellById,
+    getCardShellById,
     listChannelMessages,
     listRunsByAgent,
     getAgentById,

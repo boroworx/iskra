@@ -5024,6 +5024,7 @@ describe("agent browser access", () => {
         getRunByThreadId: () => Effect.die("unused"),
         getAgentShellById: () => Effect.die("unused"),
         getChannelShellById: () => Effect.die("unused"),
+        getCardShellById: () => Effect.die("unused"),
         listChannelMessages: () => Effect.die("unused"),
         listRunsByAgent: () => Effect.die("unused"),
         getAgentById: () => Effect.die("unused"),

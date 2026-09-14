@@ -208,6 +208,13 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
         ))
           ? { includeAgentChannels: true as const }
           : {};
+        // Ask for cards only from servers that can send them.
+        const cardsInput = (yield* session.initialConfig.pipe(
+          Effect.map((config) => config.shellCards === true),
+          Effect.orElseSucceed(() => false),
+        ))
+          ? { includeCards: true as const }
+          : {};
         yield* Ref.set(awaitingCompletion, supportsCompletionMarker);
         yield* setSynchronizing;
 
@@ -245,6 +252,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
         if (!canResume || Option.isNone(current.snapshot)) {
           return {
             ...agentChannelsInput,
+            ...cardsInput,
             ...(supportsCompletionMarker ? { requestCompletionMarker: true as const } : {}),
           };
         }
@@ -260,6 +268,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
         return {
           afterSequence: current.snapshot.value.snapshotSequence,
           ...agentChannelsInput,
+          ...cardsInput,
           ...(supportsCompletionMarker ? { requestCompletionMarker: true as const } : {}),
         };
       }),

@@ -167,6 +167,57 @@ export const sendAgentSessionMessage: (input: SendAgentSessionMessageInput) => C
     });
   });
 
+/** A human decision on a card: its reverse is another of these. */
+export type CardDecisionInput = CommandInput<"card.approve"> & {
+  readonly type:
+    | "card.approve"
+    | "card.unapprove"
+    | "card.merge.approve"
+    | "card.merge.cancel"
+    | "card.abandon"
+    | "card.reopen";
+};
+
+export const decideCard: (input: CardDecisionInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.decideCard",
+)(function* (input) {
+  const base = { commandId: yield* commandId(input), cardId: input.cardId };
+  switch (input.type) {
+    case "card.approve":
+      return yield* dispatch({ ...base, type: "card.approve" });
+    case "card.unapprove":
+      return yield* dispatch({ ...base, type: "card.unapprove" });
+    case "card.merge.approve":
+      return yield* dispatch({ ...base, type: "card.merge.approve" });
+    case "card.merge.cancel":
+      return yield* dispatch({ ...base, type: "card.merge.cancel" });
+    case "card.abandon":
+      return yield* dispatch({ ...base, type: "card.abandon" });
+    case "card.reopen":
+      return yield* dispatch({ ...base, type: "card.reopen" });
+  }
+});
+
+export type SnoozeCardInput = CommandInput<"card.snooze">;
+export const snoozeCard: (input: SnoozeCardInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.snoozeCard",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "card.snooze",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export type UnsnoozeCardInput = CommandInput<"card.unsnooze">;
+export const unsnoozeCard: (input: UnsnoozeCardInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.unsnoozeCard",
+)(function* (input) {
+  return yield* dispatch({ ...input, type: "card.unsnooze", commandId: yield* commandId(input) });
+});
+
 export const updateProject: (input: UpdateProjectInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.updateProject",
 )(function* (input) {

@@ -6,6 +6,7 @@ import type {
   OrchestrationShellSnapshot,
   ProjectId,
   ScopedProjectRef,
+  OrchestrationCardShell,
 } from "@iskra/contracts";
 import { Atom } from "effect/unstable/reactivity";
 
@@ -108,8 +109,9 @@ export function createEnvironmentProjectAtoms(input: {
 
 const EMPTY_AGENTS: ReadonlyArray<OrchestrationAgentShell> = Object.freeze([]);
 const EMPTY_CHANNELS: ReadonlyArray<OrchestrationChannelShell> = Object.freeze([]);
+const EMPTY_CARDS: ReadonlyArray<OrchestrationCardShell> = Object.freeze([]);
 
-/** An environment's active agents and channels; empty for servers that do not send them. */
+/** An environment's active agents, channels and cards; empty for servers that do not send them. */
 export function createEnvironmentAgentChannelAtoms(input: {
   readonly snapshotAtom: (
     environmentId: EnvironmentId,
@@ -129,5 +131,12 @@ export function createEnvironmentAgentChannelAtoms(input: {
     ).pipe(Atom.withLabel(`environment-channels:${environmentId}`)),
   );
 
-  return { environmentAgentsAtom, environmentChannelsAtom };
+  const environmentCardsAtom = Atom.family((environmentId: EnvironmentId) =>
+    Atom.make(
+      (get): ReadonlyArray<OrchestrationCardShell> =>
+        get(input.snapshotAtom(environmentId))?.cards ?? EMPTY_CARDS,
+    ).pipe(Atom.withLabel(`environment-cards:${environmentId}`)),
+  );
+
+  return { environmentAgentsAtom, environmentChannelsAtom, environmentCardsAtom };
 }

@@ -13,6 +13,15 @@ export function applyShellStreamEvent(
   snapshot: OrchestrationShellSnapshot,
   event: OrchestrationShellStreamEvent,
 ): OrchestrationShellSnapshot {
+  // A card follows the agent update from the same refetch, so it may share its sequence.
+  if (event.kind === "card-upserted") {
+    if (event.sequence < snapshot.snapshotSequence) return snapshot;
+    const current = snapshot.cards ?? [];
+    const cards = current.some((c) => c.id === event.card.id)
+      ? Arr.map(current, (c) => (c.id === event.card.id ? event.card : c))
+      : Arr.append(current, event.card);
+    return { ...snapshot, cards, snapshotSequence: event.sequence };
+  }
   if (event.sequence <= snapshot.snapshotSequence) return snapshot;
 
   switch (event.kind) {

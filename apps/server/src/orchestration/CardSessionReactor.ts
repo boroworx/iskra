@@ -22,7 +22,7 @@ import * as Stream from "effect/Stream";
 import { ProjectionCardRepositoryLive } from "../persistence/Layers/ProjectionCards.ts";
 import { ProjectionCardRepository } from "../persistence/Services/ProjectionCards.ts";
 import { forkParked } from "../serverActivation.ts";
-import { buildCardBrief, renderCardBrief, renderCardMessages } from "./cardBrief.ts";
+import { buildCardBrief, diffStatOf, renderCardBrief, renderCardMessages } from "./cardBrief.ts";
 import { isFinishedCardStatus } from "./cardRules.ts";
 import * as CardWorkspace from "./CardWorkspace.ts";
 import * as OrchestrationEngine from "./Services/OrchestrationEngine.ts";
@@ -309,6 +309,24 @@ const make = Effect.gen(function* () {
       });
     });
 
+  /** Records the card's diff size for its face; a failed measurement keeps the last one. */
+  const measureDiff = (cardId: CardId, threadId: ThreadId) =>
+    Effect.gen(function* () {
+      const { diff } = yield* workspace.diff(cardId);
+      const measuredAt = yield* nowIso;
+      yield* engine.dispatch({
+        type: "card.diff.record",
+        commandId: CommandId.make(`card-diff:${threadId}:${measuredAt}`),
+        cardId,
+        diffStat: diffStatOf(diff),
+        measuredAt,
+      });
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.logWarning("card diff could not be measured", { cardId, error: error.message }),
+      ),
+    );
+
   const settleTurn = Effect.fn("CardSessionReactor.settleTurn")(function* (threadId: ThreadId) {
     const run = yield* snapshotQuery.getRunByThreadId(threadId);
     if (Option.isNone(run) || run.value.cardId === null) {
@@ -316,6 +334,7 @@ const make = Effect.gen(function* () {
     }
     const { cardId, agentId, role } = run.value;
     if (role === "owner") {
+      yield* measureDiff(cardId, threadId);
       return yield* deliverToOwner(cardId);
     }
     const thread = yield* snapshotQuery.getThreadDetailById(threadId, { activityKinds: [] });

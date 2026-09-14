@@ -2537,6 +2537,75 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "card.diff.record": {
+      yield* requireCard({ readModel, command, cardId: command.cardId });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "card",
+          aggregateId: command.cardId,
+          occurredAt: command.measuredAt,
+          commandId: command.commandId,
+        })),
+        type: "card.diff-measured",
+        payload: {
+          cardId: command.cardId,
+          diffStat: command.diffStat,
+          measuredAt: command.measuredAt,
+        },
+      };
+    }
+
+    case "card.snooze": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      const refuse = (detail: string) =>
+        new OrchestrationCommandInvariantError({ commandType: command.type, detail });
+      if (isFinishedCardStatus(card.status)) {
+        return yield* refuse("A card that has landed or been abandoned waits on no one.");
+      }
+      // A wake time must be real and after the snooze itself; an unparseable one fails too.
+      if (
+        command.snoozedUntil !== null &&
+        !(Date.parse(command.snoozedUntil) > Date.parse(command.createdAt))
+      ) {
+        return yield* refuse("Snooze until a time in the future.");
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "card",
+          aggregateId: command.cardId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "card.snoozed",
+        payload: {
+          cardId: command.cardId,
+          snoozedUntil: command.snoozedUntil,
+          snoozedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "card.unsnooze": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      if (card.snoozedAt === null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "The card is not snoozed.",
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "card",
+          aggregateId: command.cardId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "card.unsnoozed",
+        payload: { cardId: command.cardId, updatedAt: occurredAt },
+      };
+    }
+
     case "card.spec.approve":
     case "card.spec.skip":
     case "card.spec.reopen": {

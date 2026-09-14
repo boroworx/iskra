@@ -614,6 +614,14 @@ export const CardMove = Schema.Literals([
 ]);
 export type CardMove = typeof CardMove.Type;
 
+/** A card's changes against its base branch, as `git diff --stat` counts them. */
+export const CardDiffStat = Schema.Struct({
+  files: NonNegativeInt,
+  additions: NonNegativeInt,
+  deletions: NonNegativeInt,
+});
+export type CardDiffStat = typeof CardDiffStat.Type;
+
 /** Ports reserved for each card's worktree, starting at its `portBase` (ISKRA_PORT). */
 export const CARD_PORT_BLOCK_SIZE = 10;
 
@@ -639,6 +647,14 @@ export const OrchestrationCard = Schema.Struct({
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   // The first of the card's CARD_PORT_BLOCK_SIZE ports, handed to its scripts as ISKRA_PORT.
   portBase: Schema.NullOr(PositiveInt),
+  // Out of Needs you until `snoozedUntil` passes (null: until new activity), or
+  // until the card has activity after `snoozedAt`.
+  snoozedUntil: Schema.NullOr(IsoDateTime),
+  snoozedAt: Schema.NullOr(IsoDateTime),
+  // When something last happened on the card that a person might act on.
+  activityAt: IsoDateTime,
+  // The worktree's changes against the base, measured when an owner turn settles.
+  diffStat: Schema.NullOr(CardDiffStat),
   relations: Schema.Array(CardRelation),
   createdBy: CardAuthor,
   createdAt: IsoDateTime,
@@ -1289,6 +1305,30 @@ export const OrchestrationChannelShell = Schema.Struct({
 });
 export type OrchestrationChannelShell = typeof OrchestrationChannelShell.Type;
 
+/** Where a card's latest owner session stands, for its face on the board and Needs you. */
+export const OrchestrationCardSessionSummary = Schema.Struct({
+  threadId: ThreadId,
+  agentId: AgentId,
+  state: RunSessionState,
+  // When the session last changed state.
+  since: IsoDateTime,
+  planProgress: Schema.NullOr(
+    Schema.Struct({
+      step: TrimmedNonEmptyString,
+      completedSteps: NonNegativeInt,
+      totalSteps: NonNegativeInt,
+    }),
+  ),
+});
+export type OrchestrationCardSessionSummary = typeof OrchestrationCardSessionSummary.Type;
+
+/** A card as the board shows it: the card and its latest owner session. */
+export const OrchestrationCardShell = Schema.Struct({
+  ...OrchestrationCard.fields,
+  ownerSession: Schema.NullOr(OrchestrationCardSessionSummary),
+});
+export type OrchestrationCardShell = typeof OrchestrationCardShell.Type;
+
 export const OrchestrationShellSnapshot = Schema.Struct({
   snapshotSequence: NonNegativeInt,
   projects: Schema.Array(OrchestrationProjectShell),
@@ -1296,6 +1336,7 @@ export const OrchestrationShellSnapshot = Schema.Struct({
   // Optional so cached snapshots and servers without agents still decode. Active entries only.
   agents: Schema.optional(Schema.Array(OrchestrationAgentShell)),
   channels: Schema.optional(Schema.Array(OrchestrationChannelShell)),
+  cards: Schema.optional(Schema.Array(OrchestrationCardShell)),
   updatedAt: IsoDateTime,
 });
 export type OrchestrationShellSnapshot = typeof OrchestrationShellSnapshot.Type;
@@ -1342,6 +1383,12 @@ export const OrchestrationShellStreamEvent = Schema.Union([
     sequence: NonNegativeInt,
     channelId: ChannelId,
   }),
+  // Sent only to subscribers that set `includeCards`. Cards are never deleted, so there is no removal.
+  Schema.Struct({
+    kind: Schema.Literal("card-upserted"),
+    sequence: NonNegativeInt,
+    card: OrchestrationCardShell,
+  }),
 ]);
 export type OrchestrationShellStreamEvent = typeof OrchestrationShellStreamEvent.Type;
 
@@ -1377,6 +1424,8 @@ export const OrchestrationSubscribeShellInput = Schema.Struct({
    * to subscribers that ask, because older clients reject unknown kinds.
    */
   includeAgentChannels: Schema.optionalKey(Schema.Boolean),
+  /** Requests card shell events, which older clients would reject. */
+  includeCards: Schema.optionalKey(Schema.Boolean),
 });
 export type OrchestrationSubscribeShellInput = typeof OrchestrationSubscribeShellInput.Type;
 
@@ -1633,6 +1682,25 @@ const CardSpecSubmitCommand = Schema.Struct({
   commandId: CommandId,
   cardId: CardId,
   agentId: Schema.optional(AgentId),
+});
+
+/** Hides a card from Needs you until a time, or with no time until its next activity. */
+const CardSnoozeCommand = Schema.Struct({
+  type: Schema.Literal("card.snooze"),
+  commandId: CommandId,
+  cardId: CardId,
+  snoozedUntil: Schema.NullOr(IsoDateTime),
+  createdAt: IsoDateTime,
+});
+const CardUnsnoozeCommand = cardStatusCommand("card.unsnooze");
+
+// Server-only: the card session reactor records the diff size after an owner turn.
+const CardDiffRecordCommand = Schema.Struct({
+  type: Schema.Literal("card.diff.record"),
+  commandId: CommandId,
+  cardId: CardId,
+  diffStat: CardDiffStat,
+  measuredAt: IsoDateTime,
 });
 
 const CardSessionStartCommand = Schema.Struct({
@@ -2114,6 +2182,8 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   CardSpecSkipCommand,
   CardSpecReopenCommand,
   CardSpecSubmitCommand,
+  CardSnoozeCommand,
+  CardUnsnoozeCommand,
   ChannelCreateCommand,
   ChannelUpdateCommand,
   ChannelArchiveCommand,
@@ -2177,6 +2247,8 @@ export const ClientOrchestrationCommand = Schema.Union([
   CardSpecSkipCommand,
   CardSpecReopenCommand,
   CardSpecSubmitCommand,
+  CardSnoozeCommand,
+  CardUnsnoozeCommand,
   ChannelCreateCommand,
   ChannelUpdateCommand,
   ChannelArchiveCommand,
@@ -2336,6 +2408,7 @@ const InternalOrchestrationCommand = Schema.Union([
   CardSessionRecordCommand,
   CardMessageRecordCommand,
   CardDeliveryUpdateCommand,
+  CardDiffRecordCommand,
   ChannelAgentWakeCommand,
   ChannelRunStartCommand,
   ChannelMessageAgentPostCommand,
@@ -2387,6 +2460,9 @@ export const OrchestrationEventType = Schema.Literals([
   "card.delivery-updated",
   "card.spec-submitted",
   "card.spec-state-changed",
+  "card.snoozed",
+  "card.unsnoozed",
+  "card.diff-measured",
   "channel.created",
   "channel.updated",
   "channel.archived",
@@ -2625,6 +2701,23 @@ export const CardSpecSubmittedPayload = Schema.Struct({
   cardId: CardId,
   agentId: AgentId,
   submittedAt: IsoDateTime,
+});
+
+export const CardSnoozedPayload = Schema.Struct({
+  cardId: CardId,
+  snoozedUntil: Schema.NullOr(IsoDateTime),
+  snoozedAt: IsoDateTime,
+});
+
+export const CardUnsnoozedPayload = Schema.Struct({
+  cardId: CardId,
+  updatedAt: IsoDateTime,
+});
+
+export const CardDiffMeasuredPayload = Schema.Struct({
+  cardId: CardId,
+  diffStat: CardDiffStat,
+  measuredAt: IsoDateTime,
 });
 
 /** A plan gate decision and who made it; each also joins the card's decision log. */
@@ -3081,6 +3174,21 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("card.spec-state-changed"),
     payload: CardSpecStateChangedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.snoozed"),
+    payload: CardSnoozedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.unsnoozed"),
+    payload: CardUnsnoozedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.diff-measured"),
+    payload: CardDiffMeasuredPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

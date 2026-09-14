@@ -650,6 +650,25 @@ badges, diff size, plan progress, spend, children); drag only for human decision
 with a reason otherwise; the cross-project Needs you list with snooze and waiting time.
 _Accept when:_ statuses and badges update live without a refresh; an illegal drag shows its reason;
 a snoozed item returns on new card activity; no continuously repainting animation.
+_Accepted:_ cards reach clients on the shell: the snapshot carries them and a `card-upserted` event
+follows every card event and every change to a card's latest owner session. It is sent only to
+subscribers that ask with `includeCards` (server config `shellCards`), so older builds never see
+it. A card's shell carries its owner session summary (state, since, plan progress), derived from
+the run, its thread session and open requests, and a diff size recorded when an owner turn
+settles. `server.test.ts` shows a subscriber that does not ask gets no card events, and one that
+asks gets the card's update and a second one when its owner session's thread changes, after the
+agent's presence update at the same sequence. `CardSessionReactor.test.ts` checks the measured
+diff and the shell's `stale` state. The board (`/board/<environment>/<project>`) lays cards out
+Triage → Done; `cards.test.ts` covers every drop from every status: the six human decisions become
+commands and every other drop is refused with its reason, shown as a toast while the card stays
+put, and a decision the server refuses shows the server's reason. Needs you (`/needs-you`, counted
+in the sidebar) lists triage proposals, draft specs, sessions awaiting input and failed or stale
+sessions, longest waiting first with how long each has waited; a card can be snoozed for an hour,
+a day or until it changes, and woken early. A snooze ends when its time passes or when the card's
+`activityAt` passes `snoozedAt`, tested in `cards.test.ts` and `decider.cardSnooze.test.ts`; an
+item awaiting an answer is never hidden. The views use no animation beyond the drag itself. The
+board and Needs you were checked by typecheck and logic tests, not yet in a paired browser. Card
+faces show no owner until multiplayer names humans, and spend arrives with M2.7.
 
 **M2.6 — Review loop and merge queue.** Checks on `inReview`, autofix up to 3 attempts, diff
 review with comments to the delegate, approve merge, serialized landing, sub-cards into parents,

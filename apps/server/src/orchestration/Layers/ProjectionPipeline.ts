@@ -687,6 +687,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               worktreePath: null,
               portBase: null,
               relations: [],
+              snoozedUntil: null,
+              snoozedAt: null,
+              activityAt: event.payload.createdAt,
+              diffStat: null,
               createdBy: event.payload.createdBy,
               createdAt: event.payload.createdAt,
               updatedAt: event.payload.updatedAt,
@@ -702,6 +706,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               ...(payload.specState !== undefined ? { specState: payload.specState } : {}),
               ...(payload.tags !== undefined ? { tags: payload.tags } : {}),
               updatedAt: payload.updatedAt,
+              activityAt: payload.updatedAt,
             }));
             return;
           }
@@ -712,6 +717,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               ...row,
               status: payload.to,
               updatedAt: payload.updatedAt,
+              activityAt: payload.updatedAt,
             }));
             return;
           }
@@ -722,6 +728,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               ...row,
               delegateAgentId: payload.delegateAgentId,
               updatedAt: payload.updatedAt,
+              activityAt: payload.updatedAt,
             }));
             return;
           }
@@ -770,7 +777,42 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             return;
           }
 
+          case "card.snoozed": {
+            const payload = event.payload;
+            yield* patchCard(payload.cardId, (row) => ({
+              ...row,
+              snoozedUntil: payload.snoozedUntil,
+              snoozedAt: payload.snoozedAt,
+            }));
+            return;
+          }
+
+          case "card.diff-measured":
+            yield* patchCard(event.payload.cardId, (row) => ({
+              ...row,
+              diffStat: event.payload.diffStat,
+            }));
+            return;
+
+          case "card.unsnoozed":
+            yield* patchCard(event.payload.cardId, (row) => ({
+              ...row,
+              snoozedUntil: null,
+              snoozedAt: null,
+            }));
+            return;
+
+          case "card.spec-submitted": {
+            const payload = event.payload;
+            yield* patchCard(payload.cardId, (row) => ({ ...row, activityAt: payload.submittedAt }));
+            return;
+          }
+
           case "card.message-posted":
+            yield* patchCard(event.payload.cardId, (row) => ({
+              ...row,
+              activityAt: event.payload.createdAt,
+            }));
             yield* projectionCardRepository.appendMessage({
               messageId: event.payload.messageId,
               cardId: event.payload.cardId,
@@ -795,6 +837,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               ...row,
               specState: payload.to,
               updatedAt: payload.updatedAt,
+              activityAt: payload.updatedAt,
             }));
             yield* projectionCardRepository.appendDecision({
               decisionId: `spec-state:${event.eventId}`,
@@ -811,6 +854,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           }
 
           case "card.decision-recorded":
+            yield* patchCard(event.payload.cardId, (row) => ({
+              ...row,
+              activityAt: event.payload.createdAt,
+            }));
             yield* projectionCardRepository.appendDecision({
               decisionId: event.payload.decisionId,
               cardId: event.payload.cardId,
@@ -910,6 +957,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
 
         case "card.session-started":
+          yield* patchCard(event.payload.cardId, (row) => ({
+            ...row,
+            activityAt: event.payload.startedAt,
+          }));
           yield* projectionChannelRepository.insertRun({
             ...event.payload,
             channelId: null,

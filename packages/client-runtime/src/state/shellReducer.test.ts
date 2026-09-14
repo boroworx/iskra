@@ -67,7 +67,28 @@ describe("applyShellStreamEvent", () => {
     }
   });
 
-  describe("agents and channels", () => {
+  describe("cards", () => {
+  it("applies a card update that shares its sequence with the agent update before it", () => {
+    const base = { snapshotSequence: 4, projects: [], threads: [], updatedAt: "2026-01-01T00:00:00.000Z" };
+    const card = {
+      id: "card-1",
+      title: "Rate limiting",
+    } as unknown as NonNullable<OrchestrationShellSnapshot["cards"]>[number];
+    const upserted = applyShellStreamEvent(base, { kind: "card-upserted", sequence: 4, card });
+    expect(upserted.cards).toEqual([card]);
+    const renamed = { ...card, title: "Rate limits" };
+    expect(
+      applyShellStreamEvent(upserted, { kind: "card-upserted", sequence: 5, card: renamed }).cards,
+    ).toEqual([renamed]);
+    expect(applyShellStreamEvent({ ...upserted, snapshotSequence: 6 }, {
+      kind: "card-upserted",
+      sequence: 5,
+      card: renamed,
+    }).cards).toEqual([card]);
+  });
+});
+
+describe("agents and channels", () => {
     const agent = {
       id: AgentId.make("agent-1"),
       projectId: ProjectId.make("project-1"),

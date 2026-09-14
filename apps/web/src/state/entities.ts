@@ -14,6 +14,7 @@ import type {
   ScopedProjectRef,
   ScopedThreadRef,
   ServerConfig,
+  OrchestrationCardShell,
 } from "@iskra/contracts";
 import type { EnvironmentId } from "@iskra/contracts";
 import { Atom } from "effect/unstable/reactivity";
@@ -49,6 +50,9 @@ const EMPTY_AGENTS_ATOM = Atom.make<ReadonlyArray<OrchestrationAgentShell>>([]).
 );
 const EMPTY_CHANNELS_ATOM = Atom.make<ReadonlyArray<OrchestrationChannelShell>>([]).pipe(
   Atom.withLabel("web-channels:empty"),
+);
+const EMPTY_CARDS_ATOM = Atom.make<ReadonlyArray<OrchestrationCardShell>>([]).pipe(
+  Atom.withLabel("web-cards:empty"),
 );
 
 const activeEnvironmentIdAtom = Atom.make<EnvironmentId | null>(null).pipe(
@@ -101,6 +105,17 @@ export function useEnvironmentChannels(
     environmentId === null
       ? EMPTY_CHANNELS_ATOM
       : environmentAgentChannels.environmentChannelsAtom(environmentId),
+  );
+}
+
+/** An environment's cards with their owner sessions; empty when it has none or cannot send them. */
+export function useEnvironmentCards(
+  environmentId: EnvironmentId | null,
+): ReadonlyArray<OrchestrationCardShell> {
+  return useAtomValue(
+    environmentId === null
+      ? EMPTY_CARDS_ATOM
+      : environmentAgentChannels.environmentCardsAtom(environmentId),
   );
 }
 

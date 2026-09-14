@@ -75,6 +75,7 @@ import {
   AGENT_RUNS_LIMIT,
   CHANNEL_SUBSCRIBE_MESSAGE_LIMIT,
   type OrchestrationChannelStreamItem,
+  CardId,
 } from "@iskra/contracts";
 import { resolveServerBackgroundActivitySettings } from "@iskra/shared/backgroundActivitySettings";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
@@ -815,6 +816,8 @@ const makeWsRpcLayer = (
                 return agentUpsertOrRemove(AgentId.make(event.aggregateId), event.sequence);
               case "channel":
                 return channelUpsertOrRemove(ChannelId.make(event.aggregateId), event.sequence);
+              case "card":
+                return cardUpsert(CardId.make(event.aggregateId), event.sequence);
               case "thread":
                 return threadOrRunPresence(ThreadId.make(event.aggregateId), event.sequence);
               default:
@@ -929,6 +932,50 @@ const makeWsRpcLayer = (
           ),
         );
 
+      // A card is never deleted, so a card with no row emits nothing.
+      const cardUpsert = (
+        cardId: CardId,
+        sequence: number,
+      ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> =>
+        retryShellProjectionRead(
+          "card",
+          cardId,
+          projectionSnapshotQuery.getCardShellById(cardId),
+        ).pipe(
+          Effect.map(
+            Option.flatMap((card) =>
+              Option.map(
+                card,
+                (nextCard): OrchestrationShellStreamEvent => ({
+                  kind: "card-upserted",
+                  sequence,
+                  card: nextCard,
+                }),
+              ),
+            ),
+          ),
+        );
+
+      // An owner session's thread changing also changes its card's face.
+      const ownerCardUpsert = (
+        threadId: ThreadId,
+        sequence: number,
+      ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> =>
+        retryShellProjectionRead(
+          "thread",
+          threadId,
+          projectionSnapshotQuery.getRunByThreadId(threadId),
+        ).pipe(
+          Effect.flatMap((run) =>
+            Option.isSome(run) &&
+            Option.isSome(run.value) &&
+            run.value.value.role === "owner" &&
+            run.value.value.cardId !== null
+              ? cardUpsert(run.value.value.cardId, sequence)
+              : Effect.succeed(Option.none<OrchestrationShellStreamEvent>()),
+          ),
+        );
+
       // A run thread never reaches the thread list; its activity changes its agent's presence.
       const threadOrRunPresence = (
         threadId: ThreadId,
@@ -1023,7 +1070,15 @@ const makeWsRpcLayer = (
           const shellEvents = yield* Effect.forEach(survivors, toShellStreamEvent, {
             concurrency: SHELL_REFETCH_CONCURRENCY,
           });
-          return shellEvents.flatMap((option) => (Option.isSome(option) ? [option.value] : []));
+          const cardFollowUps = yield* Effect.forEach(
+            survivors.filter((event) => event.aggregateKind === "thread"),
+            (event) => ownerCardUpsert(ThreadId.make(event.aggregateId), event.sequence),
+            { concurrency: SHELL_REFETCH_CONCURRENCY },
+          );
+          // A stable sort keeps a card's update after the agent update sharing its sequence.
+          return [...shellEvents, ...cardFollowUps]
+            .flatMap((option) => (Option.isSome(option) ? [option.value] : []))
+            .toSorted((left, right) => left.sequence - right.sequence);
         });
 
       // Small time/size window over which to coalesce shell events. The window
@@ -1398,6 +1453,7 @@ const makeWsRpcLayer = (
             settings,
             shellResumeCompletionMarker: true,
             shellAgentChannels: true,
+            shellCards: true,
             ...(fileManagerRevealKind === undefined
               ? {}
               : {
@@ -1568,12 +1624,19 @@ const makeWsRpcLayer = (
                 "channel-upserted",
                 "channel-removed",
               ]);
+              const cardKinds = new Set(["card-upserted"]);
               const withoutUnrequestedKinds = <A extends { readonly kind: string }, E, R>(
                 stream: Stream.Stream<A, E, R>,
               ): Stream.Stream<A, E, R> =>
-                input.includeAgentChannels === true
+                input.includeAgentChannels === true && input.includeCards === true
                   ? stream
-                  : stream.pipe(Stream.filter((item) => !agentChannelKinds.has(item.kind)));
+                  : stream.pipe(
+                      Stream.filter(
+                        (item) =>
+                          (input.includeAgentChannels === true || !agentChannelKinds.has(item.kind)) &&
+                          (input.includeCards === true || !cardKinds.has(item.kind)),
+                      ),
+                    );
 
               const liveBudget = yield* makeLiveStreamBudget();
               const liveBuffer = yield* Queue.unbounded<

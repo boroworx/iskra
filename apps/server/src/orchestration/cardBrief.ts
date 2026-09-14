@@ -1,5 +1,6 @@
 import type {
   CardAuthor,
+  CardDiffStat,
   CardBriefPayload,
   CardSessionRole,
   OrchestrationAgent,
@@ -118,6 +119,23 @@ export function renderCardBrief(brief: CardBriefPayload): RenderedRunContext {
     systemPrompt,
     firstMessage: firstMessage.filter((part) => part.length > 0).join("\n\n"),
   };
+}
+
+/** Counts files and changed lines in a unified diff. */
+export function diffStatOf(diff: string): CardDiffStat {
+  let files = 0;
+  let additions = 0;
+  let deletions = 0;
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("diff --git ")) {
+      files += 1;
+    } else if (line.startsWith("+") && !line.startsWith("+++ ")) {
+      additions += 1;
+    } else if (line.startsWith("-") && !line.startsWith("--- ")) {
+      deletions += 1;
+    }
+  }
+  return { files, additions, deletions };
 }
 
 /** Card messages waiting for the owner, as the text of its next turn. */
