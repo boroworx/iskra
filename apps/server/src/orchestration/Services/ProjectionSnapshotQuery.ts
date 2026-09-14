@@ -37,6 +37,8 @@ import type {
   OrchestrationThreadShell,
   ProjectId,
   ThreadId,
+  CardActivity,
+  CardEvidenceItem,
 } from "@iskra/contracts";
 import * as Context from "effect/Context";
 import type * as Option from "effect/Option";
@@ -247,6 +249,21 @@ export interface ProjectionSnapshotQueryShape {
   readonly listArchivedChannels: (
     projectId: ProjectId,
   ) => Effect.Effect<ReadonlyArray<OrchestrationArchivedChannel>, ProjectionRepositoryError>;
+
+  /** A card's newest `limit` activities, oldest first, and the items of its latest evidence. */
+  readonly getCardActivity: (
+    cardId: CardId,
+    limit: number,
+  ) => Effect.Effect<
+    {
+      readonly activities: ReadonlyArray<CardActivity>;
+      readonly evidence: {
+        readonly evidenceId: string;
+        readonly items: ReadonlyArray<CardEvidenceItem>;
+      } | null;
+    },
+    ProjectionRepositoryError
+  >;
 
   /** A channel's newest `limit` messages, oldest first. */
   readonly listChannelMessages: (

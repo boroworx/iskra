@@ -46,6 +46,7 @@ export const ORCHESTRATION_WS_METHODS = {
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
   subscribeChannel: "orchestration.subscribeChannel",
+  subscribeCard: "orchestration.subscribeCard",
   listAgentRuns: "orchestration.listAgentRuns",
   getCardDiff: "orchestration.getCardDiff",
   saveAgentDefinition: "orchestration.saveAgentDefinition",
@@ -4639,6 +4640,47 @@ export const OrchestrationChannelStreamItem = Schema.Union([
 ]);
 export type OrchestrationChannelStreamItem = typeof OrchestrationChannelStreamItem.Type;
 
+/** How many of a card's newest activities a card subscription starts with. */
+export const CARD_SUBSCRIBE_ACTIVITY_LIMIT = 200;
+
+export const OrchestrationSubscribeCardInput = Schema.Struct({
+  cardId: CardId,
+});
+export type OrchestrationSubscribeCardInput = typeof OrchestrationSubscribeCardInput.Type;
+
+/** The items of one evidence recording, as a card subscription carries them. */
+const CardEvidenceRecording = Schema.Struct({
+  evidenceId: TrimmedNonEmptyString,
+  items: Schema.Array(CardEvidenceItem),
+});
+
+/**
+ * A card subscription, opened only while a card is on screen: its newest activities and the items
+ * of its latest evidence, then each activity as it is recorded, each change in an activity's
+ * delivery and each new recording. An activity can arrive in both; clients keep one per id.
+ */
+export const OrchestrationCardStreamItem = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("snapshot"),
+    activities: Schema.Array(CardActivity),
+    evidence: Schema.NullOr(CardEvidenceRecording),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("activity"),
+    activity: CardActivity,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("delivery"),
+    activityId: TrimmedNonEmptyString,
+    delivery: ChannelDeliveryStatus,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("evidence"),
+    ...CardEvidenceRecording.fields,
+  }),
+]);
+export type OrchestrationCardStreamItem = typeof OrchestrationCardStreamItem.Type;
+
 export const OrchestrationRpcSchemas = {
   dispatchCommand: {
     input: ClientOrchestrationCommand,
@@ -4675,6 +4717,10 @@ export const OrchestrationRpcSchemas = {
   subscribeChannel: {
     input: OrchestrationSubscribeChannelInput,
     output: OrchestrationChannelStreamItem,
+  },
+  subscribeCard: {
+    input: OrchestrationSubscribeCardInput,
+    output: OrchestrationCardStreamItem,
   },
   listAgentRuns: {
     input: OrchestrationListAgentRunsInput,

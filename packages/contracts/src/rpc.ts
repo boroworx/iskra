@@ -1256,6 +1256,13 @@ const WsOrchestrationSubscribeChannelRpc = Rpc.make(ORCHESTRATION_WS_METHODS.sub
   stream: true,
 });
 
+const WsOrchestrationSubscribeCardRpc = Rpc.make(ORCHESTRATION_WS_METHODS.subscribeCard, {
+  payload: OrchestrationRpcSchemas.subscribeCard.input,
+  success: OrchestrationRpcSchemas.subscribeCard.output,
+  error: Schema.Union([OrchestrationGetSnapshotError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
 const WsOrchestrationGetCardDiffRpc = Rpc.make(ORCHESTRATION_WS_METHODS.getCardDiff, {
   payload: OrchestrationRpcSchemas.getCardDiff.input,
   success: OrchestrationRpcSchemas.getCardDiff.output,
@@ -1517,6 +1524,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationSubscribeShellRpc,
   WsOrchestrationSubscribeThreadRpc,
   WsOrchestrationSubscribeChannelRpc,
+  WsOrchestrationSubscribeCardRpc,
   WsOrchestrationListAgentRunsRpc,
   WsOrchestrationGetCardDiffRpc,
   WsOrchestrationSaveAgentDefinitionRpc,

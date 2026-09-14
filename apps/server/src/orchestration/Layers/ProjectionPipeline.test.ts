@@ -5476,6 +5476,7 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
         agentById: yield* snapshotQuery.getAgentById(api),
         agentShellById: yield* snapshotQuery.getAgentShellById(web),
         cardShellById: yield* snapshotQuery.getCardShellById(card1),
+        cardActivity: yield* snapshotQuery.getCardActivity(card1, 3),
         channelShellById: yield* snapshotQuery.getChannelShellById(general),
         channelMessages: yield* snapshotQuery.listChannelMessages(general, 10),
         runsByAgent: yield* snapshotQuery.listRunsByAgent(api, 10),

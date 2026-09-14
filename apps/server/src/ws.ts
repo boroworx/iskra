@@ -76,6 +76,8 @@ import {
   ChannelId,
   AGENT_RUNS_LIMIT,
   CHANNEL_SUBSCRIBE_MESSAGE_LIMIT,
+  CARD_SUBSCRIBE_ACTIVITY_LIMIT,
+  type OrchestrationCardStreamItem,
   type OrchestrationChannelStreamItem,
   CardId,
 } from "@iskra/contracts";
@@ -102,6 +104,7 @@ import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngi
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as AgentDefinitionSync from "./orchestration/AgentDefinitionSync.ts";
 import * as CardWorkspace from "./orchestration/CardWorkspace.ts";
+import { cardActivitiesOf } from "./orchestration/cardRules.ts";
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor.ts";
 import {
   observeRpcEffect as instrumentRpcEffect,
@@ -2315,6 +2318,57 @@ const makeWsRpcLayer = (
                 );
               return Stream.concat(
                 Stream.make({ kind: "snapshot" as const, messages }),
+                Stream.fromQueue(live),
+              );
+            }),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.subscribeCard]: (input) =>
+          observeRpcStreamEffect(
+            ORCHESTRATION_WS_METHODS.subscribeCard,
+            Effect.gen(function* () {
+              // Attach live events before reading the snapshot so nothing recorded meanwhile is
+              // lost; an activity can then arrive twice, and clients keep one per id.
+              const live = yield* Queue.unbounded<OrchestrationCardStreamItem>();
+              yield* Effect.forkScoped(
+                orchestrationEngine.streamDomainEvents.pipe(
+                  Stream.runForEach((event) => {
+                    if (event.aggregateKind !== "card" || event.aggregateId !== input.cardId) {
+                      return Effect.void;
+                    }
+                    const items: Array<OrchestrationCardStreamItem> = cardActivitiesOf(event).map(
+                      (activity) => ({ kind: "activity", activity }),
+                    );
+                    if (event.type === "card.delivery-updated") {
+                      for (const activityId of event.payload.messageIds) {
+                        items.push({ kind: "delivery", activityId, delivery: event.payload.status });
+                      }
+                    }
+                    if (event.type === "card.evidence-recorded") {
+                      items.push({
+                        kind: "evidence",
+                        evidenceId: event.payload.evidenceId,
+                        items: event.payload.items,
+                      });
+                    }
+                    return items.length === 0 ? Effect.void : Queue.offerAll(live, items);
+                  }),
+                ),
+                { startImmediately: true },
+              );
+              const snapshot = yield* projectionSnapshotQuery
+                .getCardActivity(input.cardId, CARD_SUBSCRIBE_ACTIVITY_LIMIT)
+                .pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new OrchestrationGetSnapshotError({
+                        message: `Failed to load the activity of card ${input.cardId}`,
+                        cause,
+                      }),
+                  ),
+                );
+              return Stream.concat(
+                Stream.make({ kind: "snapshot" as const, ...snapshot }),
                 Stream.fromQueue(live),
               );
             }),

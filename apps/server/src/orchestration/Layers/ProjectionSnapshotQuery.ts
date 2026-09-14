@@ -78,7 +78,11 @@ import {
 } from "../../persistence/Services/ProjectionChannels.ts";
 import {
   PROJECTION_CARD_COLUMNS,
+  PROJECTION_CARD_ACTIVITY_COLUMNS,
+  PROJECTION_CARD_EVIDENCE_COLUMNS,
+  ProjectionCardActivity,
   ProjectionCardDbRow,
+  ProjectionCardEvidenceDbRow,
 } from "../../persistence/Services/ProjectionCards.ts";
 import { ProjectionProject } from "../../persistence/Services/ProjectionProjects.ts";
 import { ProjectionState } from "../../persistence/Services/ProjectionState.ts";
@@ -4134,6 +4138,67 @@ pending_approval_requests AS (
       }),
     );
 
+  const listCardActivityRows = SqlSchema.findAll({
+    Request: Schema.Struct({ cardId: Schema.String, limit: Schema.Number }),
+    Result: ProjectionCardActivity,
+    execute: ({ cardId, limit }) =>
+      sql`
+        SELECT * FROM (
+          SELECT ${sql.literal(PROJECTION_CARD_ACTIVITY_COLUMNS)}, rowid AS "activityRowid"
+          FROM projection_card_activities
+          WHERE card_id = ${cardId}
+          ORDER BY created_at DESC, rowid DESC
+          LIMIT ${limit}
+        )
+        ORDER BY "createdAt" ASC, "activityRowid" ASC
+      `,
+  });
+
+  // The items of the card's latest recording, the one its face summarizes.
+  const listLatestCardEvidenceRows = SqlSchema.findAll({
+    Request: Schema.Struct({ cardId: Schema.String }),
+    Result: ProjectionCardEvidenceDbRow,
+    execute: ({ cardId }) =>
+      sql`
+        SELECT ${sql.literal(PROJECTION_CARD_EVIDENCE_COLUMNS)}
+        FROM projection_card_evidence
+        WHERE card_id = ${cardId}
+          AND evidence_id = (
+            SELECT json_extract(evidence_json, '$.evidenceId')
+            FROM projection_cards
+            WHERE card_id = ${cardId}
+          )
+        ORDER BY rowid ASC
+      `,
+  });
+
+  const getCardActivity: ProjectionSnapshotQueryShape["getCardActivity"] = (cardId, limit) =>
+    Effect.all([listCardActivityRows({ cardId, limit }), listLatestCardEvidenceRows({ cardId })]).pipe(
+      Effect.mapError(queryError("getCardActivity")),
+      Effect.map(([activityRows, evidenceRows]) => ({
+        activities: activityRows.map((row) => Struct.omit(row, ["deliveryThreadId"])),
+        evidence:
+          evidenceRows[0] === undefined
+            ? null
+            : {
+                evidenceId: evidenceRows[0].evidenceId,
+                items: evidenceRows.map((row) => ({
+                  itemId: row.itemId,
+                  kind: row.kind,
+                  source: row.source,
+                  name: row.name,
+                  criterionId: row.criterionId,
+                  exitCode: row.exitCode,
+                  timedOut: row.timedOut === 1,
+                  durationMs: row.durationMs,
+                  logTail: row.logTail,
+                  artifactPath: row.artifactPath,
+                  unavailable: row.unavailable,
+                })),
+              },
+      })),
+    );
+
   const getAgentById: ProjectionSnapshotQueryShape["getAgentById"] = (agentId) =>
     listAgentRows({ agentId }).pipe(
       Effect.mapError(queryError("getAgentById")),
@@ -4195,6 +4260,7 @@ pending_approval_requests AS (
     getChannelShellById,
     listArchivedChannels,
     getCardShellById,
+    getCardActivity,
     listChannelMessages,
     listRunsByAgent,
     getAgentById,

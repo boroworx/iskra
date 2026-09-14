@@ -225,6 +225,25 @@ export const ProjectionCardActivity = Schema.Struct({
 });
 export type ProjectionCardActivity = typeof ProjectionCardActivity.Type;
 
+/** The `projection_card_activities` columns as `ProjectionCardActivity` reads them. */
+export const PROJECTION_CARD_ACTIVITY_COLUMNS = `
+  activity_id AS "activityId",
+  card_id AS "cardId",
+  kind,
+  author_json AS "author",
+  body,
+  run_thread_id AS "runThreadId",
+  deliver_to AS "deliverTo",
+  delivery_status AS "delivery",
+  elicitation_json AS "elicitation",
+  answers_json AS "answers",
+  status_json AS "status",
+  evidence_id AS "evidenceId",
+  reason_json AS "reason",
+  created_at AS "createdAt",
+  delivery_thread_id AS "deliveryThreadId"
+`;
+
 /** One captured evidence item, with the recording it belongs to. */
 export const ProjectionCardEvidenceItem = Schema.Struct({
   ...CardEvidenceItem.fields,
@@ -236,6 +255,31 @@ export const ProjectionCardEvidenceItem = Schema.Struct({
   createdAt: IsoDateTime,
 });
 export type ProjectionCardEvidenceItem = typeof ProjectionCardEvidenceItem.Type;
+
+/** An evidence row as selected: SQLite stores `timedOut` as 0 or 1. */
+export const ProjectionCardEvidenceDbRow = ProjectionCardEvidenceItem.mapFields(
+  Struct.assign({ timedOut: Schema.Number }),
+);
+
+/** The `projection_card_evidence` columns as `ProjectionCardEvidenceDbRow` reads them. */
+export const PROJECTION_CARD_EVIDENCE_COLUMNS = `
+  item_id AS "itemId",
+  kind,
+  source,
+  name,
+  criterion_id AS "criterionId",
+  exit_code AS "exitCode",
+  timed_out AS "timedOut",
+  duration_ms AS "durationMs",
+  log_tail AS "logTail",
+  artifact_path AS "artifactPath",
+  unavailable_json AS "unavailable",
+  evidence_id AS "evidenceId",
+  card_id AS "cardId",
+  head_sha AS "headSha",
+  purpose,
+  created_at AS "createdAt"
+`;
 
 /** One priced turn of a card session, so spend sums by card and by agent. */
 export const ProjectionCardSpend = Schema.Struct({

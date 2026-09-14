@@ -2,8 +2,6 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Schema from "effect/Schema";
-import * as Struct from "effect/Struct";
 import { CardDeliveryUpdatedPayload } from "@iskra/contracts";
 
 import { toPersistenceSqlError } from "../Errors.ts";
@@ -11,39 +9,20 @@ import {
   GetProjectionCardInput,
   ListProjectionCardActivitiesInput,
   ListProjectionCardEvidenceInput,
+  PROJECTION_CARD_ACTIVITY_COLUMNS,
   PROJECTION_CARD_COLUMNS,
+  PROJECTION_CARD_EVIDENCE_COLUMNS,
   ProjectionCardActivity,
   ProjectionCardDbRow,
   ProjectionCardDecision,
   ProjectionCardDecisionDbRow,
+  ProjectionCardEvidenceDbRow,
   ProjectionCardEvidenceItem,
   ProjectionCardMessage,
   ProjectionCardRepository,
   ProjectionCardSpend,
   type ProjectionCardRepositoryShape,
 } from "../Services/ProjectionCards.ts";
-
-const ProjectionCardEvidenceDbRow = ProjectionCardEvidenceItem.mapFields(
-  Struct.assign({ timedOut: Schema.Number }),
-);
-
-const PROJECTION_CARD_ACTIVITY_COLUMNS = `
-  activity_id AS "activityId",
-  card_id AS "cardId",
-  kind,
-  author_json AS "author",
-  body,
-  run_thread_id AS "runThreadId",
-  deliver_to AS "deliverTo",
-  delivery_status AS "delivery",
-  elicitation_json AS "elicitation",
-  answers_json AS "answers",
-  status_json AS "status",
-  evidence_id AS "evidenceId",
-  reason_json AS "reason",
-  created_at AS "createdAt",
-  delivery_thread_id AS "deliveryThreadId"
-`;
 
 const makeProjectionCardRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -470,23 +449,7 @@ const makeProjectionCardRepository = Effect.gen(function* () {
     Result: ProjectionCardEvidenceDbRow,
     execute: ({ cardId, evidenceId }) =>
       sql`
-        SELECT
-          item_id AS "itemId",
-          kind,
-          source,
-          name,
-          criterion_id AS "criterionId",
-          exit_code AS "exitCode",
-          timed_out AS "timedOut",
-          duration_ms AS "durationMs",
-          log_tail AS "logTail",
-          artifact_path AS "artifactPath",
-          unavailable_json AS "unavailable",
-          evidence_id AS "evidenceId",
-          card_id AS "cardId",
-          head_sha AS "headSha",
-          purpose,
-          created_at AS "createdAt"
+        SELECT ${sql.literal(PROJECTION_CARD_EVIDENCE_COLUMNS)}
         FROM projection_card_evidence
         WHERE card_id = ${cardId} AND evidence_id = ${evidenceId}
         ORDER BY rowid ASC
