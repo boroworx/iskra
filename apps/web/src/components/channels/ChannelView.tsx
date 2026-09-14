@@ -8,7 +8,7 @@ import {
   type OrchestrationChannelMessage,
   type OrchestrationChannelShell,
 } from "@iskra/contracts";
-import { HashIcon } from "lucide-react";
+import { HashIcon, SettingsIcon } from "lucide-react";
 import { memo, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { collapseExpandedComposerCursor, replaceTextRange } from "~/composer-logic";
@@ -38,6 +38,7 @@ import {
   type AgentEntry,
   type ChannelMessageRow,
 } from "./channels.logic";
+import { ChannelSettingsDialog } from "./ChannelSettingsDialog";
 import { RunBlock } from "./RunBlock";
 
 /** One channel: its messages, a composer, and who is in it. */
@@ -73,13 +74,15 @@ export function ChannelView(props: {
   );
   const title = channel?.name ?? "";
   const postMessage = useAtomCommand(channelEnvironment.postMessage);
+  const unarchive = useAtomCommand(channelEnvironment.unarchive);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <WorkspacePageHeader className="border-b border-border">
           {channel === null ? null : (
-            <div className="flex min-w-0 items-center gap-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
               <HashIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
               <h1 className="truncate text-sm font-semibold">{title}</h1>
               {channel.topic.length > 0 ? (
@@ -87,14 +90,59 @@ export function ChannelView(props: {
                   {channel.topic}
                 </span>
               ) : null}
+              {channel.kind === "channel" ? (
+                <>
+                  {/* Below lg the members panel is hidden: its members and lead live in settings. */}
+                  <Button
+                    size="compact"
+                    variant="ghost-muted"
+                    className="ml-auto lg:hidden"
+                    onClick={() => setSettingsOpen(true)}
+                  >
+                    {members.length} {members.length === 1 ? "member" : "members"}
+                  </Button>
+                  <Button
+                    size="icon-sm"
+                    variant="ghost-muted"
+                    className="lg:ml-auto"
+                    aria-label="Channel settings"
+                    onClick={() => setSettingsOpen(true)}
+                  >
+                    <SettingsIcon />
+                  </Button>
+                </>
+              ) : null}
             </div>
           )}
         </WorkspacePageHeader>
+        {channel !== null && settingsOpen ? (
+          <ChannelSettingsDialog
+            open
+            onOpenChange={setSettingsOpen}
+            environmentId={props.environmentId}
+            channel={channel}
+          />
+        ) : null}
         {channel === null ? (
           channels.length > 0 ? (
-            <p className="px-5 py-4 text-sm text-muted-foreground">
-              This channel is archived or no longer exists.
-            </p>
+            // Archived channels leave the shell, so the page is where one comes back.
+            <div className="flex flex-wrap items-center gap-3 px-5 py-4">
+              <p className="text-sm text-muted-foreground">
+                This channel is archived or no longer exists.
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  void unarchive({
+                    environmentId: props.environmentId,
+                    input: { channelId: props.channelId },
+                  })
+                }
+              >
+                Unarchive
+              </Button>
+            </div>
           ) : null
         ) : (
           <div className="flex min-h-0 flex-1">

@@ -34,6 +34,7 @@ import {
   presenceLabel,
 } from "./channels/channels.logic";
 import { AgentSettingsDialog, useAgentDefinitions } from "./channels/AgentSettingsDialog";
+import { ChannelSettingsDialog } from "./channels/ChannelSettingsDialog";
 import { CreateAgentDialog } from "./channels/CreateAgentDialog";
 import { CreateChannelDialog } from "./channels/CreateChannelDialog";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
@@ -198,6 +199,8 @@ const ProjectChannels = memo(function ProjectChannels(props: {
   );
   const agentEntries = useMemo(() => agentListEntries(agents, projectId), [agents, projectId]);
   const [settingsAgentId, setSettingsAgentId] = useState<AgentId | null>(null);
+  const [settingsChannelId, setSettingsChannelId] = useState<ChannelId | null>(null);
+  const settingsChannel = channels.find((channel) => channel.id === settingsChannelId) ?? null;
 
   return (
     <>
@@ -231,6 +234,14 @@ const ProjectChannels = memo(function ProjectChannels(props: {
               <HashIcon />
               <span className="truncate">{entry.name}</span>
             </SidebarMenuButton>
+            <button
+              type="button"
+              aria-label={`#${entry.name} settings`}
+              onClick={() => setSettingsChannelId(entry.id)}
+              className="absolute top-1 right-1 flex size-6 items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 outline-hidden ring-ring group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100 hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-2 [&>svg]:size-3.5"
+            >
+              <SettingsIcon />
+            </button>
           </SidebarMenuItem>
         ))}
       </SidebarListGroup>
@@ -288,6 +299,16 @@ const ProjectChannels = memo(function ProjectChannels(props: {
           environmentId={environmentId}
           projectId={projectId}
           agentId={settingsAgentId}
+        />
+      )}
+      {settingsChannel === null ? null : (
+        <ChannelSettingsDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setSettingsChannelId(null);
+          }}
+          environmentId={environmentId}
+          channel={settingsChannel}
         />
       )}
       <CreateChannelDialog
