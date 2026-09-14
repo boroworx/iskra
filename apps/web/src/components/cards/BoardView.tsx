@@ -27,14 +27,17 @@ import {
   useSensors,
   type DragEndEvent,
 } from "@dnd-kit/core";
-import { Link } from "@tanstack/react-router";
-import { memo, useMemo, useState } from "react";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { PlusIcon } from "lucide-react";
+import { memo, useCallback, useMemo, useState } from "react";
 
 import { cn } from "~/lib/utils";
 import { cardEnvironment } from "~/state/cards";
 import { useEnvironmentAgents, useEnvironmentCards, useProjects } from "~/state/entities";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { NewCardDialog } from "./NewCardDialog";
 import { SidebarInset } from "../ui/sidebar";
 import { toastManager } from "../ui/toast";
 import { toastCommandFailure } from "../toastCommandFailure";
@@ -57,7 +60,11 @@ function relatedCards(cards: ReadonlyArray<OrchestrationCardShell>) {
   const blocked = new Set<CardId>();
   const subCards = new Map<CardId, ReadonlyArray<OrchestrationCardShell>>();
   for (const card of cards) {
-    if (card.relations.some((relation) => relation.kind === "blockedBy" && !landed.has(relation.cardId))) {
+    if (
+      card.relations.some(
+        (relation) => relation.kind === "blockedBy" && !landed.has(relation.cardId),
+      )
+    ) {
       blocked.add(card.id);
     }
     if (card.parentCardId !== null) {
@@ -75,7 +82,20 @@ function relatedCards(cards: ReadonlyArray<OrchestrationCardShell>) {
 export function BoardView(props: {
   readonly environmentId: EnvironmentId;
   readonly projectId: ProjectId;
+  /** The card whose sheet is open, from the route's `card` search param. */
+  readonly openCardId: CardId | null;
 }) {
+  const navigate = useNavigate();
+  const [newCardOpen, setNewCardOpen] = useState(false);
+  const openCard = useCallback(
+    (cardId: CardId | null) =>
+      void navigate({
+        to: "/board/$environmentId/$projectId",
+        params: { environmentId: props.environmentId, projectId: props.projectId },
+        search: cardId === null ? {} : { card: cardId },
+      }),
+    [navigate, props.environmentId, props.projectId],
+  );
   const projects = useProjects();
   const project = projects.find(
     (entry) => entry.environmentId === props.environmentId && entry.id === props.projectId,
@@ -134,22 +154,57 @@ export function BoardView(props: {
           <h1 className="truncate text-sm font-semibold">
             {project === undefined ? "Board" : `${project.title} board`}
           </h1>
+          <Button
+            className="ml-auto"
+            size="sm"
+            variant="outline"
+            onClick={() => setNewCardOpen(true)}
+          >
+            <PlusIcon />
+            New card
+          </Button>
         </WorkspacePageHeader>
-        <DndContext sensors={sensors} onDragEnd={(event) => void onDragEnd(event)}>
-          <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto px-5 py-4">
-            {BOARD_COLUMNS.map((column) => (
-              <BoardColumnView
-                key={column}
-                column={column}
-                cards={columns.get(column) ?? []}
-                related={related}
-                agents={agents}
-                now={now}
-                environmentId={props.environmentId}
-              />
-            ))}
-          </div>
-        </DndContext>
+        <NewCardDialog
+          open={newCardOpen}
+          onOpenChange={setNewCardOpen}
+          environmentId={props.environmentId}
+          projectId={props.projectId}
+          onCreated={openCard}
+        />
+        {cards.length === 0 ? (
+          <main className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-5 text-center">
+            <div className="flex max-w-md flex-col gap-1 text-sm text-muted-foreground">
+              <p className="font-medium text-foreground">No cards yet</p>
+              <p>
+                A card is one piece of work on its own branch. It moves Triage → Ready → In progress
+                → Review → Landing → Done.
+              </p>
+              <p>
+                You approve it, assign an agent, and approve the merge; the rest moves on its own.
+              </p>
+            </div>
+            <Button size="sm" onClick={() => setNewCardOpen(true)}>
+              <PlusIcon />
+              New card
+            </Button>
+          </main>
+        ) : (
+          <DndContext sensors={sensors} onDragEnd={(event) => void onDragEnd(event)}>
+            <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto px-5 py-4">
+              {BOARD_COLUMNS.map((column) => (
+                <BoardColumnView
+                  key={column}
+                  column={column}
+                  cards={columns.get(column) ?? []}
+                  related={related}
+                  agents={agents}
+                  now={now}
+                  environmentId={props.environmentId}
+                />
+              ))}
+            </div>
+          </DndContext>
+        )}
       </div>
     </SidebarInset>
   );
@@ -225,7 +280,8 @@ const CardFace = memo(function CardFace(props: {
           : [`Checks failed ${card.checks.failedRuns}/${CARD_AUTOFIX_ATTEMPTS}`, true],
     );
   }
-  if (card.spentUsd >= card.budgetCapUsd && card.status !== "landed") badges.push(["Budget reached", true]);
+  if (card.spentUsd >= card.budgetCapUsd && card.status !== "landed")
+    badges.push(["Budget reached", true]);
   if (card.unpricedTurns > 0 && !card.acceptsUnpriced) badges.push(["Unpriced model", true]);
 
   return (
@@ -255,7 +311,9 @@ const CardFace = memo(function CardFace(props: {
               key={label}
               className={cn(
                 "rounded px-1.5 py-0.5 text-[11px] leading-none",
-                alarming ? "bg-destructive/15 text-destructive-foreground" : "bg-muted text-muted-foreground",
+                alarming
+                  ? "bg-destructive/15 text-destructive-foreground"
+                  : "bg-muted text-muted-foreground",
               )}
             >
               {label}
