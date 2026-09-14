@@ -2562,7 +2562,6 @@ const CardDecisionRecordCommand = Schema.Struct({
 
 // Server-only: dispatched by the session reactor, agent tools, checks and the merge queue.
 const CardWorkStartCommand = cardStatusCommand("card.work.start");
-const CardReviewRequestCommand = cardStatusCommand("card.review.request");
 const CardLandCommand = Schema.Struct({
   ...cardStatusCommand("card.land").fields,
   // The merged pull request, when a person merged it on the host rather than through Iskra.
@@ -2762,16 +2761,6 @@ const CardProposeCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
-const CardDecisionAgentRecordCommand = Schema.Struct({
-  type: Schema.Literal("card.decision.agent.record"),
-  commandId: CommandId,
-  cardId: CardId,
-  agentId: AgentId,
-  decisionId: TrimmedNonEmptyString,
-  text: TrimmedNonEmptyString,
-  createdAt: IsoDateTime,
-});
-
 // Server-only: the spend reactor records each priced turn of a card's sessions.
 const CardSpendRecordCommand = Schema.Struct({
   type: Schema.Literal("card.spend.record"),
@@ -2849,13 +2838,6 @@ const CardSessionRecordCommand = Schema.Struct({
   type: Schema.Literal("card.session.record"),
   commandId: CommandId,
   ...CardSession.fields,
-});
-
-const CardMessageRecordCommand = Schema.Struct({
-  type: Schema.Literal("card.message.record"),
-  commandId: CommandId,
-  ...CardMessagePostedPayload.fields,
-  authorKind: Schema.Literals(["agent", "system", "linear"]),
 });
 
 const CardDeliveryUpdateCommand = Schema.Struct({
@@ -3504,20 +3486,17 @@ const InternalOrchestrationCommand = Schema.Union([
   CardWaitNoteCommand,
   CardPauseSystemCommand,
   CardWorkStartCommand,
-  CardReviewRequestCommand,
   CardWorkReturnCommand,
   CardLandCommand,
   CardWorkspaceSetCommand,
   CardWorkspaceClearCommand,
   CardSessionRecordCommand,
-  CardMessageRecordCommand,
   CardDeliveryUpdateCommand,
   CardDiffRecordCommand,
   CardChecksRecordCommand,
   CardOverlapFlagCommand,
   CardSpendRecordCommand,
   CardProposeCommand,
-  CardDecisionAgentRecordCommand,
   CardLinearIntakeCommand,
   CardLinearSyncCommand,
   ChannelAgentWakeCommand,

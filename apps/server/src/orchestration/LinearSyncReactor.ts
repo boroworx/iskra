@@ -588,12 +588,6 @@ export const make = Effect.gen(function* () {
    */
   const push = Effect.fn("LinearSyncReactor.push")(function* (event: OrchestrationEvent) {
     if (!(yield* linear.configured)) return;
-    if (event.type === "card.message-posted" && event.payload.authorKind === "human") {
-      const card = yield* snapshots.getCardShellById(event.payload.cardId);
-      if (Option.isNone(card) || card.value.linearIssue === null) return;
-      yield* linear.createComment(card.value.linearIssue.id, `**From Iskra:** ${event.payload.body}`);
-      return;
-    }
     if (event.type === "thread.message-sent") {
       if (event.payload.role !== "assistant" || event.payload.streaming) return;
       const owned = yield* ownerLinkOf(event.payload.threadId);
@@ -645,6 +639,14 @@ export const make = Effect.gen(function* () {
   const pushActivity = Effect.fn("LinearSyncReactor.pushActivity")(function* (
     activity: CardActivity,
   ) {
+    // A person's message or answer on the card goes to Linear as a comment.
+    if (activity.author.kind === "human" && (activity.kind === "message" || activity.kind === "response")) {
+      if (!(yield* linear.configured)) return;
+      const card = yield* snapshots.getCardShellById(activity.cardId);
+      if (Option.isNone(card) || card.value.linearIssue === null) return;
+      yield* linear.createComment(card.value.linearIssue.id, `**From Iskra:** ${activity.body}`);
+      return;
+    }
     const content = linearActivityOf(activity);
     if (content === null) return;
     const card = yield* snapshots.getCardShellById(activity.cardId);
@@ -683,7 +685,6 @@ export const make = Effect.gen(function* () {
       const events = yield* engine.subscribeDomainEvents;
       yield* forkParked(
         Stream.runForEach(events, (event) =>
-          event.type === "card.message-posted" ||
           event.type === "card.activity-recorded" ||
           (event.type === "thread.activity-appended" &&
             event.payload.activity.kind === "tool.completed") ||

@@ -239,7 +239,13 @@ describe("board toolkit handlers", () => {
       const harness = yield* makeHarness();
       yield* harness.call("record_decision", { text: "Use a token bucket." });
       expect(yield* Ref.get(harness.commands)).toMatchObject([
-        { type: "card.decision.agent.record", cardId: CARD_ID, agentId: AGENT_ID },
+        {
+          type: "card.activity.record",
+          cardId: CARD_ID,
+          kind: "decision",
+          author: { kind: "agent", id: AGENT_ID },
+          body: "Use a token bucket.",
+        },
       ]);
 
       const refusing = yield* makeHarness({

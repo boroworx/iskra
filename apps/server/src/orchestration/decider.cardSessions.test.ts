@@ -195,8 +195,12 @@ it.layer(NodeServices.layer)("decider card sessions", (it) => {
       const toOwner = yield* decide(readModel, dm("session-owner"));
       expect(toOwner).toEqual([
         expect.objectContaining({
-          type: "card.message-posted",
-          payload: expect.objectContaining({ cardId, forOwner: true, authorKind: "human" }),
+          type: "card.activity-recorded",
+          payload: expect.objectContaining({
+            cardId,
+            deliverTo: "builder",
+            author: { kind: "human", id: "human" },
+          }),
         }),
       ]);
 

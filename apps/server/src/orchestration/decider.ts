@@ -67,6 +67,8 @@ import {
 import {
   ALREADY_ANSWERED_REASON,
   ANSWER_OPTION_REASON,
+  activityAuthorOf,
+  cardActivity,
   CHECKPOINT_OPTIONS,
   NO_OPEN_QUESTION_REASON,
   NO_CRITERIA_REASON,
@@ -2453,8 +2455,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       return yield* decideCardMove({ readModel, command, move: "reopen" });
     case "card.work.start":
       return yield* decideCardMove({ readModel, command, move: "workStarted" });
-    case "card.review.request":
-      return yield* decideCardMove({ readModel, command, move: "requestReview" });
     case "card.work.return": {
       if (command.round !== undefined) {
         const card = yield* requireCard({ readModel, command, cardId: command.cardId });
@@ -2597,14 +2597,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     case "card.decision.record": {
       yield* requireCard({ readModel, command, cardId: command.cardId });
       return yield* planned(command, "card", command.cardId, command.createdAt, {
-        type: "card.decision-recorded",
-        payload: {
+        type: "card.activity-recorded",
+        payload: cardActivity({
+          activityId: command.decisionId,
           cardId: command.cardId,
-          decisionId: command.decisionId,
+          kind: "decision",
           author: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
-          text: command.text,
+          body: command.text,
           createdAt: command.createdAt,
-        },
+        }),
       });
     }
 
@@ -2807,14 +2808,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const events: PlannedOrchestrationEvent[] = [
         created,
         yield* planned(command, "card", command.cardId, command.createdAt, {
-          type: "card.decision-recorded",
-          payload: {
+          type: "card.activity-recorded",
+          payload: cardActivity({
+            activityId: `${command.cardId}:lead-reasoning`,
             cardId: command.cardId,
-            decisionId: `${command.cardId}:lead-reasoning`,
-            author,
-            text: lead.reasoning,
+            kind: "decision",
+            author: activityAuthorOf(author),
+            body: lead.reasoning,
             createdAt: command.createdAt,
-          },
+          }),
         }),
       ];
       for (const otherCardId of duplicateIds) {
@@ -2831,32 +2833,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         );
       }
       return events;
-    }
-
-    case "card.decision.agent.record": {
-      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
-      const agent = yield* requireAgent({ readModel, command, agentId: command.agentId });
-      const working =
-        card.delegateAgentId === agent.id ||
-        (readModel.liveRuns ?? []).some(
-          (run) => run.cardId === card.id && run.agentId === agent.id,
-        );
-      if (!working) {
-        return yield* refuse(
-          command,
-          `@${agent.name} isn't working on this card, so it cannot record its decisions.`,
-        );
-      }
-      return yield* planned(command, "card", command.cardId, command.createdAt, {
-        type: "card.decision-recorded",
-        payload: {
-          cardId: command.cardId,
-          decisionId: command.decisionId,
-          author: { kind: "agent", id: agent.id },
-          text: command.text,
-          createdAt: command.createdAt,
-        },
-      });
     }
 
     case "card.attempts.start": {
@@ -2978,14 +2954,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           payload: { cardId: attempt.id, updatedAt: occurredAt },
         }),
         yield* planned(command, "card", parent.id, occurredAt, {
-          type: "card.decision-recorded",
-          payload: {
+          type: "card.activity-recorded",
+          payload: cardActivity({
+            activityId: `promote:${command.commandId}`,
             cardId: parent.id,
-            decisionId: `promote:${command.commandId}`,
+            kind: "decision",
             author: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
-            text: `Promoted "${attempt.title}".`,
+            body: `Promoted "${attempt.title}".`,
             createdAt: occurredAt,
-          },
+          }),
         }),
       ];
       if (attempt.delegateAgentId !== null) {
@@ -3131,17 +3108,17 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         "A card that has landed or been abandoned takes no review comments.",
       );
       const comment = yield* planned(command, "card", command.cardId, command.createdAt, {
-        type: "card.message-posted",
-        payload: {
+        type: "card.activity-recorded",
+        payload: cardActivity({
+          activityId: command.messageId,
           cardId: command.cardId,
-          messageId: command.messageId,
-          authorKind: "human",
-          authorId: CHANNEL_HUMAN_AUTHOR_ID,
+          kind: "message",
+          author: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
           body: command.body,
-          runThreadId: null,
-          forOwner: true,
+          deliverTo: "builder",
+          delivery: "pending",
           createdAt: command.createdAt,
-        },
+        }),
       });
       // A comment on a card in review sends it back to work, with the comment as its next turn.
       return card.status === "inReview" || card.status === "landing"
@@ -3314,17 +3291,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       yield* refuseAtSessionCap(readModel, command, card.projectId);
       return [
         yield* planned(command, "card", command.cardId, command.createdAt, {
-          type: "card.message-posted",
-          payload: {
+          type: "card.activity-recorded",
+          payload: cardActivity({
+            activityId: command.messageId,
             cardId: command.cardId,
-            messageId: command.messageId,
-            authorKind: "human",
-            authorId: CHANNEL_HUMAN_AUTHOR_ID,
+            kind: "message",
+            author: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
             body: `@${agent.name} ${command.question}`,
-            runThreadId: null,
-            forOwner: false,
             createdAt: command.createdAt,
-          },
+          }),
         }),
         yield* planned(command, "card", command.cardId, command.createdAt, {
           type: "card.helper-requested",
@@ -3345,17 +3320,17 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         "A card that has landed or been abandoned takes no new messages.",
       );
       return yield* planned(command, "card", command.cardId, command.createdAt, {
-        type: "card.message-posted",
-        payload: {
+        type: "card.activity-recorded",
+        payload: cardActivity({
+          activityId: command.messageId,
           cardId: command.cardId,
-          messageId: command.messageId,
-          authorKind: "human",
-          authorId: CHANNEL_HUMAN_AUTHOR_ID,
+          kind: "message",
+          author: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
           body: command.body,
-          runThreadId: null,
-          forOwner: true,
+          deliverTo: "builder",
+          delivery: "pending",
           createdAt: command.createdAt,
-        },
+        }),
       });
     }
 
@@ -3425,23 +3400,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           rendered: command.rendered,
           ...(command.restarts === undefined ? {} : { restarts: command.restarts }),
           startedAt: command.startedAt,
-        },
-      });
-    }
-
-    case "card.message.record": {
-      yield* requireCard({ readModel, command, cardId: command.cardId });
-      return yield* planned(command, "card", command.cardId, command.createdAt, {
-        type: "card.message-posted",
-        payload: {
-          cardId: command.cardId,
-          messageId: command.messageId,
-          authorKind: command.authorKind,
-          authorId: command.authorId,
-          body: command.body,
-          runThreadId: command.runThreadId,
-          forOwner: command.forOwner,
-          createdAt: command.createdAt,
         },
       });
     }

@@ -52,7 +52,6 @@ import { ProjectionAgentRepositoryLive } from "../../persistence/Layers/Projecti
 import { ProjectionCardRepositoryLive } from "../../persistence/Layers/ProjectionCards.ts";
 import { ProjectionCardRepository } from "../../persistence/Services/ProjectionCards.ts";
 import {
-  SPEC_STATE_DECISION_TEXT,
   cardActivitiesOf,
   cardPatches,
   newCard,
@@ -703,45 +702,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             return;
           }
 
-          case "card.message-posted":
-            yield* projectionCardRepository.appendMessage({
-              messageId: event.payload.messageId,
-              cardId: event.payload.cardId,
-              authorKind: event.payload.authorKind,
-              authorId: event.payload.authorId,
-              body: event.payload.body,
-              runThreadId: event.payload.runThreadId,
-              deliveryStatus: event.payload.forOwner ? "pending" : null,
-              deliveryThreadId: null,
-              createdAt: event.payload.createdAt,
-            });
-            return;
-
           case "card.delivery-updated":
             yield* projectionCardRepository.updateDeliveries(event.payload);
-            return;
-
-          // A plan gate decision joins the log, so later briefs say who decided.
-          case "card.spec-state-changed": {
-            const payload = event.payload;
-            yield* projectionCardRepository.appendDecision({
-              decisionId: `spec-state:${event.eventId}`,
-              cardId: payload.cardId,
-              author: payload.by,
-              text: SPEC_STATE_DECISION_TEXT[payload.to],
-              createdAt: payload.updatedAt,
-            });
-            return;
-          }
-
-          case "card.decision-recorded":
-            yield* projectionCardRepository.appendDecision({
-              decisionId: event.payload.decisionId,
-              cardId: event.payload.cardId,
-              author: event.payload.author,
-              text: event.payload.text,
-              createdAt: event.payload.createdAt,
-            });
             return;
 
           default:

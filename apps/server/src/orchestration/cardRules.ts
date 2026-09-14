@@ -496,7 +496,8 @@ export const activityAuthorOf = (author: CardAuthor): CardActivity["author"] => 
 
 const SYSTEM_AUTHOR = { kind: "system", id: CHANNEL_SYSTEM_AUTHOR_ID } as const;
 
-const activity = (
+/** A card activity with every optional part empty unless `entry` sets it. */
+export const cardActivity = (
   entry: Pick<CardActivity, "activityId" | "cardId" | "kind" | "author" | "body" | "createdAt"> &
     Partial<CardActivity>,
 ): CardActivity => ({
@@ -530,7 +531,7 @@ export function cardActivitiesOf(event: OrchestrationEvent): ReadonlyArray<CardA
     case "card.message-posted": {
       const { payload } = event;
       return [
-        activity({
+        cardActivity({
           activityId: payload.messageId,
           cardId: payload.cardId,
           kind: "message",
@@ -546,7 +547,7 @@ export function cardActivitiesOf(event: OrchestrationEvent): ReadonlyArray<CardA
     case "card.decision-recorded": {
       const { payload } = event;
       return [
-        activity({
+        cardActivity({
           activityId: payload.decisionId,
           cardId: payload.cardId,
           kind: "decision",
@@ -559,7 +560,7 @@ export function cardActivitiesOf(event: OrchestrationEvent): ReadonlyArray<CardA
     case "card.spec-state-changed": {
       const { payload } = event;
       return [
-        activity({
+        cardActivity({
           activityId: `spec-state:${event.eventId}`,
           cardId: payload.cardId,
           kind: "decision",
@@ -572,7 +573,7 @@ export function cardActivitiesOf(event: OrchestrationEvent): ReadonlyArray<CardA
     case "card.status-changed": {
       const { payload } = event;
       return [
-        activity({
+        cardActivity({
           activityId: `status:${event.eventId}`,
           cardId: payload.cardId,
           kind: "status",
@@ -588,7 +589,7 @@ export function cardActivitiesOf(event: OrchestrationEvent): ReadonlyArray<CardA
     case "card.checkpoint-requested": {
       const { cardId, checkpoint } = event.payload;
       return [
-        activity({
+        cardActivity({
           activityId: checkpoint.checkpointId,
           cardId,
           kind: "elicitation",
@@ -610,7 +611,7 @@ export function cardActivitiesOf(event: OrchestrationEvent): ReadonlyArray<CardA
       const { payload } = event;
       const forBuilder = payload.decision !== "stop";
       return [
-        activity({
+        cardActivity({
           activityId: `${payload.checkpointId}:resolved`,
           cardId: payload.cardId,
           kind: "response",
@@ -629,7 +630,7 @@ export function cardActivitiesOf(event: OrchestrationEvent): ReadonlyArray<CardA
     case "card.evidence-recorded": {
       const { payload } = event;
       return [
-        activity({
+        cardActivity({
           activityId: `evidence:${payload.evidenceId}`,
           cardId: payload.cardId,
           kind: "evidence",
@@ -643,7 +644,7 @@ export function cardActivitiesOf(event: OrchestrationEvent): ReadonlyArray<CardA
     case "card.landing-linked": {
       const { cardId, landing } = event.payload;
       return [
-        activity({
+        cardActivity({
           activityId: `landing:${event.eventId}`,
           cardId,
           kind: "landing",

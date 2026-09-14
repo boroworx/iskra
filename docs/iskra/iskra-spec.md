@@ -746,17 +746,17 @@ session's run record, never from the tool's input, and passes a decider refusal'
 agent as the tool error. What each tool does:
 - `propose_card` dispatches `card.propose`. The decider creates the card in `triage` with a draft
   spec and authored by the agent (`decider.boardTools.test.ts`).
-- `record_decision` dispatches `card.decision.agent.record`. Only the card's delegate, or an agent
-  with a live session on it, may record one. Decisions join the log, and the next brief renders
-  them.
+- `record_decision` records a `decision` activity with `card.activity.record`. Only the card's
+  delegate, or an agent with a live session on it, may write one, and the next brief's worklog
+  renders it.
 - `update_plan` sets the owner session's plan progress, which is what the card face shows. It also
   appends a `turn.plan.updated` activity, which puts the plan in the work log and re-emits the card.
-- `request_review` dispatches the existing `card.review.request`.
-- `ask_owner` appends a message-mode `user-input.requested` activity, which raises `awaitingInput`
-  on the card and in Needs you.
+- `request_review` records a `reviewRequested` activity; the review gate captures evidence and moves
+  the card only through `card.review.enter`.
+- `ask_owner` records an `elicitation` activity, which the card lists in `openElicitations` until a
+  person answers it with `card.elicitation.answer` or a Linear reply.
 
-The owner answers inside the session's block in the agent's DM, and the answer becomes the session's
-next message. The owner brief names the tools. Two limits remain. Plan progress is held in memory
+The answer is a `response` activity for the builder and becomes the session's next message. The owner brief names the tools. Two limits remain. Plan progress is held in memory
 and clears when the turn ends, the same as a provider-reported plan. And there is no browser pass
 yet for the answer form.
 

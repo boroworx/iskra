@@ -10,6 +10,7 @@ import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 
 import {
+  enterReview,
   applyCommands,
   applyTo,
   assign,
@@ -133,9 +134,9 @@ it.layer(NodeServices.layer)("decider budgets", (it) => {
       const returned = yield* applyCommands([
         ...setup,
         onCard("card.work.start"),
-        onCard("card.review.request"),
+        ...enterReview(),
         { type: "card.work.return", commandId: nextCommandId(), cardId, reason: "Checks failed." },
-        onCard("card.review.request"),
+        ...enterReview(),
         {
           type: "card.work.return",
           commandId: nextCommandId(),

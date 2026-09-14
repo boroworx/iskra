@@ -135,7 +135,6 @@ type CardOnlyCommandType =
   | "card.reopen"
   | "card.unassign"
   | "card.work.start"
-  | "card.review.request"
   | "card.land"
   | "card.attempt.promote"
   | "card.spec.approve"
@@ -175,7 +174,38 @@ export const cardInReview = (id: string): ReadonlyArray<OrchestrationCommand> =>
   onCard("card.approve", id),
   assign(backend, id),
   onCard("card.work.start", id),
-  onCard("card.review.request", id),
+  ...enterReview(id),
+];
+
+/** Passing review evidence for a commit, then the card entering review on it. */
+export const enterReview = (id: string = cardId): ReadonlyArray<OrchestrationCommand> => [
+  {
+    type: "card.evidence.record",
+    commandId: nextCommandId(),
+    cardId: CardId.make(id),
+    evidenceId: `evidence-${nextCommandId()}`,
+    headSha: "abc1234",
+    purpose: "review",
+    items: [
+      {
+        itemId: "check:test",
+        kind: "check",
+        source: "local",
+        name: "test",
+        criterionId: null,
+        exitCode: 0,
+        timedOut: false,
+        durationMs: 1,
+        logTail: "ok",
+        artifactPath: null,
+        unavailable: null,
+      },
+    ],
+    flags: [],
+    risks: null,
+    recordedAt: now,
+  },
+  { type: "card.review.enter", commandId: nextCommandId(), cardId: CardId.make(id), headSha: "abc1234" },
 ];
 
 export const recordSession = (

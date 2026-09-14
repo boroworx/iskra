@@ -5484,8 +5484,6 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
         runsByAgent: yield* snapshotQuery.listRunsByAgent(api, 10),
         run: yield* snapshotQuery.getRunByThreadId(owner),
         cardRow: yield* cardRepository.getById({ cardId: card1 }),
-        decisions: yield* cardRepository.listDecisions({ cardId: card1 }),
-        openOwnerMessages: yield* cardRepository.listOpenOwnerMessages({ cardId: card1 }),
         activities: yield* cardRepository.listActivities({ cardId: card1, limit: 50 }),
         openBuilderActivities: yield* cardRepository.listOpenBuilderActivities({ cardId: card1 }),
         evidenceItems: yield* cardRepository.listEvidenceItems({

@@ -304,12 +304,13 @@ it.layer(layer)("CardSessionReactor", (it) => {
         yield* world.answer(critic.payload.threadId, "turn-critic", "Say what happens past the limit.");
         yield* world.setSession(critic.payload.threadId, "ready", null);
         const findings = yield* world.nextEvent(
-          "card.message-posted",
+          "card.activity-recorded",
           (event) => event.payload.runThreadId === critic.payload.threadId,
         );
         expect(findings.payload).toMatchObject({
-          authorKind: "agent",
-          forOwner: false,
+          kind: "critique",
+          author: { kind: "agent" },
+          deliverTo: null,
           body: "Say what happens past the limit.",
         });
 
@@ -427,9 +428,36 @@ it.layer(layer)("CardSessionReactor", (it) => {
         );
 
         yield* world.engine.dispatch({
-          type: "card.review.request",
+          type: "card.evidence.record",
+          commandId: CommandId.make("cmd-progress-evidence"),
+          cardId,
+          evidenceId: "evidence-progress",
+          headSha: "abc1234",
+          purpose: "review",
+          items: [
+            {
+              itemId: "check:test",
+              kind: "check",
+              source: "local",
+              name: "test",
+              criterionId: null,
+              exitCode: 0,
+              timedOut: false,
+              durationMs: 1,
+              logTail: "ok",
+              artifactPath: null,
+              unavailable: null,
+            },
+          ],
+          flags: [],
+          risks: null,
+          recordedAt: now,
+        });
+        yield* world.engine.dispatch({
+          type: "card.review.enter",
           commandId: CommandId.make("cmd-progress-review"),
           cardId,
+          headSha: "abc1234",
         });
         yield* world.engine.dispatch({
           type: "card.abandon",
@@ -488,7 +516,7 @@ it.layer(layer)("CardSessionReactor", (it) => {
           body: "Also handle bursts.",
           createdAt: now,
         });
-        yield* world.nextEvent("card.message-posted", (event) => event.payload.forOwner);
+        yield* world.nextEvent("card.activity-recorded", (event) => event.payload.deliverTo === "builder");
         yield* world.reactor.drain;
         // At the cap the owner's next turn is refused, so the message waits.
         expect(

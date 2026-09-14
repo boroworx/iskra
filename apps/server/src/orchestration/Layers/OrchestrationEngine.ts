@@ -87,7 +87,6 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "card.relation.remove":
     case "card.decision.record":
     case "card.work.start":
-    case "card.review.request":
     case "card.work.return":
     case "card.land":
     case "card.workspace.set":
@@ -96,7 +95,6 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "card.helper.request":
     case "card.message.post":
     case "card.session.record":
-    case "card.message.record":
     case "card.delivery.update":
     case "card.spec.approve":
     case "card.spec.skip":
@@ -117,7 +115,6 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "card.propose":
     case "card.linear.intake":
     case "card.linear.sync":
-    case "card.decision.agent.record":
     case "card.criteria.set":
     case "card.criteria.confirm":
     case "card.activity.record":

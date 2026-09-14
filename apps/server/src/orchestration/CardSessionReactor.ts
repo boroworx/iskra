@@ -15,23 +15,28 @@ import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
 import { ProjectionCardRepositoryLive } from "../persistence/Layers/ProjectionCards.ts";
 import { ProjectionRunLivenessRepositoryLive } from "../persistence/Layers/ProjectionRunLiveness.ts";
-import {
-  ProjectionCardRepository,
-  type ProjectionCardActivity,
-} from "../persistence/Services/ProjectionCards.ts";
+import { ProjectionCardRepository } from "../persistence/Services/ProjectionCards.ts";
 import {
   ProjectionRunLivenessRepository,
   type ProjectionOwnerRun,
 } from "../persistence/Services/ProjectionRunLiveness.ts";
 import { forkParked } from "../serverActivation.ts";
-import { buildCardBrief, diffStatOf, renderCardBrief, renderCardMessages } from "./cardBrief.ts";
+import {
+  buildCardBrief,
+  diffStatOf,
+  loadCardWorklog,
+  renderCardActivities,
+  renderCardBrief,
+} from "./cardBrief.ts";
 import { isFinishedCardStatus } from "./cardRules.ts";
 import * as CardWorkspace from "./CardWorkspace.ts";
 import { liveOwnerRun } from "./decider.ts";
@@ -101,16 +106,6 @@ export const MAX_OWNER_RESTARTS_PER_HOUR = 3;
 const restartsAfter = (previous: ProjectionOwnerRun | undefined) =>
   previous !== undefined && previous.sessionStatus === "error" ? previous.restarts + 1 : 0;
 
-/** A builder activity as the owner reads it in its next turn. */
-const asOwnerMessage = (activity: ProjectionCardActivity) => ({
-  messageId: MessageId.make(activity.activityId),
-  // A GitHub comment is a person writing, like one from Linear.
-  authorKind: activity.author.kind === "github" ? ("human" as const) : activity.author.kind,
-  authorId: activity.author.id,
-  body: activity.body,
-  createdAt: activity.createdAt,
-});
-
 const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngine.OrchestrationEngineService;
   const snapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
@@ -118,6 +113,8 @@ const make = Effect.gen(function* () {
   const workspace = yield* CardWorkspace.CardWorkspace;
   const liveness = yield* ProjectionRunLivenessRepository;
   const crypto = yield* Crypto.Crypto;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
   // ponytail: reads the whole command read model per request, like RunReactor; add
@@ -133,15 +130,20 @@ const make = Effect.gen(function* () {
   const postSystem = (cardId: CardId, key: string, body: string) =>
     Effect.gen(function* () {
       yield* engine.dispatch({
-        type: "card.message.record",
+        type: "card.activity.record",
         commandId: CommandId.make(`card-system:${key}`),
+        activityId: `card-system:${key}`,
         cardId,
-        messageId: MessageId.make(`card-system:${key}`),
-        authorKind: "system",
-        authorId: CHANNEL_SYSTEM_AUTHOR_ID,
+        kind: "error",
+        author: { kind: "system", id: CHANNEL_SYSTEM_AUTHOR_ID },
         body,
         runThreadId: null,
-        forOwner: false,
+        deliverTo: null,
+        elicitation: null,
+        answers: null,
+        status: null,
+        evidenceId: null,
+        reason: { code: "startFailed", text: body },
         createdAt: yield* nowIso,
       });
     });
@@ -166,31 +168,42 @@ const make = Effect.gen(function* () {
     const model = yield* readModel();
     const card = model.cards?.find((candidate) => candidate.id === input.cardId);
     const agent = model.agents?.find((candidate) => candidate.id === input.agentId);
-    if (card === undefined || agent === undefined) {
+    const project = model.projects.find((candidate) => candidate.id === card?.projectId);
+    if (card === undefined || agent === undefined || project === undefined) {
       return yield* Effect.logWarning("card session reactor could not resolve a session", input);
     }
     // The owner writes in the card's worktree, created now if this is the first session.
     const current =
       input.role === "owner" ? { ...card, ...(yield* workspace.ensure(card.id)) } : card;
     const { baseBranch, diff } = yield* workspace.diff(card.id);
-    const decisions = yield* cards.listDecisions({ cardId: card.id });
-    const context = buildCardBrief({
-      agent,
-      role: input.role,
-      card: current,
-      agents: (model.agents ?? []).filter((candidate) => candidate.projectId === card.projectId),
-      decisions,
-      baseBranch,
-      diff,
-      question: input.question,
-    });
-    const rendered = renderCardBrief(context);
     const restarts =
       input.role === "owner"
         ? restartsAfter(
             (yield* liveness.listCardOwnerRuns({ cardId: card.id, since: EPOCH }))[0],
           )
         : 0;
+    // The brief is the card's worklog: its activity, latest evidence and the repository's rules.
+    const worklog = yield* loadCardWorklog({
+      card: current,
+      root: current.worktreePath ?? project.workspaceRoot,
+      restarts,
+    }).pipe(
+      Effect.provideService(ProjectionCardRepository, cards),
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, path),
+    );
+    const context = buildCardBrief({
+      agent,
+      role: input.role,
+      card: current,
+      agents: (model.agents ?? []).filter((candidate) => candidate.projectId === card.projectId),
+      decisions: [],
+      baseBranch,
+      diff,
+      question: input.question,
+      worklog,
+    });
+    const rendered = renderCardBrief(context);
     // Ids derive from the request, so a retried request cannot start a second session.
     const threadId = ThreadId.make(`card-session-${input.key}`);
     const startedAt = yield* nowIso;
@@ -308,12 +321,12 @@ const make = Effect.gen(function* () {
     if (open.some((activity) => activity.deliveryThreadId === owner.threadId)) {
       return; // A turn carrying earlier messages is already on its way.
     }
-    const waiting = open.filter((activity) => activity.delivery === "pending").map(asOwnerMessage);
+    const waiting = open.filter((activity) => activity.delivery === "pending");
     if (waiting.length === 0) {
       return;
     }
     const model = yield* readModel();
-    const messageIds = waiting.map((message) => message.messageId);
+    const messageIds = waiting.map((activity) => MessageId.make(activity.activityId));
     // Each attempt gets its own id: a turn refused at the budget cap is tried again after a
     // raise, and the engine never re-decides a rejected command id. Sent messages are skipped,
     // so a repeated attempt cannot deliver twice.
@@ -327,7 +340,7 @@ const make = Effect.gen(function* () {
       message: {
         messageId: MessageId.make(`card-owner-turn:${key}`),
         role: "user",
-        text: renderCardMessages(waiting, model.agents ?? []),
+        text: renderCardActivities(waiting, model.agents ?? []),
         attachments: [],
       },
       runtimeMode: "approval-required",
@@ -409,15 +422,20 @@ const make = Effect.gen(function* () {
     if (reply !== undefined) {
       // A helper's answer waits for the owner; a critic's findings stay on the card.
       yield* engine.dispatch({
-        type: "card.message.record",
+        type: "card.activity.record",
         commandId: CommandId.make(`card-${role}-reply:${threadId}:${turnId}`),
+        activityId: `card-${role}-reply:${threadId}:${turnId}`,
         cardId,
-        messageId: MessageId.make(`card-${role}-reply:${threadId}:${turnId}`),
-        authorKind: "agent",
-        authorId: agentId,
+        kind: role === "helper" ? "help" : "critique",
+        author: { kind: "agent", id: agentId },
         body: reply.text,
         runThreadId: threadId,
-        forOwner: role === "helper",
+        deliverTo: role === "helper" ? "builder" : null,
+        elicitation: null,
+        answers: null,
+        status: null,
+        evidenceId: null,
+        reason: null,
         createdAt: yield* nowIso,
       });
     }
@@ -588,11 +606,6 @@ const make = Effect.gen(function* () {
         return worker.enqueue({ kind: "session", role: "helper", event });
       case "card.spec-submitted":
         return worker.enqueue({ kind: "session", role: "critic", event });
-      // Legacy owner messages are recorded as builder activities too, so either event delivers.
-      case "card.message-posted":
-        return event.payload.forOwner
-          ? worker.enqueue({ kind: "deliver", cardId: event.payload.cardId })
-          : Effect.void;
       case "card.activity-recorded": {
         const deliver =
           event.payload.deliverTo === "builder"

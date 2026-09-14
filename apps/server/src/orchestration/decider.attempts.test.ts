@@ -4,6 +4,7 @@ import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 
 import {
+  enterReview,
   applyCommands,
   applyTo,
   cardId,
@@ -89,7 +90,7 @@ it.layer(NodeServices.layer)("decider attempts", (it) => {
         ...setup({ skipSpec: true }),
         startAttempts(2),
         onCard("card.work.start", attemptIds[0]!),
-        onCard("card.review.request", attemptIds[0]!),
+        ...enterReview(attemptIds[0]!),
       ]);
       const merge = yield* Effect.flip(
         applyTo(inReview, [onCard("card.merge.approve", attemptIds[0]!)]),

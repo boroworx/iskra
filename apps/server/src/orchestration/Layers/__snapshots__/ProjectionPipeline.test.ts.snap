@@ -893,18 +893,6 @@ exports[`card, agent and channel projection > projects every card, agent and cha
       "topic": "Ship it",
     },
   },
-  "decisions": [
-    {
-      "author": {
-        "id": "human",
-        "kind": "human",
-      },
-      "cardId": "card-1",
-      "createdAt": "2026-03-01T00:31:00.000Z",
-      "decisionId": "spec-state:evt-cards-30",
-      "text": "Approved the spec.",
-    },
-  ],
   "evidenceItems": [
     {
       "artifactPath": null,
@@ -1064,19 +1052,6 @@ exports[`card, agent and channel projection > projects every card, agent and cha
       "runThreadId": null,
       "sequence": 12,
       "status": "sent",
-    },
-  ],
-  "openOwnerMessages": [
-    {
-      "authorId": "human",
-      "authorKind": "human",
-      "body": "Also cap bursts.",
-      "cardId": "card-1",
-      "createdAt": "2026-03-01T00:32:00.000Z",
-      "deliveryStatus": "sent",
-      "deliveryThreadId": "thread-owner",
-      "messageId": "card-message-1",
-      "runThreadId": null,
     },
   ],
   "projectRow": {

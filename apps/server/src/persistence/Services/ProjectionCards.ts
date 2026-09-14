@@ -27,11 +27,9 @@ import {
   CardPremise,
   CardRelation,
   CardSpecState,
-  CardMessageAuthorKind,
   CardStatus,
   CardWaitReason,
   CardOpenElicitation,
-  ChannelDeliveryStatus,
   ChannelId,
   Elicitation,
   ElicitationAnswer,
@@ -182,39 +180,6 @@ export const PROJECTION_CARD_COLUMNS = `
   updated_at AS "updatedAt"
 `;
 
-export const ProjectionCardDecision = Schema.Struct({
-  decisionId: Schema.String,
-  cardId: CardId,
-  author: CardAuthor,
-  text: Schema.String,
-  createdAt: IsoDateTime,
-});
-export type ProjectionCardDecision = typeof ProjectionCardDecision.Type;
-
-/** A decision row as selected, with its author decoded. */
-export const ProjectionCardDecisionDbRow = ProjectionCardDecision.mapFields(
-  Struct.assign({
-    author: Schema.fromJsonString(CardAuthor),
-  }),
-);
-
-/**
- * A message in a card's activity. `deliveryStatus` is null for a message not
- * meant for the owner; otherwise it tracks delivery into the owner's sessions.
- */
-export const ProjectionCardMessage = Schema.Struct({
-  messageId: MessageId,
-  cardId: CardId,
-  authorKind: CardMessageAuthorKind,
-  authorId: Schema.String,
-  body: Schema.String,
-  runThreadId: Schema.NullOr(ThreadId),
-  deliveryStatus: Schema.NullOr(ChannelDeliveryStatus),
-  deliveryThreadId: Schema.NullOr(ThreadId),
-  createdAt: IsoDateTime,
-});
-export type ProjectionCardMessage = typeof ProjectionCardMessage.Type;
-
 /** One entry of a card's activity stream, with the session its delivery rides. */
 export const ProjectionCardActivity = Schema.Struct({
   ...CardActivity.fields,
@@ -323,35 +288,15 @@ export interface ProjectionCardRepositoryShape {
     input: GetProjectionCardInput,
   ) => Effect.Effect<Option.Option<ProjectionCard>, ProjectionRepositoryError>;
 
-  /** Append one decision to a card's log; replaying the same decision is a no-op. */
-  readonly appendDecision: (
-    row: ProjectionCardDecision,
-  ) => Effect.Effect<void, ProjectionRepositoryError>;
-
   /** Record a priced turn; recording the same turn again is a no-op. */
   readonly recordSpend: (
     row: ProjectionCardSpend,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
 
-  /** A card's decision log, oldest first. */
-  readonly listDecisions: (
-    input: GetProjectionCardInput,
-  ) => Effect.Effect<ReadonlyArray<ProjectionCardDecision>, ProjectionRepositoryError>;
-
-  /** Append a message to a card's activity; replaying the same message is a no-op. */
-  readonly appendMessage: (
-    row: ProjectionCardMessage,
-  ) => Effect.Effect<void, ProjectionRepositoryError>;
-
-  /** Give these owner messages a new delivery status and session. */
+  /** Give these builder activities a new delivery status and session. */
   readonly updateDeliveries: (
     input: typeof CardDeliveryUpdatedPayload.Type,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
-
-  /** A card's owner messages still pending or sent, oldest first. */
-  readonly listOpenOwnerMessages: (
-    input: GetProjectionCardInput,
-  ) => Effect.Effect<ReadonlyArray<ProjectionCardMessage>, ProjectionRepositoryError>;
 
   /** Append one activity; replaying the same activity is a no-op. */
   readonly appendActivity: (

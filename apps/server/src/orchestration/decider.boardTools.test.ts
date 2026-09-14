@@ -60,32 +60,6 @@ it.layer(NodeServices.layer)("decider board tools", (it) => {
     }),
   );
 
-  it.effect("records a decision under the agent working on the card, and no other", () =>
-    Effect.gen(function* () {
-      const readModel = yield* applyCommands(setup);
-      const record = (agentId: AgentId): OrchestrationCommand => ({
-        type: "card.decision.agent.record",
-        commandId: nextCommandId(),
-        cardId,
-        agentId,
-        decisionId: `decision-${agentId}`,
-        text: "Use a token bucket.",
-        createdAt: now,
-      });
-
-      expect(yield* decide(readModel, record(backend))).toEqual([
-        expect.objectContaining({
-          type: "card.decision-recorded",
-          payload: expect.objectContaining({
-            author: { kind: "agent", id: backend },
-            text: "Use a token bucket.",
-          }),
-        }),
-      ]);
-      const outsider = yield* Effect.flip(decide(readModel, record(reviewer)));
-      expect(outsider.message).toContain("isn't working on this card");
-    }),
-  );
   it.effect(
     "records a channel lead's proposal with its message, reasoning and likely duplicates",
     () =>
@@ -118,7 +92,7 @@ it.layer(NodeServices.layer)("decider board tools", (it) => {
         const events = yield* decide(readModel, propose(reviewer));
         expect(events.map((event) => event.type)).toEqual([
           "card.created",
-          "card.decision-recorded",
+          "card.activity-recorded",
           "card.relation-added",
         ]);
         expect(events[0]).toMatchObject({
@@ -132,8 +106,9 @@ it.layer(NodeServices.layer)("decider board tools", (it) => {
         });
         expect(events[1]).toMatchObject({
           payload: {
-            author: { kind: "lead", id: reviewer },
-            text: expect.stringContaining("webhooks"),
+            kind: "decision",
+            author: { kind: "agent", id: reviewer },
+            body: expect.stringContaining("webhooks"),
           },
         });
         expect(events[2]).toMatchObject({ payload: { kind: "duplicateOf", otherCardId: cardId } });

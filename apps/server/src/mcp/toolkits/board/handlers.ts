@@ -254,14 +254,10 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const session = yield* requireOwnerSession;
         const decisionId = `decision-${yield* uuid}`;
-        yield* dispatch({
-          type: "card.decision.agent.record",
-          commandId: yield* commandId("decision", session.threadId),
-          cardId: session.cardId,
-          agentId: session.agentId,
-          decisionId,
-          text: input.text,
-          createdAt: yield* nowIso,
+        yield* recordActivity(session, "decision", {
+          activityId: decisionId,
+          kind: "decision",
+          body: input.text,
         });
         return { decisionId };
       }),

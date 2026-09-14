@@ -70,7 +70,7 @@ it.layer(NodeServices.layer)("decider review", (it) => {
 
       const decided = yield* decide(inReview, comment("Handle a missing key."));
       expect(decided.map((event) => event.type)).toEqual([
-        "card.message-posted",
+        "card.activity-recorded",
         "card.status-changed",
       ]);
       const returned = yield* applyTo(inReview, [comment("Handle a missing key.")]);
@@ -78,7 +78,7 @@ it.layer(NodeServices.layer)("decider review", (it) => {
 
       // In progress already, a comment just waits for the agent's next turn.
       const again = yield* decide(returned, comment("And log it."));
-      expect(again.map((event) => event.type)).toEqual(["card.message-posted"]);
+      expect(again.map((event) => event.type)).toEqual(["card.activity-recorded"]);
     }),
   );
 

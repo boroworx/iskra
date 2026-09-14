@@ -13,6 +13,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 
 import { projectEvent } from "./projector.ts";
 import {
+  enterReview,
   applyCommands,
   assign,
   backend,
@@ -75,7 +76,7 @@ it.layer(NodeServices.layer)("decider cards", (it) => {
         onCard("card.approve", "card"),
         assign(backend, "card"),
         onCard("card.work.start", "card"),
-        onCard("card.review.request", "card"),
+        ...enterReview("card"),
         onCard("card.merge.approve", "card"),
         onCard("card.merge.cancel", "card"),
         onCard("card.merge.approve", "card"),
@@ -284,8 +285,12 @@ it.layer(NodeServices.layer)("decider cards", (it) => {
         createdAt: now,
       });
       expect(event).toMatchObject({
-        type: "card.decision-recorded",
-        payload: { author: { kind: "human", id: "human" }, text: "Use Redis for the counters." },
+        type: "card.activity-recorded",
+        payload: {
+          kind: "decision",
+          author: { kind: "human", id: "human" },
+          body: "Use Redis for the counters.",
+        },
       });
 
       const projected = yield* projectEvent(readModel, {
@@ -317,7 +322,7 @@ it.layer(NodeServices.layer)("decider cards", (it) => {
 
   it("does not accept server-only card commands from clients", () => {
     const decode = Schema.decodeUnknownExit(ClientOrchestrationCommand);
-    for (const type of ["card.work.start", "card.review.request", "card.land"]) {
+    for (const type of ["card.work.start", "card.review.enter", "card.land"]) {
       expect(Exit.isFailure(decode({ type, commandId: "cmd", cardId: "card" }))).toBe(true);
     }
     expect(

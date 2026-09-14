@@ -14,7 +14,6 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 
-import type { ProjectionCardMessage } from "../persistence/Services/ProjectionCards.ts";
 import { ProjectionCardRepository } from "../persistence/Services/ProjectionCards.ts";
 import { renderNewMessage } from "./runContext.ts";
 
@@ -425,34 +424,6 @@ export function diffStatOf(diff: string): CardDiffStat {
     }
   }
   return { files, additions, deletions };
-}
-
-/** Card messages waiting for the owner, as the text of its next turn. */
-export function renderCardMessages(
-  messages: ReadonlyArray<
-    Pick<ProjectionCardMessage, "messageId" | "authorKind" | "authorId" | "body" | "createdAt">
-  >,
-  agents: ReadonlyArray<OrchestrationAgent>,
-): string {
-  return messages
-    .map((message) =>
-      renderNewMessage({
-        messageId: message.messageId,
-        // A Linear comment is a person writing, from Linear.
-        authorKind: message.authorKind === "linear" ? "human" : message.authorKind,
-        authorName:
-          message.authorKind === "agent"
-            ? (agents.find((agent) => agent.id === message.authorId)?.name ?? message.authorId)
-            : message.authorKind === "human"
-              ? "user"
-              : message.authorKind === "linear"
-                ? `${message.authorId} on Linear`
-                : "system",
-        body: message.body,
-        createdAt: message.createdAt,
-      }),
-    )
-    .join("\n\n");
 }
 
 /** Card activities waiting for the builder, as the text of its next turn. */
