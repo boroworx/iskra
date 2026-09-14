@@ -8,7 +8,7 @@ import {
   type RunSessionState,
   type ThreadId,
 } from "@iskra/contracts";
-import { memo, useMemo, useState } from "react";
+import { memo, useMemo, useState, type ReactElement } from "react";
 
 import { cn } from "~/lib/utils";
 import { useThreadDetail } from "~/state/entities";
@@ -26,18 +26,38 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { runOutputItems, sessionWhere } from "./channels.logic";
+
+/** A short explanation on hover or focus; the element alone when there is none. */
+function Hint(props: { readonly text: string | undefined; readonly children: ReactElement }) {
+  if (props.text === undefined) {
+    return props.children;
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger render={props.children} />
+      <TooltipPopup className="max-w-64">{props.text}</TooltipPopup>
+    </Tooltip>
+  );
+}
 
 const runTimeFormat = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
 
 const SESSION_STATE_LABEL: Record<RunSessionState, string> = {
   pending: "Starting",
   active: "Working",
-  awaitingInput: "Needs you",
-  complete: "Waiting",
+  awaitingInput: "Waiting for you",
+  complete: "Idle",
   error: "Failed",
-  stale: "Stale",
+  stale: "Lost in a restart",
   ended: "Ended",
+};
+
+const SESSION_STATE_HINT: Partial<Record<RunSessionState, string>> = {
+  awaitingInput: "It asked a question or needs an approval before it can go on.",
+  complete: "Its turn is done. The session stays open for the next message until it is stopped.",
+  stale: "The session did not survive a server restart. Send a new message to continue.",
 };
 
 const ROLE_HEADING: Record<OrchestrationAgentRun["role"], string> = {
@@ -48,10 +68,18 @@ const ROLE_HEADING: Record<OrchestrationAgentRun["role"], string> = {
   conversation: "In",
 };
 
+const ROLE_HINT: Record<OrchestrationAgentRun["role"], string> = {
+  owner: "Owner: the agent that builds this card on its own branch.",
+  helper: "Helper: answers a question the card's owner asked, read-only.",
+  critic: "Critic: reviews the card's changes before you do.",
+  lead: "Lead: reads channel messages that mention no one and proposes cards from them.",
+  conversation: "Conversation: replies where it was mentioned or messaged, read-only.",
+};
+
 /**
- * One session of an agent, as its DM shows it: the channel or card it works on,
+ * One session of an agent, as its page shows it: the channel or card it works on,
  * where it stands, its work in grey and what it says to people in full white,
- * and the context it started from.
+ * and the context it started from. A live conversation or card build can be stopped.
  */
 export const RunBlock = memo(function RunBlock(props: {
   readonly run: OrchestrationAgentRun;
@@ -60,6 +88,8 @@ export const RunBlock = memo(function RunBlock(props: {
   readonly cwd: string | undefined;
 }) {
   const [inspecting, setInspecting] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const stopSession = useAtomCommand(threadEnvironment.stopSession, { reportFailure: false });
   const threadRef = useMemo(
     () => scopeThreadRef(props.environmentId, props.run.threadId),
     [props.environmentId, props.run.threadId],
@@ -77,30 +107,64 @@ export const RunBlock = memo(function RunBlock(props: {
   });
   const where = sessionWhere(props.run, props.channels);
   const heading = `${ROLE_HEADING[props.run.role]} ${where}`;
+  const isCardSession = props.run.role !== "conversation" && props.run.role !== "lead";
+  const stoppable =
+    state !== "ended" && (props.run.role === "conversation" || props.run.role === "owner");
+
+  const stop = async () => {
+    setStopping(true);
+    const result = await stopSession({
+      environmentId: props.environmentId,
+      input: { threadId: props.run.threadId },
+    });
+    setStopping(false);
+    toastCommandFailure(result, "The session was not stopped", "Try again.");
+  };
 
   return (
     <section aria-label={heading} className="min-w-0 border-l-2 border-border pl-3">
       <header className="flex h-7 items-center gap-2 text-xs text-muted-foreground">
-        <span className="truncate">{heading}</span>
+        <Hint text={ROLE_HINT[props.run.role]}>
+          <span className="truncate">{heading}</span>
+        </Hint>
         <time dateTime={props.run.startedAt} className="shrink-0">
           {runTimeFormat.format(new Date(props.run.startedAt))}
         </time>
-        <span
-          className={cn(
-            "shrink-0",
-            (state === "awaitingInput" || state === "error") && "text-destructive-foreground",
-          )}
-        >
-          {SESSION_STATE_LABEL[state]}
+        <Hint text={SESSION_STATE_HINT[state]}>
+          <span
+            className={cn(
+              "shrink-0",
+              (state === "awaitingInput" || state === "error") && "text-destructive-foreground",
+            )}
+          >
+            {SESSION_STATE_LABEL[state]}
+          </span>
+        </Hint>
+        <span className="ml-auto flex shrink-0 items-center">
+          {stoppable ? (
+            <Hint text="End this session. A new message or assignment starts a fresh one.">
+              <Button
+                size="sm"
+                variant="ghost-muted"
+                disabled={stopping}
+                onClick={() => void stop()}
+              >
+                Stop
+              </Button>
+            </Hint>
+          ) : null}
+          <Hint
+            text={
+              isCardSession
+                ? "Handoff brief: the card, decisions and diff this session started from."
+                : "What this session was told when it started."
+            }
+          >
+            <Button size="sm" variant="ghost-muted" onClick={() => setInspecting(true)}>
+              {isCardSession ? "Handoff brief" : "Context"}
+            </Button>
+          </Hint>
         </span>
-        <Button
-          className="ml-auto"
-          size="sm"
-          variant="ghost-muted"
-          onClick={() => setInspecting(true)}
-        >
-          Context
-        </Button>
       </header>
       <ol className="flex flex-col gap-1">
         {items.map((item) => (
@@ -123,7 +187,12 @@ export const RunBlock = memo(function RunBlock(props: {
             request={request}
           />
         ))}
-      <RunContextDialog run={props.run} open={inspecting} onOpenChange={setInspecting} />
+      <RunContextDialog
+        run={props.run}
+        isCardSession={isCardSession}
+        open={inspecting}
+        onOpenChange={setInspecting}
+      />
     </section>
   );
 });
@@ -195,24 +264,32 @@ function RunQuestion(props: {
 /** The context inspector: exactly what the session was given, as sent. */
 function RunContextDialog(props: {
   readonly run: OrchestrationAgentRun;
+  readonly isCardSession: boolean;
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
 }) {
-  const isCardSession = props.run.role !== "conversation" && props.run.role !== "lead";
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogPopup className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>{isCardSession ? "Handoff brief" : "Run context"}</DialogTitle>
+          <DialogTitle>{props.isCardSession ? "Handoff brief" : "Run context"}</DialogTitle>
           <DialogDescription>
-            The system prompt and first message sent to the provider, and the record they were
-            rendered from.
+            {props.isCardSession
+              ? "What the session started from: the card, its decisions and diff, rendered into the instructions and first message it was sent."
+              : "The instructions and first message the session was sent when it started."}
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-4">
-          <ContextText title="System prompt" text={props.run.rendered.systemPrompt} />
+          <ContextText title="Instructions (system prompt)" text={props.run.rendered.systemPrompt} />
           <ContextText title="First message" text={props.run.rendered.firstMessage} />
-          <ContextText title="Context record" text={JSON.stringify(props.run.context, null, 2)} />
+          <details className="group">
+            <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+              Raw data these were built from
+            </summary>
+            <pre className="mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-muted/40 p-3 font-mono text-xs">
+              {JSON.stringify(props.run.context, null, 2)}
+            </pre>
+          </details>
         </DialogPanel>
       </DialogPopup>
     </Dialog>
