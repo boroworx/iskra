@@ -1,6 +1,7 @@
 import {
   AgentId,
   ChannelId,
+  DEFAULT_PROJECT_ORCHESTRATION,
   MessageId,
   ThreadId,
   type OrchestrationCommand,
@@ -21,6 +22,7 @@ import {
   nextCommandId,
   now,
   postMessage,
+  projectId,
   reviewer,
   setSession,
   startChannelRun,
@@ -315,6 +317,12 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
     Effect.gen(function* () {
       const base = [
         ...setup,
+        {
+          type: "project.orchestration.set",
+          commandId: nextCommandId(),
+          projectId,
+          orchestration: { ...DEFAULT_PROJECT_ORCHESTRATION, sessionCap: 3 },
+        } satisfies OrchestrationCommand,
         createAgent(reviewer),
         createAgent(writer),
         createChannel("general", "channel", [backend, frontend, reviewer, writer]),

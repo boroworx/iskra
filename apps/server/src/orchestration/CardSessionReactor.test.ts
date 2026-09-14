@@ -20,8 +20,11 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 
+import * as ServerSettings from "../serverSettings.ts";
+import * as CardScheduler from "./CardScheduler.ts";
 import * as CardSessionReactor from "./CardSessionReactor.ts";
 import * as CardWorkspace from "./CardWorkspace.ts";
+import * as HostAdmission from "./HostAdmission.ts";
 import {
   cardWorkspaceTestLayer,
   makeGitRepo,
@@ -32,7 +35,12 @@ import {
 import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
 
-const layer = CardSessionReactor.layer.pipe(
+const layer = Layer.mergeAll(CardSessionReactor.layer, CardScheduler.layer).pipe(
+  Layer.provideMerge(
+    HostAdmission.layerWithSample(Effect.succeed({ load1: 0, cores: 8, freeMemRatio: 1 })),
+  ),
+  // Sessions from earlier tests stay live in the shared layer; the machine's cap would hold later cards.
+  Layer.provide(ServerSettings.layerTest({ cardRuntime: { environmentSessionCap: 100 } })),
   Layer.provideMerge(cardWorkspaceTestLayer("iskra-card-session-test-")),
 );
 
@@ -50,6 +58,7 @@ const makeWorld = Effect.fn("makeWorld")(function* (
   yield* (yield* CardWorkspace.CardWorkspace).start();
   const reactor = yield* CardSessionReactor.CardSessionReactor;
   yield* reactor.start();
+  yield* (yield* CardScheduler.CardScheduler).start();
   const events = yield* engine.subscribeDomainEvents;
   const { fileSystem, path, root } = yield* makeGitRepo(`iskra-session-repo-${name}-`);
 
@@ -538,13 +547,7 @@ it.layer(layer)("CardSessionReactor", (it) => {
           state: "stale",
         });
 
-        // A lost session no longer holds the card: a fresh one can start.
-        yield* world.engine.dispatch({
-          type: "card.session.start",
-          commandId: CommandId.make("cmd-fresh-session"),
-          cardId: world.cardId,
-          createdAt: now,
-        });
+        // A lost session no longer holds the card: the scheduler starts a fresh one.
         const fresh = yield* world.nextSession();
         expect(fresh.payload.threadId).not.toBe(owner.payload.threadId);
       }),

@@ -214,15 +214,29 @@ const make = Effect.gen(function* () {
     }
   });
 
+  /**
+   * Says on the card why a session did not start, instead of dropping it (invariant 4). An owner's
+   * failure is a typed wait the scheduler retries; a helper's or critic's is a note on the card.
+   */
   const startSession = (input: Parameters<typeof startSessionUnsafe>[0]) =>
     startSessionUnsafe(input).pipe(
-      Effect.catch((error) =>
-        postSystem(
-          input.cardId,
-          input.key,
-          `A ${input.role === "owner" ? "session" : input.role} could not start: ${error.message}`,
-        ),
-      ),
+      Effect.catchCause((cause) => {
+        if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause);
+        const error = Cause.squash(cause);
+        const message = error instanceof Error ? error.message : String(error);
+        return input.role === "owner"
+          ? Effect.gen(function* () {
+              yield* engine.dispatch({
+                type: "card.wait.note",
+                commandId: CommandId.make(`card-start-failed:${input.key}`),
+                cardId: input.cardId,
+                threadId: null,
+                reason: { code: "startFailed", text: `The session could not start: ${message}` },
+                notedAt: yield* nowIso,
+              });
+            })
+          : postSystem(input.cardId, input.key, `A ${input.role} could not start: ${message}`);
+      }),
     );
 
   const onAssigned = Effect.fn("CardSessionReactor.onAssigned")(function* (
@@ -234,23 +248,10 @@ const make = Effect.gen(function* () {
     if (card === undefined || isFinishedCardStatus(card.status)) {
       return;
     }
+    // Hand off: the scheduler starts the new agent once this session has ended.
     const owner = liveOwnerRun(model, cardId);
-    if (owner !== undefined) {
-      // Hand off: the new agent starts once this session has ended.
-      if (owner.agentId !== card.delegateAgentId) {
-        yield* stopSession(owner.threadId, key);
-      }
-      return;
-    }
-    // The plan gate: the owner starts once a human approves or skips the spec.
-    if (card.delegateAgentId !== null && card.specState !== "draft") {
-      yield* startSession({
-        cardId,
-        agentId: card.delegateAgentId,
-        role: "owner",
-        key,
-        question: null,
-      });
+    if (owner !== undefined && owner.agentId !== card.delegateAgentId) {
+      yield* stopSession(owner.threadId, key);
     }
   });
 
@@ -401,26 +402,8 @@ const make = Effect.gen(function* () {
     if (Option.isNone(run) || run.value.cardId === null || run.value.role !== "owner") {
       return;
     }
-    const { cardId, agentId } = run.value;
-    yield* updateThreadDeliveries(cardId, threadId, "undelivered");
-    // A reassignment was waiting for this session to end: the new agent starts now.
-    const model = yield* readModel();
-    const card = model.cards?.find((candidate) => candidate.id === cardId);
-    if (
-      card !== undefined &&
-      !isFinishedCardStatus(card.status) &&
-      card.delegateAgentId !== null &&
-      card.delegateAgentId !== agentId &&
-      liveOwnerRun(model, cardId) === undefined
-    ) {
-      yield* startSession({
-        cardId,
-        agentId: card.delegateAgentId,
-        role: "owner",
-        key: `handoff-${threadId}`,
-        question: null,
-      });
-    }
+    // A reassignment waiting for this session to end is the scheduler's to start.
+    yield* updateThreadDeliveries(run.value.cardId, threadId, "undelivered");
   });
 
   /**
@@ -542,37 +525,21 @@ const make = Effect.gen(function* () {
         return worker.enqueue({ kind: "session", role: "helper", event });
       case "card.spec-submitted":
         return worker.enqueue({ kind: "session", role: "critic", event });
-      case "card.spec-state-changed":
-        return event.payload.to === "draft"
-          ? Effect.void
-          : worker.enqueue({ kind: "assigned", cardId: event.payload.cardId, key: event.eventId });
       case "card.message-posted":
         return event.payload.forOwner
           ? worker.enqueue({ kind: "deliver", cardId: event.payload.cardId })
           : Effect.void;
-      // A raised cap or an accepted model lets the card spend again: restart and deliver.
+      // A raised cap or an accepted model lets the card spend again. Starting a session, here or
+      // after returnToWork or the plan gate, is the scheduler's.
       case "card.budget-set":
       case "card.unpriced-accepted":
-        return Effect.all(
-          [
-            worker.enqueue({ kind: "assigned", cardId: event.payload.cardId, key: event.eventId }),
-            worker.enqueue({ kind: "deliver", cardId: event.payload.cardId }),
-          ],
-          { discard: true },
-        );
+        return worker.enqueue({ kind: "deliver", cardId: event.payload.cardId });
       case "card.status-changed": {
         const progress = worker.enqueue({ kind: "progress", event });
-        if (isFinishedCardStatus(event.payload.to)) {
-          return Effect.andThen(
-            progress,
-            worker.enqueue({ kind: "finished", cardId: event.payload.cardId, key: event.eventId }),
-          );
-        }
-        // Back to work after failed checks, a comment or a conflict: its agent needs a live session.
-        return event.payload.move === "returnToWork"
+        return isFinishedCardStatus(event.payload.to)
           ? Effect.andThen(
               progress,
-              worker.enqueue({ kind: "assigned", cardId: event.payload.cardId, key: event.eventId }),
+              worker.enqueue({ kind: "finished", cardId: event.payload.cardId, key: event.eventId }),
             )
           : progress;
       }

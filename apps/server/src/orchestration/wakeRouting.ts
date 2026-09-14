@@ -1,8 +1,9 @@
 import {
-  DEFAULT_PROJECT_RUN_CAP,
+  projectOrchestrationOf,
   type OrchestrationAgent,
   type OrchestrationChannel,
   type OrchestrationReadModel,
+  type OrchestrationSession,
   type ProjectId,
   type ThreadId,
 } from "@iskra/contracts";
@@ -12,33 +13,55 @@ export type WakeDecision =
   | { readonly kind: "queue" }
   | { readonly kind: "refuse"; readonly reason: string };
 
-/** Live sessions in a project: its channels' conversations and its cards' sessions. */
+/**
+ * Whether a session uses compute now: starting, or in a turn (waiting on a person included). A
+ * settled session waits idle and holds no slot.
+ */
+export const holdsSlot = (
+  session: Pick<OrchestrationSession, "status" | "activeTurnId"> | null | undefined,
+): boolean =>
+  session == null ||
+  session.status === "starting" ||
+  session.status === "running" ||
+  session.activeTurnId !== null;
+
+/** Live runs holding a slot, each with the project it counts against. */
+export function busyRunsOf(readModel: OrchestrationReadModel) {
+  const sessions = new Map(readModel.threads.map((thread) => [thread.id, thread.session] as const));
+  const projectOfChannel = new Map(
+    (readModel.channels ?? []).map((channel) => [channel.id, channel.projectId] as const),
+  );
+  const projectOfCard = new Map(
+    (readModel.cards ?? []).map((card) => [card.id, card.projectId] as const),
+  );
+  return (readModel.liveRuns ?? []).flatMap((run) => {
+    const projectId =
+      run.cardId !== null
+        ? projectOfCard.get(run.cardId)
+        : run.channelId !== null
+          ? projectOfChannel.get(run.channelId)
+          : undefined;
+    return projectId !== undefined && holdsSlot(sessions.get(run.threadId))
+      ? [{ ...run, projectId }]
+      : [];
+  });
+}
+
+/** Sessions holding a slot in a project: its channels' conversations and its cards' sessions. */
 export function projectLiveRunCount(
   readModel: OrchestrationReadModel,
   projectId: ProjectId,
 ): number {
-  const channelIds = new Set(
-    (readModel.channels ?? [])
-      .filter((channel) => channel.projectId === projectId)
-      .map((channel) => channel.id),
-  );
-  const cardIds = new Set(
-    (readModel.cards ?? []).filter((card) => card.projectId === projectId).map((card) => card.id),
-  );
-  return (readModel.liveRuns ?? []).filter(
-    (run) =>
-      (run.channelId !== null && channelIds.has(run.channelId)) ||
-      (run.cardId !== null && cardIds.has(run.cardId)),
-  ).length;
+  return busyRunsOf(readModel).filter((run) => run.projectId === projectId).length;
 }
 
 /**
  * Whether a message in `channel` may wake `agent` now. An agent has one live
  * conversation at a time: a wake from the same channel joins it, a wake from
  * another channel is refused so contexts never mix (a DM instead queues until
- * that conversation ends), and a project at its cap
- * of live sessions (card sessions included) starts nothing new. `newRuns`
- * counts runs the same message has already started.
+ * that conversation ends), and a project at its own session cap (card sessions
+ * included) starts nothing new. `newRuns` counts runs the same message has
+ * already started.
  */
 export function decideWake(input: {
   readonly readModel: OrchestrationReadModel;
@@ -66,12 +89,17 @@ export function decideWake(input: {
       : { kind: "refuse", reason: `@${agent.name} is busy in another channel.` };
   }
 
-  const projectRuns = projectLiveRunCount(readModel, channel.projectId);
-  // ponytail: one fixed cap for every project; make it a project setting when a project needs another value.
-  if (projectRuns + input.newRuns >= DEFAULT_PROJECT_RUN_CAP) {
+  // The environment's cap is machine-local and the card scheduler's; a wake only meets the project's.
+  const { sessionCap } = projectOrchestrationOf(
+    readModel.projects.find((project) => project.id === channel.projectId) ?? {},
+  );
+  if (
+    sessionCap !== null &&
+    projectLiveRunCount(readModel, channel.projectId) + input.newRuns >= sessionCap
+  ) {
     return {
       kind: "refuse",
-      reason: `@${agent.name} can't start: ${DEFAULT_PROJECT_RUN_CAP} runs are already live in this project.`,
+      reason: `@${agent.name} can't start: ${sessionCap} runs are already live in this project.`,
     };
   }
   return { kind: "wake" };

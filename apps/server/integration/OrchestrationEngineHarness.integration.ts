@@ -94,6 +94,7 @@ import * as CardReviewReactor from "../src/orchestration/CardReviewReactor.ts";
 import * as CardSpendReactor from "../src/orchestration/CardSpendReactor.ts";
 import * as LinearSyncReactor from "../src/orchestration/LinearSyncReactor.ts";
 import * as CardSessionReactor from "../src/orchestration/CardSessionReactor.ts";
+import * as CardScheduler from "../src/orchestration/CardScheduler.ts";
 import * as CardWorkspace from "../src/orchestration/CardWorkspace.ts";
 import * as PullRequestService from "../src/pullRequest/PullRequestService.ts";
 
@@ -457,6 +458,12 @@ export const makeOrchestrationIntegrationHarness = (
       ),
       Layer.provideMerge(
         Layer.succeed(CardSessionReactor.CardSessionReactor, {
+          start: () => Effect.void,
+          drain: Effect.void,
+        }),
+      ),
+      Layer.provideMerge(
+        Layer.succeed(CardScheduler.CardScheduler, {
           start: () => Effect.void,
           drain: Effect.void,
         }),

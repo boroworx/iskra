@@ -18,6 +18,7 @@ import * as CardReviewReactor from "../CardReviewReactor.ts";
 import * as CardSpendReactor from "../CardSpendReactor.ts";
 import * as LinearSyncReactor from "../LinearSyncReactor.ts";
 import * as CardSessionReactor from "../CardSessionReactor.ts";
+import * as CardScheduler from "../CardScheduler.ts";
 import * as CardWorkspace from "../CardWorkspace.ts";
 import { OrchestrationReactor } from "../Services/OrchestrationReactor.ts";
 import { makeOrchestrationReactor } from "./OrchestrationReactor.ts";
@@ -150,6 +151,15 @@ describe("OrchestrationReactor", () => {
           }),
         ),
         Layer.provideMerge(
+          Layer.succeed(CardScheduler.CardScheduler, {
+            start: () => {
+              started.push("card-scheduler");
+              return Effect.void;
+            },
+            drain: Effect.void,
+          }),
+        ),
+        Layer.provideMerge(
           Layer.succeed(CardSessionReactor.CardSessionReactor, {
             start: () => {
               started.push("card-session-reactor");
@@ -209,6 +219,7 @@ describe("OrchestrationReactor", () => {
       "card-review-reactor",
       "card-spend-reactor",
       "linear-sync-reactor",
+      "card-scheduler",
     ]);
 
     await Effect.runPromise(Scope.close(scope, Exit.void));

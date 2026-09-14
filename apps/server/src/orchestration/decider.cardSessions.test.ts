@@ -1,4 +1,10 @@
-import { ChannelId, MessageId, ThreadId, type OrchestrationCommand } from "@iskra/contracts";
+import {
+  ChannelId,
+  DEFAULT_PROJECT_ORCHESTRATION,
+  MessageId,
+  ThreadId,
+  type OrchestrationCommand,
+} from "@iskra/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -21,6 +27,7 @@ import {
   now,
   onCard,
   postMessage,
+  projectId,
   recordSession,
   setSession,
   setWorkspace,
@@ -132,6 +139,16 @@ it.layer(NodeServices.layer)("decider card sessions", (it) => {
       Effect.gen(function* () {
         const withChannel = yield* applyCommands([
           ...owned,
+          {
+            type: "project.orchestration.set",
+            commandId: nextCommandId(),
+            projectId,
+            orchestration: {
+              ...DEFAULT_PROJECT_ORCHESTRATION,
+              sessionCap: 3,
+              sideEffectGuard: { acknowledgedAt: now, killSwitchEnv: null },
+            },
+          } satisfies OrchestrationCommand,
           createChannel(channelId, "channel", [backend, frontend]),
         ]);
 
