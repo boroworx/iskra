@@ -9,11 +9,6 @@ import type { Atom } from "effect/unstable/reactivity";
 
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import {
-  type CreateAgentInput,
-  type CreateChannelInput,
-  type PostChannelMessageInput,
-  type SendAgentSessionMessageInput,
-  type UpdateChannelInput,
   createAgent,
   createChannel,
   postChannelMessage,
@@ -83,23 +78,23 @@ export function createChannelEnvironmentAtoms<R, E>(
     }),
     postMessage: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:channel:post-message",
-      execute: (input: PostChannelMessageInput) => postChannelMessage(input),
+      execute: postChannelMessage,
     }),
     sessionMessage: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:agent:session-message",
-      execute: (input: SendAgentSessionMessageInput) => sendAgentSessionMessage(input),
+      execute: sendAgentSessionMessage,
     }),
     create: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:channel:create",
-      execute: (input: CreateChannelInput) => createChannel(input),
+      execute: createChannel,
     }),
     update: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:channel:update",
-      execute: (input: UpdateChannelInput) => updateChannel(input),
+      execute: updateChannel,
     }),
     createAgent: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:agent:create",
-      execute: (input: CreateAgentInput) => createAgent(input),
+      execute: createAgent,
     }),
     saveAgentDefinition: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:agent:save-definition",

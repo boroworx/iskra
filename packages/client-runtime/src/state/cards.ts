@@ -4,12 +4,6 @@ import type { Atom } from "effect/unstable/reactivity";
 
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import {
-  type CardDecisionInput,
-  type SetCardBudgetInput,
-  type StartCardAttemptsInput,
-  type SnoozeCardInput,
-  type UnsnoozeCardInput,
-  type UpdateCardInput,
   decideCard,
   setCardBudget,
   startCardAttempts,
@@ -26,11 +20,11 @@ export function createCardEnvironmentAtoms<R, E>(
   return {
     decide: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:card:decide",
-      execute: (input: CardDecisionInput) => decideCard(input),
+      execute: decideCard,
     }),
     startAttempts: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:card:start-attempts",
-      execute: (input: StartCardAttemptsInput) => startCardAttempts(input),
+      execute: startCardAttempts,
     }),
     diff: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:cards:diff",
@@ -38,19 +32,19 @@ export function createCardEnvironmentAtoms<R, E>(
     }),
     setBudget: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:card:set-budget",
-      execute: (input: SetCardBudgetInput) => setCardBudget(input),
+      execute: setCardBudget,
     }),
     snooze: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:card:snooze",
-      execute: (input: SnoozeCardInput) => snoozeCard(input),
+      execute: snoozeCard,
     }),
     update: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:card:update",
-      execute: (input: UpdateCardInput) => updateCard(input),
+      execute: updateCard,
     }),
     unsnooze: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:card:unsnooze",
-      execute: (input: UnsnoozeCardInput) => unsnoozeCard(input),
+      execute: unsnoozeCard,
     }),
   };
 }
