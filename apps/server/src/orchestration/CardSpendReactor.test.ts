@@ -63,6 +63,48 @@ const layer = CardSpendReactor.layer.pipe(
   Layer.provideMerge(NodeServices.layer),
 );
 
+/** Gives a card a worktree and records its owner session, as the card reactors would. */
+const ownerSessionAtWork = Effect.fn("ownerSessionAtWork")(function* (input: {
+  readonly cardId: CardId;
+  readonly agentId: AgentId;
+  readonly agentName: string;
+  readonly title: string;
+  readonly threadId: ThreadId;
+  readonly slug: string;
+  readonly portBase: number;
+}) {
+  const engine = yield* OrchestrationEngineService;
+  const { cardId, agentId, threadId, slug } = input;
+  yield* engine.dispatch({
+    type: "card.workspace.set",
+    commandId: CommandId.make(`cmd-workspace-${slug}`),
+    cardId,
+    branch: `iskra/${slug}`,
+    worktreePath: `/tmp/worktrees/${slug}`,
+    portBase: input.portBase,
+  });
+  yield* engine.dispatch({
+    type: "card.session.record",
+    commandId: CommandId.make(`cmd-session-${slug}`),
+    threadId,
+    cardId,
+    agentId,
+    role: "owner",
+    capabilities: ["read", "write"],
+    context: {
+      agent: { id: agentId, name: input.agentName, rolePrompt: "" },
+      role: "owner",
+      card: { id: cardId, title: input.title, spec: "", branch: null, baseBranch: "main" },
+      decisions: [],
+      diff: "",
+      diffTruncated: false,
+      question: null,
+    },
+    rendered: { systemPrompt: "system", firstMessage: "brief" },
+    startedAt: now,
+  });
+});
+
 /** A card with an owner session on `model`, and a plain thread outside any card. */
 const makeWorld = Effect.fn("makeWorld")(function* (name: string, model: string) {
   const engine = yield* OrchestrationEngineService;
@@ -114,33 +156,14 @@ const makeWorld = Effect.fn("makeWorld")(function* (name: string, model: string)
     cardId,
     agentId,
   });
-  yield* engine.dispatch({
-    type: "card.workspace.set",
-    commandId: CommandId.make(`cmd-workspace-${name}`),
-    cardId,
-    branch: `iskra/${name}`,
-    worktreePath: `/tmp/worktrees/${name}`,
-    portBase: 42000,
-  });
-  yield* engine.dispatch({
-    type: "card.session.record",
-    commandId: CommandId.make(`cmd-session-${name}`),
-    threadId: ownerThreadId,
+  yield* ownerSessionAtWork({
     cardId,
     agentId,
-    role: "owner",
-    capabilities: ["read", "write"],
-    context: {
-      agent: { id: agentId, name, rolePrompt: "" },
-      role: "owner",
-      card: { id: cardId, title: "Rate limiting", spec: "", branch: null, baseBranch: "main" },
-      decisions: [],
-      diff: "",
-      diffTruncated: false,
-      question: null,
-    },
-    rendered: { systemPrompt: "system", firstMessage: "brief" },
-    startedAt: now,
+    agentName: name,
+    title: "Rate limiting",
+    threadId: ownerThreadId,
+    slug: name,
+    portBase: 42000,
   });
   for (const threadId of [ownerThreadId, plainThreadId]) {
     yield* engine.dispatch({
@@ -236,33 +259,14 @@ it.layer(layer)("CardSpendReactor", (it) => {
         ],
         createdAt: now,
       });
-      yield* engine.dispatch({
-        type: "card.workspace.set",
-        commandId: CommandId.make("cmd-workspace-attempt-one"),
-        cardId: attemptId,
-        branch: "iskra/attempt-one",
-        worktreePath: "/tmp/worktrees/attempt-one",
-        portBase: 42010,
-      });
-      yield* engine.dispatch({
-        type: "card.session.record",
-        commandId: CommandId.make("cmd-session-attempt-one"),
-        threadId: attemptThreadId,
+      yield* ownerSessionAtWork({
         cardId: attemptId,
         agentId: world.agentId,
-        role: "owner",
-        capabilities: ["read", "write"],
-        context: {
-          agent: { id: world.agentId, name: "attempt", rolePrompt: "" },
-          role: "owner",
-          card: { id: attemptId, title: "Attempt", spec: "", branch: null, baseBranch: "main" },
-          decisions: [],
-          diff: "",
-          diffTruncated: false,
-          question: null,
-        },
-        rendered: { systemPrompt: "system", firstMessage: "brief" },
-        startedAt: now,
+        agentName: "attempt",
+        title: "Attempt",
+        threadId: attemptThreadId,
+        slug: "attempt-one",
+        portBase: 42010,
       });
 
       yield* world.finished(attemptThreadId, "turn-1", { totalCostUsd: 2 });

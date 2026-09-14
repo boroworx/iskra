@@ -387,6 +387,36 @@ it.layer(layer)("LinearSyncReactor", (it) => {
         instanceId: ProviderInstanceId.make("claudeAgent"),
         model: "claude-haiku-4-5",
       };
+      /** The delegate asks a question answered by message, the way ask_owner records it. */
+      const askQuestion = (activityId: string, requestId: string, question: string) =>
+        world.engine.dispatch({
+          type: "thread.activity.append",
+          commandId: world.commandId(),
+          threadId,
+          createdAt: now,
+          activity: {
+            id: EventId.make(activityId),
+            tone: "info",
+            kind: "user-input.requested",
+            summary: "User input requested",
+            payload: {
+              requestId,
+              responseMode: "message",
+              questions: [
+                {
+                  id: "answer",
+                  header: "Question",
+                  question,
+                  options: [],
+                  allowCustomAnswer: true,
+                  multiSelect: false,
+                },
+              ],
+            },
+            turnId: null,
+            createdAt: now,
+          },
+        });
       yield* world.engine.dispatch({
         type: "agent.create",
         commandId: world.commandId(),
@@ -450,34 +480,7 @@ it.layer(layer)("LinearSyncReactor", (it) => {
 
       yield* world.reactor.start();
       const elicitation = yield* awaitActivity("elicitation");
-      yield* world.engine.dispatch({
-        type: "thread.activity.append",
-        commandId: world.commandId(),
-        threadId,
-        createdAt: now,
-        activity: {
-          id: EventId.make("activity-ask-question"),
-          tone: "info",
-          kind: "user-input.requested",
-          summary: "User input requested",
-          payload: {
-            requestId: "ask-owner:question",
-            responseMode: "message",
-            questions: [
-              {
-                id: "answer",
-                header: "Question",
-                question: "Per key or per account?",
-                options: [],
-                allowCustomAnswer: true,
-                multiSelect: false,
-              },
-            ],
-          },
-          turnId: null,
-          createdAt: now,
-        },
-      });
+      yield* askQuestion("activity-ask-question", "ask-owner:question", "Per key or per account?");
       expect(yield* Deferred.await(elicitation)).toEqual({
         type: "elicitation",
         body: "Per key or per account?",
@@ -542,34 +545,7 @@ it.layer(layer)("LinearSyncReactor", (it) => {
 
       // A second question is answered by a prompt in the agent session.
       const second = yield* awaitActivity("elicitation");
-      yield* world.engine.dispatch({
-        type: "thread.activity.append",
-        commandId: world.commandId(),
-        threadId,
-        createdAt: now,
-        activity: {
-          id: EventId.make("activity-ask-second"),
-          tone: "info",
-          kind: "user-input.requested",
-          summary: "User input requested",
-          payload: {
-            requestId: "ask-owner:second",
-            responseMode: "message",
-            questions: [
-              {
-                id: "answer",
-                header: "Question",
-                question: "Include webhooks?",
-                options: [],
-                allowCustomAnswer: true,
-                multiSelect: false,
-              },
-            ],
-          },
-          turnId: null,
-          createdAt: now,
-        },
-      });
+      yield* askQuestion("activity-ask-second", "ask-owner:second", "Include webhooks?");
       expect(yield* Deferred.await(second)).toMatchObject({ body: "Include webhooks?" });
       const secondAnswered = world.nextEvent(
         "thread.activity-appended",
