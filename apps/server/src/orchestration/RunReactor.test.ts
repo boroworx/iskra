@@ -6,8 +6,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
-  TurnId,
-  type OrchestrationEvent,
+  type RunCapability,
 } from "@iskra/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
@@ -24,17 +23,15 @@ import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolv
 import { OrchestrationEngineLive } from "./Layers/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./Layers/ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./Layers/ProjectionSnapshotQuery.ts";
+import { nextEventOn, now, providerSession } from "./reactor.testkit.ts";
 import * as RunReactor from "./RunReactor.ts";
 import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
 import * as ThreadBackgroundLiveness from "./ThreadBackgroundLiveness.ts";
 import * as ThreadPlanProgress from "./ThreadPlanProgress.ts";
 
-const now = "2026-01-01T00:00:00.000Z";
-const projectId = ProjectId.make("project-runs");
 const channelId = ChannelId.make("channel-backend");
 const agentId = AgentId.make("agent-backend");
-const triggerMessageId = MessageId.make("message-question");
 
 const layer = RunReactor.layer.pipe(
   Layer.provideMerge(
@@ -51,14 +48,19 @@ const layer = RunReactor.layer.pipe(
   Layer.provideMerge(NodeServices.layer),
 );
 
-type SessionStatus = "running" | "ready" | "stopped" | "error";
-
 /**
  * A fresh project with one agent in one channel, the reactor running, and a
  * tap on domain events. `nextEvent` consumes the tap, so await events in the
  * order they happen.
  */
-const startChannel = Effect.fn("startChannel")(function* (name: string) {
+const startChannel = Effect.fn("startChannel")(function* (
+  name: string,
+  overrides: {
+    readonly rolePrompt?: string;
+    readonly capabilities?: ReadonlyArray<RunCapability>;
+    readonly pinnedSpec?: string;
+  } = {},
+) {
   const engine = yield* OrchestrationEngineService;
   const reactor = yield* RunReactor.RunReactor;
   yield* reactor.start();
@@ -82,12 +84,12 @@ const startChannel = Effect.fn("startChannel")(function* (name: string) {
     projectId: worldProjectId,
     name,
     roleTags: [],
-    rolePrompt: "",
+    rolePrompt: overrides.rolePrompt ?? "",
     modelSelection: {
       instanceId: ProviderInstanceId.make("claudeAgent"),
       model: "claude-haiku-4-5",
     },
-    capabilities: ["read"],
+    capabilities: overrides.capabilities ?? ["read"],
     createdAt: now,
   });
   yield* engine.dispatch({
@@ -97,24 +99,10 @@ const startChannel = Effect.fn("startChannel")(function* (name: string) {
     projectId: worldProjectId,
     kind: "channel",
     name,
+    ...(overrides.pinnedSpec === undefined ? {} : { pinnedSpec: overrides.pinnedSpec }),
     memberAgentIds: [worldAgentId],
     createdAt: now,
   });
-
-  const nextEvent = <Type extends OrchestrationEvent["type"]>(
-    type: Type,
-    matches: (event: Extract<OrchestrationEvent, { type: Type }>) => boolean = () => true,
-  ) =>
-    events.pipe(
-      Stream.filter(
-        (event) =>
-          event.type === type && matches(event as Extract<OrchestrationEvent, { type: Type }>),
-      ),
-      Stream.runHead,
-      Effect.map(
-        (event) => Option.getOrThrow(event) as Extract<OrchestrationEvent, { type: Type }>,
-      ),
-    );
 
   const post = (messageId: string, body: string) =>
     engine.dispatch({
@@ -126,107 +114,21 @@ const startChannel = Effect.fn("startChannel")(function* (name: string) {
       createdAt: now,
     });
 
-  const setSession = (threadId: ThreadId, status: SessionStatus, turnId: string | null) =>
-    engine.dispatch({
-      type: "thread.session.set",
-      commandId: CommandId.make(`cmd-session-${threadId}-${status}-${turnId ?? "idle"}`),
-      threadId,
-      session: {
-        threadId,
-        status,
-        providerName: "claudeAgent",
-        runtimeMode: "approval-required",
-        activeTurnId: turnId === null ? null : TurnId.make(turnId),
-        lastError: null,
-        updatedAt: now,
-      },
-      createdAt: now,
-    });
-
-  const answer = Effect.fn("answer")(function* (threadId: ThreadId, turnId: string, text: string) {
-    const messageId = MessageId.make(`assistant-${threadId}-${turnId}`);
-    yield* engine.dispatch({
-      type: "thread.message.assistant.delta",
-      commandId: CommandId.make(`cmd-delta-${messageId}`),
-      threadId,
-      messageId,
-      delta: text,
-      turnId: TurnId.make(turnId),
-      createdAt: now,
-    });
-    yield* engine.dispatch({
-      type: "thread.message.assistant.complete",
-      commandId: CommandId.make(`cmd-complete-${messageId}`),
-      threadId,
-      messageId,
-      turnId: TurnId.make(turnId),
-      createdAt: now,
-    });
-  });
-
-  return { engine, nextEvent, post, setSession, answer };
+  return { engine, nextEvent: nextEventOn(events), post, ...(yield* providerSession) };
 });
 
 it.layer(layer)("RunReactor", (it) => {
   it.effect("starts a read-only hidden run on wake and posts its reply back to the channel", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const engine = yield* OrchestrationEngineService;
-        const snapshotQuery = yield* ProjectionSnapshotQuery;
-        const reactor = yield* RunReactor.RunReactor;
-        yield* reactor.start();
-        // Subscribe before dispatching so the reactor's events cannot be missed.
-        const events = yield* engine.subscribeDomainEvents;
-        const nextEvent = <Type extends OrchestrationEvent["type"]>(type: Type) =>
-          events.pipe(
-            Stream.filter((event) => event.type === type),
-            Stream.runHead,
-            Effect.map(Option.getOrThrow),
-          );
-
-        yield* engine.dispatch({
-          type: "project.create",
-          commandId: CommandId.make("cmd-project"),
-          projectId,
-          title: "Runs",
-          workspaceRoot: "/tmp/runs",
-          createdAt: now,
-        });
-        yield* engine.dispatch({
-          type: "agent.create",
-          commandId: CommandId.make("cmd-agent"),
-          agentId,
-          projectId,
-          name: "backend",
-          roleTags: [],
+        const world = yield* startChannel("backend", {
           rolePrompt: "You own the API.",
-          modelSelection: {
-            instanceId: ProviderInstanceId.make("claudeAgent"),
-            model: "claude-haiku-4-5",
-          },
           capabilities: ["read", "write"],
-          createdAt: now,
-        });
-        yield* engine.dispatch({
-          type: "channel.create",
-          commandId: CommandId.make("cmd-channel"),
-          channelId,
-          projectId,
-          kind: "channel",
-          name: "backend",
           pinnedSpec: "Use REST.",
-          memberAgentIds: [agentId],
-          createdAt: now,
         });
-        yield* engine.dispatch({
-          type: "channel.message.post",
-          commandId: CommandId.make("cmd-question"),
-          channelId,
-          messageId: triggerMessageId,
-          body: "@backend which API style do we use?",
-          createdAt: now,
-        });
-        const turnStart = yield* nextEvent("thread.turn-start-requested");
+        const snapshotQuery = yield* ProjectionSnapshotQuery;
+        yield* world.post("message-question", "@backend which API style do we use?");
+        const turnStart = yield* world.nextEvent("thread.turn-start-requested");
         const threadId = ThreadId.make(turnStart.aggregateId);
 
         const run = yield* snapshotQuery
@@ -245,48 +147,12 @@ it.layer(layer)("RunReactor", (it) => {
         const shell = yield* snapshotQuery.getShellSnapshot();
         expect(shell.threads.map((candidate) => candidate.id)).not.toContain(threadId);
 
-        const turnId = TurnId.make("turn-run-1");
-        const session = {
-          threadId,
-          providerName: "claudeAgent",
-          runtimeMode: "approval-required" as const,
-          lastError: null,
-          updatedAt: now,
-        };
-        yield* engine.dispatch({
-          type: "thread.session.set",
-          commandId: CommandId.make("cmd-session-running"),
-          threadId,
-          session: { ...session, status: "running", activeTurnId: turnId },
-          createdAt: now,
-        });
-        yield* engine.dispatch({
-          type: "thread.message.assistant.delta",
-          commandId: CommandId.make("cmd-assistant-delta"),
-          threadId,
-          messageId: MessageId.make("assistant-reply"),
-          delta: "We use REST.",
-          turnId,
-          createdAt: now,
-        });
-        yield* engine.dispatch({
-          type: "thread.message.assistant.complete",
-          commandId: CommandId.make("cmd-assistant-complete"),
-          threadId,
-          messageId: MessageId.make("assistant-reply"),
-          turnId,
-          createdAt: now,
-        });
-        yield* engine.dispatch({
-          type: "thread.session.set",
-          commandId: CommandId.make("cmd-session-ready"),
-          threadId,
-          session: { ...session, status: "ready", activeTurnId: null },
-          createdAt: now,
-        });
+        yield* world.setSession(threadId, "running", "turn-run-1");
+        yield* world.answer(threadId, "turn-run-1", "We use REST.");
+        yield* world.setSession(threadId, "ready", null);
 
-        yield* nextEvent("thread.session-stop-requested");
-        const replies = (yield* Stream.runCollect(engine.readEvents(0))).filter(
+        yield* world.nextEvent("thread.session-stop-requested");
+        const replies = (yield* Stream.runCollect(world.engine.readEvents(0))).filter(
           (event) =>
             event.type === "channel.message-posted" && event.payload.authorKind === "agent",
         );

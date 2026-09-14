@@ -6,80 +6,30 @@ import {
   ORPHANED_PROVIDER_SESSION_ERROR,
   ProjectId,
   ProviderInstanceId,
-  ThreadId,
   TurnId,
   runSessionState,
-  type OrchestrationEvent,
   type RunCapability,
+  type ThreadId,
 } from "@iskra/contracts";
-import * as Net from "@iskra/shared/Net";
-import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Path from "effect/Path";
-import * as Stream from "effect/Stream";
 
-import { ServerConfig } from "../config.ts";
-import { OrchestrationCommandReceiptRepositoryLive } from "../persistence/Layers/OrchestrationCommandReceipts.ts";
-import { OrchestrationEventStoreLive } from "../persistence/Layers/OrchestrationEventStore.ts";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
-import * as ProcessRunner from "../processRunner.ts";
-import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
-import * as ServerSettings from "../serverSettings.ts";
-import * as TerminalManager from "../terminal/Manager.ts";
 import * as CardSessionReactor from "./CardSessionReactor.ts";
 import * as CardWorkspace from "./CardWorkspace.ts";
-import { OrchestrationEngineLive } from "./Layers/OrchestrationEngine.ts";
-import { OrchestrationProjectionPipelineLive } from "./Layers/ProjectionPipeline.ts";
-import { OrchestrationProjectionSnapshotQueryLive } from "./Layers/ProjectionSnapshotQuery.ts";
+import {
+  cardWorkspaceTestLayer,
+  makeGitRepo,
+  nextEventOn,
+  now,
+  providerSession,
+} from "./reactor.testkit.ts";
 import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
-import * as ThreadBackgroundLiveness from "./ThreadBackgroundLiveness.ts";
-import * as ThreadPlanProgress from "./ThreadPlanProgress.ts";
-
-const now = "2026-01-01T00:00:00.000Z";
-
-// Different bytes on every call, so each generated id is new.
-let randomCalls = 0;
-const testCrypto = Crypto.make({
-  randomBytes: (size) => {
-    randomCalls += 1;
-    const bytes = new Uint8Array(size);
-    new DataView(bytes.buffer).setUint32(0, randomCalls);
-    return bytes;
-  },
-  digest: (_algorithm, data) => Effect.succeed(data),
-});
 
 const layer = CardSessionReactor.layer.pipe(
-  Layer.provideMerge(CardWorkspace.layer),
-  Layer.provideMerge(
-    OrchestrationEngineLive.pipe(Layer.provide(OrchestrationProjectionPipelineLive)),
-  ),
-  Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
-  Layer.provideMerge(ThreadBackgroundLiveness.layer),
-  Layer.provide(ThreadPlanProgress.layer),
-  Layer.provide(OrchestrationEventStoreLive),
-  Layer.provideMerge(OrchestrationCommandReceiptRepositoryLive),
-  Layer.provide(RepositoryIdentityResolver.layer),
-  Layer.provide(SqlitePersistenceMemory),
-  Layer.provideMerge(
-    ServerConfig.layerTest(process.cwd(), { prefix: "iskra-card-session-test-" }),
-  ),
-  Layer.provideMerge(ProcessRunner.layer),
-  Layer.provide(Net.layer),
-  Layer.provide(
-    Layer.mock(TerminalManager.TerminalManager)({
-      close: () => Effect.void,
-    }),
-  ),
-  Layer.provide(ServerSettings.layerTest()),
-  Layer.provide(Layer.succeed(Crypto.Crypto, testCrypto)),
-  Layer.provideMerge(NodeServices.layer),
+  Layer.provideMerge(cardWorkspaceTestLayer("iskra-card-session-test-")),
 );
 
 /**
@@ -93,30 +43,11 @@ const makeWorld = Effect.fn("makeWorld")(function* (
 ) {
   const engine = yield* OrchestrationEngineService;
   const snapshotQuery = yield* ProjectionSnapshotQuery;
-  const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const runner = yield* ProcessRunner.ProcessRunner;
   yield* (yield* CardWorkspace.CardWorkspace).start();
   const reactor = yield* CardSessionReactor.CardSessionReactor;
   yield* reactor.start();
   const events = yield* engine.subscribeDomainEvents;
-
-  const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: `iskra-session-repo-${name}-` });
-  const git = (...args: ReadonlyArray<string>) =>
-    runner
-      .run({ command: "git", args: ["-C", root, ...args] })
-      .pipe(
-        Effect.flatMap((output) =>
-          output.code === 0 ? Effect.void : Effect.die(new Error(output.stderr)),
-        ),
-      );
-  yield* git("init", "--initial-branch=main");
-  yield* git("config", "user.email", "test@example.com");
-  yield* git("config", "user.name", "Test");
-  yield* git("config", "commit.gpgsign", "false");
-  yield* fileSystem.writeFileString(path.join(root, "README.md"), "hello\n");
-  yield* git("add", ".");
-  yield* git("commit", "-m", "initial");
+  const { fileSystem, path, root } = yield* makeGitRepo(`iskra-session-repo-${name}-`);
 
   const projectId = ProjectId.make(`project-${name}`);
   const cardId = CardId.make(`card-${name}`);
@@ -179,63 +110,8 @@ const makeWorld = Effect.fn("makeWorld")(function* (
     });
   }
 
-  const nextEvent = <Type extends OrchestrationEvent["type"]>(
-    type: Type,
-    matches: (event: Extract<OrchestrationEvent, { type: Type }>) => boolean = () => true,
-  ) =>
-    events.pipe(
-      Stream.filter(
-        (event) =>
-          event.type === type && matches(event as Extract<OrchestrationEvent, { type: Type }>),
-      ),
-      Stream.runHead,
-      Effect.map(
-        (event) => Option.getOrThrow(event) as Extract<OrchestrationEvent, { type: Type }>,
-      ),
-    );
-
-  const setSession = (
-    threadId: ThreadId,
-    status: "running" | "ready" | "stopped" | "error",
-    turnId: string | null,
-    lastError: string | null = null,
-  ) =>
-    engine.dispatch({
-      type: "thread.session.set",
-      commandId: CommandId.make(`cmd-session-${threadId}-${status}-${turnId ?? "idle"}`),
-      threadId,
-      session: {
-        threadId,
-        status,
-        providerName: "claudeAgent",
-        runtimeMode: "approval-required",
-        activeTurnId: turnId === null ? null : TurnId.make(turnId),
-        lastError,
-        updatedAt: now,
-      },
-      createdAt: now,
-    });
-
-  const answer = Effect.fn("answer")(function* (threadId: ThreadId, turnId: string, text: string) {
-    const messageId = MessageId.make(`assistant-${threadId}-${turnId}`);
-    yield* engine.dispatch({
-      type: "thread.message.assistant.delta",
-      commandId: CommandId.make(`cmd-delta-${messageId}`),
-      threadId,
-      messageId,
-      delta: text,
-      turnId: TurnId.make(turnId),
-      createdAt: now,
-    });
-    yield* engine.dispatch({
-      type: "thread.message.assistant.complete",
-      commandId: CommandId.make(`cmd-complete-${messageId}`),
-      threadId,
-      messageId,
-      turnId: TurnId.make(turnId),
-      createdAt: now,
-    });
-  });
+  const nextEvent = nextEventOn(events);
+  const { setSession, answer } = yield* providerSession;
 
   /** A session is recorded before its thread exists; this waits for its first message. */
   const nextSession = Effect.fn("nextSession")(function* () {

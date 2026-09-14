@@ -4,71 +4,21 @@ import {
   CommandId,
   ProjectId,
   ProviderInstanceId,
-  type OrchestrationEvent,
   type ProjectScript,
 } from "@iskra/contracts";
-import * as Net from "@iskra/shared/Net";
-import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
-import * as Path from "effect/Path";
 import * as Stream from "effect/Stream";
 
-import { ServerConfig } from "../config.ts";
-import { OrchestrationCommandReceiptRepositoryLive } from "../persistence/Layers/OrchestrationCommandReceipts.ts";
-import { OrchestrationEventStoreLive } from "../persistence/Layers/OrchestrationEventStore.ts";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
-import * as ProcessRunner from "../processRunner.ts";
-import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
-import * as ServerSettings from "../serverSettings.ts";
-import * as TerminalManager from "../terminal/Manager.ts";
 import * as CardReviewReactor from "./CardReviewReactor.ts";
 import * as CardWorkspace from "./CardWorkspace.ts";
-import { OrchestrationEngineLive } from "./Layers/OrchestrationEngine.ts";
-import { OrchestrationProjectionPipelineLive } from "./Layers/ProjectionPipeline.ts";
-import { OrchestrationProjectionSnapshotQueryLive } from "./Layers/ProjectionSnapshotQuery.ts";
+import { cardWorkspaceTestLayer, makeGitRepo, nextEventOn, now } from "./reactor.testkit.ts";
 import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
-import * as ThreadBackgroundLiveness from "./ThreadBackgroundLiveness.ts";
-import * as ThreadPlanProgress from "./ThreadPlanProgress.ts";
-
-const now = "2026-01-01T00:00:00.000Z";
-
-// Different bytes on every call, so each generated id is new.
-let randomCalls = 0;
-const testCrypto = Crypto.make({
-  randomBytes: (size) => {
-    randomCalls += 1;
-    const bytes = new Uint8Array(size);
-    new DataView(bytes.buffer).setUint32(0, randomCalls);
-    return bytes;
-  },
-  digest: (_algorithm, data) => Effect.succeed(data),
-});
 
 const layer = CardReviewReactor.layer.pipe(
-  Layer.provideMerge(CardWorkspace.layer),
-  Layer.provideMerge(
-    OrchestrationEngineLive.pipe(Layer.provide(OrchestrationProjectionPipelineLive)),
-  ),
-  Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
-  Layer.provideMerge(ThreadBackgroundLiveness.layer),
-  Layer.provide(ThreadPlanProgress.layer),
-  Layer.provide(OrchestrationEventStoreLive),
-  Layer.provideMerge(OrchestrationCommandReceiptRepositoryLive),
-  Layer.provide(RepositoryIdentityResolver.layer),
-  Layer.provide(SqlitePersistenceMemory),
-  Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "iskra-card-review-test-" })),
-  Layer.provideMerge(ProcessRunner.layer),
-  Layer.provide(Net.layer),
-  Layer.provide(Layer.mock(TerminalManager.TerminalManager)({ close: () => Effect.void })),
-  Layer.provide(ServerSettings.layerTest()),
-  Layer.provide(Layer.succeed(Crypto.Crypto, testCrypto)),
-  Layer.provideMerge(NodeServices.layer),
+  Layer.provideMerge(cardWorkspaceTestLayer("iskra-card-review-test-")),
 );
 
 /**
@@ -82,9 +32,6 @@ const makeWorld = Effect.fn("makeWorld")(function* (
 ) {
   const engine = yield* OrchestrationEngineService;
   const snapshotQuery = yield* ProjectionSnapshotQuery;
-  const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const runner = yield* ProcessRunner.ProcessRunner;
   const workspace = yield* CardWorkspace.CardWorkspace;
   yield* workspace.start();
   const reactor = yield* CardReviewReactor.CardReviewReactor;
@@ -92,25 +39,7 @@ const makeWorld = Effect.fn("makeWorld")(function* (
   const events = yield* engine.subscribeDomainEvents;
   // A second tap, so waiting for teardown cannot consume events the test awaits.
   const teardownEvents = yield* engine.subscribeDomainEvents;
-
-  const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: `iskra-review-repo-${name}-` });
-  const gitIn = (cwd: string, ...args: ReadonlyArray<string>) =>
-    runner
-      .run({ command: "git", args: ["-C", cwd, ...args] })
-      .pipe(
-        Effect.flatMap((output) =>
-          output.code === 0
-            ? Effect.succeed(output.stdout.trim())
-            : Effect.die(new Error(output.stderr)),
-        ),
-      );
-  yield* gitIn(root, "init", "--initial-branch=main");
-  yield* gitIn(root, "config", "user.email", "test@example.com");
-  yield* gitIn(root, "config", "user.name", "Test");
-  yield* gitIn(root, "config", "commit.gpgsign", "false");
-  yield* fileSystem.writeFileString(path.join(root, "README.md"), "hello\n");
-  yield* gitIn(root, "add", ".");
-  yield* gitIn(root, "commit", "-m", "initial");
+  const { fileSystem, path, root, gitIn } = yield* makeGitRepo(`iskra-review-repo-${name}-`);
 
   const projectId = ProjectId.make(`project-${name}`);
   const agentId = AgentId.make(`agent-${name}`);
@@ -191,20 +120,7 @@ const makeWorld = Effect.fn("makeWorld")(function* (
     };
   });
 
-  const nextEvent = <Type extends OrchestrationEvent["type"]>(
-    type: Type,
-    matches: (event: Extract<OrchestrationEvent, { type: Type }>) => boolean = () => true,
-  ) =>
-    events.pipe(
-      Stream.filter(
-        (event) =>
-          event.type === type && matches(event as Extract<OrchestrationEvent, { type: Type }>),
-      ),
-      Stream.runHead,
-      Effect.map(
-        (event) => Option.getOrThrow(event) as Extract<OrchestrationEvent, { type: Type }>,
-      ),
-    );
+  const nextEvent = nextEventOn(events);
 
   /** Waits until landed cards' worktrees are removed, so the repository can be cleaned up. */
   const workspacesCleared = (cardIds: ReadonlyArray<CardId>) =>
