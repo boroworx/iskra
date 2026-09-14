@@ -37,11 +37,12 @@ import { useEnvironmentAgents, useEnvironmentCards, useProjects } from "~/state/
 import { useAtomCommand } from "~/state/use-atom-command";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
-import { NewCardDialog } from "./NewCardDialog";
 import { SidebarInset } from "../ui/sidebar";
 import { toastManager } from "../ui/toast";
 import { toastCommandFailure } from "../toastCommandFailure";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
+import { CardSheet } from "./CardSheet";
+import { NewCardDialog } from "./NewCardDialog";
 
 type Badge = readonly [label: string, alarming: boolean];
 
@@ -122,6 +123,16 @@ export function BoardView(props: {
   }, [cards]);
   // Faces get plain values from this, so a face whose own facts did not change skips rendering.
   const related = useMemo(() => relatedCards(cards), [cards]);
+  // The sheet's data is only the open card; faces never see it.
+  const openCardShell = useMemo(
+    () => cards.find((card) => card.id === props.openCardId) ?? null,
+    [cards, props.openCardId],
+  );
+  const projectAgents = useMemo(
+    () => agents.filter((agent) => agent.projectId === props.projectId),
+    [agents, props.projectId],
+  );
+  const closeCard = useCallback(() => openCard(null), [openCard]);
 
   const onDragEnd = async (event: DragEndEvent) => {
     const card = cards.find((candidate) => candidate.id === event.active.id);
@@ -171,6 +182,14 @@ export function BoardView(props: {
           projectId={props.projectId}
           onCreated={openCard}
         />
+        <CardSheet
+          environmentId={props.environmentId}
+          card={openCardShell}
+          cards={cards}
+          agents={projectAgents}
+          now={now}
+          onClose={closeCard}
+        />
         {cards.length === 0 ? (
           <main className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-5 text-center">
             <div className="flex max-w-md flex-col gap-1 text-sm text-muted-foreground">
@@ -200,6 +219,7 @@ export function BoardView(props: {
                   agents={agents}
                   now={now}
                   environmentId={props.environmentId}
+                  onOpen={openCard}
                 />
               ))}
             </div>
@@ -217,6 +237,7 @@ function BoardColumnView(props: {
   readonly agents: ReadonlyArray<OrchestrationAgentShell>;
   readonly now: number;
   readonly environmentId: EnvironmentId;
+  readonly onOpen: (cardId: CardId) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: props.column });
   return (
@@ -242,6 +263,7 @@ function BoardColumnView(props: {
               delegateName={props.agents.find((agent) => agent.id === card.delegateAgentId)?.name}
               now={props.now}
               environmentId={props.environmentId}
+              onOpen={props.onOpen}
             />
           </li>
         ))}
@@ -257,6 +279,7 @@ const CardFace = memo(function CardFace(props: {
   readonly delegateName: string | undefined;
   readonly now: number;
   readonly environmentId: EnvironmentId;
+  readonly onOpen: (cardId: CardId) => void;
 }) {
   const { card } = props;
   const children = props.subCards ?? [];
@@ -300,7 +323,16 @@ const CardFace = memo(function CardFace(props: {
         card.status === "abandoned" && "opacity-60",
       )}
     >
-      <h3 className="line-clamp-2 font-medium">{card.title}</h3>
+      <h3 className="line-clamp-2 font-medium">
+        {/* dnd-kit swallows the click that ends a drag, so this opens the sheet only on a click. */}
+        <button
+          type="button"
+          className="text-start hover:underline"
+          onClick={() => props.onOpen(card.id)}
+        >
+          {card.title}
+        </button>
+      </h3>
       {card.status === "triage" && card.proposalReasoning !== null ? (
         <p className="line-clamp-3 text-xs text-muted-foreground">{card.proposalReasoning}</p>
       ) : null}

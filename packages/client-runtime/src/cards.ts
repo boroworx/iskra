@@ -1,6 +1,7 @@
 import {
   CARD_AUTOFIX_ATTEMPTS,
   type CardId,
+  type CardRelationKind,
   type CardStatus,
   type OrchestrationCard,
   type OrchestrationCardShell,
@@ -10,7 +11,14 @@ import {
 } from "@iskra/contracts";
 
 /** The board's columns, left to right. Landed and abandoned cards share Done. */
-export const BOARD_COLUMNS = ["triage", "ready", "inProgress", "inReview", "landing", "done"] as const;
+export const BOARD_COLUMNS = [
+  "triage",
+  "ready",
+  "inProgress",
+  "inReview",
+  "landing",
+  "done",
+] as const;
 export type BoardColumn = (typeof BOARD_COLUMNS)[number];
 
 export const BOARD_COLUMN_LABEL: Record<BoardColumn, string> = {
@@ -67,7 +75,10 @@ export function cardDropDecision(status: CardStatus, to: BoardColumn): CardDropD
     case "triage":
       return status === "ready"
         ? { kind: "command", type: "card.unapprove" }
-        : { kind: "refuse", reason: "Only a ready card whose work has not started can go back to triage." };
+        : {
+            kind: "refuse",
+            reason: "Only a ready card whose work has not started can go back to triage.",
+          };
     case "landing":
       return status === "inReview"
         ? { kind: "command", type: "card.merge.approve" }
@@ -79,10 +90,160 @@ export function cardDropDecision(status: CardStatus, to: BoardColumn): CardDropD
     case "inProgress":
       return {
         kind: "refuse",
-        reason: "Work starts when the card's agent starts its first session; assign an agent instead.",
+        reason:
+          "Work starts when the card's agent starts its first session; assign an agent instead.",
       };
   }
 }
+
+const CARD_DECISION_LABEL: Record<CardDecisionCommand, string> = {
+  "card.approve": "Approve",
+  "card.unapprove": "Back to triage",
+  "card.merge.approve": "Approve merge",
+  "card.merge.cancel": "Cancel merge",
+  "card.abandon": "Abandon",
+  "card.reopen": "Reopen",
+};
+
+interface CardMoveAction {
+  readonly column: BoardColumn;
+  readonly label: string;
+  /** The decision to send, or null when the move happens on its own and `reason` says why. */
+  readonly type: CardDecisionCommand | null;
+  readonly reason: string | null;
+}
+
+/** A card's move buttons, from the same rules as a drop so a button and a drag never disagree. */
+export function cardMoveActions(status: CardStatus): ReadonlyArray<CardMoveAction> {
+  if (status === "landed") {
+    return [];
+  }
+  return BOARD_COLUMNS.flatMap((column): CardMoveAction[] => {
+    const decision = cardDropDecision(status, column);
+    if (decision.kind === "none") {
+      return [];
+    }
+    return decision.kind === "command"
+      ? [{ column, label: CARD_DECISION_LABEL[decision.type], type: decision.type, reason: null }]
+      : [
+          {
+            column,
+            label: `Move to ${BOARD_COLUMN_LABEL[column]}`,
+            type: null,
+            reason: decision.reason,
+          },
+        ];
+  });
+}
+
+/** A card session's state in words, for the board, the card sheet and attempts. */
+export const CARD_SESSION_LABEL: Record<RunSessionState, string> = {
+  pending: "Starting",
+  active: "Working",
+  awaitingInput: "Waiting for you",
+  complete: "Idle",
+  error: "Failed",
+  stale: "Stale",
+  ended: "Stopped",
+};
+
+const CARD_SESSION_HINT: Partial<Record<RunSessionState, string>> = {
+  pending: "Its agent's session is starting.",
+  active: "Its agent is working on it.",
+  awaitingInput: "Its agent asked you something; reply from the card.",
+  complete: "Its agent finished its turn and waits for a message or review.",
+  error: "Its session failed. Open the agent to see why.",
+  stale: "Its session was lost in a restart before it finished.",
+};
+
+interface CardBadge {
+  readonly label: string;
+  /** A short tooltip saying what the badge means. */
+  readonly hint: string;
+  readonly alarming: boolean;
+}
+
+/** The badges on a card's face, each with what it means. */
+export function cardBadges(
+  card: OrchestrationCardShell,
+  facts: { readonly blocked: boolean; readonly snoozed: boolean },
+): ReadonlyArray<CardBadge> {
+  const badges: CardBadge[] = [];
+  const open = card.status !== "landed" && card.status !== "abandoned";
+  if (card.specState === "draft" && card.status !== "triage" && open) {
+    badges.push({
+      label: "Spec draft",
+      hint: "The spec is not approved yet. Approve or skip it on the card.",
+      alarming: false,
+    });
+  }
+  if (facts.blocked) {
+    badges.push({
+      label: "Blocked",
+      hint: "It waits on a card it is blocked by that has not landed.",
+      alarming: true,
+    });
+  }
+  if (facts.snoozed) {
+    badges.push({
+      label: "Snoozed",
+      hint: "Hidden from Needs you until its time or its next activity.",
+      alarming: false,
+    });
+  }
+  const session = card.ownerSession;
+  const sessionHint = session === null ? undefined : CARD_SESSION_HINT[session.state];
+  if (session !== null && sessionHint !== undefined) {
+    badges.push({
+      label: CARD_SESSION_LABEL[session.state],
+      hint: sessionHint,
+      alarming: session.state === "awaitingInput" || session.state === "error",
+    });
+  }
+  if (card.checks !== null && card.status === "inReview") {
+    badges.push(
+      card.checks.state === "running"
+        ? {
+            label: "Checks running",
+            hint: "The project checks run on its branch.",
+            alarming: false,
+          }
+        : card.checks.state === "passed"
+          ? {
+              label: "Checks passed",
+              hint: "The project checks passed; approve the merge.",
+              alarming: false,
+            }
+          : {
+              label: `Checks failed ${card.checks.failedRuns}/${CARD_AUTOFIX_ATTEMPTS}`,
+              hint: `Checks failed ${card.checks.failedRuns} times in a row. Its agent retries up to ${CARD_AUTOFIX_ATTEMPTS} times, then waits for you.`,
+              alarming: true,
+            },
+    );
+  }
+  if (open && card.spentUsd >= card.budgetCapUsd) {
+    badges.push({
+      label: "Budget reached",
+      hint: "It spent its cap. Raise the budget on the card to continue.",
+      alarming: true,
+    });
+  } else if (open && card.unpricedTurns > 0 && !card.acceptsUnpriced) {
+    badges.push({
+      label: "Unpriced model",
+      hint: "Its model has no known price, so its spend can't be capped. Run it uncapped to continue.",
+      alarming: true,
+    });
+  }
+  return badges;
+}
+
+export const CARD_RELATION_LABEL: Record<CardRelationKind, string> = {
+  blocks: "Blocks",
+  blockedBy: "Blocked by",
+  duplicateOf: "Duplicate of",
+  related: "Related to",
+  overlaps: "Overlaps",
+};
 
 type SnoozeFacts = Pick<OrchestrationCard, "snoozedUntil" | "snoozedAt" | "activityAt">;
 
@@ -187,7 +348,10 @@ export function needsYouItems(input: {
           kind: "readyToMerge",
           since: card.checks.updatedAt,
         });
-      } else if (card.checks.state === "failed" && card.checks.failedRuns >= CARD_AUTOFIX_ATTEMPTS) {
+      } else if (
+        card.checks.state === "failed" &&
+        card.checks.failedRuns >= CARD_AUTOFIX_ATTEMPTS
+      ) {
         items.push({
           ...base,
           key: `checks:${card.id}`,
@@ -199,9 +363,19 @@ export function needsYouItems(input: {
     // Invariant 13: a card that may not spend waits on a person.
     if (card.status !== "landed" && card.status !== "abandoned") {
       if (card.spentUsd >= card.budgetCapUsd) {
-        items.push({ ...base, key: `budget:${card.id}`, kind: "budgetReached", since: card.activityAt });
+        items.push({
+          ...base,
+          key: `budget:${card.id}`,
+          kind: "budgetReached",
+          since: card.activityAt,
+        });
       } else if (card.unpricedTurns > 0 && !card.acceptsUnpriced) {
-        items.push({ ...base, key: `unpriced:${card.id}`, kind: "unpricedModel", since: card.activityAt });
+        items.push({
+          ...base,
+          key: `unpriced:${card.id}`,
+          kind: "unpricedModel",
+          since: card.activityAt,
+        });
       }
     }
   }
@@ -210,20 +384,27 @@ export function needsYouItems(input: {
     if (card === undefined) {
       continue;
     }
-    const base = { cardId: card.id, projectId: card.projectId, title: card.title, since: session.since };
+    const base = {
+      cardId: card.id,
+      projectId: card.projectId,
+      title: card.title,
+      since: session.since,
+    };
     if (session.state === "awaitingInput") {
       items.push({ ...base, key: `input:${card.id}`, kind: "awaitingInput", snoozable: false });
     } else if (session.state === "error" || session.state === "stale") {
       items.push({ ...base, key: `failed:${card.id}`, kind: "sessionFailed", snoozable: true });
     }
   }
-  return items
-    .filter((item) => {
-      const card = cardsById.get(item.cardId);
-      return !item.snoozable || card === undefined || !isCardSnoozed(card, input.now);
-    })
-    // The filter's copy is sorted in place: Hermes has no Array#toSorted.
-    .sort((left, right) => Date.parse(left.since) - Date.parse(right.since));
+  return (
+    items
+      .filter((item) => {
+        const card = cardsById.get(item.cardId);
+        return !item.snoozable || card === undefined || !isCardSnoozed(card, input.now);
+      })
+      // The filter's copy is sorted in place: Hermes has no Array#toSorted.
+      .sort((left, right) => Date.parse(left.since) - Date.parse(right.since))
+  );
 }
 
 /** How long an item has waited, at the coarsest unit that says it: "4m", "3h", "2d". */

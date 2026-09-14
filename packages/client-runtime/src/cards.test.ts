@@ -1,9 +1,19 @@
-import { CardId, ProjectId, type CardStatus, type OrchestrationCard } from "@iskra/contracts";
+import {
+  AgentId,
+  CardId,
+  ProjectId,
+  ThreadId,
+  type CardStatus,
+  type OrchestrationCard,
+  type OrchestrationCardShell,
+} from "@iskra/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   BOARD_COLUMNS,
+  cardBadges,
   cardDropDecision,
+  cardMoveActions,
   isCardSnoozed,
   needsYouItems,
   waitingLabel,
@@ -73,14 +83,92 @@ describe("cardDropDecision", () => {
     expect(decisions("ready")).toMatchObject({ triage: "card.unapprove", inProgress: "refuse" });
     expect(decisions("inProgress")).toMatchObject({ inReview: "refuse", done: "card.abandon" });
     expect(decisions("inReview")).toMatchObject({ landing: "card.merge.approve", ready: "refuse" });
-    expect(decisions("landing")).toMatchObject({ inReview: "card.merge.cancel", done: "card.abandon" });
-    expect(decisions("abandoned")).toMatchObject({ triage: "card.reopen", ready: "refuse", done: "none" });
+    expect(decisions("landing")).toMatchObject({
+      inReview: "card.merge.cancel",
+      done: "card.abandon",
+    });
+    expect(decisions("abandoned")).toMatchObject({
+      triage: "card.reopen",
+      ready: "refuse",
+      done: "none",
+    });
     expect(decisions("landed")).toMatchObject({ triage: "refuse", done: "none" });
 
     expect(cardDropDecision("ready", "inProgress")).toEqual({
       kind: "refuse",
-      reason: "Work starts when the card's agent starts its first session; assign an agent instead.",
+      reason:
+        "Work starts when the card's agent starts its first session; assign an agent instead.",
     });
+  });
+});
+
+describe("cardMoveActions", () => {
+  it("offers the drop decisions as buttons and says why every other move is not a button", () => {
+    const actions = (status: CardStatus) =>
+      cardMoveActions(status).map((action) => [action.label, action.type !== null]);
+
+    expect(actions("triage")).toEqual([
+      ["Approve", true],
+      ["Move to In progress", false],
+      ["Move to Review", false],
+      ["Move to Landing", false],
+      ["Abandon", true],
+    ]);
+    expect(actions("abandoned")).toEqual([
+      ["Reopen", true],
+      ["Move to Ready", false],
+      ["Move to In progress", false],
+      ["Move to Review", false],
+      ["Move to Landing", false],
+    ]);
+    expect(cardMoveActions("landed")).toEqual([]);
+    expect(cardMoveActions("ready").find((action) => action.column === "inProgress")?.reason).toBe(
+      "Work starts when the card's agent starts its first session; assign an agent instead.",
+    );
+  });
+});
+
+describe("cardBadges", () => {
+  const shell = (overrides: Partial<OrchestrationCardShell> = {}): OrchestrationCardShell => ({
+    ...card("face"),
+    ownerSession: null,
+    ...overrides,
+  });
+  const labels = (face: OrchestrationCardShell, blocked = false) =>
+    cardBadges(face, { blocked, snoozed: false }).map((badge) => [badge.label, badge.alarming]);
+
+  it("labels the session in words and counts failed checks against the retry limit", () => {
+    expect(
+      labels(
+        shell({
+          status: "inReview",
+          specState: "approved",
+          checks: { state: "failed", failedRuns: 2, summary: "", updatedAt: at(1) },
+          ownerSession: {
+            threadId: ThreadId.make("owner"),
+            agentId: AgentId.make("agent"),
+            state: "awaitingInput",
+            since: at(1),
+            planProgress: null,
+          },
+        }),
+        true,
+      ),
+    ).toEqual([
+      ["Blocked", true],
+      ["Waiting for you", true],
+      ["Checks failed 2/3", true],
+    ]);
+  });
+
+  it("shows a spent card's budget before its unpriced model, and nothing spent on a finished card", () => {
+    const spent = { specState: "approved" as const, spentUsd: 10, unpricedTurns: 1 };
+    expect(labels(shell({ status: "inProgress", ...spent }))).toEqual([["Budget reached", true]]);
+    expect(
+      labels(shell({ status: "inProgress", specState: "approved", unpricedTurns: 1 })),
+    ).toEqual([["Unpriced model", true]]);
+    expect(labels(shell({ status: "landed", ...spent }))).toEqual([]);
+    expect(labels(shell({ status: "ready" }))).toEqual([["Spec draft", false]]);
   });
 });
 
@@ -150,8 +238,16 @@ describe("needsYouItems in review", () => {
     const items = needsYouItems({
       cards: [
         card("passing", { status: "inReview", specState: "approved", checks: checks("passed", 0) }),
-        card("retrying", { status: "inReview", specState: "approved", checks: checks("failed", 2) }),
-        card("exhausted", { status: "inReview", specState: "approved", checks: checks("failed", 3) }),
+        card("retrying", {
+          status: "inReview",
+          specState: "approved",
+          checks: checks("failed", 2),
+        }),
+        card("exhausted", {
+          status: "inReview",
+          specState: "approved",
+          checks: checks("failed", 3),
+        }),
         card("unchecked", { status: "inReview", specState: "approved" }),
       ],
       sessions: [],
