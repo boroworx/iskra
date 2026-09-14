@@ -1,3 +1,9 @@
+// @effect-diagnostics nodeBuiltinImport:off - the kill test probes real processes and a pid file.
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { CardId, ProjectId, type OrchestrationCommand } from "@iskra/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
@@ -5,8 +11,11 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
+import * as Schedule from "effect/Schedule";
 import { TestClock } from "effect/testing";
 
+import { ProcessRunner } from "../processRunner.ts";
+import * as ProcessRunnerLayer from "../processRunner.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import {
   ADMISSION_RETRY,
@@ -71,6 +80,16 @@ const waitNotes = (commands: ReadonlyArray<OrchestrationCommand>) =>
   commands.flatMap((command) =>
     command.type === "card.wait.note" ? [[command.cardId, command.reason?.code ?? null]] : [],
   );
+
+/** Whether a process with this id still runs (a signal 0 probe). */
+const isAlive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 describe("HostAdmission", () => {
   it.effect("starts waiting jobs by card priority, then by how long they waited", () =>
@@ -164,6 +183,51 @@ describe("HostAdmission", () => {
         yield* Deferred.succeed(gate, undefined);
         expect(yield* Fiber.join(fiber)).toBe("done");
       }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  // Real processes and real time: the cancelled job's shell and the sleep it started must both die.
+  it.live("kills the processes a cancelled job spawned, then runs the job again", () =>
+    Effect.gen(function* () {
+      const { layer } = yield* makeWorld;
+      const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "iskra-admission-kill-"));
+      const pidFile = NodePath.join(directory, "sleep.pid");
+      yield* Effect.gen(function* () {
+        const admission = yield* HostAdmission;
+        const runner = yield* ProcessRunner;
+        const attempts = yield* Ref.make(0);
+        const suite = Ref.updateAndGet(attempts, (count) => count + 1).pipe(
+          Effect.flatMap((attempt) =>
+            attempt === 1
+              ? runner
+                  .run({
+                    command: "sh",
+                    args: ["-c", `sleep 60 & echo $! > "${pidFile}"; wait`],
+                    timeout: "2 minutes",
+                  })
+                  .pipe(Effect.orDie, Effect.asVoid)
+              : Effect.void,
+          ),
+        );
+        const fiber = yield* admission.run(job("suite", 4, "card-kill"), suite).pipe(Effect.forkChild);
+
+        const poll = { schedule: Schedule.spaced("20 millis"), times: 250 } as const;
+        const pid = yield* Effect.sync(() =>
+          NodeFS.existsSync(pidFile) ? Number(NodeFS.readFileSync(pidFile, "utf8").trim()) : 0,
+        ).pipe(Effect.repeat({ ...poll, until: (value) => value > 0 }));
+        expect(isAlive(pid)).toBe(true);
+
+        expect((yield* admission.cancelLowestPriority)?.label).toBe("suite");
+        yield* Fiber.join(fiber);
+        expect(yield* Ref.get(attempts)).toBe(2);
+        const alive = yield* Effect.sync(() => isAlive(pid)).pipe(
+          Effect.repeat({ ...poll, until: (running) => !running }),
+        );
+        expect(alive).toBe(false);
+      }).pipe(
+        Effect.provide(Layer.mergeAll(layer, ProcessRunnerLayer.layer.pipe(Layer.provide(NodeServices.layer)))),
+        Effect.ensuring(Effect.sync(() => NodeFS.rmSync(directory, { recursive: true, force: true }))),
+      );
     }),
   );
 
