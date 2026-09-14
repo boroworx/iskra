@@ -1,8 +1,13 @@
-import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
+import { Outlet, createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
 import { useEffect } from "react";
 
 import { isCommandPaletteOpen } from "../commandPaletteBus";
+import {
+  IskraCreateDialogs,
+  openCreateDialog,
+  useRouteProject,
+} from "../components/channels/IskraCreateDialogs";
 import { dispatchPreviewAction } from "../components/preview/previewActionBus";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { isPreviewFocused } from "../lib/previewFocus";
@@ -20,6 +25,10 @@ function ChatRouteGlobalShortcuts() {
   const selectedThreadKeysSize = useThreadSelectionStore((state) => state.selectedThreadKeys.size);
   const { routeThreadRef } = useHandleNewThread();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const navigate = useNavigate();
+  const routeProject = useRouteProject();
+  const boardEnvironmentId = routeProject?.environmentId ?? null;
+  const boardProjectId = routeProject?.id ?? null;
   const terminalOpen = useTerminalUiStateStore((state) =>
     routeThreadRef
       ? selectThreadTerminalUiState(state.terminalUiStateByThreadKey, routeThreadRef).terminalOpen
@@ -52,6 +61,29 @@ function ChatRouteGlobalShortcuts() {
       if (event.key === "Escape" && selectedThreadKeysSize > 0) {
         event.preventDefault();
         clearSelection();
+        return;
+      }
+
+      if (command === "needsYou.open") {
+        event.preventDefault();
+        void navigate({ to: "/needs-you" });
+        return;
+      }
+
+      if (command === "board.open") {
+        event.preventDefault();
+        if (boardEnvironmentId !== null && boardProjectId !== null) {
+          void navigate({
+            to: "/board/$environmentId/$projectId",
+            params: { environmentId: boardEnvironmentId, projectId: boardProjectId },
+          });
+        }
+        return;
+      }
+
+      if (command === "channel.new") {
+        event.preventDefault();
+        openCreateDialog("channel");
         return;
       }
 
@@ -104,8 +136,11 @@ function ChatRouteGlobalShortcuts() {
       window.removeEventListener("keydown", onWindowKeyDown);
     };
   }, [
+    boardEnvironmentId,
+    boardProjectId,
     clearSelection,
     keybindings,
+    navigate,
     previewOpen,
     routeThreadRef,
     selectedThreadKeysSize,
@@ -119,6 +154,7 @@ function ChatRouteLayout() {
   return (
     <>
       <ChatRouteGlobalShortcuts />
+      <IskraCreateDialogs />
       <Outlet />
     </>
   );

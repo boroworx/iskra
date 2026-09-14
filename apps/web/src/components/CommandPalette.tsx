@@ -41,6 +41,11 @@ import * as Option from "effect/Option";
 import {
   ArrowLeftIcon,
   AtSignIcon,
+  HashIcon,
+  InboxIcon,
+  LayoutGridIcon,
+  PlusIcon,
+  StickyNoteIcon,
   CornerLeftUpIcon,
   FileSearchIcon,
   FolderIcon,
@@ -84,6 +89,7 @@ import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import {
   useEnvironmentAgents,
+  useEnvironmentCards,
   useEnvironmentChannels,
   useProjects,
   useServerConfigs,
@@ -121,6 +127,7 @@ import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../termina
 import { buildThreadRouteParams, resolveThreadRouteTarget } from "../threadRoutes";
 import { useAvailableSettingsSearchItems } from "./settings/useAvailableSettingsSearchItems";
 import { channelListEntries } from "./channels/channels.logic";
+import { openCreateDialog, useRouteProject } from "./channels/IskraCreateDialogs";
 import {
   applyWslEnvironmentConfiguration,
   parseWslUncPath,
@@ -1127,6 +1134,56 @@ function OpenCommandPaletteDialog(props: {
     [navigate, primaryAgents, primaryEnvironmentId, projectTitleById],
   );
 
+  const channelItems = useMemo(
+    (): CommandPaletteActionItem[] =>
+      primaryEnvironmentId === null
+        ? []
+        : primaryChannels
+            .filter((channel) => channel.kind === "channel")
+            .map((channel) => ({
+              kind: "action",
+              value: `channel:${primaryEnvironmentId}:${channel.id}`,
+              searchTerms: [channel.name, `#${channel.name}`],
+              title: `#${channel.name}`,
+              description: projectTitleById.get(channel.projectId),
+              icon: <HashIcon className={ITEM_ICON_CLASS} />,
+              run: async () => {
+                await navigate({
+                  to: "/channels/$environmentId/$channelId",
+                  params: { environmentId: primaryEnvironmentId, channelId: channel.id },
+                });
+              },
+            })),
+    [navigate, primaryChannels, primaryEnvironmentId, projectTitleById],
+  );
+
+  // A card opens its sheet on its project's board.
+  const primaryCards = useEnvironmentCards(primaryEnvironmentId);
+  const cardItems = useMemo(
+    (): CommandPaletteActionItem[] =>
+      primaryEnvironmentId === null
+        ? []
+        : primaryCards.map((card) => ({
+            kind: "action",
+            value: `card:${primaryEnvironmentId}:${card.id}`,
+            searchTerms: [card.title],
+            title: card.title,
+            description: projectTitleById.get(card.projectId),
+            icon: <StickyNoteIcon className={ITEM_ICON_CLASS} />,
+            run: async () => {
+              await navigate({
+                to: "/board/$environmentId/$projectId",
+                params: { environmentId: primaryEnvironmentId, projectId: card.projectId },
+                search: { card: card.id },
+              });
+            },
+          })),
+    [navigate, primaryCards, primaryEnvironmentId, projectTitleById],
+  );
+
+  // New channel, agent and card, and the board, act on the project the route is about.
+  const routeProject = useRouteProject();
+
   const pushPaletteView = useCallback(
     (view: CommandPaletteView): void => {
       browseNavigation.invalidate();
@@ -1433,6 +1490,74 @@ function OpenCommandPaletteDialog(props: {
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
 
+  actionItems.push({
+    kind: "action",
+    value: "action:needs-you",
+    searchTerms: ["needs you", "inbox", "decisions", "approve", "review"],
+    title: "Needs you",
+    icon: <InboxIcon className={ITEM_ICON_CLASS} />,
+    shortcutCommand: "needsYou.open",
+    run: async () => {
+      await navigate({ to: "/needs-you" });
+    },
+  });
+
+  if (routeProject !== null) {
+    const boardParams = { environmentId: routeProject.environmentId, projectId: routeProject.id };
+    actionItems.push(
+      {
+        kind: "action",
+        value: "action:board",
+        searchTerms: ["board", "cards", "kanban"],
+        title: "Board",
+        description: routeProject.title,
+        icon: <LayoutGridIcon className={ITEM_ICON_CLASS} />,
+        shortcutCommand: "board.open",
+        run: async () => {
+          await navigate({ to: "/board/$environmentId/$projectId", params: boardParams });
+        },
+      },
+      {
+        kind: "action",
+        value: "action:new-card",
+        searchTerms: ["new card", "create card", "task", "issue"],
+        title: "New card",
+        description: routeProject.title,
+        icon: <PlusIcon className={ITEM_ICON_CLASS} />,
+        run: async () => {
+          await navigate({
+            to: "/board/$environmentId/$projectId",
+            params: boardParams,
+            search: { new: true },
+          });
+        },
+      },
+      {
+        kind: "action",
+        value: "action:new-channel",
+        searchTerms: ["new channel", "create channel"],
+        title: "New channel",
+        description: routeProject.title,
+        icon: <HashIcon className={ITEM_ICON_CLASS} />,
+        shortcutCommand: "channel.new",
+        run: async () => {
+          openCreateDialog("channel");
+        },
+      },
+      {
+        kind: "action",
+        value: "action:new-agent",
+        searchTerms: ["new agent", "create agent"],
+        title: "New agent",
+        description: routeProject.title,
+        icon: <AtSignIcon className={ITEM_ICON_CLASS} />,
+        run: async () => {
+          openCreateDialog("agent");
+        },
+      },
+    );
+  }
+
   if (activeThreadReferenceCopyTarget !== null) {
     actionItems.push({
       kind: "action",
@@ -1613,7 +1738,13 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  const rootGroups = buildRootGroups({ actionItems, agentItems });
+  const rootGroups = buildRootGroups({
+    actionItems,
+    channelItems,
+    agentItems,
+    // Cards are many: they show once a search is typed.
+    cardItems: deferredQuery.trim().length > 0 ? cardItems : [],
+  });
   const settingsSearchItems: CommandPaletteActionItem[] = searchSettings(
     deferredQuery,
     availableSettingsSearchItems,

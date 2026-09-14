@@ -512,14 +512,22 @@ export function getCommandPaletteMode(input: {
 
 export function buildRootGroups(input: {
   actionItems: ReadonlyArray<CommandPaletteActionItem | CommandPaletteSubmenuItem>;
+  channelItems: ReadonlyArray<CommandPaletteActionItem>;
   agentItems: ReadonlyArray<CommandPaletteActionItem>;
+  cardItems: ReadonlyArray<CommandPaletteActionItem>;
 }): CommandPaletteGroup[] {
   const groups: CommandPaletteGroup[] = [];
   if (input.actionItems.length > 0) {
     groups.push({ value: "actions", label: "Actions", items: input.actionItems });
   }
+  if (input.channelItems.length > 0) {
+    groups.push({ value: "channels", label: "Channels", items: input.channelItems });
+  }
   if (input.agentItems.length > 0) {
     groups.push({ value: "agents", label: "Agents", items: input.agentItems });
+  }
+  if (input.cardItems.length > 0) {
+    groups.push({ value: "cards", label: "Cards", items: input.cardItems });
   }
   return groups;
 }
@@ -527,7 +535,7 @@ export function buildRootGroups(input: {
 export function getCommandPaletteInputPlaceholder(mode: CommandPaletteMode): string {
   switch (mode) {
     case "root":
-      return "Search commands, projects, and agents...";
+      return "Search commands, channels, agents, and cards...";
     case "root-browse":
       return "Enter project path (e.g. ~/projects/my-app)";
     case "submenu":

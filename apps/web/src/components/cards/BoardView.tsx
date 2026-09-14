@@ -83,6 +83,8 @@ export function BoardView(props: {
   readonly projectId: ProjectId;
   /** The card whose sheet is open, from the route's `card` search param. */
   readonly openCardId: CardId | null;
+  /** Opens the New card dialog, from the route's `new` search param. */
+  readonly openNewCard: boolean;
 }) {
   const navigate = useNavigate();
   const [newCardOpen, setNewCardOpen] = useState(false);
@@ -187,8 +189,12 @@ export function BoardView(props: {
           </Button>
         </WorkspacePageHeader>
         <NewCardDialog
-          open={newCardOpen}
-          onOpenChange={setNewCardOpen}
+          open={newCardOpen || props.openNewCard}
+          onOpenChange={(open) => {
+            setNewCardOpen(open);
+            // Closing drops `new` from the URL; a created card then navigates to its sheet.
+            if (!open && props.openNewCard) openCard(null);
+          }}
           environmentId={props.environmentId}
           projectId={props.projectId}
           onCreated={openCard}
