@@ -2279,7 +2279,10 @@ const makeWsRpcLayer = (
                         return Queue.offer(live, {
                           kind: "delivery",
                           messageId: event.payload.triggerMessageId,
-                          delivery: { agentId: event.payload.agentId, status: "pending" },
+                          delivery: {
+                            agentId: event.payload.agentId,
+                            status: event.payload.queued === true ? "queued" : "pending",
+                          },
                         });
                       case "channel.delivery-updated": {
                         const { agentId, status } = event.payload;

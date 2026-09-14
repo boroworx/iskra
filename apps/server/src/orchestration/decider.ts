@@ -72,7 +72,7 @@ import {
 } from "./cardRules.ts";
 import { parseMentions } from "./mentions.ts";
 import { projectEvent } from "./projector.ts";
-import { decideWake, projectLiveRunCount } from "./wakeRouting.ts";
+import { decideWake, projectLiveRunCount, type WakeDecision } from "./wakeRouting.ts";
 import { threadHasQueuedTurnStart } from "./ThreadSettlementPolicy.ts";
 
 const isScriptRunCommand = Schema.is(SCRIPT_RUN_COMMAND_PATTERN);
@@ -97,6 +97,14 @@ function channelLeadProblem(input: {
     ? "A channel's lead must be an active agent of its project."
     : null;
 }
+
+/** Where a wake's message goes, as its request records it: into a live run, or a DM's queue. */
+const wakeTarget = (decision: Exclude<WakeDecision, { readonly kind: "refuse" }>) => {
+  if (decision.kind === "queue") return { queued: true };
+  return decision.liveRunThreadId === undefined
+    ? {}
+    : { liveRunThreadId: decision.liveRunThreadId };
+};
 
 /** Said in a channel when a message wakes nobody. */
 export const NOBODY_WOKEN_NOTE =
@@ -3566,7 +3574,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           );
           continue;
         }
-        if (decision.liveRunThreadId === undefined) {
+        if (decision.kind === "wake" && decision.liveRunThreadId === undefined) {
           newRuns += 1;
         }
         events.push(
@@ -3577,9 +3585,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
               agentId: agent.id,
               triggerMessageId: command.messageId,
               requestedAt: command.createdAt,
-              ...(decision.liveRunThreadId !== undefined
-                ? { liveRunThreadId: decision.liveRunThreadId }
-                : {}),
+              ...wakeTarget(decision),
             },
           }),
         );
@@ -3607,9 +3613,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           agentId: command.agentId,
           triggerMessageId: command.triggerMessageId,
           requestedAt: command.createdAt,
-          ...(decision.liveRunThreadId !== undefined
-            ? { liveRunThreadId: decision.liveRunThreadId }
-            : {}),
+          ...wakeTarget(decision),
         },
       });
     }

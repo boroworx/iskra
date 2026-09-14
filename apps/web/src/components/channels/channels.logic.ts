@@ -209,6 +209,7 @@ export function deliveryNotes(
   return (message.deliveries ?? []).flatMap((delivery): ReadonlyArray<DeliveryNote> => {
     const name = `@${agentNames.get(delivery.agentId) ?? delivery.agentId}`;
     switch (delivery.status) {
+      case "queued":
       case "pending":
       case "sent":
         return [{ agentId: delivery.agentId, text: `Waiting for ${name}`, undelivered: false }];

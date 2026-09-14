@@ -9,6 +9,7 @@ import {
 
 export type WakeDecision =
   | { readonly kind: "wake"; readonly liveRunThreadId?: ThreadId }
+  | { readonly kind: "queue" }
   | { readonly kind: "refuse"; readonly reason: string };
 
 /** Live sessions in a project: its channels' conversations and its cards' sessions. */
@@ -34,7 +35,8 @@ export function projectLiveRunCount(
 /**
  * Whether a message in `channel` may wake `agent` now. An agent has one live
  * conversation at a time: a wake from the same channel joins it, a wake from
- * another channel is refused so contexts never mix, and a project at its cap
+ * another channel is refused so contexts never mix (a DM instead queues until
+ * that conversation ends), and a project at its cap
  * of live sessions (card sessions included) starts nothing new. `newRuns`
  * counts runs the same message has already started.
  */
@@ -56,8 +58,11 @@ export function decideWake(input: {
     (run) => run.agentId === agent.id && run.channelId !== null,
   );
   if (agentRun !== undefined) {
-    return agentRun.channelId === channel.id
-      ? { kind: "wake", liveRunThreadId: agentRun.threadId }
+    if (agentRun.channelId === channel.id) {
+      return { kind: "wake", liveRunThreadId: agentRun.threadId };
+    }
+    return channel.kind === "dm"
+      ? { kind: "queue" }
       : { kind: "refuse", reason: `@${agent.name} is busy in another channel.` };
   }
 

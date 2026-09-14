@@ -740,12 +740,14 @@ export const CHANNEL_HUMAN_AUTHOR_ID = "human";
 export const CHANNEL_SYSTEM_AUTHOR_ID = "system";
 
 /**
- * Where a message stands with an agent it woke. `pending` waits for the agent's
+ * Where a message stands with an agent it woke. `queued` is a DM waiting for the
+ * agent's conversation in another channel to end, `pending` waits for the agent's
  * next turn, `sent` rides a turn that has not started yet, `delivered` is in a
  * running turn, and `undelivered` never reached one and shows as unanswered.
  * A message is never `delivered` merely because it was sent (invariant 10).
  */
 export const ChannelDeliveryStatus = Schema.Literals([
+  "queued",
   "pending",
   "sent",
   "delivered",
@@ -1847,6 +1849,8 @@ export const ChannelAgentWakeRequestedPayload = Schema.Struct({
   requestedAt: IsoDateTime,
   // Set when the agent is already live in this channel: the message joins that run.
   liveRunThreadId: Schema.optional(ThreadId),
+  // Set on a DM to an agent busy in another channel: no run starts until that conversation ends.
+  queued: Schema.optional(Schema.Boolean),
 });
 
 export const ChannelRunStartedPayload = ChannelRun;

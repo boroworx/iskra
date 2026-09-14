@@ -281,6 +281,62 @@ it.layer(layer)("RunReactor", (it) => {
       }),
     ),
   );
+  it.effect("queues a DM while the agent converses elsewhere and picks it up when that ends", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const world = yield* startChannel("dmqueue");
+        const reactor = yield* RunReactor.RunReactor;
+        yield* world.post("dmqueue-channel", "@dmqueue what changed?");
+        const channelRun = ThreadId.make(
+          (yield* world.nextEvent("thread.turn-start-requested")).aggregateId,
+        );
+        yield* world.setSession(channelRun, "running", "turn-1");
+
+        yield* world.engine.dispatch({
+          type: "agent.dm.post",
+          commandId: CommandId.make("cmd-dmqueue-dm"),
+          agentId: AgentId.make("agent-dmqueue"),
+          messageId: MessageId.make("dmqueue-dm"),
+          body: "ping when you're free",
+          createdAt: now,
+        });
+        const dmChannelId = ChannelId.make("dm:dmqueue-dm");
+        yield* world.nextEvent(
+          "channel.agent-wake-requested",
+          (event) => event.payload.channelId === dmChannelId && event.payload.queued === true,
+        );
+        yield* reactor.drain;
+        const dmRunsWhileBusy = Array.from(
+          yield* Stream.runCollect(world.engine.readEvents(0)),
+        ).filter(
+          (event) => event.type === "channel.run-started" && event.payload.channelId === dmChannelId,
+        );
+        expect(dmRunsWhileBusy).toHaveLength(0);
+
+        yield* world.answer(channelRun, "turn-1", "The API.");
+        yield* world.setSession(channelRun, "ready", null);
+        yield* world.nextEvent(
+          "thread.session-stop-requested",
+          (event) => event.aggregateId === channelRun,
+        );
+        yield* world.setSession(channelRun, "stopped", null);
+
+        const dmRun = yield* world.nextEvent(
+          "channel.run-started",
+          (event) => event.payload.channelId === dmChannelId,
+        );
+        expect(dmRun.payload.triggerMessageId).toBe("dmqueue-dm");
+        const sent = yield* world.nextEvent(
+          "channel.delivery-updated",
+          (event) =>
+            event.payload.status === "sent" &&
+            event.payload.messageIds.includes(MessageId.make("dmqueue-dm")),
+        );
+        expect(sent.payload.runThreadId).toBe(dmRun.payload.threadId);
+      }),
+    ),
+  );
+
   it.effect("wakes a lead mentioned by name as a conversation that replies", () =>
     Effect.scoped(
       Effect.gen(function* () {

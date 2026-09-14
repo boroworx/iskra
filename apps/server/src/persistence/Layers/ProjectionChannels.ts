@@ -244,7 +244,7 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
           ON messages.message_id = deliveries.message_id
         WHERE deliveries.agent_id = ${agentId}
           AND deliveries.channel_id = ${channelId}
-          AND deliveries.status IN ('pending', 'sent')
+          AND deliveries.status IN ('queued', 'pending', 'sent')
         ORDER BY messages.sequence ASC
       `,
   });

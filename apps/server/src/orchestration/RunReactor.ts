@@ -47,7 +47,8 @@ import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts"
  * turn ends with nothing waiting, the reply is posted and the session stopped,
  * so the next wake starts a fresh run. A run that ends with messages still
  * waiting wakes the agent again for them; a message whose turn never ran is
- * marked `undelivered` (invariant 10).
+ * marked `undelivered` (invariant 10). A DM sent while the agent converses in
+ * another channel waits as `queued` and wakes it once that conversation ends.
  */
 export class RunReactor extends Context.Service<
   RunReactor,
@@ -119,7 +120,8 @@ const make = Effect.gen(function* () {
   const startRun = Effect.fn("RunReactor.startRun")(function* (event: WakeRequestedEvent) {
     // The agent is already working in this channel: the message stays pending
     // until the current turn ends, then goes in as the run's next turn.
-    if (event.payload.liveRunThreadId !== undefined) {
+    // A queued DM waits for the agent's other conversation to end (see endRun).
+    if (event.payload.liveRunThreadId !== undefined || event.payload.queued === true) {
       return;
     }
 
@@ -204,7 +206,9 @@ const make = Effect.gen(function* () {
     yield* updateDeliveries({
       channelId,
       agentId,
-      deliveries: waiting.filter((delivery) => delivery.status === "pending"),
+      deliveries: waiting.filter(
+        (delivery) => delivery.status === "pending" || delivery.status === "queued",
+      ),
       status: "sent",
       runThreadId: threadId,
     });
@@ -309,6 +313,44 @@ const make = Effect.gen(function* () {
     });
   });
 
+  /**
+   * Wakes the agent in a channel for the messages still waiting on it there,
+   * triggered by the newest. True if the wake went through; if it is refused,
+   * the messages go unanswered.
+   */
+  const wakeForWaiting = Effect.fn("RunReactor.wakeForWaiting")(function* (input: {
+    readonly commandId: CommandId;
+    readonly channelId: ChannelId;
+    readonly agentId: AgentId;
+    readonly waiting: ReadonlyArray<ProjectionOpenChannelDelivery>;
+  }) {
+    const latest = input.waiting.at(-1);
+    if (latest === undefined) {
+      return false;
+    }
+    return yield* engine
+      .dispatch({
+        type: "channel.agent.wake",
+        commandId: input.commandId,
+        channelId: input.channelId,
+        agentId: input.agentId,
+        triggerMessageId: latest.messageId,
+        createdAt: yield* nowIso,
+      })
+      .pipe(
+        Effect.as(true),
+        Effect.catch(() =>
+          updateDeliveries({
+            channelId: input.channelId,
+            agentId: input.agentId,
+            deliveries: input.waiting,
+            status: "undelivered",
+            runThreadId: null,
+          }).pipe(Effect.as(false)),
+        ),
+      );
+  });
+
   const endRun = Effect.fn("RunReactor.endRun")(function* (threadId: ThreadId) {
     const run = yield* snapshotQuery.getRunByThreadId(threadId);
     if (Option.isNone(run) || run.value.channelId === null) {
@@ -325,33 +367,40 @@ const make = Effect.gen(function* () {
       runThreadId: threadId,
     });
 
-    const waiting = open.filter((delivery) => delivery.status === "pending");
-    const latest = waiting.at(-1);
-    if (latest === undefined) {
+    // Still waiting when the run ended: wake the agent again here in a fresh run,
+    // whose context carries them. The channel keeps the agent until then.
+    const rewoken = yield* wakeForWaiting({
+      commandId: CommandId.make(`run-rewake:${threadId}`),
+      channelId,
+      agentId,
+      waiting: open.filter((delivery) => delivery.status === "pending"),
+    });
+    if (rewoken) {
       return;
     }
-    // Still waiting when the run ended: wake the agent again in a fresh run,
-    // whose context carries them. If the wake is refused, they go unanswered.
-    yield* engine
-      .dispatch({
-        type: "channel.agent.wake",
-        commandId: CommandId.make(`run-rewake:${threadId}`),
-        channelId,
-        agentId,
-        triggerMessageId: latest.messageId,
-        createdAt: yield* nowIso,
-      })
-      .pipe(
-        Effect.catch(() =>
-          updateDeliveries({
-            channelId,
-            agentId,
-            deliveries: waiting,
-            status: "undelivered",
-            runThreadId: null,
-          }),
-        ),
-      );
+
+    // The agent is free: a DM queued behind this conversation is picked up now.
+    // ponytail: reads the whole command read model per ended run; add a narrow
+    // DM-by-agent query if run endings become frequent enough to show up in profiles.
+    const readModel = yield* snapshotQuery.getCommandReadModel();
+    const dm = (readModel.channels ?? []).find(
+      (candidate) =>
+        candidate.kind === "dm" &&
+        candidate.archivedAt === null &&
+        candidate.id !== channelId &&
+        candidate.memberAgentIds.includes(agentId),
+    );
+    if (dm === undefined) {
+      return;
+    }
+    yield* wakeForWaiting({
+      commandId: CommandId.make(`run-dm-pickup:${threadId}`),
+      channelId: dm.id,
+      agentId,
+      waiting: (yield* channels.listOpenDeliveries({ agentId, channelId: dm.id })).filter(
+        (delivery) => delivery.status === "queued",
+      ),
+    });
   });
 
   const handle = (request: RunRequest) => {

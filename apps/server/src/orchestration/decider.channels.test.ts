@@ -265,6 +265,27 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
     }),
   );
 
+  it.effect("queues a DM to an agent busy in another channel instead of refusing it", () =>
+    Effect.gen(function* () {
+      const queued = yield* decidePost(
+        [
+          ...setup,
+          createChannel("other", "channel", [backend]),
+          createChannel("dm-backend", "dm", [backend]),
+          startChannelRun(backend, "other", "run-other"),
+        ],
+        "dm-backend",
+        "ping when you're free",
+      );
+
+      expect(queued).toMatchObject([
+        { type: "channel.message-posted", payload: { authorKind: "human" } },
+        { type: "channel.agent-wake-requested", payload: { agentId: backend, queued: true } },
+      ]);
+      expect(queued[1]).not.toHaveProperty("payload.liveRunThreadId");
+    }),
+  );
+
   it.effect("refuses new runs past the project cap until a run's session ends", () =>
     Effect.gen(function* () {
       const base = [

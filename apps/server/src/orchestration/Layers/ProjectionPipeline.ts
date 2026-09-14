@@ -766,7 +766,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             agentId: event.payload.agentId,
             channelId: event.payload.channelId,
             runThreadId: event.payload.liveRunThreadId ?? null,
-            status: "pending",
+            status: event.payload.queued === true ? "queued" : "pending",
             updatedAt: event.payload.requestedAt,
           });
           return;
