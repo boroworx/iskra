@@ -392,6 +392,7 @@ export function newChannel(
     wakeDepth: payload.wakeDepth,
     memberAgentIds: payload.memberAgentIds,
     leadAgentId: payload.leadAgentId ?? null,
+    openElicitations: [],
     createdAt: payload.createdAt,
     updatedAt: payload.updatedAt,
     archivedAt: null,

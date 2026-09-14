@@ -2,20 +2,48 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
+import * as Struct from "effect/Struct";
 import { CardDeliveryUpdatedPayload } from "@iskra/contracts";
 
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
   GetProjectionCardInput,
+  ListProjectionCardActivitiesInput,
+  ListProjectionCardEvidenceInput,
   PROJECTION_CARD_COLUMNS,
+  ProjectionCardActivity,
   ProjectionCardDbRow,
   ProjectionCardDecision,
   ProjectionCardDecisionDbRow,
+  ProjectionCardEvidenceItem,
   ProjectionCardMessage,
   ProjectionCardRepository,
   ProjectionCardSpend,
   type ProjectionCardRepositoryShape,
 } from "../Services/ProjectionCards.ts";
+
+const ProjectionCardEvidenceDbRow = ProjectionCardEvidenceItem.mapFields(
+  Struct.assign({ timedOut: Schema.Number }),
+);
+
+const PROJECTION_CARD_ACTIVITY_COLUMNS = `
+  activity_id AS "activityId",
+  card_id AS "cardId",
+  kind,
+  author_json AS "author",
+  body,
+  run_thread_id AS "runThreadId",
+  deliver_to AS "deliverTo",
+  delivery_status AS "delivery",
+  elicitation_json AS "elicitation",
+  answers_json AS "answers",
+  status_json AS "status",
+  evidence_id AS "evidenceId",
+  reason_json AS "reason",
+  created_at AS "createdAt",
+  delivery_thread_id AS "deliveryThreadId"
+`;
 
 const makeProjectionCardRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -58,6 +86,17 @@ const makeProjectionCardRepository = Effect.gen(function* () {
           proposal_reasoning,
           suggested_agent_id,
           priority,
+          kind,
+          acceptance_json,
+          estimate_json,
+          premise_json,
+          checkpoint_json,
+          fix_rounds_json,
+          evidence_json,
+          landing_json,
+          paused_json,
+          wait_reason_json,
+          queued_at,
           relations_json,
           created_by_json,
           created_at,
@@ -95,6 +134,17 @@ const makeProjectionCardRepository = Effect.gen(function* () {
           ${row.proposalReasoning},
           ${row.suggestedAgentId},
           ${row.priority},
+          ${row.kind},
+          ${row.acceptance},
+          ${row.estimate},
+          ${row.premise},
+          ${row.checkpoint},
+          ${row.fixRounds},
+          ${row.evidence},
+          ${row.landing},
+          ${row.paused},
+          ${row.waitReason},
+          ${row.queuedAt},
           ${row.relations},
           ${row.createdBy},
           ${row.createdAt},
@@ -132,6 +182,17 @@ const makeProjectionCardRepository = Effect.gen(function* () {
           proposal_reasoning = excluded.proposal_reasoning,
           suggested_agent_id = excluded.suggested_agent_id,
           priority = excluded.priority,
+          kind = excluded.kind,
+          acceptance_json = excluded.acceptance_json,
+          estimate_json = excluded.estimate_json,
+          premise_json = excluded.premise_json,
+          checkpoint_json = excluded.checkpoint_json,
+          fix_rounds_json = excluded.fix_rounds_json,
+          evidence_json = excluded.evidence_json,
+          landing_json = excluded.landing_json,
+          paused_json = excluded.paused_json,
+          wait_reason_json = excluded.wait_reason_json,
+          queued_at = excluded.queued_at,
           relations_json = excluded.relations_json,
           created_by_json = excluded.created_by_json,
           created_at = excluded.created_at,
@@ -245,6 +306,7 @@ const makeProjectionCardRepository = Effect.gen(function* () {
       `,
   });
 
+  // Legacy messages and their activities share ids, so one delivery update moves both.
   const updateDeliveryRows = SqlSchema.void({
     Request: CardDeliveryUpdatedPayload,
     execute: ({ messageIds, status, threadId }) =>
@@ -253,7 +315,16 @@ const makeProjectionCardRepository = Effect.gen(function* () {
         SET delivery_status = ${status}, delivery_thread_id = ${threadId}
         WHERE ${sql.in("message_id", messageIds)}
           AND delivery_status IS NOT NULL
-      `,
+      `.pipe(
+        Effect.andThen(
+          sql`
+            UPDATE projection_card_activities
+            SET delivery_status = ${status}, delivery_thread_id = ${threadId}
+            WHERE ${sql.in("activity_id", messageIds)}
+              AND delivery_status IS NOT NULL
+          `,
+        ),
+      ),
   });
 
   const listOpenOwnerMessageRows = SqlSchema.findAll({
@@ -278,6 +349,150 @@ const makeProjectionCardRepository = Effect.gen(function* () {
       `,
   });
 
+  const insertActivityRow = SqlSchema.void({
+    Request: ProjectionCardActivity,
+    execute: (row) =>
+      sql`
+        INSERT INTO projection_card_activities (
+          activity_id,
+          card_id,
+          kind,
+          author_json,
+          body,
+          run_thread_id,
+          deliver_to,
+          delivery_status,
+          delivery_thread_id,
+          elicitation_json,
+          answers_json,
+          status_json,
+          evidence_id,
+          reason_json,
+          created_at
+        )
+        VALUES (
+          ${row.activityId},
+          ${row.cardId},
+          ${row.kind},
+          ${row.author},
+          ${row.body},
+          ${row.runThreadId},
+          ${row.deliverTo},
+          ${row.delivery},
+          ${row.deliveryThreadId},
+          ${row.elicitation},
+          ${row.answers},
+          ${row.status},
+          ${row.evidenceId},
+          ${row.reason},
+          ${row.createdAt}
+        )
+        ON CONFLICT (activity_id) DO NOTHING
+      `,
+  });
+
+  const listActivityRows = SqlSchema.findAll({
+    Request: ListProjectionCardActivitiesInput,
+    Result: ProjectionCardActivity,
+    execute: ({ cardId, limit }) =>
+      sql`
+        SELECT * FROM (
+          SELECT ${sql.literal(PROJECTION_CARD_ACTIVITY_COLUMNS)}, rowid AS "activityRowid"
+          FROM projection_card_activities
+          WHERE card_id = ${cardId}
+          ORDER BY created_at DESC, rowid DESC
+          LIMIT ${limit}
+        )
+        ORDER BY "createdAt" ASC, "activityRowid" ASC
+      `,
+  });
+
+  const listOpenBuilderActivityRows = SqlSchema.findAll({
+    Request: GetProjectionCardInput,
+    Result: ProjectionCardActivity,
+    execute: ({ cardId }) =>
+      sql`
+        SELECT ${sql.literal(PROJECTION_CARD_ACTIVITY_COLUMNS)}
+        FROM projection_card_activities
+        WHERE card_id = ${cardId}
+          AND deliver_to = 'builder'
+          AND delivery_status IN ('pending', 'sent')
+        ORDER BY created_at ASC, rowid ASC
+      `,
+  });
+
+  const insertEvidenceRow = SqlSchema.void({
+    Request: ProjectionCardEvidenceItem,
+    execute: (row) =>
+      sql`
+        INSERT INTO projection_card_evidence (
+          evidence_id,
+          item_id,
+          card_id,
+          head_sha,
+          purpose,
+          criterion_id,
+          kind,
+          source,
+          name,
+          exit_code,
+          timed_out,
+          duration_ms,
+          log_tail,
+          artifact_path,
+          unavailable_json,
+          created_at
+        )
+        VALUES (
+          ${row.evidenceId},
+          ${row.itemId},
+          ${row.cardId},
+          ${row.headSha},
+          ${row.purpose},
+          ${row.criterionId},
+          ${row.kind},
+          ${row.source},
+          ${row.name},
+          ${row.exitCode},
+          ${row.timedOut ? 1 : 0},
+          ${row.durationMs},
+          ${row.logTail},
+          ${row.artifactPath},
+          ${row.unavailable},
+          ${row.createdAt}
+        )
+        ON CONFLICT (evidence_id, item_id) DO NOTHING
+      `,
+  });
+
+  const listEvidenceRows = SqlSchema.findAll({
+    Request: ListProjectionCardEvidenceInput,
+    Result: ProjectionCardEvidenceDbRow,
+    execute: ({ cardId, evidenceId }) =>
+      sql`
+        SELECT
+          item_id AS "itemId",
+          kind,
+          source,
+          name,
+          criterion_id AS "criterionId",
+          exit_code AS "exitCode",
+          timed_out AS "timedOut",
+          duration_ms AS "durationMs",
+          log_tail AS "logTail",
+          artifact_path AS "artifactPath",
+          unavailable_json AS "unavailable",
+          evidence_id AS "evidenceId",
+          card_id AS "cardId",
+          head_sha AS "headSha",
+          purpose,
+          created_at AS "createdAt"
+        FROM projection_card_evidence
+        WHERE card_id = ${cardId} AND evidence_id = ${evidenceId}
+        ORDER BY rowid ASC
+      `,
+  });
+
   return {
     upsert: (row) => upsertProjectionCardRow(row).pipe(query("upsert")),
     getById: (input) => getProjectionCardRow(input).pipe(query("getById")),
@@ -291,6 +506,19 @@ const makeProjectionCardRepository = Effect.gen(function* () {
         : updateDeliveryRows(input).pipe(query("updateDeliveries")),
     listOpenOwnerMessages: (input) =>
       listOpenOwnerMessageRows(input).pipe(query("listOpenOwnerMessages")),
+    appendActivity: (row) => insertActivityRow(row).pipe(query("appendActivity")),
+    listActivities: (input) => listActivityRows(input).pipe(query("listActivities")),
+    listOpenBuilderActivities: (input) =>
+      listOpenBuilderActivityRows(input).pipe(query("listOpenBuilderActivities")),
+    appendEvidenceItems: (rows) =>
+      Effect.forEach(rows, insertEvidenceRow, { discard: true }).pipe(
+        query("appendEvidenceItems"),
+      ),
+    listEvidenceItems: (input) =>
+      listEvidenceRows(input).pipe(
+        Effect.map((rows) => rows.map((row) => ({ ...row, timedOut: row.timedOut === 1 }))),
+        query("listEvidenceItems"),
+      ),
   } satisfies ProjectionCardRepositoryShape;
 });
 

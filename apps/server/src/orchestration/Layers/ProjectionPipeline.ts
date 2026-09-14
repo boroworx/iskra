@@ -537,6 +537,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             faviconPath: event.payload.faviconPath ?? null,
             projectIcon: event.payload.projectIcon ?? null,
             scripts: event.payload.scripts,
+            orchestration: null,
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
             deletedAt: null,
@@ -739,6 +740,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             body: event.payload.body,
             createdAt: event.payload.createdAt,
             runThreadId: event.payload.runThreadId ?? null,
+            elicitation: event.payload.elicitation ?? null,
+            answers: event.payload.answers ?? null,
+            answeredAt: null,
           });
           return;
 

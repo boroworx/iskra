@@ -6,7 +6,12 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 
-import { ModelSelection, ProjectIconOverride, ProjectScript } from "@iskra/contracts";
+import {
+  ModelSelection,
+  ProjectIconOverride,
+  ProjectOrchestration,
+  ProjectScript,
+} from "@iskra/contracts";
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
   DeleteProjectionProjectInput,
@@ -22,9 +27,26 @@ const ProjectionProjectDbRow = ProjectionProject.mapFields(
     autoPull: Schema.Number,
     projectIcon: Schema.NullOr(Schema.fromJsonString(ProjectIconOverride)),
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
+    orchestration: Schema.NullOr(Schema.fromJsonString(ProjectOrchestration)),
   }),
 );
 type ProjectionProjectDbRow = typeof ProjectionProjectDbRow.Type;
+
+const PROJECTION_PROJECT_COLUMNS = `
+  project_id AS "projectId",
+  title,
+  workspace_root AS "workspaceRoot",
+  default_model_selection_json AS "defaultModelSelection",
+  default_thread_env_mode AS "defaultThreadEnvMode",
+  auto_pull AS "autoPull",
+  favicon_path AS "faviconPath",
+  project_icon_json AS "projectIcon",
+  scripts_json AS "scripts",
+  orchestration_json AS "orchestration",
+  created_at AS "createdAt",
+  updated_at AS "updatedAt",
+  deleted_at AS "deletedAt"
+`;
 
 const makeProjectionProjectRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -43,6 +65,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           favicon_path,
           project_icon_json,
           scripts_json,
+          orchestration_json,
           created_at,
           updated_at,
           deleted_at
@@ -57,6 +80,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           ${row.faviconPath ?? null},
           ${row.projectIcon ? JSON.stringify(row.projectIcon) : null},
           ${JSON.stringify(row.scripts)},
+          ${row.orchestration !== null ? JSON.stringify(row.orchestration) : null},
           ${row.createdAt},
           ${row.updatedAt},
           ${row.deletedAt}
@@ -71,6 +95,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           favicon_path = excluded.favicon_path,
           project_icon_json = excluded.project_icon_json,
           scripts_json = excluded.scripts_json,
+          orchestration_json = excluded.orchestration_json,
           created_at = excluded.created_at,
           updated_at = excluded.updated_at,
           deleted_at = excluded.deleted_at
@@ -82,19 +107,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
     Result: ProjectionProjectDbRow,
     execute: ({ projectId }) =>
       sql`
-        SELECT
-          project_id AS "projectId",
-          title,
-          workspace_root AS "workspaceRoot",
-          default_model_selection_json AS "defaultModelSelection",
-          default_thread_env_mode AS "defaultThreadEnvMode",
-          auto_pull AS "autoPull",
-          favicon_path AS "faviconPath",
-          project_icon_json AS "projectIcon",
-          scripts_json AS "scripts",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt",
-          deleted_at AS "deletedAt"
+        SELECT ${sql.literal(PROJECTION_PROJECT_COLUMNS)}
         FROM projection_projects
         WHERE project_id = ${projectId}
       `,
@@ -105,19 +118,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
     Result: ProjectionProjectDbRow,
     execute: () =>
       sql`
-        SELECT
-          project_id AS "projectId",
-          title,
-          workspace_root AS "workspaceRoot",
-          default_model_selection_json AS "defaultModelSelection",
-          default_thread_env_mode AS "defaultThreadEnvMode",
-          auto_pull AS "autoPull",
-          favicon_path AS "faviconPath",
-          project_icon_json AS "projectIcon",
-          scripts_json AS "scripts",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt",
-          deleted_at AS "deletedAt"
+        SELECT ${sql.literal(PROJECTION_PROJECT_COLUMNS)}
         FROM projection_projects
         ORDER BY created_at ASC, project_id ASC
       `,
@@ -132,6 +133,11 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
       `,
   });
 
+  const toProject = (row: ProjectionProjectDbRow): ProjectionProject => ({
+    ...row,
+    autoPull: row.autoPull === 1,
+  });
+
   const upsert: ProjectionProjectRepositoryShape["upsert"] = (row) =>
     upsertProjectionProjectRow(row).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionProjectRepository.upsert:query")),
@@ -139,13 +145,13 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
 
   const getById: ProjectionProjectRepositoryShape["getById"] = (input) =>
     getProjectionProjectRow(input).pipe(
-      Effect.map(Option.map((row) => ({ ...row, autoPull: row.autoPull === 1 }))),
+      Effect.map(Option.map(toProject)),
       Effect.mapError(toPersistenceSqlError("ProjectionProjectRepository.getById:query")),
     );
 
   const listAll: ProjectionProjectRepositoryShape["listAll"] = () =>
     listProjectionProjectRows().pipe(
-      Effect.map((rows) => rows.map((row) => ({ ...row, autoPull: row.autoPull === 1 }))),
+      Effect.map((rows) => rows.map(toProject)),
       Effect.mapError(toPersistenceSqlError("ProjectionProjectRepository.listAll:query")),
     );
 

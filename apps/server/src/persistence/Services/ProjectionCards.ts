@@ -1,25 +1,43 @@
 /**
  * ProjectionCardRepository - Projection repository interface for cards.
  *
- * Owns persistence operations for card rows and their decision log in the
- * orchestration projection read model.
+ * Owns persistence operations for card rows, their activity stream, evidence
+ * and the legacy decision log and messages in the orchestration projection
+ * read model.
  *
  * @module ProjectionCardRepository
  */
 import {
   AgentId,
+  CardAcceptance,
+  CardActivity,
+  CardActivityAuthor,
   CardAuthor,
+  CardCheckpoint,
   CardDeliveryUpdatedPayload,
+  CardEstimate,
+  CardEvidenceItem,
+  CardEvidencePurpose,
+  CardEvidenceSummary,
+  CardFixRounds,
   CardId,
+  CardKind,
+  CardLanding,
+  CardPause,
+  CardPremise,
   CardRelation,
   CardSpecState,
   CardMessageAuthorKind,
   CardStatus,
+  CardWaitReason,
   ChannelDeliveryStatus,
   ChannelId,
+  Elicitation,
+  ElicitationAnswer,
   IsoDateTime,
   MessageId,
   ProjectId,
+  Reason,
   ThreadId,
   CardDiffStat,
   CardChecks,
@@ -67,6 +85,17 @@ export const ProjectionCard = Schema.Struct({
   proposalReasoning: Schema.NullOr(Schema.String),
   suggestedAgentId: Schema.NullOr(AgentId),
   priority: CardPriority,
+  kind: CardKind,
+  acceptance: CardAcceptance,
+  estimate: Schema.NullOr(CardEstimate),
+  premise: Schema.NullOr(CardPremise),
+  checkpoint: Schema.NullOr(CardCheckpoint),
+  fixRounds: CardFixRounds,
+  evidence: Schema.NullOr(CardEvidenceSummary),
+  landing: Schema.NullOr(CardLanding),
+  paused: Schema.NullOr(CardPause),
+  waitReason: Schema.NullOr(CardWaitReason),
+  queuedAt: Schema.NullOr(IsoDateTime),
   relations: Schema.Array(CardRelation),
   createdBy: CardAuthor,
   createdAt: IsoDateTime,
@@ -84,10 +113,22 @@ export const ProjectionCardDbRow = ProjectionCard.mapFields(
     checks: Schema.fromJsonString(Schema.NullOr(CardChecks)),
     acceptsUnpriced: Schema.fromJsonString(Schema.Boolean),
     linearIssue: Schema.fromJsonString(Schema.NullOr(CardLinearIssue)),
+    acceptance: Schema.fromJsonString(CardAcceptance),
+    estimate: Schema.fromJsonString(Schema.NullOr(CardEstimate)),
+    premise: Schema.fromJsonString(Schema.NullOr(CardPremise)),
+    checkpoint: Schema.fromJsonString(Schema.NullOr(CardCheckpoint)),
+    fixRounds: Schema.fromJsonString(CardFixRounds),
+    evidence: Schema.fromJsonString(Schema.NullOr(CardEvidenceSummary)),
+    landing: Schema.fromJsonString(Schema.NullOr(CardLanding)),
+    paused: Schema.fromJsonString(Schema.NullOr(CardPause)),
+    waitReason: Schema.fromJsonString(Schema.NullOr(CardWaitReason)),
   }),
 );
 
-/** The `projection_cards` columns as `ProjectionCardDbRow` reads them. */
+/**
+ * The `projection_cards` columns as `ProjectionCardDbRow` reads them. Contract columns are null on
+ * cards from before the contract, which read as confirmed with no criteria and nothing open.
+ */
 export const PROJECTION_CARD_COLUMNS = `
   card_id AS "cardId",
   project_id AS "projectId",
@@ -120,6 +161,17 @@ export const PROJECTION_CARD_COLUMNS = `
   proposal_reasoning AS "proposalReasoning",
   suggested_agent_id AS "suggestedAgentId",
   priority,
+  kind,
+  COALESCE(acceptance_json, '{"criteria":[],"state":"confirmed"}') AS "acceptance",
+  COALESCE(estimate_json, 'null') AS "estimate",
+  COALESCE(premise_json, 'null') AS "premise",
+  COALESCE(checkpoint_json, 'null') AS "checkpoint",
+  COALESCE(fix_rounds_json, '{"ci":0,"review":0}') AS "fixRounds",
+  COALESCE(evidence_json, 'null') AS "evidence",
+  COALESCE(landing_json, 'null') AS "landing",
+  COALESCE(paused_json, 'null') AS "paused",
+  COALESCE(wait_reason_json, 'null') AS "waitReason",
+  queued_at AS "queuedAt",
   relations_json AS "relations",
   created_by_json AS "createdBy",
   created_at AS "createdAt",
@@ -159,6 +211,32 @@ export const ProjectionCardMessage = Schema.Struct({
 });
 export type ProjectionCardMessage = typeof ProjectionCardMessage.Type;
 
+/** One entry of a card's activity stream, with the session its delivery rides. */
+export const ProjectionCardActivity = Schema.Struct({
+  ...CardActivity.fields,
+  author: Schema.fromJsonString(CardActivityAuthor),
+  elicitation: Schema.NullOr(Schema.fromJsonString(Elicitation)),
+  answers: Schema.NullOr(Schema.fromJsonString(ElicitationAnswer)),
+  status: Schema.NullOr(
+    Schema.fromJsonString(Schema.Struct({ from: CardStatus, to: CardStatus })),
+  ),
+  reason: Schema.NullOr(Schema.fromJsonString(Reason)),
+  deliveryThreadId: Schema.NullOr(ThreadId),
+});
+export type ProjectionCardActivity = typeof ProjectionCardActivity.Type;
+
+/** One captured evidence item, with the recording it belongs to. */
+export const ProjectionCardEvidenceItem = Schema.Struct({
+  ...CardEvidenceItem.fields,
+  evidenceId: Schema.String,
+  cardId: CardId,
+  headSha: Schema.String,
+  purpose: CardEvidencePurpose,
+  unavailable: Schema.NullOr(Schema.fromJsonString(Reason)),
+  createdAt: IsoDateTime,
+});
+export type ProjectionCardEvidenceItem = typeof ProjectionCardEvidenceItem.Type;
+
 /** One priced turn of a card session, so spend sums by card and by agent. */
 export const ProjectionCardSpend = Schema.Struct({
   spendId: Schema.String,
@@ -175,6 +253,18 @@ export const GetProjectionCardInput = Schema.Struct({
   cardId: CardId,
 });
 export type GetProjectionCardInput = typeof GetProjectionCardInput.Type;
+
+export const ListProjectionCardActivitiesInput = Schema.Struct({
+  cardId: CardId,
+  limit: Schema.Number,
+});
+export type ListProjectionCardActivitiesInput = typeof ListProjectionCardActivitiesInput.Type;
+
+export const ListProjectionCardEvidenceInput = Schema.Struct({
+  cardId: CardId,
+  evidenceId: Schema.String,
+});
+export type ListProjectionCardEvidenceInput = typeof ListProjectionCardEvidenceInput.Type;
 
 export interface ProjectionCardRepositoryShape {
   /** Insert or replace a projected card row by `cardId`. */
@@ -214,6 +304,31 @@ export interface ProjectionCardRepositoryShape {
   readonly listOpenOwnerMessages: (
     input: GetProjectionCardInput,
   ) => Effect.Effect<ReadonlyArray<ProjectionCardMessage>, ProjectionRepositoryError>;
+
+  /** Append one activity; replaying the same activity is a no-op. */
+  readonly appendActivity: (
+    row: ProjectionCardActivity,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /** A card's newest `limit` activities, oldest first. */
+  readonly listActivities: (
+    input: ListProjectionCardActivitiesInput,
+  ) => Effect.Effect<ReadonlyArray<ProjectionCardActivity>, ProjectionRepositoryError>;
+
+  /** A card's activities for its builder still pending or sent, oldest first. */
+  readonly listOpenBuilderActivities: (
+    input: GetProjectionCardInput,
+  ) => Effect.Effect<ReadonlyArray<ProjectionCardActivity>, ProjectionRepositoryError>;
+
+  /** Record captured evidence items; replaying the same items is a no-op. */
+  readonly appendEvidenceItems: (
+    rows: ReadonlyArray<ProjectionCardEvidenceItem>,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /** The items of one recording of a card's evidence, in the order they were captured. */
+  readonly listEvidenceItems: (
+    input: ListProjectionCardEvidenceInput,
+  ) => Effect.Effect<ReadonlyArray<ProjectionCardEvidenceItem>, ProjectionRepositoryError>;
 }
 
 export class ProjectionCardRepository extends Context.Service<

@@ -17,6 +17,7 @@ import {
   OrchestrationThreadDetailSnapshot,
   ProjectScript,
   ProjectIconOverride,
+  ProjectOrchestration,
   TurnId,
   type OrchestrationCheckpointSummary,
   type OrchestrationLatestTurn,
@@ -146,6 +147,7 @@ const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
     autoPull: Schema.Number,
     projectIcon: Schema.NullOr(Schema.fromJsonString(ProjectIconOverride)),
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
+    orchestration: Schema.NullOr(Schema.fromJsonString(ProjectOrchestration)),
   }),
 );
 const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
@@ -438,6 +440,7 @@ function mapProjectShellRow(
     faviconPath: row.faviconPath ?? null,
     projectIcon: row.projectIcon ?? null,
     scripts: row.scripts,
+    ...(row.orchestration === null ? {} : { orchestration: row.orchestration }),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -588,6 +591,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           favicon_path AS "faviconPath",
           project_icon_json AS "projectIcon",
           scripts_json AS "scripts",
+          orchestration_json AS "orchestration",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -641,6 +645,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           wake_depth AS "wakeDepth",
           member_agent_ids_json AS "memberAgentIds",
           lead_agent_id AS "leadAgentId",
+          COALESCE(open_elicitations_json, '[]') AS "openElicitations",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           archived_at AS "archivedAt"
@@ -1406,6 +1411,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           favicon_path AS "faviconPath",
           project_icon_json AS "projectIcon",
           scripts_json AS "scripts",
+          orchestration_json AS "orchestration",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -1432,6 +1438,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           favicon_path AS "faviconPath",
           project_icon_json AS "projectIcon",
           scripts_json AS "scripts",
+          orchestration_json AS "orchestration",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -2539,6 +2546,7 @@ pending_approval_requests AS (
                 faviconPath: row.faviconPath ?? null,
                 projectIcon: row.projectIcon ?? null,
                 scripts: row.scripts,
+                ...(row.orchestration === null ? {} : { orchestration: row.orchestration }),
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
                 deletedAt: row.deletedAt,
@@ -2722,6 +2730,7 @@ pending_approval_requests AS (
                   faviconPath: row.faviconPath ?? null,
                   projectIcon: row.projectIcon ?? null,
                   scripts: row.scripts,
+                  ...(row.orchestration === null ? {} : { orchestration: row.orchestration }),
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
                   deletedAt: row.deletedAt,
@@ -3307,6 +3316,9 @@ pending_approval_requests AS (
                     faviconPath: option.value.faviconPath ?? null,
                     projectIcon: option.value.projectIcon ?? null,
                     scripts: option.value.scripts,
+                    ...(option.value.orchestration === null
+                      ? {}
+                      : { orchestration: option.value.orchestration }),
                     createdAt: option.value.createdAt,
                     updatedAt: option.value.updatedAt,
                     deletedAt: option.value.deletedAt,

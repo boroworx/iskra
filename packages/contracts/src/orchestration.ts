@@ -1000,12 +1000,45 @@ export const OrchestrationCard = Schema.Struct({
   // The agent the lead suggested to own the card; set as its delegate only when a person starts it.
   suggestedAgentId: Schema.NullOr(AgentId).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   priority: CardPriority.pipe(Schema.withDecodingDefault(Effect.succeed(0 as const))),
+  // The card contract. Each decodes to a card from before it: a task, confirmed with no criteria.
+  kind: CardKind.pipe(Schema.withDecodingDefault(Effect.succeed("task" as const))),
+  acceptance: CardAcceptance.pipe(
+    Schema.withDecodingDefault(Effect.succeed({ criteria: [], state: "confirmed" as const })),
+  ),
+  estimate: Schema.NullOr(CardEstimate).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  premise: Schema.NullOr(CardPremise).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  checkpoint: Schema.NullOr(CardCheckpoint).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  fixRounds: CardFixRounds.pipe(Schema.withDecodingDefault(Effect.succeed({ ci: 0, review: 0 }))),
+  // The latest evidence, for the commit it was captured on.
+  evidence: Schema.NullOr(CardEvidenceSummary).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  landing: Schema.NullOr(CardLanding).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  paused: Schema.NullOr(CardPause).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  waitReason: Schema.NullOr(CardWaitReason).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  // When the card last became ready to run, which orders the queue after priority.
+  queuedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   relations: Schema.Array(CardRelation),
   createdBy: CardAuthor,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
 export type OrchestrationCard = typeof OrchestrationCard.Type;
+
+/** A card's contract fields as a card from before the contract reads them. */
+export const LEGACY_CARD_CONTRACT = {
+  kind: "task",
+  acceptance: LEGACY_CARD_ACCEPTANCE,
+  estimate: null,
+  premise: null,
+  checkpoint: null,
+  fixRounds: { ci: 0, review: 0 },
+  evidence: null,
+  landing: null,
+  paused: null,
+  waitReason: null,
+  queuedAt: null,
+} as const satisfies Partial<OrchestrationCard>;
 
 export const ChannelMessageAuthorKind = Schema.Literals(["human", "agent", "system", "webhook"]);
 export type ChannelMessageAuthorKind = typeof ChannelMessageAuthorKind.Type;
@@ -1244,6 +1277,8 @@ export const OrchestrationRun = Schema.Struct({
   capabilities: RunCapabilities,
   context: Schema.Union([RunContextPayload, CardBriefPayload]),
   rendered: RenderedRunContext,
+  // Times the card's owner was restarted before this run.
+  restarts: Schema.optional(NonNegativeInt),
   startedAt: IsoDateTime,
 });
 export type OrchestrationRun = typeof OrchestrationRun.Type;

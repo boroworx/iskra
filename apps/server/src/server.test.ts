@@ -47,6 +47,7 @@ import {
   AgentId,
   ChannelId,
   CardId,
+  LEGACY_CARD_CONTRACT,
 } from "@iskra/contracts";
 import {
   computeDpopAccessTokenHash,
@@ -9918,6 +9919,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   proposalReasoning: null,
                   suggestedAgentId: null,
                   priority: 0,
+                  ...LEGACY_CARD_CONTRACT,
                   createdBy: { kind: "human" as const, id: "human" },
                   createdAt: now,
                   updatedAt: now,

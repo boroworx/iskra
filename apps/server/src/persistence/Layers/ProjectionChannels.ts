@@ -17,6 +17,7 @@ import {
   ProjectionChannelRepository,
   ProjectionOpenChannelDelivery,
   ProjectionRunDbRow,
+  SetProjectionRunWaitReasonInput,
   type ProjectionChannelRepositoryShape,
 } from "../Services/ProjectionChannels.ts";
 
@@ -39,6 +40,7 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
           wake_depth,
           member_agent_ids_json,
           lead_agent_id,
+          open_elicitations_json,
           created_at,
           updated_at,
           archived_at
@@ -53,6 +55,7 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
           ${row.wakeDepth},
           ${row.memberAgentIds},
           ${row.leadAgentId},
+          ${row.openElicitations ?? "[]"},
           ${row.createdAt},
           ${row.updatedAt},
           ${row.archivedAt}
@@ -67,6 +70,7 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
           wake_depth = excluded.wake_depth,
           member_agent_ids_json = excluded.member_agent_ids_json,
           lead_agent_id = excluded.lead_agent_id,
+          open_elicitations_json = excluded.open_elicitations_json,
           created_at = excluded.created_at,
           updated_at = excluded.updated_at,
           archived_at = excluded.archived_at
@@ -88,6 +92,7 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
           wake_depth AS "wakeDepth",
           member_agent_ids_json AS "memberAgentIds",
           lead_agent_id AS "leadAgentId",
+          COALESCE(open_elicitations_json, '[]') AS "openElicitations",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           archived_at AS "archivedAt"
@@ -108,7 +113,10 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
           author_id,
           body,
           created_at,
-          run_thread_id
+          run_thread_id,
+          elicitation_json,
+          answers_json,
+          answered_at
         )
         VALUES (
           ${row.messageId},
@@ -118,7 +126,10 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
           ${row.authorId},
           ${row.body},
           ${row.createdAt},
-          ${row.runThreadId}
+          ${row.runThreadId},
+          ${row.elicitation},
+          ${row.answers},
+          ${row.answeredAt}
         )
         ON CONFLICT (message_id) DO NOTHING
       `,
@@ -149,6 +160,7 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
           capabilities_json,
           context_json,
           rendered_json,
+          restarts,
           started_at
         )
         VALUES (
@@ -161,9 +173,20 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
           ${row.capabilities},
           ${row.context},
           ${row.rendered},
+          ${row.restarts ?? 0},
           ${row.startedAt}
         )
         ON CONFLICT (thread_id) DO NOTHING
+      `,
+  });
+
+  const setRunWaitReasonRow = SqlSchema.void({
+    Request: SetProjectionRunWaitReasonInput,
+    execute: ({ threadId, waitReason }) =>
+      sql`
+        UPDATE projection_runs
+        SET wait_reason_json = ${waitReason}
+        WHERE thread_id = ${threadId}
       `,
   });
 
@@ -237,6 +260,9 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
           messages.body,
           messages.created_at AS "createdAt",
           messages.run_thread_id AS "runThreadId",
+          messages.elicitation_json AS "elicitation",
+          messages.answers_json AS "answers",
+          messages.answered_at AS "answeredAt",
           deliveries.status,
           deliveries.run_thread_id AS "deliveryRunThreadId"
         FROM projection_channel_deliveries AS deliveries
@@ -256,6 +282,7 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
     getMessageById: (input) => getMessageRow(input).pipe(query("getMessageById")),
     insertRun: (row) => insertRunRow(row).pipe(query("insertRun")),
     endRun: (input) => endRunRow(input).pipe(query("endRun")),
+    setRunWaitReason: (input) => setRunWaitReasonRow(input).pipe(query("setRunWaitReason")),
     listWakeHistory: (input) =>
       listWakeHistoryRows(input).pipe(
         Effect.map((rows) => rows.toReversed()),

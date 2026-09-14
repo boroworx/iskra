@@ -11,6 +11,7 @@ import {
   ModelSelection,
   ProjectIconOverride,
   ProjectId,
+  ProjectOrchestration,
   ProjectScript,
   ThreadEnvMode,
 } from "@iskra/contracts";
@@ -31,6 +32,8 @@ export const ProjectionProject = Schema.Struct({
   faviconPath: Schema.optional(Schema.NullOr(Schema.String)),
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
   scripts: Schema.Array(ProjectScript),
+  // Null until a person sets the project's orchestration policy.
+  orchestration: Schema.NullOr(ProjectOrchestration),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),

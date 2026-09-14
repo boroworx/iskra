@@ -6,6 +6,10 @@
  */
 import {
   AgentId,
+  CardWaitReason,
+  Elicitation,
+  ElicitationAnswer,
+  OrchestrationChannel,
   ChannelDeliveryStatus,
   ChannelDeliveryUpdatedPayload,
   ChannelId,
@@ -22,6 +26,7 @@ import {
   RenderedRunContext,
   RunCapabilities,
   ThreadId,
+  TrimmedNonEmptyString,
 } from "@iskra/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
@@ -30,6 +35,12 @@ import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 
 import type { ProjectionRepositoryError } from "../Errors.ts";
+
+/** A lead question on a channel that nobody has answered yet, with the options it offers. */
+const OpenChannelElicitation = Schema.Struct({
+  messageId: MessageId,
+  optionIds: Schema.Array(TrimmedNonEmptyString),
+});
 
 export const ProjectionChannel = Schema.Struct({
   channelId: ChannelId,
@@ -41,6 +52,7 @@ export const ProjectionChannel = Schema.Struct({
   wakeDepth: NonNegativeInt,
   memberAgentIds: Schema.Array(AgentId),
   leadAgentId: Schema.NullOr(AgentId),
+  openElicitations: OrchestrationChannel.fields.openElicitations,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime),
@@ -51,6 +63,9 @@ export type ProjectionChannel = typeof ProjectionChannel.Type;
 export const ProjectionChannelDbRow = ProjectionChannel.mapFields(
   Struct.assign({
     memberAgentIds: Schema.fromJsonString(Schema.Array(AgentId)),
+    openElicitations: Schema.optional(
+      Schema.fromJsonString(Schema.Array(OpenChannelElicitation)),
+    ),
   }),
 );
 
@@ -70,6 +85,9 @@ export const ProjectionChannelMessage = Schema.Struct({
   body: Schema.String,
   createdAt: IsoDateTime,
   runThreadId: Schema.NullOr(ThreadId),
+  elicitation: Schema.NullOr(Schema.fromJsonString(Elicitation)),
+  answers: Schema.NullOr(Schema.fromJsonString(ElicitationAnswer)),
+  answeredAt: Schema.NullOr(IsoDateTime),
 });
 export type ProjectionChannelMessage = typeof ProjectionChannelMessage.Type;
 
@@ -82,7 +100,10 @@ export const PROJECTION_CHANNEL_MESSAGE_COLUMNS = `
   author_id AS "authorId",
   body,
   created_at AS "createdAt",
-  run_thread_id AS "runThreadId"
+  run_thread_id AS "runThreadId",
+  elicitation_json AS "elicitation",
+  answers_json AS "answers",
+  answered_at AS "answeredAt"
 `;
 
 /** A stored message as clients and agents see it. */
@@ -97,6 +118,9 @@ export function toOrchestrationChannelMessage(
     body: row.body,
     createdAt: row.createdAt,
     ...(row.runThreadId !== null ? { runThreadId: row.runThreadId } : {}),
+    ...(row.elicitation !== null ? { elicitation: row.elicitation } : {}),
+    ...(row.answeredAt !== null ? { answeredAt: row.answeredAt } : {}),
+    ...(row.answers !== null ? { answers: row.answers } : {}),
   };
 }
 
@@ -122,6 +146,12 @@ export const EndProjectionRunInput = Schema.Struct({
   endedAt: IsoDateTime,
 });
 export type EndProjectionRunInput = typeof EndProjectionRunInput.Type;
+
+export const SetProjectionRunWaitReasonInput = Schema.Struct({
+  threadId: ThreadId,
+  waitReason: Schema.NullOr(Schema.fromJsonString(CardWaitReason)),
+});
+export type SetProjectionRunWaitReasonInput = typeof SetProjectionRunWaitReasonInput.Type;
 
 /** A message's standing with one agent it woke. */
 export const ProjectionChannelDelivery = Schema.Struct({
@@ -180,6 +210,11 @@ export interface ProjectionChannelRepositoryShape {
 
   /** Mark a run ended. Ending a thread that is not a live run is a no-op. */
   readonly endRun: (input: EndProjectionRunInput) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /** Record why a run waits, or clear it. A thread that is not a run is a no-op. */
+  readonly setRunWaitReason: (
+    input: SetProjectionRunWaitReasonInput,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
 
   /** Record a message's standing with an agent, replacing any earlier one. */
   readonly upsertDelivery: (

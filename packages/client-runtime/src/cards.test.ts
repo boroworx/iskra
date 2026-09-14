@@ -1,6 +1,7 @@
 import {
   AgentId,
   CardId,
+  LEGACY_CARD_CONTRACT,
   ProjectId,
   ThreadId,
   type CardStatus,
@@ -60,6 +61,7 @@ const card = (id: string, overrides: Partial<OrchestrationCard> = {}): Orchestra
   proposalReasoning: null,
   suggestedAgentId: null,
   priority: 0,
+  ...LEGACY_CARD_CONTRACT,
   ...overrides,
 });
 
