@@ -4,7 +4,6 @@ import {
   CardId,
   CHANNEL_SYSTEM_AUTHOR_ID,
   CommandId,
-  MessageId,
   CardLinearIssue,
   type CardActivity,
   type CardCriterion,
@@ -402,16 +401,22 @@ export const make = Effect.gen(function* () {
         question = null;
         if (answered) continue;
       }
+      // A Linear reply is a person writing: it reaches the card's builder as its next turn.
       yield* dispatch({
-        type: "card.message.record",
+        type: "card.activity.record",
         commandId: CommandId.make(`server:linear-${reply.key}`),
+        activityId: `linear-${reply.key}`,
         cardId: card.id,
-        messageId: MessageId.make(`linear-${reply.key}`),
-        authorKind: "linear",
-        authorId: reply.authorName,
+        kind: "message",
+        author: { kind: "linear", id: reply.authorName },
         body: reply.body,
         runThreadId: null,
-        forOwner: true,
+        deliverTo: "builder",
+        elicitation: null,
+        answers: null,
+        status: null,
+        evidenceId: null,
+        reason: null,
         createdAt: reply.createdAt,
       });
     }

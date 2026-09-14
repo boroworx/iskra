@@ -437,16 +437,17 @@ it.layer(layer)("LinearSyncReactor", (it) => {
       expect(issues.get(world.issueId)?.title).toBe("Budget alerts by email and Slack");
 
       const fromLinear = world.nextEvent(
-        "card.message-posted",
-        (event) => event.payload.cardId === world.cardId,
+        "card.activity-recorded",
+        (event) => event.payload.cardId === world.cardId && event.payload.author.kind === "linear",
       );
       inLinear.comment(world.issueId, "Slack too, please.", ANA);
       yield* world.reactor.syncNow;
       expect((yield* fromLinear).payload).toMatchObject({
-        authorKind: "linear",
-        authorId: "Ana",
+        kind: "message",
+        author: { kind: "linear", id: "Ana" },
         body: "Slack too, please.",
-        forOwner: true,
+        deliverTo: "builder",
+        delivery: "pending",
       });
 
       yield* world.reactor.start();
