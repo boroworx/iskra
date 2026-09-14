@@ -1,4 +1,5 @@
 import {
+  CardId,
   CommandId,
   EnvironmentId,
   ORCHESTRATION_WS_METHODS,
@@ -24,11 +25,14 @@ import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import {
   archiveThread,
   createProject,
+  decideCard,
   revertThreadCheckpoint,
   reorderActiveThread,
   settleThread,
+  snoozeCard,
   stopThreadSession,
   unsettleThread,
+  unsnoozeCard,
 } from "./commands.ts";
 
 const TEST_CRYPTO_LAYER = Layer.succeed(
@@ -192,6 +196,30 @@ describe("environment commands", () => {
           threadId: "thread-1",
           reason: "user",
         },
+      ]);
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
+  it.effect("sends Iskra commands with or without timestamps by type", () =>
+    Effect.gen(function* () {
+      const dispatched: ClientOrchestrationCommand[] = [];
+      const supervisor = yield* makeSupervisor(dispatched);
+      const cardId = CardId.make("card-1");
+      const commandId = CommandId.make("iskra-command");
+      const createdAt = "2026-06-06T00:02:00.000Z";
+      for (const command of [
+        snoozeCard({ commandId, cardId, snoozedUntil: null, createdAt }),
+        unsnoozeCard({ commandId, cardId }),
+        decideCard({ commandId, cardId, type: "card.merge.approve" }),
+      ]) {
+        yield* command.pipe(
+          Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+        );
+      }
+      expect(dispatched).toEqual([
+        { type: "card.snooze", commandId, cardId, snoozedUntil: null, createdAt },
+        { type: "card.unsnooze", commandId, cardId },
+        { type: "card.merge.approve", commandId, cardId },
       ]);
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
   );

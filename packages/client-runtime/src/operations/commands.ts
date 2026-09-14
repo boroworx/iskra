@@ -75,10 +75,9 @@ function commandId(input: { readonly commandId?: CommandId }) {
   });
 }
 
-function timestampedCommandMetadata(input: {
-  readonly commandId?: CommandId;
-  readonly createdAt?: string;
-}) {
+type CommandMetadata = { readonly commandId?: CommandId; readonly createdAt?: string };
+
+function timestampedCommandMetadata(input: CommandMetadata) {
   return Effect.all({
     commandId: commandId(input),
     createdAt:
@@ -104,68 +103,46 @@ export const createProject: (input: CreateProjectInput) => CommandEffect = Effec
   });
 });
 
-export type CreateAgentInput = CommandInput<"agent.create">;
-export type CreateChannelInput = CommandInput<"channel.create">;
-export type PostChannelMessageInput = CommandInput<"channel.message.post">;
-export type SendAgentSessionMessageInput = CommandInput<"agent.session.message">;
-export type UpdateChannelInput = CommandInput<"channel.update">;
-
-export const updateChannel: (input: UpdateChannelInput) => CommandEffect = Effect.fn(
-  "EnvironmentCommands.updateChannel",
-)(function* (input) {
-  return yield* dispatch({
-    ...input,
-    type: "channel.update",
-    commandId: yield* commandId(input),
+/** A wrapper that fills in the command id. */
+function command<T extends CommandType>(
+  name: string,
+  type: T,
+): (input: CommandInput<T>) => CommandEffect {
+  return Effect.fn(`EnvironmentCommands.${name}`)(function* (input: {
+    readonly commandId?: CommandId;
+  }) {
+    const id = yield* commandId(input);
+    return yield* dispatch({
+      ...input,
+      type: type as CommandType,
+      commandId: id,
+    } as ClientOrchestrationCommand);
   });
-});
+}
 
-export const createAgent: (input: CreateAgentInput) => CommandEffect = Effect.fn(
-  "EnvironmentCommands.createAgent",
-)(function* (input) {
-  const metadata = yield* timestampedCommandMetadata(input);
-  return yield* dispatch({
-    ...input,
-    type: "agent.create",
-    commandId: metadata.commandId,
-    createdAt: metadata.createdAt,
-  });
-});
-
-export const createChannel: (input: CreateChannelInput) => CommandEffect = Effect.fn(
-  "EnvironmentCommands.createChannel",
-)(function* (input) {
-  const metadata = yield* timestampedCommandMetadata(input);
-  return yield* dispatch({
-    ...input,
-    type: "channel.create",
-    commandId: metadata.commandId,
-    createdAt: metadata.createdAt,
-  });
-});
-
-export const postChannelMessage: (input: PostChannelMessageInput) => CommandEffect = Effect.fn(
-  "EnvironmentCommands.postChannelMessage",
-)(function* (input) {
-  const metadata = yield* timestampedCommandMetadata(input);
-  return yield* dispatch({
-    ...input,
-    type: "channel.message.post",
-    commandId: metadata.commandId,
-    createdAt: metadata.createdAt,
-  });
-});
-
-export const sendAgentSessionMessage: (input: SendAgentSessionMessageInput) => CommandEffect =
-  Effect.fn("EnvironmentCommands.sendAgentSessionMessage")(function* (input) {
+/** A wrapper that fills in the command id and, unless the caller gives one, the creation time. */
+function timestampedCommand<T extends CommandType>(
+  name: string,
+  type: T,
+): (input: Omit<CommandOf<T>, "type" | keyof CommandMetadata> & CommandMetadata) => CommandEffect {
+  return Effect.fn(`EnvironmentCommands.${name}`)(function* (input: CommandMetadata) {
     const metadata = yield* timestampedCommandMetadata(input);
     return yield* dispatch({
       ...input,
-      type: "agent.session.message",
-      commandId: metadata.commandId,
-      createdAt: metadata.createdAt,
-    });
+      type: type as CommandType,
+      ...metadata,
+    } as ClientOrchestrationCommand);
   });
+}
+
+export const updateChannel = command("updateChannel", "channel.update");
+export const createAgent = timestampedCommand("createAgent", "agent.create");
+export const createChannel = timestampedCommand("createChannel", "channel.create");
+export const postChannelMessage = timestampedCommand("postChannelMessage", "channel.message.post");
+export const sendAgentSessionMessage = timestampedCommand(
+  "sendAgentSessionMessage",
+  "agent.session.message",
+);
 
 /** A human decision on a card: its reverse is another of these. */
 export type CardDecisionInput = CommandInput<"card.approve"> & {
@@ -184,76 +161,16 @@ export type CardDecisionInput = CommandInput<"card.approve"> & {
 export const decideCard: (input: CardDecisionInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.decideCard",
 )(function* (input) {
-  const base = { commandId: yield* commandId(input), cardId: input.cardId };
-  switch (input.type) {
-    case "card.approve":
-      return yield* dispatch({ ...base, type: "card.approve" });
-    case "card.unapprove":
-      return yield* dispatch({ ...base, type: "card.unapprove" });
-    case "card.merge.approve":
-      return yield* dispatch({ ...base, type: "card.merge.approve" });
-    case "card.merge.cancel":
-      return yield* dispatch({ ...base, type: "card.merge.cancel" });
-    case "card.abandon":
-      return yield* dispatch({ ...base, type: "card.abandon" });
-    case "card.reopen":
-      return yield* dispatch({ ...base, type: "card.reopen" });
-    case "card.unpriced.accept":
-      return yield* dispatch({ ...base, type: "card.unpriced.accept" });
-    case "card.unpriced.refuse":
-      return yield* dispatch({ ...base, type: "card.unpriced.refuse" });
-    case "card.attempt.promote":
-      return yield* dispatch({ ...base, type: "card.attempt.promote" });
-  }
+  const id = yield* commandId(input);
+  return yield* dispatch({ commandId: id, cardId: input.cardId, type: input.type });
 });
 
-export type StartCardAttemptsInput = CommandInput<"card.attempts.start">;
-export const startCardAttempts: (input: StartCardAttemptsInput) => CommandEffect = Effect.fn(
-  "EnvironmentCommands.startCardAttempts",
-)(function* (input) {
-  const metadata = yield* timestampedCommandMetadata(input);
-  return yield* dispatch({
-    ...input,
-    type: "card.attempts.start",
-    commandId: metadata.commandId,
-    createdAt: metadata.createdAt,
-  });
-});
-
-export type SetCardBudgetInput = CommandInput<"card.budget.set">;
-export const setCardBudget: (input: SetCardBudgetInput) => CommandEffect = Effect.fn(
-  "EnvironmentCommands.setCardBudget",
-)(function* (input) {
-  return yield* dispatch({ ...input, type: "card.budget.set", commandId: yield* commandId(input) });
-});
-
-export type SnoozeCardInput = CommandInput<"card.snooze">;
-export const snoozeCard: (input: SnoozeCardInput) => CommandEffect = Effect.fn(
-  "EnvironmentCommands.snoozeCard",
-)(function* (input) {
-  const metadata = yield* timestampedCommandMetadata(input);
-  return yield* dispatch({
-    ...input,
-    type: "card.snooze",
-    commandId: metadata.commandId,
-    createdAt: metadata.createdAt,
-  });
-});
-
+export const startCardAttempts = timestampedCommand("startCardAttempts", "card.attempts.start");
+export const setCardBudget = command("setCardBudget", "card.budget.set");
+export const snoozeCard = timestampedCommand("snoozeCard", "card.snooze");
 /** A person's edit of a card's fields: title, spec, tags or priority. */
-export type UpdateCardInput = CommandInput<"card.update">;
-export const updateCard: (input: UpdateCardInput) => CommandEffect = Effect.fn(
-  "EnvironmentCommands.updateCard",
-)(function* (input) {
-  return yield* dispatch({ ...input, type: "card.update", commandId: yield* commandId(input) });
-});
-
-export type UnsnoozeCardInput = CommandInput<"card.unsnooze">;
-export const unsnoozeCard: (input: UnsnoozeCardInput) => CommandEffect = Effect.fn(
-  "EnvironmentCommands.unsnoozeCard",
-)(function* (input) {
-  return yield* dispatch({ ...input, type: "card.unsnooze", commandId: yield* commandId(input) });
-});
+export const updateCard = command("updateCard", "card.update");
+export const unsnoozeCard = command("unsnoozeCard", "card.unsnooze");
 
 export const updateProject: (input: UpdateProjectInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.updateProject",
