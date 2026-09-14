@@ -474,6 +474,45 @@ const clearProviderSessionContinuationMarkers = (threadIds: ReadonlyArray<Thread
     yield* clearContinuationMarkers(directory, threadIds);
   }).pipe(Effect.mapError(toServerUpdateThreadContinuationError));
 
+/**
+ * A card owner idle when the server stopped has no provider session left, and sessions never
+ * resume: its next turn would start without the card's brief. It is settled as lost instead, so
+ * the card session reactor restarts it from the brief like any other stale owner.
+ */
+export const markStaleCardOwners = Effect.gen(function* () {
+  const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService;
+  const query = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+  const crypto = yield* Crypto.Crypto;
+  const readModel = yield* query.getCommandReadModel();
+  const sessions = new Map(readModel.threads.map((thread) => [thread.id, thread.session] as const));
+  for (const run of readModel.liveRuns ?? []) {
+    const session = sessions.get(run.threadId);
+    if (run.cardId === null || run.role !== "owner" || session == null || session.status !== "ready") {
+      continue;
+    }
+    const settledAt = DateTime.formatIso(yield* DateTime.now);
+    yield* orchestrationEngine.dispatch({
+      type: "thread.session.set",
+      commandId: CommandId.make(yield* crypto.randomUUIDv4),
+      threadId: run.threadId,
+      session: {
+        ...session,
+        status: "error",
+        activeTurnId: null,
+        lastError: ORPHANED_PROVIDER_SESSION_ERROR,
+        updatedAt: settledAt,
+      },
+      createdAt: settledAt,
+    });
+  }
+}).pipe(
+  Effect.catchCause((cause) =>
+    Cause.hasInterrupts(cause)
+      ? Effect.failCause(cause)
+      : Effect.logWarning("stale card owner reconciliation failed", { cause }),
+  ),
+);
+
 export const reconcileProviderSessions = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
@@ -880,6 +919,7 @@ export const make = (options?: StartupOptions) =>
       );
 
       yield* runStartupPhase("provider-sessions.reconcile", reconcileProviderSessions);
+      yield* runStartupPhase("card-sessions.stale", markStaleCardOwners);
 
       yield* Effect.logDebug("startup phase: syncing clean projects");
       yield* runStartupPhase("projects.auto-pull", syncAutoPullProjects);

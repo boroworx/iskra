@@ -22,7 +22,12 @@ import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
 import { ProjectionCardRepositoryLive } from "../persistence/Layers/ProjectionCards.ts";
+import { ProjectionRunLivenessRepositoryLive } from "../persistence/Layers/ProjectionRunLiveness.ts";
 import { ProjectionCardRepository } from "../persistence/Services/ProjectionCards.ts";
+import {
+  ProjectionRunLivenessRepository,
+  type ProjectionOwnerRun,
+} from "../persistence/Services/ProjectionRunLiveness.ts";
 import { forkParked } from "../serverActivation.ts";
 import { buildCardBrief, diffStatOf, renderCardBrief, renderCardMessages } from "./cardBrief.ts";
 import { isFinishedCardStatus, questionText } from "./cardRules.ts";
@@ -33,11 +38,12 @@ import * as OrchestrationEngine from "./Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts";
 
 /**
- * Runs card sessions. Assigning an agent, or asking for a fresh session, starts
- * the card's owner session in its worktree from a handoff brief (spec, decisions
- * and diff). Reassigning stops the idle owner session and starts the new
- * agent's once it has ended, so a card never has two writers. A helper answers
- * a question read-only; its answer joins the card's activity for the owner.
+ * Runs card sessions. A requested session (from the scheduler, or a person asking for a fresh one)
+ * starts the card's owner in its worktree from a handoff brief (spec, decisions and diff).
+ * Reassigning stops the idle owner session; the scheduler starts the new agent's once it has
+ * ended, so a card never has two writers. An owner lost to an error or a server restart returns
+ * its unread messages to the card and is restarted by the scheduler, until repeated losses pause
+ * the card. A helper answers a question read-only; its answer joins the card's activity for the owner.
  *
  * Messages for the owner go in as its next turn once it is idle, never into a
  * running turn, and are `delivered` only once that turn runs. A message whose
@@ -67,13 +73,15 @@ type CardSessionRequest =
   | { readonly kind: "finished"; readonly cardId: CardId; readonly key: string }
   | { readonly kind: "settled"; readonly threadId: ThreadId }
   | { readonly kind: "running"; readonly threadId: ThreadId }
-  | { readonly kind: "ended"; readonly threadId: ThreadId }
+  | { readonly kind: "ended"; readonly threadId: ThreadId; readonly failed: boolean }
   | { readonly kind: "progress"; readonly event: ProgressEvent };
 
 type ProgressEvent = Extract<
   OrchestrationEvent,
   { type: "card.status-changed" | "thread.activity-appended" }
 >;
+
+const EPOCH = "1970-01-01T00:00:00.000Z";
 
 /** What a status move says in the card's channel, given the card's title and its owner's @name. */
 const PROGRESS_NOTES: Partial<Record<CardMove, (title: string, owner: string) => string>> = {
@@ -83,11 +91,19 @@ const PROGRESS_NOTES: Partial<Record<CardMove, (title: string, owner: string) =>
   abandon: (title) => `${title} was dropped`,
 };
 
+/** An owner lost this many times within the window pauses its card instead of restarting. */
+export const MAX_OWNER_RESTARTS_PER_HOUR = 3;
+
+/** Restarts before a new owner session: one more than a previous owner that failed, else none. */
+const restartsAfter = (previous: ProjectionOwnerRun | undefined) =>
+  previous !== undefined && previous.sessionStatus === "error" ? previous.restarts + 1 : 0;
+
 const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngine.OrchestrationEngineService;
   const snapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const cards = yield* ProjectionCardRepository;
   const workspace = yield* CardWorkspace.CardWorkspace;
+  const liveness = yield* ProjectionRunLivenessRepository;
   const crypto = yield* Crypto.Crypto;
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
@@ -156,6 +172,12 @@ const make = Effect.gen(function* () {
       question: input.question,
     });
     const rendered = renderCardBrief(context);
+    const restarts =
+      input.role === "owner"
+        ? restartsAfter(
+            (yield* liveness.listCardOwnerRuns({ cardId: card.id, since: EPOCH }))[0],
+          )
+        : 0;
     // Ids derive from the request, so a retried request cannot start a second session.
     const threadId = ThreadId.make(`card-session-${input.key}`);
     const startedAt = yield* nowIso;
@@ -171,6 +193,7 @@ const make = Effect.gen(function* () {
       capabilities: input.role === "owner" ? agent.capabilities : ["read"],
       context,
       rendered,
+      ...(restarts > 0 ? { restarts } : {}),
       startedAt,
     });
     yield* engine.dispatch({
@@ -312,7 +335,7 @@ const make = Effect.gen(function* () {
   const updateThreadDeliveries = (
     cardId: CardId,
     threadId: ThreadId,
-    status: "delivered" | "undelivered",
+    status: "pending" | "delivered" | "undelivered",
   ) =>
     Effect.gen(function* () {
       const sent = (yield* cards.listOpenOwnerMessages({ cardId })).filter(
@@ -397,13 +420,48 @@ const make = Effect.gen(function* () {
     }
   });
 
-  const endSession = Effect.fn("CardSessionReactor.endSession")(function* (threadId: ThreadId) {
+  /**
+   * An owner session ended. A reassignment waiting for it is the scheduler's to start. One lost to
+   * an error or a restart hands its unread messages back to the card, and the scheduler restarts
+   * the card from its brief, unless the owner failed more than MAX_OWNER_RESTARTS_PER_HOUR times
+   * in the last hour, which pauses the card for a person instead.
+   */
+  const endSession = Effect.fn("CardSessionReactor.endSession")(function* (
+    threadId: ThreadId,
+    failed: boolean,
+  ) {
     const run = yield* snapshotQuery.getRunByThreadId(threadId);
     if (Option.isNone(run) || run.value.cardId === null || run.value.role !== "owner") {
       return;
     }
-    // A reassignment waiting for this session to end is the scheduler's to start.
-    yield* updateThreadDeliveries(run.value.cardId, threadId, "undelivered");
+    const { cardId } = run.value;
+    const card = (yield* readModel()).cards?.find((candidate) => candidate.id === cardId);
+    const lost = failed && card !== undefined && !isFinishedCardStatus(card.status);
+    yield* updateThreadDeliveries(cardId, threadId, lost ? "pending" : "undelivered");
+    if (
+      !lost ||
+      card.paused !== null ||
+      card.status === "inReview" ||
+      card.status === "landing"
+    ) {
+      return;
+    }
+    const since = DateTime.formatIso(DateTime.subtract(yield* DateTime.now, { hours: 1 }));
+    const failures = (yield* liveness.listCardOwnerRuns({ cardId, since })).filter(
+      (owner) => owner.sessionStatus === "error",
+    ).length;
+    if (failures <= MAX_OWNER_RESTARTS_PER_HOUR) {
+      return;
+    }
+    yield* engine.dispatch({
+      type: "card.pause.system",
+      commandId: CommandId.make(`card-session-failed:${threadId}`),
+      cardId,
+      reason: {
+        code: "sessionFailed",
+        text: `The agent's session failed ${failures} times in the last hour; resume the card to try again.`,
+      },
+    });
   });
 
   /**
@@ -496,7 +554,7 @@ const make = Effect.gen(function* () {
       case "running":
         return markDelivered(request.threadId);
       case "ended":
-        return endSession(request.threadId);
+        return endSession(request.threadId, request.failed);
       case "progress":
         return postProgress(request.event);
     }
@@ -549,8 +607,15 @@ const make = Effect.gen(function* () {
           ? worker.enqueue({ kind: "progress", event })
           : Effect.void;
       case "thread.session-set": {
-        const kind = runSessionChange(event.payload.session);
-        return kind === null ? Effect.void : worker.enqueue({ kind, threadId: event.payload.threadId });
+        const { session, threadId } = event.payload;
+        const kind = runSessionChange(session);
+        return kind === null
+          ? Effect.void
+          : worker.enqueue(
+              kind === "ended"
+                ? { kind, threadId, failed: session.status === "error" }
+                : { kind, threadId },
+            );
       }
       default:
         return Effect.void;
@@ -567,4 +632,5 @@ const make = Effect.gen(function* () {
 
 export const layer = Layer.effect(CardSessionReactor, make).pipe(
   Layer.provide(ProjectionCardRepositoryLive),
+  Layer.provide(ProjectionRunLivenessRepositoryLive),
 );

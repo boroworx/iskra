@@ -553,4 +553,52 @@ it.layer(layer)("CardSessionReactor", (it) => {
       }),
     ),
   );
+
+  it.effect("restarts a lost owner from its brief with its unread messages, and pauses the card after four losses in an hour", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const world = yield* makeWorld("restart");
+        yield* world.assign("backend");
+        const first = yield* world.nextSession();
+        yield* world.setSession(first.payload.threadId, "ready", null);
+
+        // A message goes in as the idle owner's next turn, which is lost before it runs.
+        yield* world.engine.dispatch({
+          type: "card.message.post",
+          commandId: CommandId.make("cmd-restart-message"),
+          cardId: world.cardId,
+          messageId: MessageId.make("message-restart"),
+          body: "Also handle bursts.",
+          createdAt: now,
+        });
+        yield* world.nextEvent("card.delivery-updated", (event) => event.payload.status === "sent");
+        yield* world.setSession(first.payload.threadId, "error", null, "The provider crashed.");
+        const returned = yield* world.nextEvent("card.delivery-updated");
+        expect(returned.payload).toMatchObject({ status: "pending", messageIds: ["message-restart"] });
+
+        // The scheduler restarts the owner, counting the restart, and the message goes in once it settles.
+        const second = yield* world.nextSession();
+        expect(second.payload).toMatchObject({ role: "owner", restarts: 1 });
+        yield* world.setSession(second.payload.threadId, "ready", null);
+        const redelivered = yield* world.nextEvent(
+          "card.delivery-updated",
+          (event) => event.payload.status === "sent",
+        );
+        expect(redelivered.payload.threadId).toBe(second.payload.threadId);
+
+        // Three more losses within the hour: the fourth pauses the card instead of restarting it.
+        yield* world.setSession(second.payload.threadId, "error", null, "The provider crashed.");
+        const third = yield* world.nextSession();
+        expect(third.payload.restarts).toBe(2);
+        yield* world.setSession(third.payload.threadId, "error", null, "The provider crashed.");
+        const fourth = yield* world.nextSession();
+        expect(fourth.payload.restarts).toBe(3);
+        yield* world.setSession(fourth.payload.threadId, "error", null, "The provider crashed.");
+        const paused = yield* world.nextEvent("card.paused");
+        expect(paused.payload).toMatchObject({ by: "system", reason: { code: "sessionFailed" } });
+        yield* world.reactor.drain;
+        expect((yield* world.card)?.paused?.reason.code).toBe("sessionFailed");
+      }),
+    ),
+  );
 });
