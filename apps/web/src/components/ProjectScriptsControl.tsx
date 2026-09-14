@@ -116,6 +116,8 @@ export default function ProjectScriptsControl({
       keybinding: null,
       previewUrl: fileScript.previewUrl ?? null,
       autoOpenPreview: fileScript.previewUrl ? (fileScript.autoOpenPreview ?? false) : false,
+      ...(fileScript.role === undefined ? {} : { role: fileScript.role }),
+      ...(fileScript.exclusive === undefined ? {} : { exclusive: fileScript.exclusive }),
     };
     const result = await onAddScript(payload);
     if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {

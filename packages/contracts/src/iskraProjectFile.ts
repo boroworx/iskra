@@ -2,7 +2,7 @@ import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 
 import { ThreadEnvMode } from "./environment.ts";
-import { ProjectScriptIcon } from "./orchestration.ts";
+import { ProjectScriptIcon, ProjectScriptRole } from "./orchestration.ts";
 
 /** File name of the checked-in Iskra project file, resolved at the workspace root. */
 export const ISKRA_PROJECT_FILE_NAME = "iskra.json";
@@ -40,6 +40,18 @@ export const IskraProjectFileScript = Schema.Struct({
     Schema.Boolean.annotate({
       description:
         "When true, the script runs automatically after a worktree is created for a new thread.",
+    }),
+  ),
+  role: Schema.optionalKey(
+    ProjectScriptRole.annotate({
+      description:
+        'What the script does for a card\'s worktree: "setup" prepares it, "run" starts the app, "archive" cleans up before it is removed.',
+    }),
+  ),
+  exclusive: Schema.optionalKey(
+    Schema.Boolean.annotate({
+      description:
+        "When true, starting the script on one card stops it on the others, for scripts that share a port or database.",
     }),
   ),
   previewUrl: Schema.optionalKey(

@@ -407,12 +407,20 @@ export const ProjectScriptIcon = Schema.Literals([
 ]);
 export type ProjectScriptIcon = typeof ProjectScriptIcon.Type;
 
+/** What a script does for a card's worktree: prepare it, run the app, or clean up before removal. */
+export const ProjectScriptRole = Schema.Literals(["setup", "run", "archive"]);
+export type ProjectScriptRole = typeof ProjectScriptRole.Type;
+
 export const ProjectScript = Schema.Struct({
   id: TrimmedNonEmptyString,
   name: TrimmedNonEmptyString,
   command: TrimmedNonEmptyString,
   icon: ProjectScriptIcon,
   runOnWorktreeCreate: Schema.Boolean,
+  // Optional so scripts saved before roles still decode; `runOnWorktreeCreate` is the legacy setup flag.
+  role: Schema.optional(ProjectScriptRole),
+  // For a script that shares a port or database: starting it on one card stops it on the others.
+  exclusive: Schema.optional(Schema.Boolean),
   /**
    * URL to open in the in-app browser preview when this script runs (or
    * when the user explicitly requests a preview). Optional; only honored on
@@ -606,6 +614,9 @@ export const CardMove = Schema.Literals([
 ]);
 export type CardMove = typeof CardMove.Type;
 
+/** Ports reserved for each card's worktree, starting at its `portBase` (ISKRA_PORT). */
+export const CARD_PORT_BLOCK_SIZE = 10;
+
 export const OrchestrationCard = Schema.Struct({
   id: CardId,
   projectId: ProjectId,
@@ -623,6 +634,11 @@ export const OrchestrationCard = Schema.Struct({
   delegateAgentId: Schema.NullOr(AgentId),
   // Null means the repository's default branch, resolved when the card's worktree is created.
   baseBranch: Schema.NullOr(TrimmedNonEmptyString),
+  // The card's own branch and worktree: set when work starts, cleared when it lands or is abandoned.
+  branch: Schema.NullOr(TrimmedNonEmptyString),
+  worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  // The first of the card's CARD_PORT_BLOCK_SIZE ports, handed to its scripts as ISKRA_PORT.
+  portBase: Schema.NullOr(PositiveInt),
   relations: Schema.Array(CardRelation),
   createdBy: CardAuthor,
   createdAt: IsoDateTime,
@@ -1484,6 +1500,17 @@ const CardWorkReturnCommand = Schema.Struct({
   reason: TrimmedNonEmptyString,
 });
 
+const CardWorkspaceSetCommand = Schema.Struct({
+  type: Schema.Literal("card.workspace.set"),
+  commandId: CommandId,
+  cardId: CardId,
+  branch: TrimmedNonEmptyString,
+  worktreePath: TrimmedNonEmptyString,
+  portBase: PositiveInt,
+});
+
+const CardWorkspaceClearCommand = cardStatusCommand("card.workspace.clear");
+
 const ChannelCreateCommand = Schema.Struct({
   type: Schema.Literal("channel.create"),
   commandId: CommandId,
@@ -2093,6 +2120,8 @@ const InternalOrchestrationCommand = Schema.Union([
   CardReviewRequestCommand,
   CardWorkReturnCommand,
   CardLandCommand,
+  CardWorkspaceSetCommand,
+  CardWorkspaceClearCommand,
   ChannelAgentWakeCommand,
   ChannelRunStartCommand,
   ChannelMessageAgentPostCommand,
@@ -2135,6 +2164,8 @@ export const OrchestrationEventType = Schema.Literals([
   "card.relation-added",
   "card.relation-removed",
   "card.decision-recorded",
+  "card.workspace-set",
+  "card.workspace-cleared",
   "channel.created",
   "channel.updated",
   "channel.archived",
@@ -2315,6 +2346,19 @@ export const CardDecisionRecordedPayload = Schema.Struct({
   author: CardAuthor,
   text: TrimmedNonEmptyString,
   createdAt: IsoDateTime,
+});
+
+export const CardWorkspaceSetPayload = Schema.Struct({
+  cardId: CardId,
+  branch: TrimmedNonEmptyString,
+  worktreePath: TrimmedNonEmptyString,
+  portBase: PositiveInt,
+  updatedAt: IsoDateTime,
+});
+
+export const CardWorkspaceClearedPayload = Schema.Struct({
+  cardId: CardId,
+  updatedAt: IsoDateTime,
 });
 
 export const ChannelCreatedPayload = Schema.Struct({
@@ -2717,6 +2761,16 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("card.decision-recorded"),
     payload: CardDecisionRecordedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.workspace-set"),
+    payload: CardWorkspaceSetPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.workspace-cleared"),
+    payload: CardWorkspaceClearedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

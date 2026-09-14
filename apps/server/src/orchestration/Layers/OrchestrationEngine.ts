@@ -89,6 +89,8 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "card.review.request":
     case "card.work.return":
     case "card.land":
+    case "card.workspace.set":
+    case "card.workspace.clear":
       return {
         aggregateKind: "card",
         aggregateId: command.cardId,

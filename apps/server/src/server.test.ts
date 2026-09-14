@@ -123,6 +123,7 @@ import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSna
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor.ts";
 import * as PullRequestSyncReactor from "./orchestration/PullRequestSyncReactor.ts";
 import * as AgentDefinitionSync from "./orchestration/AgentDefinitionSync.ts";
+import * as CardWorkspace from "./orchestration/CardWorkspace.ts";
 import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
 import { OrchestrationEventStoreLive } from "./persistence/Layers/OrchestrationEventStore.ts";
 import { OrchestrationEventStore } from "./persistence/Services/OrchestrationEventStore.ts";
@@ -975,6 +976,9 @@ const buildAppUnderTest = (options?: {
             requestSync: () => Effect.void,
           }),
           Layer.mock(AgentDefinitionSync.AgentDefinitionSync)({
+            start: () => Effect.void,
+          }),
+          Layer.mock(CardWorkspace.CardWorkspace)({
             start: () => Effect.void,
           }),
         ),

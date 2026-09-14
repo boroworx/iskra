@@ -86,6 +86,8 @@ export interface NewProjectScriptInput {
   previewUrl: string | null;
   /** When true, automatically open the preview panel pointed at `previewUrl`. */
   autoOpenPreview: boolean;
+  role?: ProjectScript["role"];
+  exclusive?: ProjectScript["exclusive"];
 }
 
 export type ProjectScriptActionResult = AtomCommandResult<void, unknown>;
@@ -122,6 +124,8 @@ export function editorRequestForScript(
       keybinding: keybindingValueForCommand(keybindings, commandForProjectScript(script.id)),
       previewUrl: script.previewUrl ?? null,
       autoOpenPreview: script.autoOpenPreview ?? false,
+      ...(script.role === undefined ? {} : { role: script.role }),
+      ...(script.exclusive === undefined ? {} : { exclusive: script.exclusive }),
     },
   };
 }

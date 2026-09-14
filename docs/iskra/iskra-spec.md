@@ -593,6 +593,16 @@ project setup script with `run` and `archive` scripts, an `ISKRA_PORT` range per
 non-concurrent run mode for scripts that share a port or database. _Accept when:_ two cards run
 the app at the same time on different ports; abandoning a card runs `archive` and removes its
 worktree and branch.
+_Accepted:_ `CardWorkspace.ts` gives a card an `iskra/<title>-<id>` branch off its base (a
+sub-card's parent branch, else the repository default), a worktree, and a free block of ten ports
+from 42000, recorded on the card by the internal `card.workspace.set` command. Project scripts
+gain `role` (`setup`, `run`, `archive`) and `exclusive`, in `iskra.json` and the stored project
+scripts. Its test runs against a real git repository: two cards get distinct worktrees, branches
+and port blocks, and each card's setup script writes its own `ISKRA_PORT`; running a `run` script
+opens a terminal in each card's worktree with that card's port, and an exclusive script stops
+itself on the other card first; a failed setup leaves no worktree or branch behind; abandoning a
+card runs `archive`, removes the worktree and branch, and clears the card's workspace. Nothing
+creates a workspace yet; card sessions call it in M2.3, and the board's run button arrives in M2.5.
 
 **M2.3 — Card sessions.** Owner write sessions in the card worktree, session states, the handoff
 brief, delegate reassignment, helper runs, and the DM as a window onto the agent's sessions.

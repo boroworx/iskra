@@ -90,6 +90,7 @@ import * as VcsProcess from "../src/vcs/VcsProcess.ts";
 import * as AgentAwarenessRelay from "../src/relay/AgentAwarenessRelay.ts";
 import * as RunReactor from "../src/orchestration/RunReactor.ts";
 import * as AgentDefinitionSync from "../src/orchestration/AgentDefinitionSync.ts";
+import * as CardWorkspace from "../src/orchestration/CardWorkspace.ts";
 import * as PullRequestService from "../src/pullRequest/PullRequestService.ts";
 
 const decodeCodexSettings = Schema.decodeEffect(CodexSettings);
@@ -432,6 +433,15 @@ export const makeOrchestrationIntegrationHarness = (
           reconcile: () => Effect.void,
           save: () => Effect.die("agent files are not used by the engine harness"),
           importDefinitions: () => Effect.die("agent files are not used by the engine harness"),
+        }),
+      ),
+      Layer.provideMerge(
+        Layer.succeed(CardWorkspace.CardWorkspace, {
+          start: () => Effect.void,
+          ensure: () => Effect.die("card workspaces are not used by the engine harness"),
+          teardown: () => Effect.die("card workspaces are not used by the engine harness"),
+          runScript: () => Effect.die("card workspaces are not used by the engine harness"),
+          drain: Effect.void,
         }),
       ),
     );

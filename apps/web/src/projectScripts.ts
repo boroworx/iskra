@@ -14,6 +14,9 @@ export interface ProjectScriptInput {
   readonly runOnWorktreeCreate: ProjectScript["runOnWorktreeCreate"];
   readonly previewUrl: Exclude<ProjectScript["previewUrl"], undefined> | null;
   readonly autoOpenPreview: boolean;
+  /** Set from iskra.json; the editor has no control for these and keeps them as they were. */
+  readonly role?: ProjectScript["role"];
+  readonly exclusive?: ProjectScript["exclusive"];
 }
 
 export function buildProjectScript(id: string, input: ProjectScriptInput): ProjectScript {
@@ -29,6 +32,8 @@ export function buildProjectScript(id: string, input: ProjectScriptInput): Proje
           previewUrl: input.previewUrl,
           autoOpenPreview: input.autoOpenPreview,
         }),
+    ...(input.role === undefined ? {} : { role: input.role }),
+    ...(input.exclusive === undefined ? {} : { exclusive: input.exclusive }),
   };
 }
 

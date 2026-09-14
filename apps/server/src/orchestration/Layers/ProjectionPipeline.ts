@@ -683,6 +683,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               ownerHumanId: event.payload.ownerHumanId,
               delegateAgentId: null,
               baseBranch: event.payload.baseBranch,
+              branch: null,
+              worktreePath: null,
+              portBase: null,
               relations: [],
               createdBy: event.payload.createdBy,
               createdAt: event.payload.createdAt,
@@ -740,6 +743,30 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
                 updatedAt,
               }));
             }
+            return;
+          }
+
+          case "card.workspace-set": {
+            const payload = event.payload;
+            yield* patchCard(payload.cardId, (row) => ({
+              ...row,
+              branch: payload.branch,
+              worktreePath: payload.worktreePath,
+              portBase: payload.portBase,
+              updatedAt: payload.updatedAt,
+            }));
+            return;
+          }
+
+          case "card.workspace-cleared": {
+            const payload = event.payload;
+            yield* patchCard(payload.cardId, (row) => ({
+              ...row,
+              branch: null,
+              worktreePath: null,
+              portBase: null,
+              updatedAt: payload.updatedAt,
+            }));
             return;
           }
 

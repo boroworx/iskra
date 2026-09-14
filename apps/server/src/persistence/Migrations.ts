@@ -69,6 +69,7 @@ import Migration0054 from "./Migrations/054_ProjectionRuns.ts";
 import Migration0055 from "./Migrations/055_ProjectionRunsEndedAt.ts";
 import Migration0056 from "./Migrations/056_ProjectionChannelDeliveries.ts";
 import Migration0057 from "./Migrations/057_ProjectionCards.ts";
+import Migration0058 from "./Migrations/058_ProjectionCardWorkspaces.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -138,6 +139,7 @@ const migrationEntries = [
   [55, "ProjectionRunsEndedAt", Migration0055],
   [56, "ProjectionChannelDeliveries", Migration0056],
   [57, "ProjectionCards", Migration0057],
+  [58, "ProjectionCardWorkspaces", Migration0058],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

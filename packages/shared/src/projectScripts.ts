@@ -70,6 +70,16 @@ export function projectScriptRuntimeEnv(
   return env;
 }
 
+/** The script that prepares a new worktree: role `setup`, or the legacy `runOnWorktreeCreate` flag. */
 export function setupProjectScript(scripts: readonly ProjectScript[]): ProjectScript | null {
-  return scripts.find((script) => script.runOnWorktreeCreate) ?? null;
+  return (
+    scripts.find((script) => script.role === "setup") ??
+    scripts.find((script) => script.role === undefined && script.runOnWorktreeCreate) ??
+    null
+  );
+}
+
+/** The script that cleans up a card's worktree before it is removed. */
+export function archiveProjectScript(scripts: readonly ProjectScript[]): ProjectScript | null {
+  return scripts.find((script) => script.role === "archive") ?? null;
 }

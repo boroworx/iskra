@@ -43,6 +43,8 @@ import {
   CardRelationRemovedPayload,
   CardStatusChangedPayload,
   CardUpdatedPayload,
+  CardWorkspaceClearedPayload,
+  CardWorkspaceSetPayload,
   ChannelArchivedPayload,
   ChannelCreatedPayload,
   ChannelRunStartedPayload,
@@ -1228,6 +1230,9 @@ export function projectEvent(
             ownerHumanId: payload.ownerHumanId,
             delegateAgentId: null,
             baseBranch: payload.baseBranch,
+            branch: null,
+            worktreePath: null,
+            portBase: null,
             relations: [],
             createdBy: payload.createdBy,
             createdAt: payload.createdAt,
@@ -1294,6 +1299,34 @@ export function projectEvent(
         Effect.map((payload) => ({
           ...nextBase,
           cards: relateCards(nextBase.cards ?? [], payload, withoutRelation),
+        })),
+      );
+
+    case "card.workspace-set":
+      return decodeForEvent(CardWorkspaceSetPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          cards: updateCard(nextBase.cards ?? [], payload.cardId, (card) => ({
+            ...card,
+            branch: payload.branch,
+            worktreePath: payload.worktreePath,
+            portBase: payload.portBase,
+            updatedAt: payload.updatedAt,
+          })),
+        })),
+      );
+
+    case "card.workspace-cleared":
+      return decodeForEvent(CardWorkspaceClearedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          cards: updateCard(nextBase.cards ?? [], payload.cardId, (card) => ({
+            ...card,
+            branch: null,
+            worktreePath: null,
+            portBase: null,
+            updatedAt: payload.updatedAt,
+          })),
         })),
       );
 

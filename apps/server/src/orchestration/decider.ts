@@ -2450,6 +2450,57 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "card.workspace.set": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      if (isFinishedCardStatus(card.status)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A card that has landed or been abandoned cannot get a workspace.",
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "card",
+          aggregateId: command.cardId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "card.workspace-set",
+        payload: {
+          cardId: command.cardId,
+          branch: command.branch,
+          worktreePath: command.worktreePath,
+          portBase: command.portBase,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "card.workspace.clear": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      if (card.worktreePath === null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "This card has no workspace to clear.",
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "card",
+          aggregateId: command.cardId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "card.workspace-cleared",
+        payload: {
+          cardId: command.cardId,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
     case "card.decision.record": {
       yield* requireCard({ readModel, command, cardId: command.cardId });
       return {
