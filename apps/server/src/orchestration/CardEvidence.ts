@@ -13,6 +13,7 @@ import {
 } from "@iskra/contracts";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
+import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -234,7 +235,11 @@ export const inspectChanges = Effect.fn("CardEvidence.inspectChanges")(function*
   return { files, manifests, headSha };
 });
 
-const gitIn = (worktreePath: string, args: ReadonlyArray<string>, timeout = "2 minutes") =>
+const gitIn = (
+  worktreePath: string,
+  args: ReadonlyArray<string>,
+  timeout: Duration.Input = "2 minutes",
+) =>
   Effect.flatMap(ProcessRunner, (runner) =>
     runner.run({ command: "git", args: ["-C", worktreePath, ...args], timeout }),
   );
