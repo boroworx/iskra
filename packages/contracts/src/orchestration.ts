@@ -1353,13 +1353,15 @@ export type AgentPresence = typeof AgentPresence.Type;
 
 /** What a client needs to list an agent; its role prompt and model settings stay on the server. */
 export const OrchestrationAgentShell = Schema.Struct({
-  id: AgentId,
-  projectId: ProjectId,
-  name: AgentName,
-  avatar: Schema.NullOr(TrimmedNonEmptyString),
-  roleTags: Schema.Array(TrimmedNonEmptyString),
-  // The model the agent's DM starts on.
-  modelSelection: ModelSelection,
+  // `modelSelection` is the model the agent's DM starts on.
+  ...Struct.pick(OrchestrationAgent.fields, [
+    "id",
+    "projectId",
+    "name",
+    "avatar",
+    "roleTags",
+    "modelSelection",
+  ]),
   // Derived from the agent's live run: running while it has one, blocked while that run waits on the user.
   presence: AgentPresence,
   // What the agent's card sessions have cost across every card. Optional for older servers.
@@ -1368,16 +1370,9 @@ export const OrchestrationAgentShell = Schema.Struct({
 export type OrchestrationAgentShell = typeof OrchestrationAgentShell.Type;
 
 /** What a client needs to list a channel; its pinned spec and history stay on the server. */
-export const OrchestrationChannelShell = Schema.Struct({
-  id: ChannelId,
-  projectId: ProjectId,
-  kind: ChannelKind,
-  name: TrimmedNonEmptyString,
-  topic: Schema.String,
-  memberAgentIds: Schema.Array(AgentId),
-  // The agent woken by messages that mention no one; it only proposes triage cards.
-  leadAgentId: Schema.NullOr(AgentId).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
-});
+export const OrchestrationChannelShell = OrchestrationChannel.mapFields(
+  Struct.pick(["id", "projectId", "kind", "name", "topic", "memberAgentIds", "leadAgentId"]),
+);
 export type OrchestrationChannelShell = typeof OrchestrationChannelShell.Type;
 
 /** Where a card's latest owner session stands, for its face on the board and Needs you. */
@@ -1578,6 +1573,293 @@ export const OrchestrationThreadDetailSnapshot = Schema.Struct({
 });
 export type OrchestrationThreadDetailSnapshot = typeof OrchestrationThreadDetailSnapshot.Type;
 
+export const AgentCreatedPayload = Schema.Struct({
+  agentId: AgentId,
+  projectId: ProjectId,
+  name: AgentName,
+  avatar: Schema.NullOr(TrimmedNonEmptyString),
+  roleTags: Schema.Array(TrimmedNonEmptyString),
+  rolePrompt: Schema.String,
+  modelSelection: ModelSelection,
+  capabilities: RunCapabilities,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const AgentUpdatedPayload = Schema.Struct({
+  agentId: AgentId,
+  name: Schema.optional(AgentName),
+  avatar: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  roleTags: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  rolePrompt: Schema.optional(Schema.String),
+  modelSelection: Schema.optional(ModelSelection),
+  capabilities: Schema.optional(RunCapabilities),
+  updatedAt: IsoDateTime,
+});
+
+export const AgentArchivedPayload = Schema.Struct({
+  agentId: AgentId,
+  archivedAt: IsoDateTime,
+});
+
+export const AgentUnarchivedPayload = Schema.Struct({
+  agentId: AgentId,
+  updatedAt: IsoDateTime,
+});
+
+export const CardCreatedPayload = Schema.Struct({
+  cardId: CardId,
+  // Optional so events from before attempts still decode.
+  attemptGroupId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  sourceMessageId: Schema.optional(Schema.NullOr(MessageId)),
+  proposalReasoning: Schema.optional(Schema.NullOr(Schema.String)),
+  priority: Schema.optional(CardPriority),
+  projectId: ProjectId,
+  channelId: Schema.NullOr(ChannelId),
+  parentCardId: Schema.NullOr(CardId),
+  title: TrimmedNonEmptyString,
+  spec: Schema.String,
+  specState: CardSpecState,
+  tags: Schema.Array(TrimmedNonEmptyString),
+  status: CardStatus,
+  ownerHumanId: TrimmedNonEmptyString,
+  baseBranch: Schema.NullOr(TrimmedNonEmptyString),
+  createdBy: CardAuthor,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const CardUpdatedPayload = Schema.Struct({
+  cardId: CardId,
+  title: Schema.optional(TrimmedNonEmptyString),
+  spec: Schema.optional(Schema.String),
+  specState: Schema.optional(CardSpecState),
+  tags: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  priority: Schema.optional(CardPriority),
+  updatedAt: IsoDateTime,
+});
+
+export const CardStatusChangedPayload = Schema.Struct({
+  cardId: CardId,
+  from: CardStatus,
+  to: CardStatus,
+  move: CardMove,
+  // Set when something returned the card to work: failed checks, a review comment, a conflict.
+  reason: Schema.optional(TrimmedNonEmptyString),
+  updatedAt: IsoDateTime,
+});
+
+export const CardDelegateChangedPayload = Schema.Struct({
+  cardId: CardId,
+  delegateAgentId: Schema.NullOr(AgentId),
+  updatedAt: IsoDateTime,
+});
+
+const CardRelationChangeFields = { cardId: CardId, kind: CardRelationKind, otherCardId: CardId };
+
+/** Recorded once on the card that named it; projections also apply the inverse to the other card. */
+export const CardRelationAddedPayload = Schema.Struct({
+  ...CardRelationChangeFields,
+  updatedAt: IsoDateTime,
+});
+
+export const CardRelationRemovedPayload = Schema.Struct({
+  ...CardRelationChangeFields,
+  updatedAt: IsoDateTime,
+});
+
+export const CardDecisionRecordedPayload = Schema.Struct({
+  cardId: CardId,
+  decisionId: TrimmedNonEmptyString,
+  author: CardAuthor,
+  text: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
+export const CardWorkspaceSetPayload = Schema.Struct({
+  cardId: CardId,
+  branch: TrimmedNonEmptyString,
+  worktreePath: TrimmedNonEmptyString,
+  portBase: PositiveInt,
+  updatedAt: IsoDateTime,
+});
+
+export const CardWorkspaceClearedPayload = Schema.Struct({
+  cardId: CardId,
+  updatedAt: IsoDateTime,
+});
+
+export const CardSessionRequestedPayload = Schema.Struct({
+  cardId: CardId,
+  agentId: AgentId,
+  requestedAt: IsoDateTime,
+});
+
+export const CardSessionStartedPayload = CardSession;
+
+export const CardHelperRequestedPayload = Schema.Struct({
+  cardId: CardId,
+  agentId: AgentId,
+  messageId: MessageId,
+  question: TrimmedNonEmptyString,
+  requestedAt: IsoDateTime,
+});
+
+export const CardMessageAuthorKind = Schema.Literals(["human", "agent", "system", "linear"]);
+export type CardMessageAuthorKind = typeof CardMessageAuthorKind.Type;
+
+/** A message in a card's activity. `forOwner` messages wait for the owner session's next turn. */
+export const CardMessagePostedPayload = Schema.Struct({
+  cardId: CardId,
+  messageId: MessageId,
+  authorKind: CardMessageAuthorKind,
+  authorId: TrimmedNonEmptyString,
+  body: Schema.String,
+  runThreadId: Schema.NullOr(ThreadId),
+  forOwner: Schema.Boolean,
+  createdAt: IsoDateTime,
+});
+
+export const CardDeliveryUpdatedPayload = Schema.Struct({
+  cardId: CardId,
+  messageIds: Schema.Array(MessageId),
+  status: ChannelDeliveryStatus,
+  threadId: Schema.NullOr(ThreadId),
+  updatedAt: IsoDateTime,
+});
+
+export const CardSpecSubmittedPayload = Schema.Struct({
+  cardId: CardId,
+  agentId: AgentId,
+  submittedAt: IsoDateTime,
+});
+
+export const CardSnoozedPayload = Schema.Struct({
+  cardId: CardId,
+  snoozedUntil: Schema.NullOr(IsoDateTime),
+  snoozedAt: IsoDateTime,
+});
+
+export const CardUnsnoozedPayload = Schema.Struct({
+  cardId: CardId,
+  updatedAt: IsoDateTime,
+});
+
+export const CardDiffMeasuredPayload = Schema.Struct({
+  cardId: CardId,
+  diffStat: CardDiffStat,
+  measuredAt: IsoDateTime,
+});
+
+export const CardChecksUpdatedPayload = Schema.Struct({
+  cardId: CardId,
+  checks: CardChecks,
+});
+
+export const CardSpendRecordedPayload = Schema.Struct({
+  cardId: CardId,
+  threadId: ThreadId,
+  agentId: AgentId,
+  turnId: TurnId,
+  costUsd: Schema.Number,
+  costSource: UsageCostSource,
+  recordedAt: IsoDateTime,
+});
+
+export const CardBudgetSetPayload = Schema.Struct({
+  cardId: CardId,
+  capUsd: Schema.Number,
+  updatedAt: IsoDateTime,
+});
+
+export const CardLinearSyncedPayload = Schema.Struct({
+  cardId: CardId,
+  issue: CardLinearIssue,
+  syncedAt: IsoDateTime,
+});
+
+export const CardUnpricedAcceptedPayload = Schema.Struct({
+  cardId: CardId,
+  accepts: Schema.Boolean,
+  updatedAt: IsoDateTime,
+});
+
+/** A plan gate decision and who made it; each also joins the card's decision log. */
+export const CardSpecStateChangedPayload = Schema.Struct({
+  cardId: CardId,
+  from: CardSpecState,
+  to: CardSpecState,
+  by: CardAuthor,
+  updatedAt: IsoDateTime,
+});
+
+export const ChannelCreatedPayload = Schema.Struct({
+  channelId: ChannelId,
+  projectId: ProjectId,
+  kind: ChannelKind,
+  name: TrimmedNonEmptyString,
+  topic: Schema.String,
+  pinnedSpec: Schema.String,
+  wakeDepth: NonNegativeInt,
+  memberAgentIds: Schema.Array(AgentId),
+  leadAgentId: Schema.optional(Schema.NullOr(AgentId)),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const ChannelUpdatedPayload = Schema.Struct({
+  channelId: ChannelId,
+  name: Schema.optional(TrimmedNonEmptyString),
+  topic: Schema.optional(Schema.String),
+  pinnedSpec: Schema.optional(Schema.String),
+  wakeDepth: Schema.optional(NonNegativeInt),
+  memberAgentIds: Schema.optional(Schema.Array(AgentId)),
+  leadAgentId: Schema.optional(Schema.NullOr(AgentId)),
+  updatedAt: IsoDateTime,
+});
+
+export const ChannelArchivedPayload = Schema.Struct({
+  channelId: ChannelId,
+  archivedAt: IsoDateTime,
+});
+
+export const ChannelUnarchivedPayload = Schema.Struct({
+  channelId: ChannelId,
+  updatedAt: IsoDateTime,
+});
+
+export const ChannelMessagePostedPayload = Schema.Struct({
+  channelId: ChannelId,
+  messageId: MessageId,
+  authorKind: ChannelMessageAuthorKind,
+  authorId: TrimmedNonEmptyString,
+  body: Schema.String,
+  createdAt: IsoDateTime,
+  runThreadId: Schema.optional(ThreadId),
+  // The project agents a human message named, resolved when it was posted.
+  mentions: Schema.optional(Schema.Array(AgentId)),
+});
+
+export const ChannelAgentWakeRequestedPayload = Schema.Struct({
+  channelId: ChannelId,
+  agentId: AgentId,
+  triggerMessageId: MessageId,
+  requestedAt: IsoDateTime,
+  // Set when the agent is already live in this channel: the message joins that run.
+  liveRunThreadId: Schema.optional(ThreadId),
+});
+
+export const ChannelRunStartedPayload = ChannelRun;
+
+export const ChannelDeliveryUpdatedPayload = Schema.Struct({
+  channelId: ChannelId,
+  agentId: AgentId,
+  messageIds: Schema.Array(MessageId),
+  status: ChannelDeliveryStatus,
+  runThreadId: Schema.NullOr(ThreadId),
+  updatedAt: IsoDateTime,
+});
+
 export const ProjectCreateCommand = Schema.Struct({
   type: Schema.Literal("project.create"),
   commandId: CommandId,
@@ -1630,13 +1912,7 @@ const AgentCreateCommand = Schema.Struct({
 const AgentUpdateCommand = Schema.Struct({
   type: Schema.Literal("agent.update"),
   commandId: CommandId,
-  agentId: AgentId,
-  name: Schema.optional(AgentName),
-  avatar: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
-  roleTags: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
-  rolePrompt: Schema.optional(Schema.String),
-  modelSelection: Schema.optional(ModelSelection),
-  capabilities: Schema.optional(RunCapabilities),
+  ...Struct.omit(AgentUpdatedPayload.fields, ["updatedAt"]),
 });
 
 const AgentArchiveCommand = Schema.Struct({
@@ -1668,11 +1944,7 @@ const CardCreateCommand = Schema.Struct({
 const CardUpdateCommand = Schema.Struct({
   type: Schema.Literal("card.update"),
   commandId: CommandId,
-  cardId: CardId,
-  title: Schema.optional(TrimmedNonEmptyString),
-  spec: Schema.optional(Schema.String),
-  tags: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
-  priority: Schema.optional(CardPriority),
+  ...Struct.omit(CardUpdatedPayload.fields, ["specState", "updatedAt"]),
 });
 
 /** A status command names only the card: the decider derives where it goes. */
@@ -1701,17 +1973,13 @@ const CardAssignCommand = Schema.Struct({
 const CardRelationAddCommand = Schema.Struct({
   type: Schema.Literal("card.relation.add"),
   commandId: CommandId,
-  cardId: CardId,
-  kind: CardRelationKind,
-  otherCardId: CardId,
+  ...CardRelationChangeFields,
 });
 
 const CardRelationRemoveCommand = Schema.Struct({
   type: Schema.Literal("card.relation.remove"),
   commandId: CommandId,
-  cardId: CardId,
-  kind: CardRelationKind,
-  otherCardId: CardId,
+  ...CardRelationChangeFields,
 });
 
 const CardDecisionRecordCommand = Schema.Struct({
@@ -1738,15 +2006,11 @@ const CardWorkReturnCommand = Schema.Struct({
 const CardWorkspaceSetCommand = Schema.Struct({
   type: Schema.Literal("card.workspace.set"),
   commandId: CommandId,
-  cardId: CardId,
-  branch: TrimmedNonEmptyString,
-  worktreePath: TrimmedNonEmptyString,
-  portBase: PositiveInt,
+  ...Struct.omit(CardWorkspaceSetPayload.fields, ["updatedAt"]),
 });
 
 const CardWorkspaceClearCommand = cardStatusCommand("card.workspace.clear");
 
-/** Starts a fresh owner session for the card's agent, as after a lost or stopped one. */
 /** Plan gate decisions. Each names only the card: the decider derives where the spec goes. */
 const CardSpecApproveCommand = cardStatusCommand("card.spec.approve");
 const CardSpecSkipCommand = cardStatusCommand("card.spec.skip");
@@ -1774,9 +2038,7 @@ const CardUnsnoozeCommand = cardStatusCommand("card.unsnooze");
 const CardDiffRecordCommand = Schema.Struct({
   type: Schema.Literal("card.diff.record"),
   commandId: CommandId,
-  cardId: CardId,
-  diffStat: CardDiffStat,
-  measuredAt: IsoDateTime,
+  ...CardDiffMeasuredPayload.fields,
 });
 
 // Server-only: the review reactor records check runs, and flags overlaps when a card lands.
@@ -1812,8 +2074,7 @@ const CardAttemptPromoteCommand = cardStatusCommand("card.attempt.promote");
 const CardBudgetSetCommand = Schema.Struct({
   type: Schema.Literal("card.budget.set"),
   commandId: CommandId,
-  cardId: CardId,
-  capUsd: Schema.Number,
+  ...Struct.omit(CardBudgetSetPayload.fields, ["updatedAt"]),
 });
 
 /** A person accepting, or taking back, running a card's unpriced model without a cap. */
@@ -1836,9 +2097,7 @@ const CardLinearIntakeCommand = Schema.Struct({
 const CardLinearSyncCommand = Schema.Struct({
   type: Schema.Literal("card.linear.sync"),
   commandId: CommandId,
-  cardId: CardId,
-  issue: CardLinearIssue,
-  syncedAt: IsoDateTime,
+  ...CardLinearSyncedPayload.fields,
 });
 
 // Server-only: what agents do through board tools. Tools never approve, assign or land.
@@ -1878,13 +2137,7 @@ const CardDecisionAgentRecordCommand = Schema.Struct({
 const CardSpendRecordCommand = Schema.Struct({
   type: Schema.Literal("card.spend.record"),
   commandId: CommandId,
-  cardId: CardId,
-  threadId: ThreadId,
-  agentId: AgentId,
-  turnId: TurnId,
-  costUsd: Schema.Number,
-  costSource: UsageCostSource,
-  recordedAt: IsoDateTime,
+  ...CardSpendRecordedPayload.fields,
 });
 
 /** A person's review comment: it goes to the card's agent, and a card in review goes back to work. */
@@ -1897,6 +2150,7 @@ const CardReviewCommentCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+/** Starts a fresh owner session for the card's agent, as after a lost or stopped one. */
 const CardSessionStartCommand = Schema.Struct({
   type: Schema.Literal("card.session.start"),
   commandId: CommandId,
@@ -1948,24 +2202,14 @@ const CardSessionRecordCommand = Schema.Struct({
 const CardMessageRecordCommand = Schema.Struct({
   type: Schema.Literal("card.message.record"),
   commandId: CommandId,
-  cardId: CardId,
-  messageId: MessageId,
+  ...CardMessagePostedPayload.fields,
   authorKind: Schema.Literals(["agent", "system", "linear"]),
-  authorId: TrimmedNonEmptyString,
-  body: Schema.String,
-  runThreadId: Schema.NullOr(ThreadId),
-  forOwner: Schema.Boolean,
-  createdAt: IsoDateTime,
 });
 
 const CardDeliveryUpdateCommand = Schema.Struct({
   type: Schema.Literal("card.delivery.update"),
   commandId: CommandId,
-  cardId: CardId,
-  messageIds: Schema.Array(MessageId),
-  status: ChannelDeliveryStatus,
-  threadId: Schema.NullOr(ThreadId),
-  updatedAt: IsoDateTime,
+  ...CardDeliveryUpdatedPayload.fields,
 });
 
 const ChannelCreateCommand = Schema.Struct({
@@ -1986,13 +2230,7 @@ const ChannelCreateCommand = Schema.Struct({
 const ChannelUpdateCommand = Schema.Struct({
   type: Schema.Literal("channel.update"),
   commandId: CommandId,
-  channelId: ChannelId,
-  name: Schema.optional(TrimmedNonEmptyString),
-  topic: Schema.optional(Schema.String),
-  pinnedSpec: Schema.optional(Schema.String),
-  wakeDepth: Schema.optional(NonNegativeInt),
-  memberAgentIds: Schema.optional(Schema.Array(AgentId)),
-  leadAgentId: Schema.optional(Schema.NullOr(AgentId)),
+  ...Struct.omit(ChannelUpdatedPayload.fields, ["updatedAt"]),
 });
 
 const ChannelArchiveCommand = Schema.Struct({
@@ -2045,12 +2283,7 @@ const ChannelMessageAgentPostCommand = Schema.Struct({
 const ChannelDeliveryUpdateCommand = Schema.Struct({
   type: Schema.Literal("channel.delivery.update"),
   commandId: CommandId,
-  channelId: ChannelId,
-  agentId: AgentId,
-  messageIds: Schema.Array(MessageId),
-  status: ChannelDeliveryStatus,
-  runThreadId: Schema.NullOr(ThreadId),
-  updatedAt: IsoDateTime,
+  ...ChannelDeliveryUpdatedPayload.fields,
 });
 
 const ThreadCreateCommand = Schema.Struct({
@@ -2352,7 +2585,8 @@ const ThreadSessionStopCommand = Schema.Struct({
   onlyIfSettled: Schema.optional(Schema.Boolean),
 });
 
-const DispatchableClientOrchestrationCommand = Schema.Union([
+/** Agent, card and channel commands a client may send, shared by both client command unions. */
+const IskraClientCommands = [
   AgentCreateCommand,
   AgentUpdateCommand,
   AgentArchiveCommand,
@@ -2391,6 +2625,10 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ChannelArchiveCommand,
   ChannelUnarchiveCommand,
   ChannelMessagePostCommand,
+] as const;
+
+const DispatchableClientOrchestrationCommand = Schema.Union([
+  ...IskraClientCommands,
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
@@ -2424,44 +2662,7 @@ export type DispatchableClientOrchestrationCommand =
   typeof DispatchableClientOrchestrationCommand.Type;
 
 export const ClientOrchestrationCommand = Schema.Union([
-  AgentCreateCommand,
-  AgentUpdateCommand,
-  AgentArchiveCommand,
-  AgentUnarchiveCommand,
-  AgentSessionMessageCommand,
-  CardCreateCommand,
-  CardUpdateCommand,
-  CardApproveCommand,
-  CardUnapproveCommand,
-  CardAssignCommand,
-  CardUnassignCommand,
-  CardMergeApproveCommand,
-  CardMergeCancelCommand,
-  CardAbandonCommand,
-  CardReopenCommand,
-  CardRelationAddCommand,
-  CardRelationRemoveCommand,
-  CardDecisionRecordCommand,
-  CardSessionStartCommand,
-  CardHelperRequestCommand,
-  CardMessagePostCommand,
-  CardSpecApproveCommand,
-  CardSpecSkipCommand,
-  CardSpecReopenCommand,
-  CardSpecSubmitCommand,
-  CardSnoozeCommand,
-  CardUnsnoozeCommand,
-  CardReviewCommentCommand,
-  CardBudgetSetCommand,
-  CardUnpricedAcceptCommand,
-  CardUnpricedRefuseCommand,
-  CardAttemptsStartCommand,
-  CardAttemptPromoteCommand,
-  ChannelCreateCommand,
-  ChannelUpdateCommand,
-  ChannelArchiveCommand,
-  ChannelUnarchiveCommand,
-  ChannelMessagePostCommand,
+  ...IskraClientCommands,
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
@@ -2764,295 +2965,6 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
 export const ProjectDeletedPayload = Schema.Struct({
   projectId: ProjectId,
   deletedAt: IsoDateTime,
-});
-
-export const AgentCreatedPayload = Schema.Struct({
-  agentId: AgentId,
-  projectId: ProjectId,
-  name: AgentName,
-  avatar: Schema.NullOr(TrimmedNonEmptyString),
-  roleTags: Schema.Array(TrimmedNonEmptyString),
-  rolePrompt: Schema.String,
-  modelSelection: ModelSelection,
-  capabilities: RunCapabilities,
-  createdAt: IsoDateTime,
-  updatedAt: IsoDateTime,
-});
-
-export const AgentUpdatedPayload = Schema.Struct({
-  agentId: AgentId,
-  name: Schema.optional(AgentName),
-  avatar: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
-  roleTags: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
-  rolePrompt: Schema.optional(Schema.String),
-  modelSelection: Schema.optional(ModelSelection),
-  capabilities: Schema.optional(RunCapabilities),
-  updatedAt: IsoDateTime,
-});
-
-export const AgentArchivedPayload = Schema.Struct({
-  agentId: AgentId,
-  archivedAt: IsoDateTime,
-});
-
-export const AgentUnarchivedPayload = Schema.Struct({
-  agentId: AgentId,
-  updatedAt: IsoDateTime,
-});
-
-export const CardCreatedPayload = Schema.Struct({
-  cardId: CardId,
-  // Optional so events from before attempts still decode.
-  attemptGroupId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
-  sourceMessageId: Schema.optional(Schema.NullOr(MessageId)),
-  proposalReasoning: Schema.optional(Schema.NullOr(Schema.String)),
-  priority: Schema.optional(CardPriority),
-  projectId: ProjectId,
-  channelId: Schema.NullOr(ChannelId),
-  parentCardId: Schema.NullOr(CardId),
-  title: TrimmedNonEmptyString,
-  spec: Schema.String,
-  specState: CardSpecState,
-  tags: Schema.Array(TrimmedNonEmptyString),
-  status: CardStatus,
-  ownerHumanId: TrimmedNonEmptyString,
-  baseBranch: Schema.NullOr(TrimmedNonEmptyString),
-  createdBy: CardAuthor,
-  createdAt: IsoDateTime,
-  updatedAt: IsoDateTime,
-});
-
-export const CardUpdatedPayload = Schema.Struct({
-  cardId: CardId,
-  title: Schema.optional(TrimmedNonEmptyString),
-  spec: Schema.optional(Schema.String),
-  specState: Schema.optional(CardSpecState),
-  tags: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
-  priority: Schema.optional(CardPriority),
-  updatedAt: IsoDateTime,
-});
-
-export const CardStatusChangedPayload = Schema.Struct({
-  cardId: CardId,
-  from: CardStatus,
-  to: CardStatus,
-  move: CardMove,
-  // Set when something returned the card to work: failed checks, a review comment, a conflict.
-  reason: Schema.optional(TrimmedNonEmptyString),
-  updatedAt: IsoDateTime,
-});
-
-export const CardDelegateChangedPayload = Schema.Struct({
-  cardId: CardId,
-  delegateAgentId: Schema.NullOr(AgentId),
-  updatedAt: IsoDateTime,
-});
-
-/** Recorded once on the card that named it; projections also apply the inverse to the other card. */
-export const CardRelationAddedPayload = Schema.Struct({
-  cardId: CardId,
-  kind: CardRelationKind,
-  otherCardId: CardId,
-  updatedAt: IsoDateTime,
-});
-
-export const CardRelationRemovedPayload = Schema.Struct({
-  cardId: CardId,
-  kind: CardRelationKind,
-  otherCardId: CardId,
-  updatedAt: IsoDateTime,
-});
-
-export const CardDecisionRecordedPayload = Schema.Struct({
-  cardId: CardId,
-  decisionId: TrimmedNonEmptyString,
-  author: CardAuthor,
-  text: TrimmedNonEmptyString,
-  createdAt: IsoDateTime,
-});
-
-export const CardWorkspaceSetPayload = Schema.Struct({
-  cardId: CardId,
-  branch: TrimmedNonEmptyString,
-  worktreePath: TrimmedNonEmptyString,
-  portBase: PositiveInt,
-  updatedAt: IsoDateTime,
-});
-
-export const CardWorkspaceClearedPayload = Schema.Struct({
-  cardId: CardId,
-  updatedAt: IsoDateTime,
-});
-
-export const CardSessionRequestedPayload = Schema.Struct({
-  cardId: CardId,
-  agentId: AgentId,
-  requestedAt: IsoDateTime,
-});
-
-export const CardSessionStartedPayload = CardSession;
-
-export const CardHelperRequestedPayload = Schema.Struct({
-  cardId: CardId,
-  agentId: AgentId,
-  messageId: MessageId,
-  question: TrimmedNonEmptyString,
-  requestedAt: IsoDateTime,
-});
-
-export const CardMessageAuthorKind = Schema.Literals(["human", "agent", "system", "linear"]);
-export type CardMessageAuthorKind = typeof CardMessageAuthorKind.Type;
-
-/** A message in a card's activity. `forOwner` messages wait for the owner session's next turn. */
-export const CardMessagePostedPayload = Schema.Struct({
-  cardId: CardId,
-  messageId: MessageId,
-  authorKind: CardMessageAuthorKind,
-  authorId: TrimmedNonEmptyString,
-  body: Schema.String,
-  runThreadId: Schema.NullOr(ThreadId),
-  forOwner: Schema.Boolean,
-  createdAt: IsoDateTime,
-});
-
-export const CardDeliveryUpdatedPayload = Schema.Struct({
-  cardId: CardId,
-  messageIds: Schema.Array(MessageId),
-  status: ChannelDeliveryStatus,
-  threadId: Schema.NullOr(ThreadId),
-  updatedAt: IsoDateTime,
-});
-
-export const CardSpecSubmittedPayload = Schema.Struct({
-  cardId: CardId,
-  agentId: AgentId,
-  submittedAt: IsoDateTime,
-});
-
-export const CardSnoozedPayload = Schema.Struct({
-  cardId: CardId,
-  snoozedUntil: Schema.NullOr(IsoDateTime),
-  snoozedAt: IsoDateTime,
-});
-
-export const CardUnsnoozedPayload = Schema.Struct({
-  cardId: CardId,
-  updatedAt: IsoDateTime,
-});
-
-export const CardDiffMeasuredPayload = Schema.Struct({
-  cardId: CardId,
-  diffStat: CardDiffStat,
-  measuredAt: IsoDateTime,
-});
-
-export const CardChecksUpdatedPayload = Schema.Struct({
-  cardId: CardId,
-  checks: CardChecks,
-});
-
-export const CardSpendRecordedPayload = Schema.Struct({
-  cardId: CardId,
-  threadId: ThreadId,
-  agentId: AgentId,
-  turnId: TurnId,
-  costUsd: Schema.Number,
-  costSource: UsageCostSource,
-  recordedAt: IsoDateTime,
-});
-
-export const CardBudgetSetPayload = Schema.Struct({
-  cardId: CardId,
-  capUsd: Schema.Number,
-  updatedAt: IsoDateTime,
-});
-
-export const CardLinearSyncedPayload = Schema.Struct({
-  cardId: CardId,
-  issue: CardLinearIssue,
-  syncedAt: IsoDateTime,
-});
-
-export const CardUnpricedAcceptedPayload = Schema.Struct({
-  cardId: CardId,
-  accepts: Schema.Boolean,
-  updatedAt: IsoDateTime,
-});
-
-/** A plan gate decision and who made it; each also joins the card's decision log. */
-export const CardSpecStateChangedPayload = Schema.Struct({
-  cardId: CardId,
-  from: CardSpecState,
-  to: CardSpecState,
-  by: CardAuthor,
-  updatedAt: IsoDateTime,
-});
-
-export const ChannelCreatedPayload = Schema.Struct({
-  channelId: ChannelId,
-  projectId: ProjectId,
-  kind: ChannelKind,
-  name: TrimmedNonEmptyString,
-  topic: Schema.String,
-  pinnedSpec: Schema.String,
-  wakeDepth: NonNegativeInt,
-  memberAgentIds: Schema.Array(AgentId),
-  leadAgentId: Schema.optional(Schema.NullOr(AgentId)),
-  createdAt: IsoDateTime,
-  updatedAt: IsoDateTime,
-});
-
-export const ChannelUpdatedPayload = Schema.Struct({
-  channelId: ChannelId,
-  name: Schema.optional(TrimmedNonEmptyString),
-  topic: Schema.optional(Schema.String),
-  pinnedSpec: Schema.optional(Schema.String),
-  wakeDepth: Schema.optional(NonNegativeInt),
-  memberAgentIds: Schema.optional(Schema.Array(AgentId)),
-  leadAgentId: Schema.optional(Schema.NullOr(AgentId)),
-  updatedAt: IsoDateTime,
-});
-
-export const ChannelArchivedPayload = Schema.Struct({
-  channelId: ChannelId,
-  archivedAt: IsoDateTime,
-});
-
-export const ChannelUnarchivedPayload = Schema.Struct({
-  channelId: ChannelId,
-  updatedAt: IsoDateTime,
-});
-
-export const ChannelMessagePostedPayload = Schema.Struct({
-  channelId: ChannelId,
-  messageId: MessageId,
-  authorKind: ChannelMessageAuthorKind,
-  authorId: TrimmedNonEmptyString,
-  body: Schema.String,
-  createdAt: IsoDateTime,
-  runThreadId: Schema.optional(ThreadId),
-  // The project agents a human message named, resolved when it was posted.
-  mentions: Schema.optional(Schema.Array(AgentId)),
-});
-
-export const ChannelAgentWakeRequestedPayload = Schema.Struct({
-  channelId: ChannelId,
-  agentId: AgentId,
-  triggerMessageId: MessageId,
-  requestedAt: IsoDateTime,
-  // Set when the agent is already live in this channel: the message joins that run.
-  liveRunThreadId: Schema.optional(ThreadId),
-});
-
-export const ChannelRunStartedPayload = ChannelRun;
-
-export const ChannelDeliveryUpdatedPayload = Schema.Struct({
-  channelId: ChannelId,
-  agentId: AgentId,
-  messageIds: Schema.Array(MessageId),
-  status: ChannelDeliveryStatus,
-  runThreadId: Schema.NullOr(ThreadId),
-  updatedAt: IsoDateTime,
 });
 
 export const ThreadCreatedPayload = Schema.Struct({
