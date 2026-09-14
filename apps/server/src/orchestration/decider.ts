@@ -3716,6 +3716,28 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       });
     }
 
+    // A note from Iskra itself: like the note on a refused wake, it wakes no one.
+    case "channel.message.system.post": {
+      const channel = yield* requireChannel({ readModel, command, channelId: command.channelId });
+      if (channel.archivedAt !== null) {
+        return yield* refuse(
+          command,
+          `Channel '${command.channelId}' is archived and cannot receive messages.`,
+        );
+      }
+      return yield* planned(command, "channel", command.channelId, command.createdAt, {
+        type: "channel.message-posted",
+        payload: {
+          channelId: command.channelId,
+          messageId: command.messageId,
+          authorKind: "system",
+          authorId: CHANNEL_SYSTEM_AUTHOR_ID,
+          body: command.body,
+          createdAt: command.createdAt,
+        },
+      });
+    }
+
     default: {
       command satisfies never;
       const fallback = command as never as { type: string };

@@ -5,6 +5,7 @@ import {
   ThreadId,
   type AgentId,
   type CardId,
+  type CardMove,
   type CardSessionRole,
   type OrchestrationEvent,
 } from "@iskra/contracts";
@@ -16,6 +17,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
@@ -23,7 +25,7 @@ import { ProjectionCardRepositoryLive } from "../persistence/Layers/ProjectionCa
 import { ProjectionCardRepository } from "../persistence/Services/ProjectionCards.ts";
 import { forkParked } from "../serverActivation.ts";
 import { buildCardBrief, diffStatOf, renderCardBrief, renderCardMessages } from "./cardBrief.ts";
-import { isFinishedCardStatus } from "./cardRules.ts";
+import { isFinishedCardStatus, questionText } from "./cardRules.ts";
 import * as CardWorkspace from "./CardWorkspace.ts";
 import { liveOwnerRun } from "./decider.ts";
 import { runSessionChange } from "./RunReactor.ts";
@@ -41,6 +43,9 @@ import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts"
  * running turn, and are `delivered` only once that turn runs. A message whose
  * turn never ran is `undelivered`; one still pending when the session ends
  * waits for the card's next owner session (invariant 10).
+ *
+ * A card from a channel reports back there: its owner starting, asking something, sending it to
+ * review, and its landing or being dropped. The notes wake no one.
  */
 export class CardSessionReactor extends Context.Service<
   CardSessionReactor,
@@ -62,7 +67,21 @@ type CardSessionRequest =
   | { readonly kind: "finished"; readonly cardId: CardId; readonly key: string }
   | { readonly kind: "settled"; readonly threadId: ThreadId }
   | { readonly kind: "running"; readonly threadId: ThreadId }
-  | { readonly kind: "ended"; readonly threadId: ThreadId };
+  | { readonly kind: "ended"; readonly threadId: ThreadId }
+  | { readonly kind: "progress"; readonly event: ProgressEvent };
+
+type ProgressEvent = Extract<
+  OrchestrationEvent,
+  { type: "card.status-changed" | "thread.activity-appended" }
+>;
+
+/** What a status move says in the card's channel, given the card's title and its owner's @name. */
+const PROGRESS_NOTES: Partial<Record<CardMove, (title: string, owner: string) => string>> = {
+  workStarted: (title, owner) => `${owner} started work on ${title}`,
+  requestReview: (title) => `${title} is ready for review`,
+  landed: (title) => `${title} landed`,
+  abandon: (title) => `${title} was dropped`,
+};
 
 const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngine.OrchestrationEngineService;
@@ -404,6 +423,67 @@ const make = Effect.gen(function* () {
     }
   });
 
+  /**
+   * Posts a card's progress in the channel it came from. The message id derives from the event, so
+   * a replayed event posts once; a channel archived since is skipped.
+   */
+  const postProgress = Effect.fn("CardSessionReactor.postProgress")(function* (
+    event: ProgressEvent,
+  ) {
+    let cardId: CardId;
+    let marker = "card-progress";
+    let note: (title: string, owner: string) => string;
+    if (event.type === "card.status-changed") {
+      const moveNote = PROGRESS_NOTES[event.payload.move];
+      if (moveNote === undefined) {
+        return;
+      }
+      cardId = event.payload.cardId;
+      note = moveNote;
+    } else {
+      const { activity, threadId } = event.payload;
+      const question = Predicate.isObject(activity.payload)
+        ? questionText(activity.payload.questions)
+        : "";
+      const run = yield* snapshotQuery.getRunByThreadId(threadId);
+      if (
+        question.length === 0 ||
+        Option.isNone(run) ||
+        run.value.role !== "owner" ||
+        run.value.cardId === null
+      ) {
+        return;
+      }
+      cardId = run.value.cardId;
+      marker = "card-question";
+      note = (_title, owner) => `${owner} asks: ${question}`;
+    }
+    const model = yield* readModel();
+    const card = model.cards?.find((candidate) => candidate.id === cardId);
+    // Attempts run beside their card; only the card itself reports to the channel.
+    if (card === undefined || card.channelId === null || card.attemptGroupId !== null) {
+      return;
+    }
+    const owner = model.agents?.find((agent) => agent.id === card.delegateAgentId)?.name;
+    yield* engine
+      .dispatch({
+        type: "channel.message.system.post",
+        commandId: CommandId.make(`card-progress:${event.eventId}`),
+        channelId: card.channelId,
+        messageId: MessageId.make(`${event.eventId}:${marker}:${card.id}`),
+        body: note(card.title, owner === undefined ? "Its agent" : `@${owner}`),
+        createdAt: yield* nowIso,
+      })
+      .pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("card progress was not posted", {
+            cardId: card.id,
+            error: error.message,
+          }),
+        ),
+      );
+  });
+
   const handle = (request: CardSessionRequest) => {
     switch (request.kind) {
       case "assigned":
@@ -434,6 +514,8 @@ const make = Effect.gen(function* () {
         return markDelivered(request.threadId);
       case "ended":
         return endSession(request.threadId);
+      case "progress":
+        return postProgress(request.event);
     }
   };
 
@@ -478,13 +560,26 @@ const make = Effect.gen(function* () {
           ],
           { discard: true },
         );
-      case "card.status-changed":
+      case "card.status-changed": {
+        const progress = worker.enqueue({ kind: "progress", event });
         if (isFinishedCardStatus(event.payload.to)) {
-          return worker.enqueue({ kind: "finished", cardId: event.payload.cardId, key: event.eventId });
+          return Effect.andThen(
+            progress,
+            worker.enqueue({ kind: "finished", cardId: event.payload.cardId, key: event.eventId }),
+          );
         }
         // Back to work after failed checks, a comment or a conflict: its agent needs a live session.
         return event.payload.move === "returnToWork"
-          ? worker.enqueue({ kind: "assigned", cardId: event.payload.cardId, key: event.eventId })
+          ? Effect.andThen(
+              progress,
+              worker.enqueue({ kind: "assigned", cardId: event.payload.cardId, key: event.eventId }),
+            )
+          : progress;
+      }
+      // Only a question is worth a note; every other activity is skipped before the queue.
+      case "thread.activity-appended":
+        return event.payload.activity.kind === "user-input.requested"
+          ? worker.enqueue({ kind: "progress", event })
           : Effect.void;
       case "thread.session-set": {
         const kind = runSessionChange(event.payload.session);

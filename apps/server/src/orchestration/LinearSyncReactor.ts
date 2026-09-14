@@ -31,7 +31,7 @@ import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as LinearClient from "../linear/LinearClient.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { isFinishedCardStatus } from "./cardRules.ts";
+import { isFinishedCardStatus, questionText } from "./cardRules.ts";
 import { liveOwnerRun } from "./decider.ts";
 import * as OrchestrationEngine from "./Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts";
@@ -467,18 +467,6 @@ export const make = Effect.gen(function* () {
     });
     return opened;
   });
-
-  const questionText = (questions: unknown) =>
-    Array.isArray(questions)
-      ? questions
-          .map((question) =>
-            Predicate.isObject(question) && typeof question.question === "string"
-              ? question.question
-              : "",
-          )
-          .filter((question) => question.length > 0)
-          .join("\n\n")
-      : "";
 
   /**
    * What goes to Linear as it happens: a person's comment on a card, and the delegate's session as

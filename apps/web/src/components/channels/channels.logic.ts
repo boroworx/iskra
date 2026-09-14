@@ -402,3 +402,16 @@ export function cardProposalStatus(
       return "Dropped";
   }
 }
+
+/**
+ * The card a note from Iskra reports on, read from the note's id, and whether the note is its
+ * owner's question. Null for any other message.
+ */
+export function cardNoteOf(
+  message: Pick<OrchestrationChannelMessage, "id" | "authorKind">,
+): { readonly cardId: string; readonly question: boolean } | null {
+  const match =
+    message.authorKind === "system" ? /:card-(progress|question):([^:]+)$/.exec(message.id) : null;
+  const cardId = match?.[2];
+  return match === null || cardId === undefined ? null : { cardId, question: match[1] === "question" };
+}

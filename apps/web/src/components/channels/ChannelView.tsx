@@ -9,6 +9,7 @@ import {
   type OrchestrationChannelMessage,
   type OrchestrationChannelShell,
 } from "@iskra/contracts";
+import { Link } from "@tanstack/react-router";
 import { HashIcon, SettingsIcon } from "lucide-react";
 import { memo, useEffect, useId, useMemo, useRef, useState } from "react";
 
@@ -34,6 +35,7 @@ import { SidebarInset } from "../ui/sidebar";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import {
   agentListEntries,
+  cardNoteOf,
   channelMemberEntries,
   channelMessageRows,
   deliveryNotes,
@@ -257,6 +259,10 @@ export const Timeline = memo(function Timeline(props: TimelineSource) {
         : proposalAnchors(props.messages, proposals.cards, proposals.channelId),
     [props.messages, proposals],
   );
+  const cardById = useMemo(
+    () => new Map<string, OrchestrationCardShell>((proposals?.cards ?? []).map((card) => [card.id, card])),
+    [proposals],
+  );
   // Keep the newest message in view as messages arrive.
   const scrollRef = useStickToNewest(rows.at(-1)?.message.id);
 
@@ -275,6 +281,7 @@ export const Timeline = memo(function Timeline(props: TimelineSource) {
             busyChannels={props.busyChannels}
             proposals={anchors.get(row.message.id)}
             proposalAgents={proposals?.agents ?? NO_AGENTS}
+            cardById={cardById}
           />
         ))}
       </ol>
@@ -291,6 +298,7 @@ function MessageRow(props: {
   readonly busyChannels: ReadonlyMap<string, string> | undefined;
   readonly proposals: ReadonlyArray<OrchestrationCardShell> | undefined;
   readonly proposalAgents: ReadonlyArray<AgentEntry>;
+  readonly cardById: ReadonlyMap<string, OrchestrationCardShell>;
 }) {
   const { message, authorName, showHeader } = props.row;
   const notes =
@@ -349,6 +357,11 @@ function MessageRow(props: {
           ))}
         </p>
       ) : null}
+      <CardNoteLink
+        message={message}
+        cardById={props.cardById}
+        environmentId={props.environmentId}
+      />
       {props.proposals?.map((card) => (
         <CardProposal
           key={card.id}
@@ -358,6 +371,29 @@ function MessageRow(props: {
         />
       ))}
     </li>
+  );
+}
+
+/** Under Iskra's note on a card's progress: where to open the card, or answer its owner's question. */
+function CardNoteLink(props: {
+  readonly message: OrchestrationChannelMessage;
+  readonly cardById: ReadonlyMap<string, OrchestrationCardShell>;
+  readonly environmentId: EnvironmentId;
+}) {
+  const note = cardNoteOf(props.message);
+  const card = note === null ? undefined : props.cardById.get(note.cardId);
+  if (note === null || card === undefined) {
+    return null;
+  }
+  return (
+    <Link
+      to="/board/$environmentId/$projectId"
+      params={{ environmentId: props.environmentId, projectId: card.projectId }}
+      search={{ card: card.id }}
+      className="self-start text-xs text-muted-foreground hover:underline"
+    >
+      {note.question ? "Answer on the card" : "Open card"}
+    </Link>
   );
 }
 

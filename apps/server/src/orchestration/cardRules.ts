@@ -8,6 +8,7 @@ import {
   type OrchestrationCard,
   type OrchestrationEvent,
 } from "@iskra/contracts";
+import * as Predicate from "effect/Predicate";
 
 /**
  * A card's status is derived from what happened to it. Humans decide only
@@ -180,6 +181,19 @@ export function cardBudgetRefusal(
   }
   return null;
 }
+
+/** The questions a `user-input.requested` activity asks, as one text; empty when it asks none. */
+export const questionText = (questions: unknown): string =>
+  Array.isArray(questions)
+    ? questions
+        .map((question) =>
+          Predicate.isObject(question) && typeof question.question === "string"
+            ? question.question
+            : "",
+        )
+        .filter((question) => question.length > 0)
+        .join("\n\n")
+    : "";
 
 /** A card as the read model and its projection row both hold it, less the id they key differently. */
 export type CardFields = Omit<OrchestrationCard, "id">;

@@ -22,6 +22,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   agentListEntries,
   busyChannelName,
+  cardNoteOf,
   cardProposalStatus,
   channelListEntries,
   channelMemberEntries,
@@ -131,6 +132,18 @@ describe("cardProposalStatus", () => {
     expect(cardProposalStatus({ ...owned, status: "inReview" }, agents)).toBe("Ready for review");
     expect(cardProposalStatus({ ...owned, status: "landed" }, agents)).toBe("Landed");
     expect(cardProposalStatus({ ...owned, status: "abandoned" }, agents)).toBe("Dropped");
+  });
+});
+
+describe("cardNoteOf", () => {
+  it("reads the card from a progress note's id, and only from Iskra's notes", () => {
+    const note = message("event-1:card-progress:card-page", "system", "system", "2026-01-01T10:00:00.000Z");
+    const question = message("event-2:card-question:card-page", "system", "system", "2026-01-01T10:00:00.000Z");
+    const typed = message("event-3:card-progress:card-page", "human", "human", "2026-01-01T10:00:00.000Z");
+    expect(cardNoteOf(note)).toEqual({ cardId: "card-page", question: false });
+    expect(cardNoteOf(question)).toEqual({ cardId: "card-page", question: true });
+    expect(cardNoteOf(typed)).toBeNull();
+    expect(cardNoteOf(message("ask:system:nobody", "system", "system", "2026-01-01T10:00:00.000Z"))).toBeNull();
   });
 });
 

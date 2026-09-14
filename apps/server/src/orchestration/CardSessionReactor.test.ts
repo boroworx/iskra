@@ -1,7 +1,9 @@
 import {
   AgentId,
   CardId,
+  ChannelId,
   CommandId,
+  EventId,
   MessageId,
   ORPHANED_PROVIDER_SESSION_ERROR,
   ProjectId,
@@ -15,6 +17,7 @@ import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Stream from "effect/Stream";
 
 import * as CardSessionReactor from "./CardSessionReactor.ts";
 import * as CardWorkspace from "./CardWorkspace.ts";
@@ -334,6 +337,115 @@ it.layer(layer)("CardSessionReactor", (it) => {
           "card.status-changed",
           (event) => event.payload.cardId === proposalId && event.payload.to === "inProgress",
         );
+      }),
+    ),
+  );
+
+  it.effect("reports a channel's card back to it as it starts, asks, goes to review and is dropped, waking no one", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const world = yield* makeWorld("progress");
+        const channelId = ChannelId.make("channel-progress");
+        const cardId = CardId.make("card-progress-page");
+        yield* world.engine.dispatch({
+          type: "channel.create",
+          commandId: CommandId.make("cmd-progress-channel"),
+          channelId,
+          projectId: ProjectId.make("project-progress"),
+          kind: "channel",
+          name: "api-design",
+          memberAgentIds: [world.agent("frontend"), world.agent("reviewer")],
+          leadAgentId: world.agent("reviewer"),
+          createdAt: now,
+        });
+        yield* world.engine.dispatch({
+          type: "card.create",
+          commandId: CommandId.make("cmd-progress-card"),
+          cardId,
+          projectId: ProjectId.make("project-progress"),
+          channelId,
+          title: "Landing page",
+          spec: "A landing page.",
+          tags: [],
+          createdAt: now,
+        });
+        yield* world.engine.dispatch({
+          type: "card.approve",
+          commandId: CommandId.make("cmd-progress-start"),
+          cardId,
+          delegateAgentId: world.agent("frontend"),
+        });
+        const owner = yield* world.nextSession();
+        yield* world.nextEvent(
+          "channel.message-posted",
+          (event) => event.payload.body === "@frontend started work on Landing page",
+        );
+
+        yield* world.engine.dispatch({
+          type: "thread.activity.append",
+          commandId: CommandId.make("cmd-progress-ask"),
+          threadId: owner.payload.threadId,
+          createdAt: now,
+          activity: {
+            id: EventId.make("activity-progress-ask"),
+            tone: "info",
+            kind: "user-input.requested",
+            summary: "User input requested",
+            payload: {
+              requestId: "ask-owner:progress",
+              responseMode: "message",
+              questions: [
+                {
+                  id: "answer",
+                  header: "Question",
+                  question: "Which color scheme?",
+                  options: [],
+                  allowCustomAnswer: true,
+                  multiSelect: false,
+                },
+              ],
+            },
+            turnId: null,
+            createdAt: now,
+          },
+        });
+        yield* world.nextEvent(
+          "channel.message-posted",
+          (event) => event.payload.body === "@frontend asks: Which color scheme?",
+        );
+
+        yield* world.engine.dispatch({
+          type: "card.review.request",
+          commandId: CommandId.make("cmd-progress-review"),
+          cardId,
+        });
+        yield* world.engine.dispatch({
+          type: "card.abandon",
+          commandId: CommandId.make("cmd-progress-drop"),
+          cardId,
+        });
+        yield* world.nextEvent(
+          "channel.message-posted",
+          (event) => event.payload.body === "Landing page was dropped",
+        );
+        yield* world.reactor.drain;
+
+        const events = yield* Stream.runCollect(world.engine.readEvents(0));
+        const notes = events.filter((event) => event.type === "channel.message-posted");
+        expect(notes.map((event) => [event.payload.authorKind, event.payload.body])).toEqual([
+          ["system", "@frontend started work on Landing page"],
+          ["system", "@frontend asks: Which color scheme?"],
+          ["system", "Landing page is ready for review"],
+          ["system", "Landing page was dropped"],
+        ]);
+        expect(notes.map((event) => event.payload.messageId)).toEqual([
+          expect.stringMatching(/:card-progress:card-progress-page$/),
+          expect.stringMatching(/:card-question:card-progress-page$/),
+          expect.stringMatching(/:card-progress:card-progress-page$/),
+          expect.stringMatching(/:card-progress:card-progress-page$/),
+        ]);
+        // The notes wake no one, not even the channel's lead.
+        expect(events.some((event) => event.type === "channel.agent-wake-requested")).toBe(false);
       }),
     ),
   );

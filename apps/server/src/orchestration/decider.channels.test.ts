@@ -184,6 +184,31 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
     }),
   );
 
+  it.effect("posts a system note that wakes no one, not even the channel's lead", () =>
+    Effect.gen(function* () {
+      const readModel = yield* applyCommands([
+        ...setup,
+        createChannel("general", "channel", [backend], backend),
+      ]);
+
+      const posted = yield* decide(readModel, {
+        type: "channel.message.system.post",
+        commandId: nextCommandId(),
+        channelId: ChannelId.make("general"),
+        messageId: MessageId.make("event-1:card-progress:card-page"),
+        body: "@backend started work on Landing page",
+        createdAt: now,
+      });
+
+      expect(posted).toMatchObject([
+        {
+          type: "channel.message-posted",
+          payload: { authorKind: "system", body: "@backend started work on Landing page" },
+        },
+      ]);
+    }),
+  );
+
   it.effect("wakes exactly the member agents a message mentions, and says when it wakes nobody", () =>
     Effect.gen(function* () {
       const base = [

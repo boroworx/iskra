@@ -2314,6 +2314,16 @@ const ChannelMessageAgentPostCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+// Server-only: a note Iskra posts in a channel, such as a card's progress. It wakes no one.
+const ChannelMessageSystemPostCommand = Schema.Struct({
+  type: Schema.Literal("channel.message.system.post"),
+  commandId: CommandId,
+  channelId: ChannelId,
+  messageId: MessageId,
+  body: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
 const ChannelDeliveryUpdateCommand = Schema.Struct({
   type: Schema.Literal("channel.delivery.update"),
   commandId: CommandId,
@@ -2863,6 +2873,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ChannelAgentWakeCommand,
   ChannelRunStartCommand,
   ChannelMessageAgentPostCommand,
+  ChannelMessageSystemPostCommand,
   ChannelDeliveryUpdateCommand,
   ThreadAutoSettleCommand,
   ThreadPullRequestSyncCommand,
