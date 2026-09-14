@@ -16,6 +16,7 @@ import { usePrimaryEnvironmentId } from "~/state/environments";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { ApproveAndStart } from "../channels/CardProposal";
 import { SubscribedCardQuestions } from "./CardContract";
+import { CheckpointControls } from "./CardReviewPanel";
 import { agentListEntries, type AgentEntry } from "../channels/channels.logic";
 import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
@@ -125,6 +126,13 @@ export function NeedsYouView() {
                         <p className="line-clamp-2 text-xs text-muted-foreground">
                           {proposalReasoningOf(item.cardId)}
                         </p>
+                      ) : null}
+                      {item.kind === "checkpoint" &&
+                      environmentId !== null &&
+                      itemCard !== undefined ? (
+                        <div className="mt-1.5">
+                          <CheckpointControls card={itemCard} environmentId={environmentId} />
+                        </div>
                       ) : null}
                       {item.kind === "awaitingInput" &&
                       environmentId !== null &&

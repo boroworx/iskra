@@ -169,12 +169,12 @@ const CARD_SESSION_HINT: Partial<Record<RunSessionState, string>> = {
  */
 const WAIT_REASON_LABEL: Readonly<Record<string, string>> = {
   waitingForCapacity: "Waiting for machine capacity",
+  waitingForSlot: "Waiting for a session slot",
+  waitingForMemory: "Waiting for free memory",
   reviewCapacity: "Waiting for agent pull requests to be reviewed",
-  sessionCap: "Waiting for a session slot",
-  blockedBy: "Waiting on a blocker",
+  blocked: "Waiting on a blocker",
   criteriaNotConfirmed: "Criteria not confirmed",
   sideEffectGuard: "Waiting for the side-effect guard",
-  memoryPressure: "Waiting for free memory",
 };
 
 export function waitReasonLabel(reason: Pick<Reason, "code" | "text">): string {

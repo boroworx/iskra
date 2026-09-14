@@ -10,6 +10,8 @@ import type { AtomCommandResult } from "@iskra/client-runtime/state/runtime";
 import {
   CardRelationKind,
   MessageId,
+  projectOrchestrationOf,
+  type CardEvidenceItem,
   type AgentId,
   type CardActivity,
   type CardId,
@@ -24,11 +26,13 @@ import { useMemo, useState, type ReactNode } from "react";
 
 import { randomUUID } from "~/lib/utils";
 import { cardEnvironment } from "~/state/cards";
+import { useProjects } from "~/state/entities";
 import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { ApproveAndStart } from "../channels/CardProposal";
 import { CardActivityTimeline } from "./CardActivityTimeline";
 import { CardCriteria, CardPreviewPanel, CardQuestions } from "./CardContract";
+import { CardLandingPanel, CardReview, CheckpointControls } from "./CardReviewPanel";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -113,6 +117,17 @@ function CardSheetBody(props: {
     cardEnvironment.activity({ environmentId, input: { cardId: card.id } }),
   );
   const activities = activity.data?.activities ?? NO_ACTIVITIES;
+  const evidence = activity.data?.evidence ?? null;
+  const projects = useProjects();
+  const policy = useMemo(
+    () =>
+      projectOrchestrationOf(
+        projects.find(
+          (project) => project.environmentId === environmentId && project.id === card.projectId,
+        ) ?? {},
+      ),
+    [projects, environmentId, card.projectId],
+  );
 
   const [title, setTitle] = useState(card.title);
   const [spec, setSpec] = useState(card.spec);
@@ -289,6 +304,30 @@ function CardSheetBody(props: {
 
         {open ? (
           <CardQuestionsSection card={card} activities={activities} environmentId={environmentId} />
+        ) : null}
+
+        {open && card.checkpoint !== null ? (
+          <Section label="Checkpoint">
+            <CheckpointControls card={card} environmentId={environmentId} />
+          </Section>
+        ) : null}
+
+        {card.evidence !== null || card.status === "inReview" || card.status === "landing" ? (
+          <Section label="Review">
+            <CardReview card={card} evidence={evidence} environmentId={environmentId} />
+          </Section>
+        ) : null}
+
+        {card.landing !== null || card.status === "inReview" || card.status === "landing" ? (
+          <Section label="Landing">
+            <CardLandingPanel
+              card={card}
+              items={evidence?.items ?? NO_EVIDENCE_ITEMS}
+              activities={activities}
+              policy={policy}
+              environmentId={environmentId}
+            />
+          </Section>
         ) : null}
 
         <Section label="Acceptance criteria">
@@ -599,6 +638,7 @@ function CardSheetBody(props: {
 }
 
 const NO_ACTIVITIES: ReadonlyArray<CardActivity> = [];
+const NO_EVIDENCE_ITEMS: ReadonlyArray<CardEvidenceItem> = [];
 
 /** The agent's open questions, titled only when there are some. */
 function CardQuestionsSection(props: Parameters<typeof CardQuestions>[0]) {

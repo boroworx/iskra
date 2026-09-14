@@ -1,5 +1,6 @@
 import type {
   AssetResource,
+  CardActivity,
   CardCriterion,
   CardEvidenceItem,
   CardFixRounds,
@@ -119,6 +120,33 @@ export const SCOPE_FLAG_LABEL: Record<CardScopeFlag["kind"], string> = {
   protectedPath: "Protected file",
   outsideLikelyAreas: "Outside the estimated areas",
 };
+
+/** The pull request's CI as the evidence reads it: the checks sourced from CI and how many failed. */
+export function ciSummary(items: ReadonlyArray<CardEvidenceItem>): {
+  readonly total: number;
+  readonly failed: ReadonlyArray<string>;
+} {
+  const ci = items.filter((item) => item.source === "ci" && item.kind === "check");
+  return {
+    total: ci.length,
+    failed: ci.filter((item) => evidenceItemView(item).state !== "passed").map((item) => item.name),
+  };
+}
+
+/**
+ * Pull request comments from people who aren't trusted on the repository: recorded on the card but
+ * delivered to no one, so they wait for a person to forward them to the agent.
+ */
+export function untrustedComments(
+  activities: ReadonlyArray<CardActivity>,
+): ReadonlyArray<CardActivity> {
+  return activities.filter(
+    (activity) =>
+      activity.kind === "message" &&
+      activity.author.kind === "github" &&
+      activity.deliverTo === null,
+  );
+}
 
 interface FixRoundView {
   readonly used: number;

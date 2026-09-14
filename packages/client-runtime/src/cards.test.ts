@@ -427,6 +427,9 @@ describe("waitReasonLabel", () => {
     expect(waitReasonLabel({ code: "reviewCapacity", text: "x" })).toBe(
       "Waiting for agent pull requests to be reviewed",
     );
+    expect(waitReasonLabel({ code: "waitingForSlot", text: "x" })).toBe(
+      "Waiting for a session slot",
+    );
     expect(waitReasonLabel({ code: "somethingNew", text: "Waiting on the moon." })).toBe(
       "Waiting on the moon.",
     );

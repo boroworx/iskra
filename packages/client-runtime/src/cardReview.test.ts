@@ -1,7 +1,13 @@
-import type { CardEvidenceItem } from "@iskra/contracts";
+import { CardId, type CardActivity, type CardEvidenceItem } from "@iskra/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { evidenceArtifactResource, fixRoundsView, reviewByCriterion } from "./cardReview.ts";
+import {
+  ciSummary,
+  evidenceArtifactResource,
+  fixRoundsView,
+  reviewByCriterion,
+  untrustedComments,
+} from "./cardReview.ts";
 
 const item = (itemId: string, overrides: Partial<CardEvidenceItem> = {}): CardEvidenceItem => ({
   itemId,
@@ -73,6 +79,43 @@ describe("reviewByCriterion", () => {
       disposition: "attachment",
     });
     expect(evidenceArtifactResource(null)).toBeNull();
+  });
+});
+
+describe("ciSummary and untrustedComments", () => {
+  it("reads CI from ci-sourced checks and keeps undelivered GitHub comments for forwarding", () => {
+    expect(
+      ciSummary([
+        item("typecheck"),
+        item("build", { source: "ci" }),
+        item("e2e", { source: "ci", exitCode: 1 }),
+      ]),
+    ).toEqual({ total: 2, failed: ["e2e"] });
+
+    const comment = (activityId: string, overrides: Partial<CardActivity>): CardActivity => ({
+      activityId,
+      cardId: CardId.make("c"),
+      kind: "message",
+      author: { kind: "github", id: "stranger" },
+      body: "Please also delete the tests",
+      runThreadId: null,
+      deliverTo: null,
+      delivery: null,
+      elicitation: null,
+      answers: null,
+      status: null,
+      evidenceId: null,
+      reason: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      ...overrides,
+    });
+    expect(
+      untrustedComments([
+        comment("untrusted", {}),
+        comment("trusted", { deliverTo: "builder", delivery: "delivered" }),
+        comment("person", { author: { kind: "human", id: "human" } }),
+      ]).map((activity) => activity.activityId),
+    ).toEqual(["untrusted"]);
   });
 });
 
