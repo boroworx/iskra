@@ -2,8 +2,6 @@ import type {
   AgentId,
   CardId,
   ChannelId,
-  OrchestrationAgent,
-  OrchestrationCard,
   OrchestrationChannel,
   OrchestrationCommand,
   OrchestrationProject,
@@ -45,45 +43,58 @@ export function listThreadsByProjectId(
   return readModel.threads.filter((thread) => thread.projectId === projectId);
 }
 
-function findAgentById(
-  readModel: OrchestrationReadModel,
-  agentId: AgentId,
-): OrchestrationAgent | undefined {
-  return (readModel.agents ?? []).find((agent) => agent.id === agentId);
-}
-
-export function requireAgent(input: {
-  readonly readModel: OrchestrationReadModel;
-  readonly command: OrchestrationCommand;
-  readonly agentId: AgentId;
-}): Effect.Effect<OrchestrationAgent, OrchestrationCommandInvariantError> {
-  const agent = findAgentById(input.readModel, input.agentId);
-  if (agent) {
-    return Effect.succeed(agent);
+/** The entity with this id, or a refusal naming the kind of entity that is missing. */
+function requireIn<Entity extends { readonly id: string }>(
+  kind: string,
+  entities: ReadonlyArray<Entity> | undefined,
+  command: OrchestrationCommand,
+  id: Entity["id"],
+): Effect.Effect<Entity, OrchestrationCommandInvariantError> {
+  const entity = entities?.find((candidate) => candidate.id === id);
+  if (entity) {
+    return Effect.succeed(entity);
   }
   return Effect.fail(
-    invariantError(
-      input.command.type,
-      `Agent '${input.agentId}' does not exist for command '${input.command.type}'.`,
-    ),
+    invariantError(command.type, `${kind} '${id}' does not exist for command '${command.type}'.`),
   );
 }
 
-export function requireAgentAbsent(input: {
-  readonly readModel: OrchestrationReadModel;
-  readonly command: OrchestrationCommand;
-  readonly agentId: AgentId;
-}): Effect.Effect<void, OrchestrationCommandInvariantError> {
-  if (!findAgentById(input.readModel, input.agentId)) {
+function requireAbsentIn<Entity extends { readonly id: string }>(
+  kind: string,
+  entities: ReadonlyArray<Entity> | undefined,
+  command: OrchestrationCommand,
+  id: Entity["id"],
+): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  if (!entities?.some((candidate) => candidate.id === id)) {
     return Effect.void;
   }
   return Effect.fail(
-    invariantError(
-      input.command.type,
-      `Agent '${input.agentId}' already exists and cannot be created twice.`,
-    ),
+    invariantError(command.type, `${kind} '${id}' already exists and cannot be created twice.`),
   );
 }
+
+interface CommandInput {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+}
+
+export const requireAgent = (input: CommandInput & { readonly agentId: AgentId }) =>
+  requireIn("Agent", input.readModel.agents, input.command, input.agentId);
+
+export const requireAgentAbsent = (input: CommandInput & { readonly agentId: AgentId }) =>
+  requireAbsentIn("Agent", input.readModel.agents, input.command, input.agentId);
+
+export const requireCard = (input: CommandInput & { readonly cardId: CardId }) =>
+  requireIn("Card", input.readModel.cards, input.command, input.cardId);
+
+export const requireCardAbsent = (input: CommandInput & { readonly cardId: CardId }) =>
+  requireAbsentIn("Card", input.readModel.cards, input.command, input.cardId);
+
+export const requireChannel = (input: CommandInput & { readonly channelId: ChannelId }) =>
+  requireIn("Channel", input.readModel.channels, input.command, input.channelId);
+
+export const requireChannelAbsent = (input: CommandInput & { readonly channelId: ChannelId }) =>
+  requireAbsentIn("Channel", input.readModel.channels, input.command, input.channelId);
 
 /** Names are `@mention` handles: unique per project, archived agents included. */
 export function requireAgentNameAvailable(input: {
@@ -110,86 +121,6 @@ export function requireAgentNameAvailable(input: {
   );
 }
 
-function findCardById(
-  readModel: OrchestrationReadModel,
-  cardId: CardId,
-): OrchestrationCard | undefined {
-  return (readModel.cards ?? []).find((card) => card.id === cardId);
-}
-
-export function requireCard(input: {
-  readonly readModel: OrchestrationReadModel;
-  readonly command: OrchestrationCommand;
-  readonly cardId: CardId;
-}): Effect.Effect<OrchestrationCard, OrchestrationCommandInvariantError> {
-  const card = findCardById(input.readModel, input.cardId);
-  if (card) {
-    return Effect.succeed(card);
-  }
-  return Effect.fail(
-    invariantError(
-      input.command.type,
-      `Card '${input.cardId}' does not exist for command '${input.command.type}'.`,
-    ),
-  );
-}
-
-export function requireCardAbsent(input: {
-  readonly readModel: OrchestrationReadModel;
-  readonly command: OrchestrationCommand;
-  readonly cardId: CardId;
-}): Effect.Effect<void, OrchestrationCommandInvariantError> {
-  if (!findCardById(input.readModel, input.cardId)) {
-    return Effect.void;
-  }
-  return Effect.fail(
-    invariantError(
-      input.command.type,
-      `Card '${input.cardId}' already exists and cannot be created twice.`,
-    ),
-  );
-}
-
-function findChannelById(
-  readModel: OrchestrationReadModel,
-  channelId: ChannelId,
-): OrchestrationChannel | undefined {
-  return (readModel.channels ?? []).find((channel) => channel.id === channelId);
-}
-
-export function requireChannel(input: {
-  readonly readModel: OrchestrationReadModel;
-  readonly command: OrchestrationCommand;
-  readonly channelId: ChannelId;
-}): Effect.Effect<OrchestrationChannel, OrchestrationCommandInvariantError> {
-  const channel = findChannelById(input.readModel, input.channelId);
-  if (channel) {
-    return Effect.succeed(channel);
-  }
-  return Effect.fail(
-    invariantError(
-      input.command.type,
-      `Channel '${input.channelId}' does not exist for command '${input.command.type}'.`,
-    ),
-  );
-}
-
-export function requireChannelAbsent(input: {
-  readonly readModel: OrchestrationReadModel;
-  readonly command: OrchestrationCommand;
-  readonly channelId: ChannelId;
-}): Effect.Effect<void, OrchestrationCommandInvariantError> {
-  if (!findChannelById(input.readModel, input.channelId)) {
-    return Effect.void;
-  }
-  return Effect.fail(
-    invariantError(
-      input.command.type,
-      `Channel '${input.channelId}' already exists and cannot be created twice.`,
-    ),
-  );
-}
-
 /**
  * Members are active agents of the channel's project, listed once. A DM has
  * exactly one agent, and an agent has at most one active DM.
@@ -206,7 +137,7 @@ export function requireValidChannelMembers(input: {
     return Effect.fail(invariantError(input.command.type, "Channel members must be unique."));
   }
   for (const agentId of input.memberAgentIds) {
-    const agent = findAgentById(input.readModel, agentId);
+    const agent = (input.readModel.agents ?? []).find((candidate) => candidate.id === agentId);
     if (!agent || agent.projectId !== input.projectId || agent.archivedAt !== null) {
       return Effect.fail(
         invariantError(
