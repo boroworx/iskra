@@ -3,6 +3,10 @@ import {
   CardId,
   CommandId,
   EventId,
+  MessageId,
+  type CardActivity,
+  type CardCriterion,
+  type Elicitation,
   type OrchestrationCommand,
   type ThreadId,
 } from "@iskra/contracts";
@@ -11,6 +15,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 
+import { renderReviewRequest } from "../../../orchestration/CardEvidence.ts";
 import * as OrchestrationEngine from "../../../orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ThreadPlanProgressService } from "../../../orchestration/ThreadPlanProgress.ts";
@@ -21,7 +26,38 @@ import {
   BoardToolFailedError,
   BoardToolkit,
   LeadSessionRequiredError,
+  type CriterionInput,
 } from "./tools.ts";
+
+/** Criteria numbered in the order the agent wrote them. */
+export const criteriaOf = (
+  inputs: ReadonlyArray<typeof CriterionInput.Type>,
+): ReadonlyArray<CardCriterion> =>
+  inputs.map((input, index) => ({
+    id: `c${index + 1}`,
+    text: input.text,
+    verification: input.verification ?? "automated",
+  }));
+
+/** A question with numbered options; a recommendation that isn't one of them is left for the decider to refuse. */
+export const elicitationOf = (
+  question: string,
+  options: ReadonlyArray<string>,
+  recommended: string | undefined,
+): Elicitation => {
+  const offered = options.map((label, index) => ({ id: `o${index + 1}`, label }));
+  return {
+    question,
+    options: offered,
+    recommendedOptionId:
+      recommended === undefined
+        ? null
+        : (offered.find((option) => option.label === recommended)?.id ?? recommended),
+    allowText: true,
+  };
+};
+
+export const REVIEW_REQUESTED_CODE = "reviewRequested";
 
 const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngine.OrchestrationEngineService;
@@ -77,6 +113,33 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  type OwnerSession = Effect.Success<typeof requireOwnerSession>;
+
+  /** An entry in the card's activity, written as the session's agent. */
+  const recordActivity = (
+    session: OwnerSession,
+    tag: string,
+    entry: Pick<CardActivity, "activityId" | "kind" | "body"> &
+      Partial<Pick<CardActivity, "elicitation" | "reason">>,
+  ) =>
+    Effect.gen(function* () {
+      yield* dispatch({
+        type: "card.activity.record",
+        commandId: yield* commandId(tag, session.threadId),
+        cardId: session.cardId,
+        author: { kind: "agent", id: session.agentId },
+        runThreadId: session.threadId,
+        deliverTo: null,
+        elicitation: null,
+        answers: null,
+        status: null,
+        evidenceId: null,
+        reason: null,
+        createdAt: yield* nowIso,
+        ...entry,
+      });
+    });
+
   return BoardToolkit.of({
     // ponytail: a lead run that takes later messages as further turns still links proposals to the
     // message that first woke it; carry each turn's message on the run if that misleads.
@@ -100,6 +163,9 @@ const make = Effect.gen(function* () {
           title: input.title,
           spec: input.spec,
           tags: input.tags ?? [],
+          criteria: criteriaOf(input.criteria),
+          estimate: input.estimate,
+          premise: input.premise,
           lead: {
             sourceMessageId: session.triggerMessageId,
             reasoning: input.reasoning,
@@ -110,12 +176,31 @@ const make = Effect.gen(function* () {
         });
         return { cardId };
       }),
+    ask_clarification: (input) =>
+      Effect.gen(function* () {
+        const session = yield* requireLeadSession;
+        const messageId = MessageId.make(`lead-question:${session.threadId}:${yield* uuid}`);
+        yield* dispatch({
+          type: "channel.message.agent.post",
+          commandId: yield* commandId("lead-ask", session.threadId),
+          channelId: session.channelId,
+          messageId,
+          agentId: session.agentId,
+          runThreadId: session.threadId,
+          body: input.question,
+          elicitation: elicitationOf(input.question, input.options, input.recommended),
+          createdAt: yield* nowIso,
+        });
+        return { messageId };
+      }),
     propose_card: (input) =>
       Effect.gen(function* () {
         const session = yield* requireOwnerSession;
         const card = yield* snapshots.getCardShellById(session.cardId).pipe(
           Effect.mapError(failed),
-          Effect.flatMap(Option.match({ onNone: () => new BoardSessionRequiredError({}), onSome: Effect.succeed })),
+          Effect.flatMap(
+            Option.match({ onNone: () => new BoardSessionRequiredError({}), onSome: Effect.succeed }),
+          ),
         );
         const cardId = CardId.make(`card-${yield* uuid}`);
         yield* dispatch({
@@ -129,6 +214,8 @@ const make = Effect.gen(function* () {
           title: input.title,
           spec: input.spec,
           tags: input.tags ?? [],
+          ...(input.criteria === undefined ? {} : { criteria: criteriaOf(input.criteria) }),
+          ...(input.subCard === true ? { subCard: true } : {}),
           createdAt: yield* nowIso,
         });
         return { cardId };
@@ -169,14 +256,31 @@ const make = Effect.gen(function* () {
             createdAt,
           },
         });
+        // The card's own record of the plan, which later sessions start from.
+        yield* recordActivity(session, "plan-activity", {
+          activityId: `plan-${yield* uuid}`,
+          kind: "plan",
+          body: input.steps
+            .map(
+              (step) =>
+                `- [${step.status === "completed" ? "x" : step.status === "inProgress" ? "~" : " "}] ${step.step}`,
+            )
+            .join("\n"),
+        });
         return {
           completedSteps: input.steps.filter((step) => step.status === "completed").length,
           totalSteps: input.steps.length,
         };
       }),
-    request_review: () =>
+    request_review: (input) =>
       Effect.gen(function* () {
         const session = yield* requireOwnerSession;
+        yield* recordActivity(session, "review-request", {
+          activityId: `review-request-${yield* uuid}`,
+          kind: "message",
+          body: renderReviewRequest(input.summary, input.risks),
+          reason: { code: REVIEW_REQUESTED_CODE, text: "Asked for review." },
+        });
         yield* dispatch({
           type: "card.review.request",
           commandId: yield* commandId("review", session.threadId),
@@ -184,10 +288,38 @@ const make = Effect.gen(function* () {
         });
         return {};
       }),
+    request_checkpoint: (input) =>
+      Effect.gen(function* () {
+        const session = yield* requireOwnerSession;
+        const checkpointId = `checkpoint-${yield* uuid}`;
+        yield* dispatch({
+          type: "card.checkpoint.request",
+          commandId: yield* commandId("checkpoint", session.threadId),
+          cardId: session.cardId,
+          checkpoint: {
+            checkpointId,
+            whatToTry: input.whatToTry,
+            question: input.question ?? null,
+            evidenceId: null,
+            requestedAt: yield* nowIso,
+          },
+        });
+        return { checkpointId };
+      }),
     ask_owner: (input) =>
       Effect.gen(function* () {
         const session = yield* requireOwnerSession;
         const requestId = ApprovalRequestId.make(`ask-owner:${yield* uuid}`);
+        // The card's record of the question first, so a refused option set asks nothing.
+        yield* recordActivity(session, "ask-activity", {
+          activityId: requestId,
+          kind: "elicitation",
+          body: input.question,
+          elicitation:
+            input.options === undefined
+              ? null
+              : elicitationOf(input.question, input.options, input.recommended),
+        });
         const createdAt = yield* nowIso;
         // A message-mode question: the answer is committed as the session's next user message.
         yield* dispatch({
@@ -208,7 +340,10 @@ const make = Effect.gen(function* () {
                   id: "answer",
                   header: "Question",
                   question: input.question,
-                  options: (input.options ?? []).map((label) => ({ label, description: "" })),
+                  options: (input.options ?? []).map((label) => ({
+                    label,
+                    description: label === input.recommended ? "Recommended" : "",
+                  })),
                   allowCustomAnswer: true,
                   multiSelect: false,
                 },
@@ -219,6 +354,33 @@ const make = Effect.gen(function* () {
           },
         });
         return { requestId };
+      }),
+    propose_criteria_change: (input) =>
+      Effect.gen(function* () {
+        const session = yield* requireOwnerSession;
+        const proposalId = `criteria-change-${yield* uuid}`;
+        const criteria = criteriaOf(input.criteria);
+        yield* recordActivity(session, "criteria-change", {
+          activityId: proposalId,
+          kind: "elicitation",
+          body: `${input.reason}\n\nProposed acceptance criteria:\n${criteria
+            .map(
+              (criterion) =>
+                `- ${criterion.text}${criterion.verification === "manual" ? " (checked by a person)" : ""}`,
+            )
+            .join("\n")}`,
+          elicitation: {
+            question: "Change the acceptance criteria to the proposed ones?",
+            options: [
+              { id: "apply", label: "Apply them" },
+              { id: "keep", label: "Keep the current ones" },
+            ],
+            recommendedOptionId: null,
+            allowText: true,
+          },
+          reason: { code: "criteriaChange", text: input.reason },
+        });
+        return { proposalId };
       }),
   });
 });

@@ -53,14 +53,40 @@ const ownerRun = (role: OrchestrationRun["role"] = "owner") =>
     capabilities: ["read", "write"],
   }) as unknown as OrchestrationRun;
 
+const leadRun = {
+  ...ownerRun("lead"),
+  channelId: CHANNEL_ID,
+  cardId: null,
+  triggerMessageId: "message-export",
+} as unknown as OrchestrationRun;
+
 const card = { id: CARD_ID, projectId: PROJECT_ID, channelId: CHANNEL_ID } as OrchestrationCardShell;
 
 const channelShell = { id: CHANNEL_ID, projectId: PROJECT_ID } as unknown as OrchestrationChannelShell;
 
-const makeHarness = Effect.fn("makeBoardToolkitHarness")(function* (options: {
-  readonly run?: OrchestrationRun | null;
-  readonly reject?: (command: OrchestrationCommand) => OrchestrationCommandInvariantError | null;
-} = {}) {
+const reviewInput = {
+  summary: "Adds a token bucket per key.",
+  risks: { sideEffect: "low", performance: "medium", compatibility: "low", notes: "" },
+} as const;
+
+const triageInput = {
+  title: "Limit webhook calls",
+  spec: "Webhooks need their own limit.",
+  reasoning: "Asked for in #api; the open card leaves webhooks out.",
+  criteria: [
+    { text: "A webhook over its limit gets a 429." },
+    { text: "The limit shows in the dashboard.", verification: "manual" },
+  ],
+  estimate: { size: "S", likelyAreas: ["apps/server/webhooks"], risks: [], split: null },
+  premise: { goal: "Stop webhook floods.", getsThere: true, pushback: null },
+} as const;
+
+const makeHarness = Effect.fn("makeBoardToolkitHarness")(function* (
+  options: {
+    readonly run?: OrchestrationRun | null;
+    readonly reject?: (command: OrchestrationCommand) => OrchestrationCommandInvariantError | null;
+  } = {},
+) {
   const commands = yield* Ref.make<ReadonlyArray<OrchestrationCommand>>([]);
   const run = options.run === undefined ? ownerRun() : options.run;
   const planProgress = ThreadPlanProgress.make();
@@ -117,14 +143,17 @@ const makeHarness = Effect.fn("makeBoardToolkitHarness")(function* (options: {
 });
 
 describe("board toolkit handlers", () => {
-  it("offers no tool that approves, assigns or lands", () => {
+  it("offers no tool that approves, assigns, moves or lands", () => {
     expect(Object.keys(BoardToolkit.tools)).toEqual([
       "propose_card",
       "record_decision",
       "update_plan",
       "request_review",
+      "request_checkpoint",
       "ask_owner",
+      "propose_criteria_change",
       "propose_triage_card",
+      "ask_clarification",
     ]);
   });
 
@@ -132,14 +161,16 @@ describe("board toolkit handlers", () => {
     Effect.gen(function* () {
       const withoutBoard = yield* makeHarness();
       expect(
-        yield* withoutBoard.call("request_review", {}, ["pull-requests"]).pipe(Effect.flip),
+        yield* withoutBoard.call("request_review", reviewInput, ["pull-requests"]).pipe(Effect.flip),
       ).toMatchObject({ _tag: "McpCapabilityUnavailableError", capability: "board" });
 
-      const helper = yield* makeHarness({ run: ownerRun("helper") });
-      expect(yield* helper.call("request_review", {}).pipe(Effect.flip)).toMatchObject({
-        _tag: "BoardSessionRequiredError",
-      });
-      expect(yield* Ref.get(helper.commands)).toEqual([]);
+      for (const role of ["helper", "critic", "lead"] as const) {
+        const other = yield* makeHarness({ run: ownerRun(role) });
+        expect(
+          yield* other.call("request_checkpoint", { whatToTry: "Open /limits" }).pipe(Effect.flip),
+        ).toMatchObject({ _tag: "BoardSessionRequiredError" });
+        expect(yield* Ref.get(other.commands)).toEqual([]);
+      }
     }),
   );
 
@@ -149,6 +180,7 @@ describe("board toolkit handlers", () => {
       yield* harness.call("propose_card", {
         title: "Rate limit webhooks",
         spec: "They share the API's limits.",
+        criteria: [{ text: "Webhooks have their own limit." }],
         subCard: true,
       });
       expect(yield* Ref.get(harness.commands)).toMatchObject([
@@ -158,6 +190,8 @@ describe("board toolkit handlers", () => {
           projectId: PROJECT_ID,
           channelId: CHANNEL_ID,
           parentCardId: CARD_ID,
+          subCard: true,
+          criteria: [{ id: "c1", text: "Webhooks have their own limit.", verification: "automated" }],
           title: "Rate limit webhooks",
           tags: [],
         },
@@ -177,15 +211,17 @@ describe("board toolkit handlers", () => {
         reject: (command) =>
           new OrchestrationCommandInvariantError({
             commandType: command.type,
-            detail: "Only a card in progress can be sent to review.",
+            detail: "Only a card in progress can ask for a checkpoint.",
           }),
       });
-      const refusal = yield* refusing.call("request_review", {}).pipe(Effect.flip);
-      expect(refusal.message).toBe("Only a card in progress can be sent to review.");
+      const refusal = yield* refusing
+        .call("request_checkpoint", { whatToTry: "Open /limits" })
+        .pipe(Effect.flip);
+      expect(refusal.message).toBe("Only a card in progress can ask for a checkpoint.");
     }),
   );
 
-  it.effect("shows the plan's current step and logs the plan on the session", () =>
+  it.effect("shows the plan's current step and records the plan on the card", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness();
       const result = yield* harness.call("update_plan", {
@@ -202,23 +238,42 @@ describe("board toolkit handlers", () => {
         totalSteps: 3,
       });
       expect(yield* Ref.get(harness.commands)).toMatchObject([
+        { type: "thread.activity.append", threadId: THREAD_ID, activity: { kind: "turn.plan.updated" } },
         {
-          type: "thread.activity.append",
-          threadId: THREAD_ID,
-          activity: { kind: "turn.plan.updated" },
+          type: "card.activity.record",
+          cardId: CARD_ID,
+          kind: "plan",
+          author: { kind: "agent", id: AGENT_ID },
+          body: "- [x] Add the limiter\n- [~] Wire it into the router\n- [ ] Test it",
         },
       ]);
     }),
   );
 
-  it.effect("asks the owner a question answered by message", () =>
+  it.effect("asks the owner a question with a recommended answer, on the card and the session", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness();
       const { requestId } = yield* harness.call("ask_owner", {
         question: "Per key or per account?",
         options: ["Per key", "Per account"],
+        recommended: "Per key",
       });
       expect(yield* Ref.get(harness.commands)).toMatchObject([
+        {
+          type: "card.activity.record",
+          activityId: requestId,
+          kind: "elicitation",
+          deliverTo: null,
+          elicitation: {
+            question: "Per key or per account?",
+            options: [
+              { id: "o1", label: "Per key" },
+              { id: "o2", label: "Per account" },
+            ],
+            recommendedOptionId: "o1",
+            allowText: true,
+          },
+        },
         {
           type: "thread.activity.append",
           threadId: THREAD_ID,
@@ -230,7 +285,10 @@ describe("board toolkit handlers", () => {
               questions: [
                 {
                   question: "Per key or per account?",
-                  options: [{ label: "Per key" }, { label: "Per account" }],
+                  options: [
+                    { label: "Per key", description: "Recommended" },
+                    { label: "Per account", description: "" },
+                  ],
                 },
               ],
             },
@@ -239,24 +297,37 @@ describe("board toolkit handlers", () => {
       ]);
     }),
   );
+
+  it.effect("records a review request and a checkpoint as intent, never as a status move", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      yield* harness.call("request_checkpoint", { whatToTry: "Open /limits", question: "Right shape?" });
+      yield* harness.call("propose_criteria_change", {
+        criteria: [{ text: "Limits are per account." }],
+        reason: "Keys are shared across an account.",
+      });
+      expect(yield* Ref.get(harness.commands)).toMatchObject([
+        {
+          type: "card.checkpoint.request",
+          cardId: CARD_ID,
+          checkpoint: { whatToTry: "Open /limits", question: "Right shape?", evidenceId: null },
+        },
+        {
+          type: "card.activity.record",
+          kind: "elicitation",
+          reason: { code: "criteriaChange" },
+          body: "Keys are shared across an account.\n\nProposed acceptance criteria:\n- Limits are per account.",
+        },
+      ]);
+    }),
+  );
+
   it.effect("lets a channel lead propose a triage card from the message that woke it, and nothing else", () =>
     Effect.gen(function* () {
-      const leadRun = {
-        ...ownerRun("lead"),
-        channelId: CHANNEL_ID,
-        cardId: null,
-        triggerMessageId: "message-export",
-      } as unknown as OrchestrationRun;
       const lead = yield* makeHarness({ run: leadRun });
       yield* lead.call(
         "propose_triage_card",
-        {
-          title: "Limit webhook calls",
-          spec: "Webhooks need their own limit.",
-          reasoning: "Asked for in #api; the open card leaves webhooks out.",
-          likelyDuplicateCardIds: ["card-limits"],
-          suggestedAgent: "frontend",
-        },
+        { ...triageInput, likelyDuplicateCardIds: ["card-limits"], suggestedAgent: "frontend" },
         ["lead"],
       );
       expect(yield* Ref.get(lead.commands)).toMatchObject([
@@ -265,6 +336,12 @@ describe("board toolkit handlers", () => {
           agentId: AGENT_ID,
           projectId: PROJECT_ID,
           channelId: CHANNEL_ID,
+          criteria: [
+            { id: "c1", verification: "automated" },
+            { id: "c2", verification: "manual" },
+          ],
+          estimate: { size: "S" },
+          premise: { getsThere: true },
           lead: {
             sourceMessageId: "message-export",
             likelyDuplicateCardIds: ["card-limits"],
@@ -278,10 +355,35 @@ describe("board toolkit handlers", () => {
 
       const owner = yield* makeHarness();
       expect(
-        yield* owner
-          .call("propose_triage_card", { title: "Other", spec: "", reasoning: "None." })
-          .pipe(Effect.flip),
+        yield* owner.call("propose_triage_card", triageInput).pipe(Effect.flip),
       ).toMatchObject({ _tag: "McpCapabilityUnavailableError", capability: "lead" });
+      expect(
+        yield* owner
+          .call("ask_clarification", { question: "Which?", options: ["A", "B"], recommended: "A" }, ["lead"])
+          .pipe(Effect.flip),
+      ).toMatchObject({ _tag: "LeadSessionRequiredError" });
+    }),
+  );
+
+  it.effect("posts a lead's clarifying question in its channel with answers to pick", () =>
+    Effect.gen(function* () {
+      const lead = yield* makeHarness({ run: leadRun });
+      const { messageId } = yield* lead.call(
+        "ask_clarification",
+        { question: "Per key or per account?", options: ["Per key", "Per account"], recommended: "Per account" },
+        ["lead"],
+      );
+      expect(yield* Ref.get(lead.commands)).toMatchObject([
+        {
+          type: "channel.message.agent.post",
+          channelId: CHANNEL_ID,
+          messageId,
+          agentId: AGENT_ID,
+          runThreadId: THREAD_ID,
+          body: "Per key or per account?",
+          elicitation: { recommendedOptionId: "o2", allowText: true },
+        },
+      ]);
     }),
   );
 });
