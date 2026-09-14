@@ -7,7 +7,6 @@ import {
   type CardEvidencePurpose,
   type CardId,
   type CardRiskClaims,
-  type OrchestrationCard,
   type OrchestrationEvent,
   type Reason,
 } from "@iskra/contracts";
@@ -47,9 +46,8 @@ import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts"
  * changed, and record it all as evidence for the commit. Review passes only through
  * `card.review.enter`, which the decider refuses without passing evidence for that commit. Failing
  * checks go back to the owner as its next turn and use a CI fix round; past the project's rounds
- * the card pauses for a person. A checkpoint records the same evidence and moves nothing.
- *
- * Until landing moves to its own reactor, a card approved to merge also lands here, locally.
+ * the card pauses for a person. A checkpoint records the same evidence and moves nothing. Landing
+ * is CardLandingReactor's.
  */
 export class CardReviewReactor extends Context.Service<
   CardReviewReactor,
@@ -59,15 +57,12 @@ export class CardReviewReactor extends Context.Service<
   }
 >()("@iskra/cli/orchestration/CardReviewReactor") {}
 
-type ReviewJob =
-  | {
-      readonly kind: "blueprint";
-      readonly purpose: CardEvidencePurpose;
-      readonly cardId: CardId;
-      readonly key: string;
-      readonly risks: CardRiskClaims | null;
-    }
-  | { readonly kind: "land"; readonly cardId: CardId; readonly key: string };
+interface ReviewJob {
+  readonly purpose: CardEvidencePurpose;
+  readonly cardId: CardId;
+  readonly key: string;
+  readonly risks: CardRiskClaims | null;
+}
 
 /** A check's result as an evidence item. */
 const checkItem = (result: CardWorkspace.CardCheckResult): CardEvidenceItem => ({
@@ -146,9 +141,7 @@ const make = Effect.gen(function* () {
       reason: { code, text: body.split("\n")[0]!.slice(0, 200) },
     });
 
-  const blueprint = Effect.fn("CardReviewReactor.blueprint")(function* (
-    job: Extract<ReviewJob, { kind: "blueprint" }>,
-  ) {
+  const blueprint = Effect.fn("CardReviewReactor.blueprint")(function* (job: ReviewJob) {
     const { cardId, key, purpose } = job;
     const model = yield* readModel();
     const card = model.cards?.find((candidate) => candidate.id === cardId);
@@ -182,13 +175,13 @@ const make = Effect.gen(function* () {
       );
     }
 
-    const job_ = { cardId, projectId: card.projectId, priority: card.priority, label: card.title };
+    const heavy = { cardId, projectId: card.projectId, priority: card.priority, label: card.title };
     const localChecks = checks.filter((check) => check.source !== "ci");
     const run =
       localChecks.length === 0
         ? { passed: true, summary: "", results: [] }
         : yield* admission.run(
-            { ...job_, kind: "checks" },
+            { ...heavy, kind: "checks" },
             workspace.runChecks({ cardId, scope: "full", checks: localChecks }),
           );
 
@@ -224,7 +217,7 @@ const make = Effect.gen(function* () {
         yield* workspace.runScript({ cardId, scriptId: script.id });
         ui.push(
           ...(yield* admission.run(
-            { ...job_, kind: "evidence" },
+            { ...heavy, kind: "evidence" },
             captureUiEvidence({
               cardId,
               environmentId: yield* environment.getEnvironmentId,
@@ -289,7 +282,12 @@ const make = Effect.gen(function* () {
       .pipe(
         Effect.catchTag("OrchestrationCommandInvariantError", (refusal) =>
           Effect.gen(function* () {
-            yield* tellBuilder(cardId, key, "reviewRefused", `The card didn't enter review: ${refusal.detail}`);
+            yield* tellBuilder(
+              cardId,
+              key,
+              "reviewRefused",
+              `The card didn't enter review: ${refusal.detail}`,
+            );
             // A project without checks needs a person: it shows in Needs you.
             if (refusal.detail === NO_CHECKS_REASON) {
               yield* record(cardId, `review-checks-missing:${key}`, {
@@ -304,123 +302,14 @@ const make = Effect.gen(function* () {
       );
   });
 
-  const afterLanding = Effect.fn("CardReviewReactor.afterLanding")(function* (
-    landed: OrchestrationCard,
-    files: ReadonlyArray<string>,
-    key: string,
-  ) {
-    const others = ((yield* readModel()).cards ?? []).filter(
-      (card) => card.projectId === landed.projectId && card.id !== landed.id,
-    );
-    // What this card blocked is free now; the relation stays as history.
-    for (const blocked of others.filter((card) =>
-      card.relations.some((relation) => relation.kind === "blockedBy" && relation.cardId === landed.id),
-    )) {
-      yield* engine.dispatch({
-        type: "card.relation.remove",
-        commandId: CommandId.make(`card-unblock:${key}:${blocked.id}`),
-        cardId: blocked.id,
-        kind: "blockedBy",
-        otherCardId: landed.id,
-      });
-      yield* engine
-        .dispatch({
-          type: "card.relation.add",
-          commandId: CommandId.make(`card-related:${key}:${blocked.id}`),
-          cardId: blocked.id,
-          kind: "related",
-          otherCardId: landed.id,
-        })
-        .pipe(Effect.catch(() => Effect.void));
-    }
-
-    const landedFiles = new Set(files);
-    for (const other of others.filter(
-      (card) => card.status === "inProgress" && card.worktreePath !== null,
-    )) {
-      const shared = (yield* workspace
-        .changedFiles(other.id)
-        .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []))).filter((file) =>
-        landedFiles.has(file),
-      );
-      if (
-        shared.length === 0 ||
-        other.relations.some((relation) => relation.kind === "overlaps" && relation.cardId === landed.id)
-      ) {
-        continue;
-      }
-      yield* engine.dispatch({
-        type: "card.overlap.flag",
-        commandId: CommandId.make(`card-overlap:${key}:${other.id}`),
-        cardId: other.id,
-        otherCardId: landed.id,
-      });
-      yield* tellBuilder(
-        other.id,
-        `${key}:${other.id}`,
-        "overlap",
-        `"${landed.title}" just landed and changes files you are changing too: ${shared.join(", ")}. Rebase onto its base branch before you ask for review.`,
-      );
-    }
-  });
-
-  const returnToWork = (cardId: CardId, key: string, reason: string) =>
-    engine.dispatch({
-      type: "card.work.return",
-      commandId: CommandId.make(`card-return:${key}`),
-      cardId,
-      reason,
-    });
-
-  const land = Effect.fn("CardReviewReactor.land")(function* (cardId: CardId, key: string) {
-    const card = (yield* readModel()).cards?.find((candidate) => candidate.id === cardId);
-    // Taken out of the queue while it waited.
-    if (card === undefined || card.status !== "landing") return;
-    const result = yield* workspace
-      .land(cardId)
-      .pipe(
-        Effect.catch((error) =>
-          Effect.succeed({ kind: "notMerged" as const, message: error.message }),
-        ),
-      );
-    switch (result.kind) {
-      case "landed":
-        yield* engine.dispatch({
-          type: "card.land",
-          commandId: CommandId.make(`card-land:${key}`),
-          cardId,
-        });
-        return yield* afterLanding(card, result.files, key);
-      case "conflict":
-        yield* tellBuilder(
-          cardId,
-          key,
-          "rebaseConflict",
-          `Landing stopped: rebasing onto \`${result.baseBranch}\` conflicts in ${result.files.join(", ") || "the worktree"}. Rebase onto \`${result.baseBranch}\`, resolve the conflicts, then ask for review again.`,
-        );
-        return yield* returnToWork(cardId, key, `Rebasing onto ${result.baseBranch} conflicts.`);
-      case "checksFailed":
-        yield* tellBuilder(
-          cardId,
-          key,
-          "checksFailed",
-          `Landing stopped: the project's checks failed after rebasing.\n\n${result.summary}`,
-        );
-        return yield* returnToWork(cardId, key, "The project's checks failed while landing.");
-      case "notMerged":
-        yield* tellBuilder(cardId, key, "landingBlocked", `Landing stopped: ${result.message}`);
-        return yield* returnToWork(cardId, key, "The card could not be merged into its base.");
-    }
-  });
-
   const handle = (job: ReviewJob) =>
-    (job.kind === "blueprint" ? blueprint(job) : land(job.cardId, job.key)).pipe(
+    blueprint(job).pipe(
       Effect.provide(context),
       Effect.catchCause((cause) =>
         Cause.hasInterruptsOnly(cause)
           ? Effect.failCause(cause)
           : Effect.logWarning("card review job failed", {
-              kind: job.kind,
+              purpose: job.purpose,
               cardId: job.cardId,
               cause: Cause.pretty(cause),
             }),
@@ -440,7 +329,10 @@ const make = Effect.gen(function* () {
       yield* worker.enqueue(job);
     });
   const drain = Effect.suspend(() =>
-    Effect.forEach(workers.values(), (worker) => worker.drain, { concurrency: "unbounded", discard: true }),
+    Effect.forEach(workers.values(), (worker) => worker.drain, {
+      concurrency: "unbounded",
+      discard: true,
+    }),
   );
 
   const processEvent = (event: OrchestrationEvent) => {
@@ -449,7 +341,6 @@ const make = Effect.gen(function* () {
         const activity = event.payload;
         return activity.author.kind === "agent" && activity.reason?.code === REVIEW_REQUESTED_CODE
           ? enqueue({
-              kind: "blueprint",
               purpose: "review",
               cardId: activity.cardId,
               key: event.eventId,
@@ -459,16 +350,11 @@ const make = Effect.gen(function* () {
       }
       case "card.checkpoint-requested":
         return enqueue({
-          kind: "blueprint",
           purpose: "checkpoint",
           cardId: event.payload.cardId,
           key: event.eventId,
           risks: null,
         });
-      case "card.status-changed":
-        return event.payload.to === "landing"
-          ? enqueue({ kind: "land", cardId: event.payload.cardId, key: event.eventId })
-          : Effect.void;
       default:
         return Effect.void;
     }
