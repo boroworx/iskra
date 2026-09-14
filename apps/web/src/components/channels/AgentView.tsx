@@ -7,7 +7,8 @@ import {
   type OrchestrationCardShell,
   type ThreadId,
 } from "@iskra/contracts";
-import { AtSignIcon } from "lucide-react";
+import type { EnvironmentProject } from "@iskra/client-runtime/state/models";
+import { AtSignIcon, SettingsIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { randomUUID } from "~/lib/utils";
@@ -20,8 +21,14 @@ import {
 } from "~/state/entities";
 import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
+import {
+  AgentSettingsDialog,
+  useAgentDefinitions,
+  useSaveAgentDefinition,
+} from "./AgentSettingsDialog";
 import { MessageComposer, PresenceBadge, useStickToNewest } from "./ChannelView";
 import { dmTargets } from "./channels.logic";
 import { RunBlock } from "./RunBlock";
@@ -54,6 +61,7 @@ export function AgentView(props: {
     }),
   );
   const sendToSession = useAtomCommand(channelEnvironment.sessionMessage);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Sessions start and end as the agent's presence changes: refetch the list then.
   const refreshRuns = runs.refresh;
@@ -83,14 +91,35 @@ export function AgentView(props: {
               <h1 className="truncate text-sm font-semibold">{agent.name}</h1>
               <PresenceBadge presence={agent.presence} />
               <AgentStats agent={agent} cards={cards} />
+              <Button
+                className="ml-auto"
+                size="icon-sm"
+                variant="ghost-muted"
+                aria-label={`@${agent.name} settings`}
+                onClick={() => setSettingsOpen(true)}
+              >
+                <SettingsIcon />
+              </Button>
+              <AgentSettingsDialog
+                open={settingsOpen}
+                onOpenChange={setSettingsOpen}
+                environmentId={props.environmentId}
+                projectId={agent.projectId}
+                agentId={agent.id}
+              />
             </div>
           )}
         </WorkspacePageHeader>
         {agent === null ? (
           agents.length > 0 ? (
-            <p className="px-5 py-4 text-sm text-muted-foreground">
-              This agent is archived or no longer exists.
-            </p>
+            <div className="flex flex-col gap-3 px-5 py-4 text-sm text-muted-foreground">
+              <p>This agent is archived or no longer exists.</p>
+              {projects
+                .filter((entry) => entry.environmentId === props.environmentId)
+                .map((entry) => (
+                  <ArchivedAgentUnarchive key={entry.id} project={entry} agentId={props.agentId} />
+                ))}
+            </div>
           ) : null
         ) : (
           <main className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -159,6 +188,36 @@ export function AgentView(props: {
         )}
       </div>
     </SidebarInset>
+  );
+}
+
+/** Unarchive for an agent archived in this project; nothing when it is not one of the project's. */
+function ArchivedAgentUnarchive(props: {
+  readonly project: EnvironmentProject;
+  readonly agentId: AgentId;
+}) {
+  const definitions = useAgentDefinitions(props.project.environmentId, props.project.id);
+  const saveDefinition = useSaveAgentDefinition(props.project.environmentId, props.project.id);
+  const [busy, setBusy] = useState(false);
+  const entry = definitions.data?.agents.find(
+    (agent) => agent.archived && agent.definition.id === props.agentId,
+  );
+  if (entry === undefined) {
+    return null;
+  }
+  return (
+    <Button
+      className="self-start"
+      size="sm"
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true);
+        await saveDefinition(entry.definition, "Agent not unarchived");
+        setBusy(false);
+      }}
+    >
+      Unarchive @{entry.definition.name}
+    </Button>
   );
 }
 

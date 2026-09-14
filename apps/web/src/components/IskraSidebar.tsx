@@ -7,8 +7,15 @@ import type {
   ThreadId,
 } from "@iskra/contracts";
 import { Link, useParams } from "@tanstack/react-router";
-import { AtSignIcon, HashIcon, InboxIcon, PlusIcon } from "lucide-react";
-import { memo, useMemo, useState, type ReactNode } from "react";
+import {
+  ArchiveIcon,
+  AtSignIcon,
+  HashIcon,
+  InboxIcon,
+  PlusIcon,
+  SettingsIcon,
+} from "lucide-react";
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { isElectron } from "../env";
 import { cn } from "../lib/utils";
@@ -26,6 +33,7 @@ import {
   presenceDotClassName,
   presenceLabel,
 } from "./channels/channels.logic";
+import { AgentSettingsDialog, useAgentDefinitions } from "./channels/AgentSettingsDialog";
 import { CreateAgentDialog } from "./channels/CreateAgentDialog";
 import { CreateChannelDialog } from "./channels/CreateChannelDialog";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
@@ -189,6 +197,7 @@ const ProjectChannels = memo(function ProjectChannels(props: {
     [channels, projectId],
   );
   const agentEntries = useMemo(() => agentListEntries(agents, projectId), [agents, projectId]);
+  const [settingsAgentId, setSettingsAgentId] = useState<AgentId | null>(null);
 
   return (
     <>
@@ -245,7 +254,7 @@ const ProjectChannels = memo(function ProjectChannels(props: {
             >
               <AtSignIcon />
               <span className="truncate">{entry.name}</span>
-              <span className="ml-auto flex shrink-0 items-center">
+              <span className="ml-auto flex shrink-0 items-center group-focus-within/menu-item:invisible group-hover/menu-item:invisible">
                 <span
                   aria-hidden
                   className={cn("size-2 rounded-full", presenceDotClassName(entry.presence))}
@@ -253,9 +262,34 @@ const ProjectChannels = memo(function ProjectChannels(props: {
                 <span className="sr-only">{presenceLabel(entry.presence)}</span>
               </span>
             </SidebarMenuButton>
+            <button
+              type="button"
+              aria-label={`@${entry.name} settings`}
+              onClick={() => setSettingsAgentId(entry.id)}
+              className="absolute top-1 right-1 flex size-6 items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 outline-hidden ring-ring group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100 hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-2 [&>svg]:size-3.5"
+            >
+              <SettingsIcon />
+            </button>
           </SidebarMenuItem>
         ))}
+        <ArchivedAgents
+          environmentId={environmentId}
+          projectId={projectId}
+          activeCount={agentEntries.length}
+          onOpen={setSettingsAgentId}
+        />
       </SidebarListGroup>
+      {settingsAgentId === null ? null : (
+        <AgentSettingsDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setSettingsAgentId(null);
+          }}
+          environmentId={environmentId}
+          projectId={projectId}
+          agentId={settingsAgentId}
+        />
+      )}
       <CreateChannelDialog
         open={openDialog === "channel"}
         onOpenChange={(open) => setOpenDialog(open ? "channel" : null)}
@@ -271,6 +305,63 @@ const ProjectChannels = memo(function ProjectChannels(props: {
     </>
   );
 });
+
+/**
+ * A project's archived agents, collapsed under its agents, so an archive is never
+ * a one-way door: each opens its settings, which offer Unarchive.
+ */
+function ArchivedAgents(props: {
+  readonly environmentId: EnvironmentId;
+  readonly projectId: ProjectId;
+  readonly activeCount: number;
+  readonly onOpen: (agentId: AgentId) => void;
+}) {
+  const definitions = useAgentDefinitions(props.environmentId, props.projectId);
+  const [open, setOpen] = useState(false);
+  // The list does not stream: refetch when an agent is archived or unarchived.
+  const refresh = definitions.refresh;
+  const seenCount = useRef(props.activeCount);
+  useEffect(() => {
+    if (seenCount.current !== props.activeCount) {
+      seenCount.current = props.activeCount;
+      refresh();
+    }
+  }, [props.activeCount, refresh]);
+  const archived = useMemo(
+    () =>
+      (definitions.data?.agents ?? [])
+        .filter((agent) => agent.archived)
+        .map((agent) => agent.definition)
+        .toSorted((left, right) => left.name.localeCompare(right.name)),
+    [definitions.data],
+  );
+  if (archived.length === 0) {
+    return null;
+  }
+  return (
+    <>
+      <SidebarMenuItem>
+        <SidebarMenuButton size="sm" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+          <ArchiveIcon />
+          <span className="truncate text-sidebar-muted-foreground">Archived ({archived.length})</span>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+      {open
+        ? archived.map((definition) => (
+            <SidebarMenuItem key={definition.id}>
+              <SidebarMenuButton
+                size="sm"
+                className="pl-6 text-sidebar-muted-foreground"
+                onClick={() => props.onOpen(definition.id)}
+              >
+                <span className="truncate">@{definition.name}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          ))
+        : null}
+    </>
+  );
+}
 
 function SidebarListGroup(props: {
   readonly label: string;
