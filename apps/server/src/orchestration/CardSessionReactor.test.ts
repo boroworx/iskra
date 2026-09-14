@@ -301,6 +301,43 @@ it.layer(layer)("CardSessionReactor", (it) => {
     ),
   );
 
+  it.effect("starts the owner as soon as a person approves and starts a proposal with a draft spec", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const world = yield* makeWorld("go", "draft");
+        const proposalId = CardId.make("card-go-proposal");
+        yield* world.engine.dispatch({
+          type: "card.create",
+          commandId: CommandId.make("cmd-go-proposal"),
+          cardId: proposalId,
+          projectId: ProjectId.make("project-go"),
+          title: "Landing page",
+          spec: "A landing page for Iskra in apps/web.",
+          tags: [],
+          createdAt: now,
+        });
+        yield* world.engine.dispatch({
+          type: "card.approve",
+          commandId: CommandId.make("cmd-go-start"),
+          cardId: proposalId,
+          delegateAgentId: world.agent("frontend"),
+        });
+
+        const owner = yield* world.nextSession();
+        expect(owner.payload).toMatchObject({
+          cardId: proposalId,
+          role: "owner",
+          agentId: world.agent("frontend"),
+        });
+        expect(owner.payload.rendered.firstMessage).toContain("user: Approved the spec.");
+        yield* world.nextEvent(
+          "card.status-changed",
+          (event) => event.payload.cardId === proposalId && event.payload.to === "inProgress",
+        );
+      }),
+    ),
+  );
+
   it.effect("holds a card's messages at its budget cap and delivers them once a person raises it", () =>
     Effect.scoped(
       Effect.gen(function* () {

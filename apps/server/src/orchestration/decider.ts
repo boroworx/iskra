@@ -2337,8 +2337,25 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       });
     }
 
-    case "card.approve":
-      return yield* decideCardMove({ readModel, command, move: "approve" });
+    case "card.approve": {
+      if (command.delegateAgentId === undefined) {
+        return yield* decideCardMove({ readModel, command, move: "approve" });
+      }
+      // Approve & start, decided as one batch so a refused step leaves nothing half done. A ready
+      // card with no owner yet skips the approval. A draft spec is approved too: the person read it
+      // when they chose to start, and the owner waits behind a draft spec otherwise.
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      const { delegateAgentId, ...approve } = command;
+      const step = { commandId: command.commandId, cardId: command.cardId };
+      return yield* decideCommandSequence({
+        readModel,
+        commands: [
+          ...(card.status === "ready" && card.delegateAgentId === null ? [] : [approve]),
+          ...(card.specState === "draft" ? [{ ...step, type: "card.spec.approve" as const }] : []),
+          { ...step, type: "card.assign", agentId: delegateAgentId },
+        ],
+      });
+    }
     case "card.unapprove":
       return yield* decideCardMove({ readModel, command, move: "unapprove" });
     case "card.merge.approve": {

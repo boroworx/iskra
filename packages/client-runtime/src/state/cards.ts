@@ -5,6 +5,7 @@ import type { Atom } from "effect/unstable/reactivity";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import {
   addCardRelation,
+  approveAndStartCard,
   assignCard,
   commentOnCardReview,
   createCard,
@@ -59,6 +60,10 @@ export function createCardEnvironmentAtoms<R, E>(
     assign: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:card:assign",
       execute: assignCard,
+    }),
+    approveAndStart: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:card:approve-and-start",
+      execute: approveAndStartCard,
     }),
     postMessage: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:card:post-message",

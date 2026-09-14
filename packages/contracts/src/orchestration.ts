@@ -1970,7 +1970,11 @@ const cardStatusCommand = <const Type extends string>(type: Type) =>
     cardId: CardId,
   });
 
-const CardApproveCommand = cardStatusCommand("card.approve");
+const CardApproveCommand = Schema.Struct({
+  ...cardStatusCommand("card.approve").fields,
+  // Approve & start: also approves a draft spec and assigns this agent, so its owner session starts.
+  delegateAgentId: Schema.optional(AgentId),
+});
 const CardUnapproveCommand = cardStatusCommand("card.unapprove");
 const CardMergeApproveCommand = cardStatusCommand("card.merge.approve");
 const CardMergeCancelCommand = cardStatusCommand("card.merge.cancel");

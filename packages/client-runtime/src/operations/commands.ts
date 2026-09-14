@@ -182,6 +182,11 @@ export const unsnoozeCard = command("unsnoozeCard", "card.unsnooze");
 /** A person's new card; the client names its id. Priority is set afterwards with `updateCard`. */
 export const createCard = timestampedCommand("createCard", "card.create");
 export const assignCard = command("assignCard", "card.assign");
+/**
+ * Approve & start: approves a triage card, approves its draft spec and assigns its owner in one
+ * step, so the owner session starts. Also starts a ready card that has no owner yet.
+ */
+export const approveAndStartCard = command("approveAndStartCard", "card.approve");
 /** A person's message for the card's owner session. */
 export const postCardMessage = timestampedCommand("postCardMessage", "card.message.post");
 export const commentOnCardReview = timestampedCommand("commentOnCardReview", "card.review.comment");

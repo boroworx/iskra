@@ -228,6 +228,47 @@ it.layer(NodeServices.layer)("decider cards", (it) => {
       }),
   );
 
+  it.effect("approves and starts a card in one step: approval, its draft spec, and its owner", () =>
+    Effect.gen(function* () {
+      const start = (id: string, delegateAgentId: AgentId = backend): OrchestrationCommand => ({
+        type: "card.approve",
+        commandId: nextCommandId(),
+        cardId: CardId.make(id),
+        delegateAgentId,
+      });
+      const proposed = [...setup, createCard("card", { spec: "Build it." })];
+      const base = yield* applyCommands(proposed);
+
+      expect((yield* decide(base, start("card"))).map((event) => event.type)).toEqual([
+        "card.status-changed",
+        "card.spec-state-changed",
+        "card.delegate-changed",
+      ]);
+      expect(cardIn(yield* applyCommands([...proposed, start("card")]), "card")).toMatchObject({
+        status: "ready",
+        specState: "approved",
+        delegateAgentId: backend,
+      });
+
+      // A card approved earlier without an owner starts the same way, keeping its approved spec.
+      const approvedAlone = yield* applyCommands([
+        ...setup,
+        createCard("late"),
+        onCard("card.approve", "late"),
+        onCard("card.spec.approve", "late"),
+      ]);
+      expect((yield* decide(approvedAlone, start("late"))).map((event) => event.type)).toEqual([
+        "card.delegate-changed",
+      ]);
+
+      // Nothing is half done: an owner that can't be assigned refuses the whole step.
+      const outsider = yield* Effect.flip(
+        decide(base, start("card", AgentId.make("agent-nobody"))),
+      );
+      expect(outsider.message).toContain("agent-nobody");
+    }),
+  );
+
   it.effect("records decisions as events without adding them to the read model", () =>
     Effect.gen(function* () {
       const readModel = yield* applyCommands([...setup, createCard("card")]);
