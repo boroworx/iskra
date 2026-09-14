@@ -1,101 +1,57 @@
 import {
   AgentId,
   ChannelId,
-  CommandId,
   MessageId,
-  ProjectId,
-  ProviderInstanceId,
   ThreadId,
   type OrchestrationCommand,
-  type RunCapability,
 } from "@iskra/contracts";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 
-import { decideOrchestrationCommand } from "./decider.ts";
-import { createEmptyReadModel, projectEvent } from "./projector.ts";
+import {
+  applyCommands,
+  backend,
+  createAgent,
+  createChannel,
+  createProject,
+  createThread,
+  decide,
+  frontend,
+  nextCommandId,
+  now,
+  postMessage,
+  reviewer,
+  setSession,
+  startChannelRun,
+} from "./decider.testkit.ts";
 
-const now = "2026-01-01T00:00:00.000Z";
-const projectId = ProjectId.make("project-channels");
-const backend = AgentId.make("agent-backend");
-const frontend = AgentId.make("agent-frontend");
-
-const createAgent = (agentId: AgentId, name: string): OrchestrationCommand => ({
-  type: "agent.create",
-  commandId: CommandId.make(`cmd-create-${agentId}`),
-  agentId,
-  projectId,
-  name,
-  roleTags: [],
-  rolePrompt: "",
-  modelSelection: { instanceId: ProviderInstanceId.make("claudeAgent"), model: "claude-haiku-4-5" },
-  capabilities: ["read"],
-  createdAt: now,
-});
+const writer = AgentId.make("agent-writer");
 
 const setup: ReadonlyArray<OrchestrationCommand> = [
-  {
-    type: "project.create",
-    commandId: CommandId.make("cmd-project-channels"),
-    projectId,
-    title: "Channels",
-    workspaceRoot: "/tmp/channels",
-    createdAt: now,
-  },
-  createAgent(backend, "backend"),
-  createAgent(frontend, "frontend"),
+  createProject(),
+  createAgent(backend),
+  createAgent(frontend),
 ];
-
-const createChannel = (
-  id: string,
-  kind: "channel" | "dm",
-  memberAgentIds: ReadonlyArray<AgentId>,
-): OrchestrationCommand => ({
-  type: "channel.create",
-  commandId: CommandId.make(`cmd-create-${id}`),
-  channelId: ChannelId.make(id),
-  projectId,
-  kind,
-  name: id,
-  memberAgentIds,
-  createdAt: now,
-});
 
 const channelCommand = (
   id: string,
   type: "channel.archive" | "channel.unarchive",
 ): OrchestrationCommand => ({
   type,
-  commandId: CommandId.make(`cmd-${type}-${id}`),
+  commandId: nextCommandId(),
   channelId: ChannelId.make(id),
 });
 
-const postMessage = (channelId: string, body: string): OrchestrationCommand => ({
-  type: "channel.message.post",
-  commandId: CommandId.make(`cmd-post-${channelId}-${body}`),
-  channelId: ChannelId.make(channelId),
-  messageId: MessageId.make(`message-${channelId}-${body}`),
-  body,
-  createdAt: now,
-});
-
-// Decides and projects each command in order, like the engine does for one batch.
-const applyCommands = Effect.fn("applyCommands")(function* (
+// Decides a human post after `commands`.
+const decidePost = (
   commands: ReadonlyArray<OrchestrationCommand>,
-) {
-  let readModel = createEmptyReadModel(now);
-  for (const command of commands) {
-    const decided = yield* decideOrchestrationCommand({ command, readModel });
-    for (const event of Array.isArray(decided) ? decided : [decided]) {
-      readModel = yield* projectEvent(readModel, {
-        ...event,
-        sequence: readModel.snapshotSequence + 1,
-      });
-    }
-  }
-  return readModel;
-});
+  channelId: string,
+  body: string,
+) =>
+  applyCommands(commands).pipe(
+    Effect.flatMap((readModel) => decide(readModel, postMessage(channelId, body))),
+  );
 
 it.layer(NodeServices.layer)("decider channels", (it) => {
   it.effect("creates a channel whose members are active agents of the project", () =>
@@ -119,11 +75,7 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
       yield* Effect.flip(
         applyCommands([
           ...setup,
-          {
-            type: "agent.archive",
-            commandId: CommandId.make("cmd-archive-frontend"),
-            agentId: frontend,
-          },
+          { type: "agent.archive", commandId: nextCommandId(), agentId: frontend },
           createChannel("general", "channel", [frontend]),
         ]),
       );
@@ -167,7 +119,7 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
     Effect.gen(function* () {
       const wake = (agentId: AgentId): OrchestrationCommand => ({
         type: "channel.agent.wake",
-        commandId: CommandId.make(`cmd-wake-${agentId}`),
+        commandId: nextCommandId(),
         channelId: ChannelId.make("general"),
         agentId,
         triggerMessageId: MessageId.make("message-general-hello"),
@@ -176,11 +128,9 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
       const base = [...setup, createChannel("general", "channel", [backend])];
 
       const readModel = yield* applyCommands(base);
-      const woken = yield* decideOrchestrationCommand({ command: wake(backend), readModel });
-      expect(woken).toMatchObject({
-        type: "channel.agent-wake-requested",
-        payload: { agentId: backend },
-      });
+      expect(yield* decide(readModel, wake(backend))).toMatchObject([
+        { type: "channel.agent-wake-requested", payload: { agentId: backend } },
+      ]);
 
       yield* Effect.flip(applyCommands([...base, wake(frontend)]));
       yield* Effect.flip(
@@ -195,38 +145,13 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
         ...setup,
         createChannel("general", "channel", [backend]),
       ]);
-      const trigger = {
-        messageId: MessageId.make("message-general-hello"),
-        authorKind: "human" as const,
-        authorName: "user",
-        body: "hello",
-        createdAt: now,
-      };
-      const startRun = (capabilities: ReadonlyArray<RunCapability>): OrchestrationCommand => ({
-        type: "channel.run.start",
-        commandId: CommandId.make("cmd-run-start"),
-        threadId: ThreadId.make("run-thread"),
-        channelId: ChannelId.make("general"),
-        agentId: backend,
-        triggerMessageId: trigger.messageId,
-        capabilities,
-        context: {
-          agent: { id: backend, name: "backend", rolePrompt: "" },
-          channel: { id: ChannelId.make("general"), kind: "channel", name: "general", topic: "" },
-          pinnedSpec: "",
-          wakeDepth: 30,
-          history: [],
-          trigger,
-        },
-        rendered: { systemPrompt: "You are @backend.", firstMessage: "hello" },
-        startedAt: now,
-      });
 
-      const started = yield* decideOrchestrationCommand({ command: startRun(["read"]), readModel });
-      expect(started).toMatchObject({ type: "channel.run-started" });
+      expect(
+        yield* decide(readModel, startChannelRun(backend, "general", "run-thread")),
+      ).toMatchObject([{ type: "channel.run-started" }]);
 
       const refused = yield* Effect.flip(
-        decideOrchestrationCommand({ command: startRun(["read", "write"]), readModel }),
+        decide(readModel, startChannelRun(backend, "general", "run-thread", ["read", "write"])),
       );
       expect(refused.message).toContain("read-only");
     }),
@@ -239,80 +164,31 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
         createChannel("general", "channel", [backend]),
       ]);
 
-      const posted = yield* decideOrchestrationCommand({
-        command: {
-          type: "channel.message.agent.post",
-          commandId: CommandId.make("cmd-reply"),
-          channelId: ChannelId.make("general"),
-          messageId: MessageId.make("reply-1"),
-          agentId: backend,
-          runThreadId: ThreadId.make("run-thread"),
-          body: "It is REST.",
-          createdAt: now,
-        },
-        readModel,
+      const posted = yield* decide(readModel, {
+        type: "channel.message.agent.post",
+        commandId: nextCommandId(),
+        channelId: ChannelId.make("general"),
+        messageId: MessageId.make("reply-1"),
+        agentId: backend,
+        runThreadId: ThreadId.make("run-thread"),
+        body: "It is REST.",
+        createdAt: now,
       });
 
-      expect(posted).toMatchObject({
-        type: "channel.message-posted",
-        payload: { authorKind: "agent", authorId: backend, runThreadId: "run-thread" },
-      });
+      expect(posted).toMatchObject([
+        {
+          type: "channel.message-posted",
+          payload: { authorKind: "agent", authorId: backend, runThreadId: "run-thread" },
+        },
+      ]);
     }),
   );
-
-  const reviewer = AgentId.make("agent-reviewer");
-  const writer = AgentId.make("agent-writer");
-
-  const startRun = (
-    agentId: AgentId,
-    channelId: string,
-    threadId: string,
-  ): OrchestrationCommand => ({
-    type: "channel.run.start",
-    commandId: CommandId.make(`cmd-run-${threadId}`),
-    threadId: ThreadId.make(threadId),
-    channelId: ChannelId.make(channelId),
-    agentId,
-    triggerMessageId: MessageId.make("message-trigger"),
-    capabilities: ["read"],
-    context: {
-      agent: { id: agentId, name: "agent", rolePrompt: "" },
-      channel: { id: ChannelId.make(channelId), kind: "channel", name: channelId, topic: "" },
-      pinnedSpec: "",
-      wakeDepth: 30,
-      history: [],
-      trigger: {
-        messageId: MessageId.make("message-trigger"),
-        authorKind: "human",
-        authorName: "user",
-        body: "hi",
-        createdAt: now,
-      },
-    },
-    rendered: { systemPrompt: "", firstMessage: "hi" },
-    startedAt: now,
-  });
-
-  // Decides a human post after `commands`, always as a list of events.
-  const decidePost = (
-    commands: ReadonlyArray<OrchestrationCommand>,
-    channelId: string,
-    body: string,
-  ) =>
-    Effect.gen(function* () {
-      const readModel = yield* applyCommands(commands);
-      const decided = yield* decideOrchestrationCommand({
-        command: postMessage(channelId, body),
-        readModel,
-      });
-      return Array.isArray(decided) ? decided : [decided];
-    });
 
   it.effect("wakes exactly the member agents a message mentions, and nobody otherwise", () =>
     Effect.gen(function* () {
       const base = [
         ...setup,
-        createAgent(reviewer, "reviewer"),
+        createAgent(reviewer),
         createChannel("general", "channel", [backend, frontend]),
       ];
 
@@ -360,7 +236,7 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
         ...setup,
         createChannel("general", "channel", [backend]),
         createChannel("other", "channel", [backend]),
-        startRun(backend, "other", "run-other"),
+        startChannelRun(backend, "other", "run-other"),
       ];
 
       const elsewhere = yield* decidePost(base, "general", "@backend ping");
@@ -384,53 +260,19 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
     Effect.gen(function* () {
       const base = [
         ...setup,
-        createAgent(reviewer, "reviewer"),
-        createAgent(writer, "writer"),
+        createAgent(reviewer),
+        createAgent(writer),
         createChannel("general", "channel", [backend, frontend, reviewer, writer]),
-        startRun(backend, "general", "run-1"),
-        startRun(frontend, "general", "run-2"),
-        startRun(reviewer, "general", "run-3"),
+        startChannelRun(backend, "general", "run-1"),
+        startChannelRun(frontend, "general", "run-2"),
+        startChannelRun(reviewer, "general", "run-3"),
       ];
 
       const capped = yield* decidePost(base, "general", "@writer help");
       expect(capped[1]).toMatchObject({ payload: { authorKind: "system" } });
 
-      const threadId = ThreadId.make("run-1");
       const freed = yield* decidePost(
-        [
-          ...base,
-          {
-            type: "thread.create",
-            commandId: CommandId.make("cmd-thread-run-1"),
-            threadId,
-            projectId,
-            title: "@backend in #general",
-            modelSelection: {
-              instanceId: ProviderInstanceId.make("claudeAgent"),
-              model: "claude-haiku-4-5",
-            },
-            runtimeMode: "approval-required",
-            interactionMode: "default",
-            branch: null,
-            worktreePath: null,
-            createdAt: now,
-          },
-          {
-            type: "thread.session.set",
-            commandId: CommandId.make("cmd-stop-run-1"),
-            threadId,
-            session: {
-              threadId,
-              status: "stopped",
-              providerName: "claudeAgent",
-              runtimeMode: "approval-required",
-              activeTurnId: null,
-              lastError: null,
-              updatedAt: now,
-            },
-            createdAt: now,
-          },
-        ],
+        [...base, createThread("run-1"), setSession("run-1", "stopped")],
         "general",
         "@writer help",
       );
@@ -446,14 +288,9 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
       const base = [...setup, createChannel("general", "channel", [backend])];
 
       const readModel = yield* applyCommands(base);
-      const posted = yield* decideOrchestrationCommand({
-        command: postMessage("general", "hello"),
-        readModel,
-      });
-      expect(posted).toMatchObject({
-        type: "channel.message-posted",
-        payload: { authorKind: "human", body: "hello" },
-      });
+      expect(yield* decide(readModel, postMessage("general", "hello"))).toMatchObject([
+        { type: "channel.message-posted", payload: { authorKind: "human", body: "hello" } },
+      ]);
 
       yield* Effect.flip(
         applyCommands([
@@ -470,39 +307,43 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
       ]);
     }),
   );
-  it.effect("wakes only the channel's lead on a message that mentions no one; a mention bypasses it", () =>
-    Effect.gen(function* () {
-      const lead = AgentId.make("agent-lead");
-      const withLead = (
-        id: string,
-        kind: "channel" | "dm",
-        members: ReadonlyArray<AgentId>,
-        leadAgentId: AgentId,
-      ) => ({ ...createChannel(id, kind, members), leadAgentId }) as OrchestrationCommand;
-      const base = [...setup, createAgent(lead, "lead"), withLead("triage", "channel", [backend], lead)];
+  it.effect(
+    "wakes only the channel's lead on a message that mentions no one; a mention bypasses it",
+    () =>
+      Effect.gen(function* () {
+        const lead = AgentId.make("agent-lead");
+        const base = [
+          ...setup,
+          createAgent(lead),
+          createChannel("triage", "channel", [backend], lead),
+        ];
 
-      const unmentioned = yield* decidePost(base, "triage", "the export button is broken");
-      expect(unmentioned.map((event) => event.type)).toEqual([
-        "channel.message-posted",
-        "channel.agent-wake-requested",
-      ]);
-      expect(unmentioned[1]).toMatchObject({ payload: { agentId: lead } });
+        const unmentioned = yield* decidePost(base, "triage", "the export button is broken");
+        expect(unmentioned.map((event) => event.type)).toEqual([
+          "channel.message-posted",
+          "channel.agent-wake-requested",
+        ]);
+        expect(unmentioned[1]).toMatchObject({ payload: { agentId: lead } });
 
-      const mentioned = yield* decidePost(base, "triage", "@backend the export button is broken");
-      expect(mentioned.map((event) => event.type)).toEqual([
-        "channel.message-posted",
-        "channel.agent-wake-requested",
-      ]);
-      expect(mentioned[1]).toMatchObject({ payload: { agentId: backend } });
+        const mentioned = yield* decidePost(base, "triage", "@backend the export button is broken");
+        expect(mentioned.map((event) => event.type)).toEqual([
+          "channel.message-posted",
+          "channel.agent-wake-requested",
+        ]);
+        expect(mentioned[1]).toMatchObject({ payload: { agentId: backend } });
 
-      const member = yield* Effect.flip(
-        applyCommands([...setup, withLead("both", "channel", [backend], backend)]),
-      );
-      expect(member.message).toContain("a lead is not a member");
-      const dm = yield* Effect.flip(
-        applyCommands([...setup, createAgent(lead, "lead"), withLead("dm-lead", "dm", [backend], lead)]),
-      );
-      expect(dm.message).toContain("Only a channel can have a lead");
-    }),
+        const member = yield* Effect.flip(
+          applyCommands([...setup, createChannel("both", "channel", [backend], backend)]),
+        );
+        expect(member.message).toContain("a lead is not a member");
+        const dm = yield* Effect.flip(
+          applyCommands([
+            ...setup,
+            createAgent(lead),
+            createChannel("dm-lead", "dm", [backend], lead),
+          ]),
+        );
+        expect(dm.message).toContain("Only a channel can have a lead");
+      }),
   );
 });
