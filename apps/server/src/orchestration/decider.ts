@@ -90,7 +90,9 @@ function channelLeadProblem(input: {
 }): string | null {
   if (input.leadAgentId === null) return null;
   if (input.kind !== "channel") return "Only a channel can have a lead, not a DM.";
-  const agent = (input.readModel.agents ?? []).find((candidate) => candidate.id === input.leadAgentId);
+  const agent = (input.readModel.agents ?? []).find(
+    (candidate) => candidate.id === input.leadAgentId,
+  );
   if (agent === undefined || agent.projectId !== input.projectId || agent.archivedAt !== null) {
     return "A channel's lead must be an active agent of its project.";
   }
@@ -220,6 +222,36 @@ type DecideOrchestrationCommandResult =
   | PlannedOrchestrationEvent
   | ReadonlyArray<PlannedOrchestrationEvent>;
 
+/** The event body `planned` stamps; each event type keeps its own payload shape. */
+type PlannedEventBody<Event = OrchestrationEvent> = Event extends OrchestrationEvent
+  ? Pick<Event, "type" | "payload">
+  : never;
+
+/** Plans one event on an aggregate, correlated with the command that caused it. */
+const planned = (
+  command: Pick<OrchestrationCommand, "commandId">,
+  aggregateKind: OrchestrationEvent["aggregateKind"],
+  aggregateId: OrchestrationEvent["aggregateId"],
+  occurredAt: string,
+  event: PlannedEventBody,
+): Effect.Effect<PlannedOrchestrationEvent, PlatformError.PlatformError, Crypto.Crypto> =>
+  withEventBase({ aggregateKind, aggregateId, occurredAt, commandId: command.commandId }).pipe(
+    Effect.map((base) => ({ ...base, ...event })),
+  );
+
+/** Refuses a command that breaks an invariant. The detail reaches people and agents as written. */
+const refuse = (command: Pick<OrchestrationCommand, "type">, detail: string) =>
+  new OrchestrationCommandInvariantError({ commandType: command.type, detail });
+
+/** The card, refusing the command with `finishedReason` once the card has landed or been abandoned. */
+const requireLiveCard = (input: Parameters<typeof requireCard>[0], finishedReason: string) =>
+  requireCard(input).pipe(
+    Effect.filterOrFail(
+      (card) => !isFinishedCardStatus(card.status),
+      () => refuse(input.command, finishedReason),
+    ),
+  );
+
 /** A card status command: the rules derive the target status, never the client. */
 const decideCardMove = Effect.fn("decideCardMove")(function* (input: {
   readonly readModel: OrchestrationReadModel;
@@ -238,19 +270,10 @@ const decideCardMove = Effect.fn("decideCardMove")(function* (input: {
   });
   const result = nextCardStatus(cardFactsOf(input.readModel.cards ?? [], card), input.move);
   if (!result.ok) {
-    return yield* new OrchestrationCommandInvariantError({
-      commandType: input.command.type,
-      detail: result.reason,
-    });
+    return yield* refuse(input.command, result.reason);
   }
   const occurredAt = yield* nowIso;
-  return {
-    ...(yield* withEventBase({
-      aggregateKind: "card",
-      aggregateId: card.id,
-      occurredAt,
-      commandId: input.command.commandId,
-    })),
+  return yield* planned(input.command, "card", card.id, occurredAt, {
     type: "card.status-changed",
     payload: {
       cardId: card.id,
@@ -260,7 +283,7 @@ const decideCardMove = Effect.fn("decideCardMove")(function* (input: {
       ...(input.reason !== undefined ? { reason: input.reason } : {}),
       updatedAt: occurredAt,
     },
-  };
+  });
 });
 
 const decideCommandSequence = Effect.fn("decideCommandSequence")(function* ({
@@ -307,7 +330,8 @@ const budgetCardOf = (readModel: OrchestrationReadModel, card: OrchestrationCard
 const liveOwnerRun = (readModel: OrchestrationReadModel, cardId: CardId) =>
   (readModel.liveRuns ?? []).find((run) => run.cardId === cardId && run.role === "owner");
 
-const FINISHED_CARD_SESSION_REASON = "A card that has landed or been abandoned takes no new sessions.";
+const FINISHED_CARD_SESSION_REASON =
+  "A card that has landed or been abandoned takes no new sessions.";
 // Invariant 12: no writing before the plan gate.
 const PLAN_GATE_REASON = "Approve or skip the card's spec before an agent writes to it.";
 const SPEC_DECISION_TARGET = {
@@ -1402,12 +1426,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         budgetRun === undefined
           ? undefined
           : readModel.cards?.find((candidate) => candidate.id === budgetRun.cardId);
-      const budgetRefusal = budgetCard === undefined ? null : cardBudgetRefusal(budgetCardOf(readModel, budgetCard));
+      const budgetRefusal =
+        budgetCard === undefined ? null : cardBudgetRefusal(budgetCardOf(readModel, budgetCard));
       if (budgetRefusal !== null) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: budgetRefusal,
-        });
+        return yield* refuse(command, budgetRefusal);
       }
       const sourceProposedPlan = command.sourceProposedPlan;
       const sourceThread = sourceProposedPlan
@@ -2165,13 +2187,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         projectId: command.projectId,
         name: command.name,
       });
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "agent",
-          aggregateId: command.agentId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "agent", command.agentId, command.createdAt, {
         type: "agent.created",
         payload: {
           agentId: command.agentId,
@@ -2185,7 +2201,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
-      };
+      });
     }
 
     case "agent.update": {
@@ -2204,13 +2220,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         });
       }
       const occurredAt = yield* nowIso;
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "agent",
-          aggregateId: command.agentId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "agent", command.agentId, occurredAt, {
         type: "agent.updated",
         payload: {
           agentId: command.agentId,
@@ -2224,7 +2234,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.capabilities !== undefined ? { capabilities: command.capabilities } : {}),
           updatedAt: occurredAt,
         },
-      };
+      });
     }
 
     case "agent.archive": {
@@ -2234,25 +2244,16 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         agentId: command.agentId,
       });
       if (agent.archivedAt !== null) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: `Agent '${command.agentId}' is already archived.`,
-        });
+        return yield* refuse(command, `Agent '${command.agentId}' is already archived.`);
       }
       const occurredAt = yield* nowIso;
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "agent",
-          aggregateId: command.agentId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "agent", command.agentId, occurredAt, {
         type: "agent.archived",
         payload: {
           agentId: command.agentId,
           archivedAt: occurredAt,
         },
-      };
+      });
     }
 
     case "agent.unarchive": {
@@ -2262,25 +2263,16 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         agentId: command.agentId,
       });
       if (agent.archivedAt === null) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: `Agent '${command.agentId}' is not archived.`,
-        });
+        return yield* refuse(command, `Agent '${command.agentId}' is not archived.`);
       }
       const occurredAt = yield* nowIso;
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "agent",
-          aggregateId: command.agentId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "agent", command.agentId, occurredAt, {
         type: "agent.unarchived",
         payload: {
           agentId: command.agentId,
           updatedAt: occurredAt,
         },
-      };
+      });
     }
 
     case "card.create": {
@@ -2301,34 +2293,25 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           (channel) => channel.id === channelId && channel.projectId === command.projectId,
         )
       ) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: `Channel '${channelId}' is not in project '${command.projectId}'.`,
-        });
+        return yield* refuse(
+          command,
+          `Channel '${channelId}' is not in project '${command.projectId}'.`,
+        );
       }
       const parentCardId = command.parentCardId ?? null;
       if (parentCardId !== null) {
         const parent = yield* requireCard({ readModel, command, cardId: parentCardId });
         if (parent.projectId !== command.projectId) {
-          return yield* new OrchestrationCommandInvariantError({
-            commandType: command.type,
-            detail: `Parent card '${parentCardId}' is in another project.`,
-          });
+          return yield* refuse(command, `Parent card '${parentCardId}' is in another project.`);
         }
         if (isFinishedCardStatus(parent.status)) {
-          return yield* new OrchestrationCommandInvariantError({
-            commandType: command.type,
-            detail: "A sub-card cannot be added to a card that has landed or been abandoned.",
-          });
+          return yield* refuse(
+            command,
+            "A sub-card cannot be added to a card that has landed or been abandoned.",
+          );
         }
       }
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "card",
-          aggregateId: command.cardId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "card", command.cardId, command.createdAt, {
         type: "card.created",
         payload: {
           cardId: command.cardId,
@@ -2347,41 +2330,30 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
-      };
+      });
     }
 
     case "card.update": {
-      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
-      if (isFinishedCardStatus(card.status)) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: "A card that has landed or been abandoned cannot be edited.",
-        });
-      }
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        "A card that has landed or been abandoned cannot be edited.",
+      );
       const occurredAt = yield* nowIso;
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "card",
-          aggregateId: command.cardId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "card", command.cardId, occurredAt, {
         type: "card.updated",
         payload: {
           cardId: command.cardId,
           ...(command.title !== undefined ? { title: command.title } : {}),
           ...(command.spec !== undefined ? { spec: command.spec } : {}),
           // Changing an approved or skipped spec sends it back through the plan gate.
-          ...(command.spec !== undefined &&
-          command.spec !== card.spec &&
-          card.specState !== "draft"
+          ...(command.spec !== undefined && command.spec !== card.spec && card.specState !== "draft"
             ? { specState: "draft" as const }
             : {}),
           ...(command.tags !== undefined ? { tags: command.tags } : {}),
           ...(command.priority !== undefined ? { priority: command.priority } : {}),
           updatedAt: occurredAt,
         },
-      };
+      });
     }
 
     case "card.approve":
@@ -2392,10 +2364,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       // Invariant 16: an attempt lands only by being promoted into its card.
       const attempt = yield* requireCard({ readModel, command, cardId: command.cardId });
       if (attempt.attemptGroupId !== null) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: "An attempt lands only by being promoted into its card.",
-        });
+        return yield* refuse(command, "An attempt lands only by being promoted into its card.");
       }
       return yield* decideCardMove({ readModel, command, move: "approveMerge" });
     }
@@ -2426,23 +2395,17 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       if (command.type === "card.assign") {
         const agent = yield* requireAgent({ readModel, command, agentId: command.agentId });
         if (agent.projectId !== card.projectId || agent.archivedAt !== null) {
-          return yield* new OrchestrationCommandInvariantError({
-            commandType: command.type,
-            detail: `Agent '${agent.id}' is not an active agent of this card's project.`,
-          });
+          return yield* refuse(
+            command,
+            `Agent '${agent.id}' is not an active agent of this card's project.`,
+          );
         }
         if (card.delegateAgentId === agent.id) {
-          return yield* new OrchestrationCommandInvariantError({
-            commandType: command.type,
-            detail: `@${agent.name} is already assigned to this card.`,
-          });
+          return yield* refuse(command, `@${agent.name} is already assigned to this card.`);
         }
         delegateAgentId = agent.id;
       } else if (card.delegateAgentId === null) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: "No agent is assigned to this card.",
-        });
+        return yield* refuse(command, "No agent is assigned to this card.");
       }
       // An idle owner session is stopped and handed off; one mid-turn holds the card.
       const owner = liveOwnerRun(readModel, card.id);
@@ -2450,28 +2413,22 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         owner === undefined
           ? undefined
           : readModel.threads.find((thread) => thread.id === owner.threadId);
-      const allowed = canChangeDelegate(card, (ownerThread?.session?.activeTurnId ?? null) !== null);
+      const allowed = canChangeDelegate(
+        card,
+        (ownerThread?.session?.activeTurnId ?? null) !== null,
+      );
       if (!allowed.ok) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: allowed.reason,
-        });
+        return yield* refuse(command, allowed.reason);
       }
       const occurredAt = yield* nowIso;
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "card",
-          aggregateId: command.cardId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "card", command.cardId, occurredAt, {
         type: "card.delegate-changed",
         payload: {
           cardId: command.cardId,
           delegateAgentId,
           updatedAt: occurredAt,
         },
-      };
+      });
     }
 
     case "card.relation.add":
@@ -2493,51 +2450,31 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
                   ? "These cards already have that relation."
                   : null;
         if (problem !== null) {
-          return yield* new OrchestrationCommandInvariantError({
-            commandType: command.type,
-            detail: problem,
-          });
+          return yield* refuse(command, problem);
         }
       } else if (!exists) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: "These cards do not have that relation.",
-        });
+        return yield* refuse(command, "These cards do not have that relation.");
       }
       const occurredAt = yield* nowIso;
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "card",
-          aggregateId: command.cardId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
-        type: command.type === "card.relation.add" ? "card.relation-added" : "card.relation-removed",
+      return yield* planned(command, "card", command.cardId, occurredAt, {
+        type:
+          command.type === "card.relation.add" ? "card.relation-added" : "card.relation-removed",
         payload: {
           cardId: command.cardId,
           kind: command.kind,
           otherCardId: command.otherCardId,
           updatedAt: occurredAt,
         },
-      };
+      });
     }
 
     case "card.workspace.set": {
-      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
-      if (isFinishedCardStatus(card.status)) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: "A card that has landed or been abandoned cannot get a workspace.",
-        });
-      }
+      yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        "A card that has landed or been abandoned cannot get a workspace.",
+      );
       const occurredAt = yield* nowIso;
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "card",
-          aggregateId: command.cardId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "card", command.cardId, occurredAt, {
         type: "card.workspace-set",
         payload: {
           cardId: command.cardId,
@@ -2546,42 +2483,27 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           portBase: command.portBase,
           updatedAt: occurredAt,
         },
-      };
+      });
     }
 
     case "card.workspace.clear": {
       const card = yield* requireCard({ readModel, command, cardId: command.cardId });
       if (card.worktreePath === null) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: "This card has no workspace to clear.",
-        });
+        return yield* refuse(command, "This card has no workspace to clear.");
       }
       const occurredAt = yield* nowIso;
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "card",
-          aggregateId: command.cardId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "card", command.cardId, occurredAt, {
         type: "card.workspace-cleared",
         payload: {
           cardId: command.cardId,
           updatedAt: occurredAt,
         },
-      };
+      });
     }
 
     case "card.decision.record": {
       yield* requireCard({ readModel, command, cardId: command.cardId });
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "card",
-          aggregateId: command.cardId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "card", command.cardId, command.createdAt, {
         type: "card.decision-recorded",
         payload: {
           cardId: command.cardId,
@@ -2590,7 +2512,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           text: command.text,
           createdAt: command.createdAt,
         },
-      };
+      });
     }
 
     // Invariants 5 and 15: a Linear issue enters as a triage card; only a person's delegation in
@@ -2608,20 +2530,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       yield* requireProject({ readModel, command, projectId: command.projectId });
       yield* requireCardAbsent({ readModel, command, cardId: command.cardId });
       if ((readModel.cards ?? []).some((card) => card.linearIssue?.id === command.issue.id)) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: `Linear issue ${command.issue.identifier} already has a card.`,
-        });
+        return yield* refuse(
+          command,
+          `Linear issue ${command.issue.identifier} already has a card.`,
+        );
       }
-      const eventBase = withEventBase({
-        aggregateKind: "card",
-        aggregateId: command.cardId,
-        occurredAt: command.createdAt,
-        commandId: command.commandId,
-      });
       return [
-        {
-          ...(yield* eventBase),
+        yield* planned(command, "card", command.cardId, command.createdAt, {
           type: "card.created",
           payload: {
             cardId: command.cardId,
@@ -2640,12 +2555,11 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             createdAt: command.createdAt,
             updatedAt: command.createdAt,
           },
-        },
-        {
-          ...(yield* eventBase),
+        }),
+        yield* planned(command, "card", command.cardId, command.createdAt, {
           type: "card.linear-synced",
           payload: { cardId: command.cardId, issue: command.issue, syncedAt: command.createdAt },
-        },
+        }),
       ];
     }
 
@@ -2657,21 +2571,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           (other) => other.id !== card.id && other.linearIssue?.id === command.issue.id,
         )
       ) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: "A card has at most one Linear issue, and an issue at most one card.",
-        });
+        return yield* refuse(
+          command,
+          "A card has at most one Linear issue, and an issue at most one card.",
+        );
       }
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "card",
-          aggregateId: command.cardId,
-          occurredAt: command.syncedAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "card", command.cardId, command.syncedAt, {
         type: "card.linear-synced",
         payload: { cardId: command.cardId, issue: command.issue, syncedAt: command.syncedAt },
-      };
+      });
     }
 
     // Invariant 5: a card an agent proposes enters triage; only a person promotes it.
@@ -2679,48 +2587,40 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       yield* requireProject({ readModel, command, projectId: command.projectId });
       yield* requireCardAbsent({ readModel, command, cardId: command.cardId });
       const agent = yield* requireAgent({ readModel, command, agentId: command.agentId });
-      const refuse = (detail: string) =>
-        new OrchestrationCommandInvariantError({ commandType: command.type, detail });
       if (agent.projectId !== command.projectId || agent.archivedAt !== null) {
-        return yield* refuse(`@${agent.name} isn't an active agent of this project.`);
+        return yield* refuse(command, `@${agent.name} isn't an active agent of this project.`);
       }
       const channelId = command.channelId ?? null;
       const channel =
         channelId === null
           ? undefined
           : (readModel.channels ?? []).find(
-              (candidate) => candidate.id === channelId && candidate.projectId === command.projectId,
+              (candidate) =>
+                candidate.id === channelId && candidate.projectId === command.projectId,
             );
       if (channelId !== null && channel === undefined) {
-        return yield* refuse(`Channel '${channelId}' is not in this project.`);
+        return yield* refuse(command, `Channel '${channelId}' is not in this project.`);
       }
       const lead = command.lead;
       if (lead !== undefined && channel?.leadAgentId !== agent.id) {
-        return yield* refuse(`@${agent.name} doesn't lead this channel.`);
+        return yield* refuse(command, `@${agent.name} doesn't lead this channel.`);
       }
       const parentCardId = command.parentCardId ?? null;
       if (parentCardId !== null) {
         const parent = yield* requireCard({ readModel, command, cardId: parentCardId });
         if (parent.projectId !== command.projectId || isFinishedCardStatus(parent.status)) {
-          return yield* refuse("A sub-card needs a live card of the same project.");
+          return yield* refuse(command, "A sub-card needs a live card of the same project.");
         }
       }
       const duplicateIds = [...new Set(lead?.likelyDuplicateCardIds ?? [])];
       for (const duplicateId of duplicateIds) {
         const duplicate = (readModel.cards ?? []).find((card) => card.id === duplicateId);
         if (duplicate === undefined || duplicate.projectId !== command.projectId) {
-          return yield* refuse(`Card '${duplicateId}' is not a card of this project.`);
+          return yield* refuse(command, `Card '${duplicateId}' is not a card of this project.`);
         }
       }
-      const eventBase = withEventBase({
-        aggregateKind: "card",
-        aggregateId: command.cardId,
-        occurredAt: command.createdAt,
-        commandId: command.commandId,
-      });
       const author = { kind: lead === undefined ? "agent" : "lead", id: agent.id } as const;
-      const created: PlannedOrchestrationEvent = {
-        ...(yield* eventBase),
+      const created = yield* planned(command, "card", command.cardId, command.createdAt, {
         type: "card.created",
         payload: {
           cardId: command.cardId,
@@ -2740,15 +2640,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
-      };
+      });
       if (lead === undefined) {
         return created;
       }
       // A lead's proposal carries why it was made and what it may duplicate, for triage to judge.
       const events: PlannedOrchestrationEvent[] = [
         created,
-        {
-          ...(yield* eventBase),
+        yield* planned(command, "card", command.cardId, command.createdAt, {
           type: "card.decision-recorded",
           payload: {
             cardId: command.cardId,
@@ -2757,19 +2656,20 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             text: lead.reasoning,
             createdAt: command.createdAt,
           },
-        },
+        }),
       ];
       for (const otherCardId of duplicateIds) {
-        events.push({
-          ...(yield* eventBase),
-          type: "card.relation-added",
-          payload: {
-            cardId: command.cardId,
-            kind: "duplicateOf",
-            otherCardId,
-            updatedAt: command.createdAt,
-          },
-        });
+        events.push(
+          yield* planned(command, "card", command.cardId, command.createdAt, {
+            type: "card.relation-added",
+            payload: {
+              cardId: command.cardId,
+              kind: "duplicateOf",
+              otherCardId,
+              updatedAt: command.createdAt,
+            },
+          }),
+        );
       }
       return events;
     }
@@ -2783,18 +2683,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           (run) => run.cardId === card.id && run.agentId === agent.id,
         );
       if (!working) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: `@${agent.name} isn't working on this card, so it cannot record its decisions.`,
-        });
+        return yield* refuse(
+          command,
+          `@${agent.name} isn't working on this card, so it cannot record its decisions.`,
+        );
       }
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "card",
-          aggregateId: command.cardId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "card", command.cardId, command.createdAt, {
         type: "card.decision-recorded",
         payload: {
           cardId: command.cardId,
@@ -2803,18 +2697,16 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           text: command.text,
           createdAt: command.createdAt,
         },
-      };
+      });
     }
 
     case "card.attempts.start": {
       const parent = yield* requireCard({ readModel, command, cardId: command.cardId });
-      const refuse = (detail: string) =>
-        new OrchestrationCommandInvariantError({ commandType: command.type, detail });
       if (parent.status !== "ready") {
-        return yield* refuse("Attempts start on a ready card, before its work begins.");
+        return yield* refuse(command, "Attempts start on a ready card, before its work begins.");
       }
       if (parent.attemptGroupId !== null) {
-        return yield* refuse("An attempt cannot run attempts of its own.");
+        return yield* refuse(command, "An attempt cannot run attempts of its own.");
       }
       if (
         (readModel.cards ?? []).some(
@@ -2824,22 +2716,23 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             !isFinishedCardStatus(card.status),
         )
       ) {
-        return yield* refuse("The card already has attempts running.");
+        return yield* refuse(command, "The card already has attempts running.");
       }
       if (
         command.attempts.length < CARD_ATTEMPTS_MIN ||
         command.attempts.length > CARD_ATTEMPTS_MAX
       ) {
         return yield* refuse(
+          command,
           `Start between ${CARD_ATTEMPTS_MIN} and ${CARD_ATTEMPTS_MAX} attempts.`,
         );
       }
       if (parent.specState === "draft") {
-        return yield* refuse(PLAN_GATE_REASON);
+        return yield* refuse(command, PLAN_GATE_REASON);
       }
       const overBudget = cardBudgetRefusal(parent);
       if (overBudget !== null) {
-        return yield* refuse(overBudget);
+        return yield* refuse(command, overBudget);
       }
       const attemptGroupId = `attempts:${command.commandId}`;
       const events: PlannedOrchestrationEvent[] = [];
@@ -2847,82 +2740,70 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         yield* requireCardAbsent({ readModel, command, cardId: attempt.cardId });
         const agent = yield* requireAgent({ readModel, command, agentId: attempt.agentId });
         if (agent.projectId !== parent.projectId || agent.archivedAt !== null) {
-          return yield* refuse(`@${agent.name} isn't an active agent of this card's project.`);
+          return yield* refuse(
+            command,
+            `@${agent.name} isn't an active agent of this card's project.`,
+          );
         }
-        const attemptEventBase = () =>
-          withEventBase({
-            aggregateKind: "card",
-            aggregateId: attempt.cardId,
-            occurredAt: command.createdAt,
-            commandId: command.commandId,
-          });
-        events.push({
-          ...(yield* attemptEventBase()),
-          type: "card.created",
-          payload: {
-            cardId: attempt.cardId,
-            attemptGroupId,
-            projectId: parent.projectId,
-            channelId: parent.channelId,
-            parentCardId: parent.id,
-            title: `${parent.title} · attempt ${index + 1}`,
-            spec: parent.spec,
-            specState: parent.specState,
-            tags: parent.tags,
-            // Approved with its card: an attempt is the card's own work, not a proposal.
-            status: "ready",
-            ownerHumanId: parent.ownerHumanId,
-            baseBranch: parent.baseBranch,
-            createdBy: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
-            createdAt: command.createdAt,
-            updatedAt: command.createdAt,
-          },
-        });
-        events.push({
-          ...(yield* attemptEventBase()),
-          type: "card.delegate-changed",
-          payload: {
-            cardId: attempt.cardId,
-            delegateAgentId: agent.id,
-            updatedAt: command.createdAt,
-          },
-        });
+        events.push(
+          yield* planned(command, "card", attempt.cardId, command.createdAt, {
+            type: "card.created",
+            payload: {
+              cardId: attempt.cardId,
+              attemptGroupId,
+              projectId: parent.projectId,
+              channelId: parent.channelId,
+              parentCardId: parent.id,
+              title: `${parent.title} · attempt ${index + 1}`,
+              spec: parent.spec,
+              specState: parent.specState,
+              tags: parent.tags,
+              // Approved with its card: an attempt is the card's own work, not a proposal.
+              status: "ready",
+              ownerHumanId: parent.ownerHumanId,
+              baseBranch: parent.baseBranch,
+              createdBy: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
+              createdAt: command.createdAt,
+              updatedAt: command.createdAt,
+            },
+          }),
+        );
+        events.push(
+          yield* planned(command, "card", attempt.cardId, command.createdAt, {
+            type: "card.delegate-changed",
+            payload: {
+              cardId: attempt.cardId,
+              delegateAgentId: agent.id,
+              updatedAt: command.createdAt,
+            },
+          }),
+        );
       }
       return events;
     }
 
     case "card.attempt.promote": {
       const attempt = yield* requireCard({ readModel, command, cardId: command.cardId });
-      const refuse = (detail: string) =>
-        new OrchestrationCommandInvariantError({ commandType: command.type, detail });
       if (attempt.attemptGroupId === null || attempt.parentCardId === null) {
-        return yield* refuse("Only an attempt can be promoted.");
+        return yield* refuse(command, "Only an attempt can be promoted.");
       }
       if (isFinishedCardStatus(attempt.status)) {
-        return yield* refuse("That attempt was already promoted or dropped.");
+        return yield* refuse(command, "That attempt was already promoted or dropped.");
       }
       if (attempt.branch === null || attempt.worktreePath === null || attempt.portBase === null) {
-        return yield* refuse("The attempt has no work to promote yet.");
+        return yield* refuse(command, "The attempt has no work to promote yet.");
       }
-      const parent = yield* requireCard({ readModel, command, cardId: attempt.parentCardId });
-      if (isFinishedCardStatus(parent.status)) {
-        return yield* refuse("A card that has landed or been abandoned takes no attempt.");
-      }
+      const parent = yield* requireLiveCard(
+        { readModel, command, cardId: attempt.parentCardId },
+        "A card that has landed or been abandoned takes no attempt.",
+      );
       if (parent.worktreePath !== null) {
-        return yield* refuse("The card already has its branch.");
+        return yield* refuse(command, "The card already has its branch.");
       }
       const occurredAt = yield* nowIso;
-      const eventBase = (cardId: CardId) =>
-        withEventBase({
-          aggregateKind: "card",
-          aggregateId: cardId,
-          occurredAt,
-          commandId: command.commandId,
-        });
       const events: PlannedOrchestrationEvent[] = [
         // The attempt's worktree becomes the card's; it is not torn down with the attempt.
-        {
-          ...(yield* eventBase(parent.id)),
+        yield* planned(command, "card", parent.id, occurredAt, {
           type: "card.workspace-set",
           payload: {
             cardId: parent.id,
@@ -2931,14 +2812,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             portBase: attempt.portBase,
             updatedAt: occurredAt,
           },
-        },
-        {
-          ...(yield* eventBase(attempt.id)),
+        }),
+        yield* planned(command, "card", attempt.id, occurredAt, {
           type: "card.workspace-cleared",
           payload: { cardId: attempt.id, updatedAt: occurredAt },
-        },
-        {
-          ...(yield* eventBase(parent.id)),
+        }),
+        yield* planned(command, "card", parent.id, occurredAt, {
           type: "card.decision-recorded",
           payload: {
             cardId: parent.id,
@@ -2947,38 +2826,41 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             text: `Promoted "${attempt.title}".`,
             createdAt: occurredAt,
           },
-        },
+        }),
       ];
       if (attempt.delegateAgentId !== null) {
-        events.push({
-          ...(yield* eventBase(parent.id)),
-          type: "card.delegate-changed",
-          payload: {
-            cardId: parent.id,
-            delegateAgentId: attempt.delegateAgentId,
-            updatedAt: occurredAt,
-          },
-        });
+        events.push(
+          yield* planned(command, "card", parent.id, occurredAt, {
+            type: "card.delegate-changed",
+            payload: {
+              cardId: parent.id,
+              delegateAgentId: attempt.delegateAgentId,
+              updatedAt: occurredAt,
+            },
+          }),
+        );
       }
       // Invariant 16: promoting drops every attempt of the group, the promoted one included.
       for (const sibling of (readModel.cards ?? []).filter(
-        (card) => card.attemptGroupId === attempt.attemptGroupId && !isFinishedCardStatus(card.status),
+        (card) =>
+          card.attemptGroupId === attempt.attemptGroupId && !isFinishedCardStatus(card.status),
       )) {
-        events.push({
-          ...(yield* eventBase(sibling.id)),
-          type: "card.status-changed",
-          payload: {
-            cardId: sibling.id,
-            from: sibling.status,
-            to: "abandoned",
-            move: "abandon",
-            reason:
-              sibling.id === attempt.id
-                ? "Promoted into its card."
-                : "Another attempt was promoted.",
-            updatedAt: occurredAt,
-          },
-        });
+        events.push(
+          yield* planned(command, "card", sibling.id, occurredAt, {
+            type: "card.status-changed",
+            payload: {
+              cardId: sibling.id,
+              from: sibling.status,
+              to: "abandoned",
+              move: "abandon",
+              reason:
+                sibling.id === attempt.id
+                  ? "Promoted into its card."
+                  : "Another attempt was promoted.",
+              updatedAt: occurredAt,
+            },
+          }),
+        );
       }
       return events;
     }
@@ -2986,18 +2868,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     case "card.spend.record": {
       yield* requireCard({ readModel, command, cardId: command.cardId });
       if (!Number.isFinite(command.costUsd) || command.costUsd < 0) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: "A turn's cost must be a finite amount of zero or more.",
-        });
+        return yield* refuse(command, "A turn's cost must be a finite amount of zero or more.");
       }
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "card",
-          aggregateId: command.cardId,
-          occurredAt: command.recordedAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "card", command.cardId, command.recordedAt, {
         type: "card.spend-recorded",
         payload: {
           cardId: command.cardId,
@@ -3008,29 +2881,20 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           costSource: command.costSource,
           recordedAt: command.recordedAt,
         },
-      };
+      });
     }
 
     // Only a person raises a card's cap (invariant 13).
     case "card.budget.set": {
       yield* requireCard({ readModel, command, cardId: command.cardId });
       if (!Number.isFinite(command.capUsd) || command.capUsd <= 0) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: "A budget cap must be a positive amount.",
-        });
+        return yield* refuse(command, "A budget cap must be a positive amount.");
       }
       const occurredAt = yield* nowIso;
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "card",
-          aggregateId: command.cardId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "card", command.cardId, occurredAt, {
         type: "card.budget-set",
         payload: { cardId: command.cardId, capUsd: command.capUsd, updatedAt: occurredAt },
-      };
+      });
     }
 
     case "card.unpriced.accept":
@@ -3038,36 +2902,24 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const card = yield* requireCard({ readModel, command, cardId: command.cardId });
       const accepts = command.type === "card.unpriced.accept";
       if (card.acceptsUnpriced === accepts) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: accepts
+        return yield* refuse(
+          command,
+          accepts
             ? "The card already runs its unpriced model uncapped."
             : "The card already holds its unpriced model for a person to accept.",
-        });
+        );
       }
       const occurredAt = yield* nowIso;
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "card",
-          aggregateId: command.cardId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "card", command.cardId, occurredAt, {
         type: "card.unpriced-accepted",
         payload: { cardId: command.cardId, accepts, updatedAt: occurredAt },
-      };
+      });
     }
 
     case "card.checks.record": {
       const card = yield* requireCard({ readModel, command, cardId: command.cardId });
       const previousFailures = card.checks?.failedRuns ?? 0;
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "card",
-          aggregateId: command.cardId,
-          occurredAt: command.updatedAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "card", command.cardId, command.updatedAt, {
         type: "card.checks-updated",
         payload: {
           cardId: command.cardId,
@@ -3084,7 +2936,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             updatedAt: command.updatedAt,
           },
         },
-      };
+      });
     }
 
     // Invariant 8: overlaps are flagged by the server when a card lands.
@@ -3092,29 +2944,17 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const card = yield* requireCard({ readModel, command, cardId: command.cardId });
       const other = yield* requireCard({ readModel, command, cardId: command.otherCardId });
       if (other.id === card.id || other.projectId !== card.projectId) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: "Only two different cards of one project can overlap.",
-        });
+        return yield* refuse(command, "Only two different cards of one project can overlap.");
       }
       if (
         card.relations.some(
           (relation) => relation.kind === "overlaps" && relation.cardId === other.id,
         )
       ) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: "These cards are already flagged as overlapping.",
-        });
+        return yield* refuse(command, "These cards are already flagged as overlapping.");
       }
       const occurredAt = yield* nowIso;
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "card",
-          aggregateId: command.cardId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "card", command.cardId, occurredAt, {
         type: "card.relation-added",
         payload: {
           cardId: command.cardId,
@@ -3122,24 +2962,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           otherCardId: command.otherCardId,
           updatedAt: occurredAt,
         },
-      };
+      });
     }
 
     case "card.review.comment": {
-      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
-      if (isFinishedCardStatus(card.status)) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: "A card that has landed or been abandoned takes no review comments.",
-        });
-      }
-      const comment: PlannedOrchestrationEvent = {
-        ...(yield* withEventBase({
-          aggregateKind: "card",
-          aggregateId: command.cardId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        "A card that has landed or been abandoned takes no review comments.",
+      );
+      const comment = yield* planned(command, "card", command.cardId, command.createdAt, {
         type: "card.message-posted",
         payload: {
           cardId: command.cardId,
@@ -3151,7 +2982,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           forOwner: true,
           createdAt: command.createdAt,
         },
-      };
+      });
       // A comment on a card in review sends it back to work, with the comment as its next turn.
       return card.status === "inReview" || card.status === "landing"
         ? [
@@ -3168,98 +2999,68 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
 
     case "card.diff.record": {
       yield* requireCard({ readModel, command, cardId: command.cardId });
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "card",
-          aggregateId: command.cardId,
-          occurredAt: command.measuredAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "card", command.cardId, command.measuredAt, {
         type: "card.diff-measured",
         payload: {
           cardId: command.cardId,
           diffStat: command.diffStat,
           measuredAt: command.measuredAt,
         },
-      };
+      });
     }
 
     case "card.snooze": {
-      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
-      const refuse = (detail: string) =>
-        new OrchestrationCommandInvariantError({ commandType: command.type, detail });
-      if (isFinishedCardStatus(card.status)) {
-        return yield* refuse("A card that has landed or been abandoned waits on no one.");
-      }
+      yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        "A card that has landed or been abandoned waits on no one.",
+      );
       // A wake time must be real and after the snooze itself; an unparseable one fails too.
       if (
         command.snoozedUntil !== null &&
         !(Date.parse(command.snoozedUntil) > Date.parse(command.createdAt))
       ) {
-        return yield* refuse("Snooze until a time in the future.");
+        return yield* refuse(command, "Snooze until a time in the future.");
       }
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "card",
-          aggregateId: command.cardId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "card", command.cardId, command.createdAt, {
         type: "card.snoozed",
         payload: {
           cardId: command.cardId,
           snoozedUntil: command.snoozedUntil,
           snoozedAt: command.createdAt,
         },
-      };
+      });
     }
 
     case "card.unsnooze": {
       const card = yield* requireCard({ readModel, command, cardId: command.cardId });
       if (card.snoozedAt === null) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: "The card is not snoozed.",
-        });
+        return yield* refuse(command, "The card is not snoozed.");
       }
       const occurredAt = yield* nowIso;
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "card",
-          aggregateId: command.cardId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "card", command.cardId, occurredAt, {
         type: "card.unsnoozed",
         payload: { cardId: command.cardId, updatedAt: occurredAt },
-      };
+      });
     }
 
     case "card.spec.approve":
     case "card.spec.skip":
     case "card.spec.reopen": {
-      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
-      const refuse = (detail: string) =>
-        new OrchestrationCommandInvariantError({ commandType: command.type, detail });
-      if (isFinishedCardStatus(card.status)) {
-        return yield* refuse("A card that has landed or been abandoned keeps its spec as it is.");
-      }
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        "A card that has landed or been abandoned keeps its spec as it is.",
+      );
       const to = SPEC_DECISION_TARGET[command.type];
       if (to === "draft" ? card.specState === "draft" : card.specState !== "draft") {
         return yield* refuse(
+          command,
           card.specState === "draft"
             ? "The spec is already a draft."
             : `The spec is already ${card.specState}.`,
         );
       }
       const occurredAt = yield* nowIso;
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "card",
-          aggregateId: command.cardId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "card", command.cardId, occurredAt, {
         type: "card.spec-state-changed",
         payload: {
           cardId: command.cardId,
@@ -3268,110 +3069,90 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           by: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
           updatedAt: occurredAt,
         },
-      };
+      });
     }
 
     case "card.spec.submit": {
-      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
-      const refuse = (detail: string) =>
-        new OrchestrationCommandInvariantError({ commandType: command.type, detail });
-      if (isFinishedCardStatus(card.status)) {
-        return yield* refuse(FINISHED_CARD_SESSION_REASON);
-      }
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        FINISHED_CARD_SESSION_REASON,
+      );
       if (card.specState !== "draft") {
-        return yield* refuse("Only a draft spec is reviewed; reopen the spec first.");
+        return yield* refuse(command, "Only a draft spec is reviewed; reopen the spec first.");
       }
       if (card.spec.trim().length === 0) {
-        return yield* refuse("Write a spec before submitting it.");
+        return yield* refuse(command, "Write a spec before submitting it.");
       }
       const criticId = command.agentId ?? card.delegateAgentId;
       if (criticId === null) {
-        return yield* refuse("Choose an agent to review the spec.");
+        return yield* refuse(command, "Choose an agent to review the spec.");
       }
       const critic = yield* requireAgent({ readModel, command, agentId: criticId });
       if (critic.projectId !== card.projectId || critic.archivedAt !== null) {
-        return yield* refuse(`@${critic.name} isn't an active agent of this card's project.`);
+        return yield* refuse(
+          command,
+          `@${critic.name} isn't an active agent of this card's project.`,
+        );
       }
       if (projectLiveRunCount(readModel, card.projectId) >= DEFAULT_PROJECT_RUN_CAP) {
-        return yield* refuse(sessionCapReason);
+        return yield* refuse(command, sessionCapReason);
       }
       const occurredAt = yield* nowIso;
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "card",
-          aggregateId: command.cardId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "card", command.cardId, occurredAt, {
         type: "card.spec-submitted",
         payload: {
           cardId: command.cardId,
           agentId: critic.id,
           submittedAt: occurredAt,
         },
-      };
+      });
     }
 
     case "card.session.start": {
-      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
-      const refuse = (detail: string) =>
-        new OrchestrationCommandInvariantError({ commandType: command.type, detail });
-      if (isFinishedCardStatus(card.status)) {
-        return yield* refuse(FINISHED_CARD_SESSION_REASON);
-      }
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        FINISHED_CARD_SESSION_REASON,
+      );
       if (card.delegateAgentId === null) {
-        return yield* refuse("Assign an agent before starting a session.");
+        return yield* refuse(command, "Assign an agent before starting a session.");
       }
       if (card.specState === "draft") {
-        return yield* refuse(PLAN_GATE_REASON);
+        return yield* refuse(command, PLAN_GATE_REASON);
       }
       // Invariant 11: one writer per card.
       if (liveOwnerRun(readModel, card.id) !== undefined) {
-        return yield* refuse(SECOND_WRITER_REASON);
+        return yield* refuse(command, SECOND_WRITER_REASON);
       }
       if (projectLiveRunCount(readModel, card.projectId) >= DEFAULT_PROJECT_RUN_CAP) {
-        return yield* refuse(sessionCapReason);
+        return yield* refuse(command, sessionCapReason);
       }
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "card",
-          aggregateId: command.cardId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "card", command.cardId, command.createdAt, {
         type: "card.session-requested",
         payload: {
           cardId: command.cardId,
           agentId: card.delegateAgentId,
           requestedAt: command.createdAt,
         },
-      };
+      });
     }
 
     case "card.helper.request": {
       const card = yield* requireCard({ readModel, command, cardId: command.cardId });
       const agent = yield* requireAgent({ readModel, command, agentId: command.agentId });
-      const refuse = (detail: string) =>
-        new OrchestrationCommandInvariantError({ commandType: command.type, detail });
       if (agent.projectId !== card.projectId || agent.archivedAt !== null) {
-        return yield* refuse(`@${agent.name} isn't an active agent of this card's project.`);
+        return yield* refuse(
+          command,
+          `@${agent.name} isn't an active agent of this card's project.`,
+        );
       }
       if (isFinishedCardStatus(card.status)) {
-        return yield* refuse(FINISHED_CARD_SESSION_REASON);
+        return yield* refuse(command, FINISHED_CARD_SESSION_REASON);
       }
       if (projectLiveRunCount(readModel, card.projectId) >= DEFAULT_PROJECT_RUN_CAP) {
-        return yield* refuse(sessionCapReason);
+        return yield* refuse(command, sessionCapReason);
       }
-      const cardEventBase = () =>
-        withEventBase({
-          aggregateKind: "card",
-          aggregateId: command.cardId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        });
       return [
-        {
-          ...(yield* cardEventBase()),
+        yield* planned(command, "card", command.cardId, command.createdAt, {
           type: "card.message-posted",
           payload: {
             cardId: command.cardId,
@@ -3383,9 +3164,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             forOwner: false,
             createdAt: command.createdAt,
           },
-        },
-        {
-          ...(yield* cardEventBase()),
+        }),
+        yield* planned(command, "card", command.cardId, command.createdAt, {
           type: "card.helper-requested",
           payload: {
             cardId: command.cardId,
@@ -3394,25 +3174,16 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             question: command.question,
             requestedAt: command.createdAt,
           },
-        },
+        }),
       ];
     }
 
     case "card.message.post": {
-      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
-      if (isFinishedCardStatus(card.status)) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: "A card that has landed or been abandoned takes no new messages.",
-        });
-      }
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "card",
-          aggregateId: command.cardId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
+      yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        "A card that has landed or been abandoned takes no new messages.",
+      );
+      return yield* planned(command, "card", command.cardId, command.createdAt, {
         type: "card.message-posted",
         payload: {
           cardId: command.cardId,
@@ -3424,58 +3195,59 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           forOwner: true,
           createdAt: command.createdAt,
         },
-      };
+      });
     }
 
     case "card.session.record": {
       const card = yield* requireCard({ readModel, command, cardId: command.cardId });
       const agent = yield* requireAgent({ readModel, command, agentId: command.agentId });
-      const refuse = (detail: string) =>
-        new OrchestrationCommandInvariantError({ commandType: command.type, detail });
       if (isFinishedCardStatus(card.status)) {
-        return yield* refuse(FINISHED_CARD_SESSION_REASON);
+        return yield* refuse(command, FINISHED_CARD_SESSION_REASON);
       }
       if (agent.projectId !== card.projectId || agent.archivedAt !== null) {
-        return yield* refuse(`@${agent.name} isn't an active agent of this card's project.`);
+        return yield* refuse(
+          command,
+          `@${agent.name} isn't an active agent of this card's project.`,
+        );
       }
       if (command.role === "owner") {
         if (card.delegateAgentId !== agent.id) {
-          return yield* refuse(`Only the card's assigned agent writes to it, not @${agent.name}.`);
+          return yield* refuse(
+            command,
+            `Only the card's assigned agent writes to it, not @${agent.name}.`,
+          );
         }
         // Invariant 11: one writer per card.
         if (liveOwnerRun(readModel, card.id) !== undefined) {
-          return yield* refuse(SECOND_WRITER_REASON);
+          return yield* refuse(command, SECOND_WRITER_REASON);
         }
         if (card.worktreePath === null) {
-          return yield* refuse("An owner session works in the card's worktree, which is missing.");
+          return yield* refuse(
+            command,
+            "An owner session works in the card's worktree, which is missing.",
+          );
         }
         if (card.specState === "draft") {
-          return yield* refuse(PLAN_GATE_REASON);
+          return yield* refuse(command, PLAN_GATE_REASON);
         }
         const beyond = command.capabilities.filter(
           (capability) => !agent.capabilities.includes(capability),
         );
         if (beyond.length > 0) {
-          return yield* refuse(`@${agent.name} is not allowed ${beyond.join(", ")}.`);
+          return yield* refuse(command, `@${agent.name} is not allowed ${beyond.join(", ")}.`);
         }
       } else if (command.capabilities.some((capability) => capability !== "read")) {
         // Invariant 11: helpers and critics are read-only.
-        return yield* refuse(`A ${command.role} session is read-only.`);
+        return yield* refuse(command, `A ${command.role} session is read-only.`);
       }
       if (projectLiveRunCount(readModel, card.projectId) >= DEFAULT_PROJECT_RUN_CAP) {
-        return yield* refuse(sessionCapReason);
+        return yield* refuse(command, sessionCapReason);
       }
       const overBudget = cardBudgetRefusal(budgetCardOf(readModel, card));
       if (overBudget !== null) {
-        return yield* refuse(overBudget);
+        return yield* refuse(command, overBudget);
       }
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "card",
-          aggregateId: command.cardId,
-          occurredAt: command.startedAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "card", command.cardId, command.startedAt, {
         type: "card.session-started",
         payload: {
           threadId: command.threadId,
@@ -3487,18 +3259,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           rendered: command.rendered,
           startedAt: command.startedAt,
         },
-      };
+      });
     }
 
     case "card.message.record": {
       yield* requireCard({ readModel, command, cardId: command.cardId });
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "card",
-          aggregateId: command.cardId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "card", command.cardId, command.createdAt, {
         type: "card.message-posted",
         payload: {
           cardId: command.cardId,
@@ -3510,18 +3276,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           forOwner: command.forOwner,
           createdAt: command.createdAt,
         },
-      };
+      });
     }
 
     case "card.delivery.update": {
       yield* requireCard({ readModel, command, cardId: command.cardId });
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "card",
-          aggregateId: command.cardId,
-          occurredAt: command.updatedAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "card", command.cardId, command.updatedAt, {
         type: "card.delivery-updated",
         payload: {
           cardId: command.cardId,
@@ -3530,7 +3290,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           threadId: command.threadId,
           updatedAt: command.updatedAt,
         },
-      };
+      });
     }
 
     // A DM writes into one of the agent's live sessions under its delivery rules,
@@ -3539,16 +3299,23 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const run = (readModel.liveRuns ?? []).find(
         (candidate) => candidate.threadId === command.threadId,
       );
-      const refuse = (detail: string) =>
-        new OrchestrationCommandInvariantError({ commandType: command.type, detail });
       if (run === undefined) {
-        return yield* refuse("That session has ended; a DM message never starts a session.");
+        return yield* refuse(
+          command,
+          "That session has ended; a DM message never starts a session.",
+        );
       }
       if (run.role === "lead") {
-        return yield* refuse("A channel's lead takes no messages; post in its channel instead.");
+        return yield* refuse(
+          command,
+          "A channel's lead takes no messages; post in its channel instead.",
+        );
       }
       if (run.role === "helper" || run.role === "critic") {
-        return yield* refuse(`A ${run.role} takes no messages; write to the card's owner session.`);
+        return yield* refuse(
+          command,
+          `A ${run.role} takes no messages; write to the card's owner session.`,
+        );
       }
       if (run.cardId !== null) {
         return yield* decideOrchestrationCommand({
@@ -3564,7 +3331,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         });
       }
       if (run.channelId === null) {
-        return yield* refuse("That session belongs to no channel or card.");
+        return yield* refuse(command, "That session belongs to no channel or card.");
       }
       const agent = yield* requireAgent({ readModel, command, agentId: run.agentId });
       const projectAgents = (readModel.agents ?? []).filter(
@@ -3611,18 +3378,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         memberAgentIds: command.memberAgentIds,
       });
       if (createLeadProblem !== null) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: createLeadProblem,
-        });
+        return yield* refuse(command, createLeadProblem);
       }
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "channel",
-          aggregateId: command.channelId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "channel", command.channelId, command.createdAt, {
         type: "channel.created",
         payload: {
           channelId: command.channelId,
@@ -3637,7 +3395,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
-      };
+      });
     }
 
     case "channel.update": {
@@ -3666,20 +3424,11 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           memberAgentIds: command.memberAgentIds ?? channel.memberAgentIds,
         });
         if (updateLeadProblem !== null) {
-          return yield* new OrchestrationCommandInvariantError({
-            commandType: command.type,
-            detail: updateLeadProblem,
-          });
+          return yield* refuse(command, updateLeadProblem);
         }
       }
       const occurredAt = yield* nowIso;
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "channel",
-          aggregateId: command.channelId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "channel", command.channelId, occurredAt, {
         type: "channel.updated",
         payload: {
           channelId: command.channelId,
@@ -3693,7 +3442,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.leadAgentId !== undefined ? { leadAgentId: command.leadAgentId } : {}),
           updatedAt: occurredAt,
         },
-      };
+      });
     }
 
     case "channel.archive": {
@@ -3703,25 +3452,16 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         channelId: command.channelId,
       });
       if (channel.archivedAt !== null) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: `Channel '${command.channelId}' is already archived.`,
-        });
+        return yield* refuse(command, `Channel '${command.channelId}' is already archived.`);
       }
       const occurredAt = yield* nowIso;
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "channel",
-          aggregateId: command.channelId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "channel", command.channelId, occurredAt, {
         type: "channel.archived",
         payload: {
           channelId: command.channelId,
           archivedAt: occurredAt,
         },
-      };
+      });
     }
 
     case "channel.unarchive": {
@@ -3731,10 +3471,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         channelId: command.channelId,
       });
       if (channel.archivedAt === null) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: `Channel '${command.channelId}' is not archived.`,
-        });
+        return yield* refuse(command, `Channel '${command.channelId}' is not archived.`);
       }
       // Members may have been archived, or gained another DM, while this channel was archived.
       yield* requireValidChannelMembers({
@@ -3746,19 +3483,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         exceptChannelId: channel.id,
       });
       const occurredAt = yield* nowIso;
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "channel",
-          aggregateId: command.channelId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "channel", command.channelId, occurredAt, {
         type: "channel.unarchived",
         payload: {
           channelId: command.channelId,
           updatedAt: occurredAt,
         },
-      };
+      });
     }
 
     case "channel.message.post": {
@@ -3768,35 +3499,33 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         channelId: command.channelId,
       });
       if (channel.archivedAt !== null) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: `Channel '${command.channelId}' is archived and cannot receive messages.`,
-        });
+        return yield* refuse(
+          command,
+          `Channel '${command.channelId}' is archived and cannot receive messages.`,
+        );
       }
       const projectAgents = (readModel.agents ?? []).filter(
         (agent) => agent.projectId === channel.projectId,
       );
       const mentions = parseMentions(command.body, projectAgents);
-      const channelEventBase = () =>
-        withEventBase({
-          aggregateKind: "channel",
-          aggregateId: command.channelId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        });
-      const messageEvent: PlannedOrchestrationEvent = {
-        ...(yield* channelEventBase()),
-        type: "channel.message-posted",
-        payload: {
-          channelId: command.channelId,
-          messageId: command.messageId,
-          authorKind: "human",
-          authorId: CHANNEL_HUMAN_AUTHOR_ID,
-          body: command.body,
-          createdAt: command.createdAt,
-          ...(mentions.length > 0 ? { mentions } : {}),
+      const messageEvent = yield* planned(
+        command,
+        "channel",
+        command.channelId,
+        command.createdAt,
+        {
+          type: "channel.message-posted",
+          payload: {
+            channelId: command.channelId,
+            messageId: command.messageId,
+            authorKind: "human",
+            authorId: CHANNEL_HUMAN_AUTHOR_ID,
+            body: command.body,
+            createdAt: command.createdAt,
+            ...(mentions.length > 0 ? { mentions } : {}),
+          },
         },
-      };
+      );
 
       // Invariant 3: a mention, or a message in an agent's DM, wakes its agents. A channel message
       // that mentions no one wakes only the channel's lead, if it has one.
@@ -3816,36 +3545,38 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         const decision = decideWake({ readModel, channel, agent, newRuns });
         if (decision.kind === "refuse") {
           // Invariant 4: a refused wake is said in the channel, never dropped silently.
-          events.push({
-            ...(yield* channelEventBase()),
-            type: "channel.message-posted",
-            payload: {
-              channelId: command.channelId,
-              messageId: MessageId.make(`${command.messageId}:system:${agent.id}`),
-              authorKind: "system",
-              authorId: CHANNEL_SYSTEM_AUTHOR_ID,
-              body: decision.reason,
-              createdAt: command.createdAt,
-            },
-          });
+          events.push(
+            yield* planned(command, "channel", command.channelId, command.createdAt, {
+              type: "channel.message-posted",
+              payload: {
+                channelId: command.channelId,
+                messageId: MessageId.make(`${command.messageId}:system:${agent.id}`),
+                authorKind: "system",
+                authorId: CHANNEL_SYSTEM_AUTHOR_ID,
+                body: decision.reason,
+                createdAt: command.createdAt,
+              },
+            }),
+          );
           continue;
         }
         if (decision.liveRunThreadId === undefined) {
           newRuns += 1;
         }
-        events.push({
-          ...(yield* channelEventBase()),
-          type: "channel.agent-wake-requested",
-          payload: {
-            channelId: command.channelId,
-            agentId: agent.id,
-            triggerMessageId: command.messageId,
-            requestedAt: command.createdAt,
-            ...(decision.liveRunThreadId !== undefined
-              ? { liveRunThreadId: decision.liveRunThreadId }
-              : {}),
-          },
-        });
+        events.push(
+          yield* planned(command, "channel", command.channelId, command.createdAt, {
+            type: "channel.agent-wake-requested",
+            payload: {
+              channelId: command.channelId,
+              agentId: agent.id,
+              triggerMessageId: command.messageId,
+              requestedAt: command.createdAt,
+              ...(decision.liveRunThreadId !== undefined
+                ? { liveRunThreadId: decision.liveRunThreadId }
+                : {}),
+            },
+          }),
+        );
       }
       return events.length === 1 ? messageEvent : events;
     }
@@ -3862,25 +3593,16 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         agentId: command.agentId,
       });
       if (channel.archivedAt !== null) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: `Channel '${channel.id}' is archived and cannot wake agents.`,
-        });
+        return yield* refuse(
+          command,
+          `Channel '${channel.id}' is archived and cannot wake agents.`,
+        );
       }
       const decision = decideWake({ readModel, channel, agent, newRuns: 0 });
       if (decision.kind === "refuse") {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: decision.reason,
-        });
+        return yield* refuse(command, decision.reason);
       }
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "channel",
-          aggregateId: command.channelId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "channel", command.channelId, command.createdAt, {
         type: "channel.agent-wake-requested",
         payload: {
           channelId: command.channelId,
@@ -3891,7 +3613,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             ? { liveRunThreadId: decision.liveRunThreadId }
             : {}),
         },
-      };
+      });
     }
 
     case "channel.run.start": {
@@ -3907,28 +3629,19 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       });
       // Invariant 1: a conversation run never writes. Writing needs a card.
       if (command.capabilities.some((capability) => capability !== "read")) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: "A channel conversation run is read-only; writing requires a card.",
-        });
+        return yield* refuse(
+          command,
+          "A channel conversation run is read-only; writing requires a card.",
+        );
       }
       if (
         command.role === "lead" &&
         (readModel.channels ?? []).find((channel) => channel.id === command.channelId)
           ?.leadAgentId !== command.agentId
       ) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: "Only a channel's lead starts a lead run in it.",
-        });
+        return yield* refuse(command, "Only a channel's lead starts a lead run in it.");
       }
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "channel",
-          aggregateId: command.channelId,
-          occurredAt: command.startedAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "channel", command.channelId, command.startedAt, {
         type: "channel.run-started",
         payload: {
           threadId: command.threadId,
@@ -3941,7 +3654,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           rendered: command.rendered,
           startedAt: command.startedAt,
         },
-      };
+      });
     }
 
     case "channel.delivery.update": {
@@ -3950,13 +3663,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         channelId: command.channelId,
       });
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "channel",
-          aggregateId: command.channelId,
-          occurredAt: command.updatedAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "channel", command.channelId, command.updatedAt, {
         type: "channel.delivery-updated",
         payload: {
           channelId: command.channelId,
@@ -3966,7 +3673,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           runThreadId: command.runThreadId,
           updatedAt: command.updatedAt,
         },
-      };
+      });
     }
 
     case "channel.message.agent.post": {
@@ -3981,10 +3688,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         agentId: command.agentId,
       });
       if (channel.archivedAt !== null) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: `Channel '${command.channelId}' is archived and cannot receive messages.`,
-        });
+        return yield* refuse(
+          command,
+          `Channel '${command.channelId}' is archived and cannot receive messages.`,
+        );
       }
       // A lead never answers in its channel; it only proposes cards.
       if (
@@ -3992,18 +3699,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           (run) => run.threadId === command.runThreadId && run.role === "lead",
         )
       ) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: "A channel's lead does not post in the channel.",
-        });
+        return yield* refuse(command, "A channel's lead does not post in the channel.");
       }
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "channel",
-          aggregateId: command.channelId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
+      return yield* planned(command, "channel", command.channelId, command.createdAt, {
         type: "channel.message-posted",
         payload: {
           channelId: command.channelId,
@@ -4014,7 +3712,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           createdAt: command.createdAt,
           runThreadId: command.runThreadId,
         },
-      };
+      });
     }
 
     default: {
