@@ -1457,6 +1457,13 @@ const CLAUDE_SETTING_SOURCES = [
   "project",
   "local",
 ] as const satisfies ReadonlyArray<SettingSource>;
+// The Claude tools each run capability allows. Bash can write, so `shell` is only honored together with `write`.
+const CLAUDE_TOOLS_BY_RUN_CAPABILITY = {
+  read: ["Read", "Glob", "Grep"],
+  write: ["Edit", "Write", "NotebookEdit"],
+  shell: ["Bash"],
+  network: ["WebFetch", "WebSearch"],
+} as const;
 
 function buildPromptText(
   input: ProviderSendTurnInput,
@@ -4719,20 +4726,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             : runtimeModeToPermission[input.runtimeMode]));
       const passthroughArgs = input.run ? {} : extraArgs;
       const settingSources = input.run ? [] : [...CLAUDE_SETTING_SOURCES];
-      // Bash can write, so `shell` is only honored together with `write`.
-      const claudeToolsByCapability = {
-        read: ["Read", "Glob", "Grep"],
-        write: ["Edit", "Write", "NotebookEdit"],
-        shell: ["Bash"],
-        network: ["WebFetch", "WebSearch"],
-      } as const;
       const runCapabilities = input.run?.capabilities ?? [];
       const allowedTools = [
         ...new Set(
           runCapabilities.flatMap((capability) =>
             capability === "shell" && !runCapabilities.includes("write")
               ? []
-              : claudeToolsByCapability[capability],
+              : CLAUDE_TOOLS_BY_RUN_CAPABILITY[capability],
           ),
         ),
       ];
@@ -5036,14 +5036,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     // "default" restores the session's original permission mode.
     // When interactionMode is absent we leave the current mode unchanged.
     // A run keeps `dontAsk` for its whole life: nothing mid-session may widen it.
-    if (context.startInput.run) {
-      // Intentionally no permission mode change.
-    } else if (input.interactionMode === "plan") {
+    if (!context.startInput.run && input.interactionMode === "plan") {
       yield* Effect.tryPromise({
         try: () => context.query.setPermissionMode("plan"),
         catch: (cause) => toRequestError(input.threadId, "turn/setPermissionMode", cause),
       });
-    } else if (input.interactionMode === "default") {
+    } else if (!context.startInput.run && input.interactionMode === "default") {
       yield* Effect.tryPromise({
         try: () => context.query.setPermissionMode(context.basePermissionMode ?? "default"),
         catch: (cause) => toRequestError(input.threadId, "turn/setPermissionMode", cause),
