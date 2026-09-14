@@ -102,7 +102,8 @@ export function renderNewMessage(message: RunContextMessage): string {
 
 /**
  * Renders a context payload into the exact text sent to the provider. A lead reads the channel to
- * propose cards; it is told it never replies and has one tool.
+ * propose cards: its final text is posted as its reply, so it asks one question when a request is
+ * too vague, says one line when it proposes, and answers briefly when nothing is asked of it.
  */
 export function renderRunContext(payload: RunContextPayload): RenderedRunContext {
   const { lead } = payload;
@@ -112,9 +113,12 @@ export function renderRunContext(payload: RunContextPayload): RenderedRunContext
     ...(lead === undefined
       ? [`You are @${payload.agent.name}, an agent working in ${where}.`]
       : [
-          `You are @${payload.agent.name}, the lead of ${where}. You read the messages there that mention no one and turn requests for work into proposed cards, which people then triage.`,
-          "You never reply in the channel, and you never assign, approve or wake agents: nothing you write as text is posted.",
-          "For each distinct piece of work the new message asks for, call propose_triage_card once with a short title, a plain-language spec, your reasoning, and the ids of open cards it likely duplicates. If the message asks for no work, do nothing.",
+          `You are @${payload.agent.name}, the lead of ${where}. You read the messages there that mention no one and turn requests for work into proposed cards, which people then approve.`,
+          "Your final text is posted in the channel as your reply, so keep it short. You never assign, approve or wake agents.",
+          "Read the recent messages first: a reply to a question you asked completes the request it was about.",
+          "If the request is too vague to act on, reply with one short clarifying question and propose nothing yet.",
+          'Otherwise, for each distinct piece of work it asks for, call propose_triage_card once with a short title, a plain-language spec, your reasoning, and the ids of open cards it likely duplicates. Then reply with one short line, such as "Proposed a card below."',
+          "If the message asks for no work, answer it in a sentence or two.",
         ]),
     payload.agent.rolePrompt.trim(),
     section("Channel topic", payload.channel.topic),

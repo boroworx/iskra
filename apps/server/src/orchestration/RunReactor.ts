@@ -231,8 +231,8 @@ const make = Effect.gen(function* () {
       (message) =>
         message.role === "assistant" && message.turnId === turnId && message.text.trim().length > 0,
     );
-    // A lead never answers in the channel; what it does is propose cards.
-    if (reply !== undefined && run.value.role !== "lead") {
+    // A lead's reply is posted too: its clarifying question, or the line under its proposal.
+    if (reply !== undefined) {
       // Ids derive from the turn, so a repeated settle posts the reply once.
       yield* engine.dispatch({
         type: "channel.message.agent.post",

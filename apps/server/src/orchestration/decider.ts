@@ -3675,14 +3675,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           `Channel '${command.channelId}' is archived and cannot receive messages.`,
         );
       }
-      // A lead never answers in its channel; it only proposes cards.
-      if (
-        (readModel.liveRuns ?? []).some(
-          (run) => run.threadId === command.runThreadId && run.role === "lead",
-        )
-      ) {
-        return yield* refuse(command, "A channel's lead does not post in the channel.");
-      }
       return yield* planned(command, "channel", command.channelId, command.createdAt, {
         type: "channel.message-posted",
         payload: {

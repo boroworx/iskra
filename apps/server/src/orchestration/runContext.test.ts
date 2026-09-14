@@ -177,9 +177,12 @@ describe("renderRunContext", () => {
 
     expect(renderRunContext({ ...payload, lead })).toEqual({
       systemPrompt: [
-        "You are @backend, the lead of #backend. You read the messages there that mention no one and turn requests for work into proposed cards, which people then triage.",
-        "You never reply in the channel, and you never assign, approve or wake agents: nothing you write as text is posted.",
-        "For each distinct piece of work the new message asks for, call propose_triage_card once with a short title, a plain-language spec, your reasoning, and the ids of open cards it likely duplicates. If the message asks for no work, do nothing.",
+        "You are @backend, the lead of #backend. You read the messages there that mention no one and turn requests for work into proposed cards, which people then approve.",
+        "Your final text is posted in the channel as your reply, so keep it short. You never assign, approve or wake agents.",
+        "Read the recent messages first: a reply to a question you asked completes the request it was about.",
+        "If the request is too vague to act on, reply with one short clarifying question and propose nothing yet.",
+        'Otherwise, for each distinct piece of work it asks for, call propose_triage_card once with a short title, a plain-language spec, your reasoning, and the ids of open cards it likely duplicates. Then reply with one short line, such as "Proposed a card below."',
+        "If the message asks for no work, answer it in a sentence or two.",
         "You own the API.",
         "## Channel topic\n\nAPI work",
         "## Channel members\n\n- @backend\n- @frontend (ui, css)",

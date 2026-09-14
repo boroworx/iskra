@@ -372,7 +372,7 @@ it.layer(layer)("RunReactor", (it) => {
     ),
   );
 
-  it.effect("wakes a channel's lead on a message that mentions no one, and the lead posts nothing", () =>
+  it.effect("wakes a channel's lead on a message that mentions no one, and posts its clarifying question", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const world = yield* startChannel("leadworld");
@@ -402,7 +402,7 @@ it.layer(layer)("RunReactor", (it) => {
           leadAgentId: leadId,
         });
 
-        yield* world.post("message-lead-request", "exports time out on big projects");
+        yield* world.post("message-lead-request", "make an awesome web page");
         const turnStart = yield* world.nextEvent("thread.turn-start-requested");
         const threadId = ThreadId.make(turnStart.aggregateId);
         const run = yield* snapshotQuery
@@ -414,30 +414,38 @@ it.layer(layer)("RunReactor", (it) => {
           triggerMessageId: "message-lead-request",
           capabilities: ["read"],
         });
-        expect(run.rendered.systemPrompt).toContain("You never reply in the channel");
+        expect(run.rendered.systemPrompt).toContain("one short clarifying question");
         expect(run.rendered.systemPrompt).toContain("@leadworld");
         expect(run.rendered.firstMessage).toContain("## Open cards");
 
         yield* world.setSession(threadId, "running", "turn-lead");
-        yield* world.answer(threadId, "turn-lead", "This asks for faster exports.");
+        yield* world.answer(threadId, "turn-lead", "What's the page for?");
         yield* world.setSession(threadId, "ready", null);
+        yield* world.nextEvent(
+          "thread.session-stop-requested",
+          (event) => event.payload.threadId === threadId,
+        );
+        yield* world.setSession(threadId, "stopped", null);
         yield* reactor.drain;
         const messages = yield* snapshotQuery.listChannelMessages(leadChannelId, 50);
-        expect(messages.map((message) => message.authorKind)).toEqual(["human"]);
+        expect(messages.map((message) => [message.authorKind, message.body])).toEqual([
+          ["human", "make an awesome web page"],
+          ["agent", "What's the page for?"],
+        ]);
 
-        const refused = yield* Effect.flip(
-          world.engine.dispatch({
-            type: "channel.message.agent.post",
-            commandId: CommandId.make("cmd-lead-post"),
-            channelId: leadChannelId,
-            messageId: MessageId.make("message-lead-reply"),
-            agentId: leadId,
-            runThreadId: threadId,
-            body: "Faster exports it is.",
-            createdAt: now,
-          }),
+        // The answer mentions no one either: it wakes the lead again, which reads its own question.
+        yield* world.post("message-lead-answer", "a landing page for iskra, in apps/web");
+        const answerTurn = yield* world.nextEvent("thread.turn-start-requested");
+        const answerRun = yield* snapshotQuery
+          .getRunByThreadId(ThreadId.make(answerTurn.aggregateId))
+          .pipe(Effect.map(Option.getOrThrow));
+        expect(answerRun).toMatchObject({ role: "lead", triggerMessageId: "message-lead-answer" });
+        expect(answerRun.rendered.firstMessage).toContain(
+          "@triager: What's the page for?",
         );
-        expect(refused.message).toContain("does not post in the channel");
+        expect(answerRun.rendered.firstMessage).toContain(
+          "New message for you:\n[2026-01-01T00:00:00.000Z] user: a landing page for iskra, in apps/web",
+        );
       }),
     ),
   );
