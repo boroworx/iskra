@@ -34,6 +34,34 @@ const issueNode = {
   },
 };
 
+const agentSessionNode = {
+  activities: {
+    nodes: [
+      {
+        id: "prompt-late",
+        createdAt: "2026-02-01T00:00:03.000Z",
+        user: null,
+        sourceComment: { id: "comment-9" },
+        content: { __typename: "AgentActivityPromptContent", body: "And webhooks." },
+      },
+      {
+        id: "thought-1",
+        createdAt: "2026-02-01T00:00:02.000Z",
+        user: { name: "Iskra" },
+        sourceComment: null,
+        content: { __typename: "AgentActivityThoughtContent", body: "Thinking." },
+      },
+      {
+        id: "prompt-early",
+        createdAt: "2026-02-01T00:00:01.000Z",
+        user: { name: "Ana" },
+        sourceComment: null,
+        content: { __typename: "AgentActivityPromptContent", body: "Per key." },
+      },
+    ],
+  },
+};
+
 const makeClient = (env: Record<string, string>) =>
   Effect.gen(function* () {
     const requests: Array<{ readonly url: string; readonly authorization: string | undefined }> = [];
@@ -46,7 +74,7 @@ const makeClient = (env: Record<string, string>) =>
       requests.push({ url: request.url, authorization: request.headers.authorization });
       const body = request.url.endsWith("/oauth/token")
         ? { access_token: "token-1", expires_in: 2_591_999 }
-        : { data: { issues: { nodes: [issueNode] } } };
+        : { data: { issues: { nodes: [issueNode] }, agentSession: agentSessionNode } };
       return Effect.succeed(
         HttpClientResponse.fromWeb(
           request,
@@ -152,6 +180,33 @@ it.effect("prefers credentials from settings, and signs in again when they chang
       false,
       true,
       false,
+    ]);
+  }),
+);
+
+it.effect("reads only people's prompts from an agent session, oldest first", () =>
+  Effect.gen(function* () {
+    const { client, requests } = yield* makeClient({
+      ISKRA_LINEAR_CLIENT_ID: "client",
+      ISKRA_LINEAR_CLIENT_SECRET: "secret",
+    });
+    const prompts = yield* client.agentPrompts("session-1");
+    expect(requests.at(-1)?.url).toBe("https://api.linear.app/graphql");
+    expect(prompts).toEqual([
+      {
+        id: "prompt-early",
+        body: "Per key.",
+        createdAt: "2026-02-01T00:00:01.000Z",
+        authorName: "Ana",
+        sourceCommentId: null,
+      },
+      {
+        id: "prompt-late",
+        body: "And webhooks.",
+        createdAt: "2026-02-01T00:00:03.000Z",
+        authorName: "Linear",
+        sourceCommentId: "comment-9",
+      },
     ]);
   }),
 );

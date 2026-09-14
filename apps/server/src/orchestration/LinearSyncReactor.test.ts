@@ -5,8 +5,10 @@ import {
   EventId,
   MessageId,
   ProjectId,
+  TurnId,
   ProviderInstanceId,
   ThreadId,
+  type BackgroundPolicySnapshot,
   type CardPriority,
   type OrchestrationEvent,
 } from "@iskra/contracts";
@@ -17,8 +19,10 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
 import * as Stream from "effect/Stream";
 
+import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import { ServerConfig } from "../config.ts";
 import * as LinearClient from "../linear/LinearClient.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../persistence/Layers/OrchestrationCommandReceipts.ts";
@@ -72,6 +76,24 @@ const issues = new Map<string, LinearClient.LinearIssue>();
 const issueLabels = new Map<string, ReadonlyArray<string>>();
 const appComments: Array<{ readonly issueId: string; readonly body: string }> = [];
 let commentWaiter: Deferred.Deferred<string> | null = null;
+const agentActivities: Array<{
+  readonly sessionId: string;
+  readonly content: LinearClient.LinearAgentActivityContent;
+}> = [];
+const agentPrompts = new Map<string, ReadonlyArray<LinearClient.LinearAgentPrompt>>();
+let activityWaiter: {
+  readonly type: LinearClient.LinearAgentActivityContent["type"];
+  readonly deferred: Deferred.Deferred<LinearClient.LinearAgentActivityContent>;
+} | null = null;
+/** Resolves with the next agent activity of `type`; arm it before the event that posts it. */
+const awaitActivity = (type: LinearClient.LinearAgentActivityContent["type"]) =>
+  Effect.gen(function* () {
+    const deferred = yield* Deferred.make<LinearClient.LinearAgentActivityContent>();
+    activityWaiter = { type, deferred };
+    return deferred;
+  });
+let sweeps = 0;
+let sweepWaiter: { readonly count: number; readonly deferred: Deferred.Deferred<void> } | null = null;
 
 const inLinear = {
   put: (
@@ -112,9 +134,14 @@ const fakeLinear = Layer.succeed(LinearClient.LinearClient, {
   configured: Effect.succeed(true),
   viewerId: Effect.succeed(APP_USER),
   teamStates: () => Effect.succeed(STATES),
-  delegatedIssues: Effect.sync(() =>
-    Array.from(issues.values()).filter((issue) => issue.delegateId === APP_USER),
-  ),
+  delegatedIssues: Effect.suspend(() => {
+    sweeps += 1;
+    const delegated = Array.from(issues.values()).filter((issue) => issue.delegateId === APP_USER);
+    const waiter = sweepWaiter;
+    if (waiter === null || sweeps < waiter.count) return Effect.succeed(delegated);
+    sweepWaiter = null;
+    return Deferred.succeed(waiter.deferred, undefined).pipe(Effect.as(delegated));
+  }),
   labeledIssues: (teamId, label) =>
     Effect.sync(() =>
       Array.from(issues.values()).filter(
@@ -140,6 +167,16 @@ const fakeLinear = Layer.succeed(LinearClient.LinearClient, {
       return issues.get(id)!;
     }),
   updateIssue: (issueId, changes) => Effect.sync(() => inLinear.edit(issueId, changes)),
+  createAgentSession: (issueId) => Effect.succeed(`session-${issueId}`),
+  createAgentActivity: (sessionId, content) =>
+    Effect.suspend(() => {
+      agentActivities.push({ sessionId, content });
+      const waiter = activityWaiter;
+      if (waiter === null || waiter.type !== content.type) return Effect.void;
+      activityWaiter = null;
+      return Deferred.succeed(waiter.deferred, content).pipe(Effect.asVoid);
+    }),
+  agentPrompts: (sessionId) => Effect.sync(() => agentPrompts.get(sessionId) ?? []),
   createComment: (issueId, body) =>
     Effect.suspend(() => {
       appComments.push({ issueId, body });
@@ -148,7 +185,9 @@ const fakeLinear = Layer.succeed(LinearClient.LinearClient, {
     }),
 });
 
-const layer = LinearSyncReactor.layer.pipe(
+const makeLayer = <A, E>(backgroundPolicy: Layer.Layer<A, E>) =>
+  LinearSyncReactor.layer.pipe(
+  Layer.provide(backgroundPolicy),
   Layer.provideMerge(
     OrchestrationEngineLive.pipe(Layer.provide(OrchestrationProjectionPipelineLive)),
   ),
@@ -164,6 +203,17 @@ const layer = LinearSyncReactor.layer.pipe(
   Layer.provide(Layer.succeed(Crypto.Crypto, testCrypto)),
   Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "iskra-linear-sync-test-" })),
   Layer.provideMerge(NodeServices.layer),
+);
+
+const layer = makeLayer(Layer.empty);
+
+/** A client that is in the background, then comes to the foreground. */
+const snapshotWith = (activeForegroundLeaseCount: number) =>
+  ({ activeForegroundLeaseCount }) as unknown as BackgroundPolicySnapshot;
+const focusLayer = makeLayer(
+  Layer.mock(BackgroundPolicy.BackgroundPolicy)({
+    streamChanges: Stream.make(snapshotWith(0), snapshotWith(1)),
+  }),
 );
 
 /** A project on the Linear team, and an approved card on it that sync has linked to an issue. */
@@ -328,7 +378,7 @@ it.layer(layer)("LinearSyncReactor", (it) => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("sends the delegate's question to Linear and answers it from a Linear comment", () =>
+  it.effect("mirrors the delegate's session as Linear agent activity and answers its questions from Linear", () =>
     Effect.gen(function* () {
       const world = yield* makeWorld("question");
       const agentId = AgentId.make("agent-question");
@@ -399,7 +449,7 @@ it.layer(layer)("LinearSyncReactor", (it) => {
       });
 
       yield* world.reactor.start();
-      commentWaiter = yield* Deferred.make<string>();
+      const elicitation = yield* awaitActivity("elicitation");
       yield* world.engine.dispatch({
         type: "thread.activity.append",
         commandId: world.commandId(),
@@ -428,10 +478,10 @@ it.layer(layer)("LinearSyncReactor", (it) => {
           createdAt: now,
         },
       });
-      expect(yield* Deferred.await(commentWaiter)).toBe(
-        "**@backend asks:** Per key or per account?\n\nReply here to answer.",
-      );
-      commentWaiter = null;
+      expect(yield* Deferred.await(elicitation)).toEqual({
+        type: "elicitation",
+        body: "Per key or per account?",
+      });
 
       const answered = world.nextEvent(
         "thread.activity-appended",
@@ -442,6 +492,105 @@ it.layer(layer)("LinearSyncReactor", (it) => {
       expect((yield* answered).payload.activity.payload).toMatchObject({
         requestId: "ask-owner:question",
         answers: { answer: "Per key." },
+      });
+
+      // The delegate's work shows as activity: a tool call as an action, its reply as a response.
+      const action = yield* awaitActivity("action");
+      yield* world.engine.dispatch({
+        type: "thread.activity.append",
+        commandId: world.commandId(),
+        threadId,
+        createdAt: now,
+        activity: {
+          id: EventId.make("activity-tool-edit"),
+          tone: "tool",
+          kind: "tool.completed",
+          summary: "Edited src/limits.ts",
+          payload: { itemType: "file_change", detail: "src/limits.ts" },
+          turnId: null,
+          createdAt: now,
+        },
+      });
+      expect(yield* Deferred.await(action)).toEqual({
+        type: "action",
+        action: "Edited src/limits.ts",
+        parameter: "src/limits.ts",
+      });
+      const response = yield* awaitActivity("response");
+      const replyId = MessageId.make("assistant-question-reply");
+      yield* world.engine.dispatch({
+        type: "thread.message.assistant.delta",
+        commandId: world.commandId(),
+        threadId,
+        messageId: replyId,
+        delta: "Limits are per key now.",
+        turnId: TurnId.make("turn-question"),
+        createdAt: now,
+      });
+      yield* world.engine.dispatch({
+        type: "thread.message.assistant.complete",
+        commandId: world.commandId(),
+        threadId,
+        messageId: replyId,
+        turnId: TurnId.make("turn-question"),
+        createdAt: now,
+      });
+      expect(yield* Deferred.await(response)).toEqual({
+        type: "response",
+        body: "Limits are per key now.",
+      });
+
+      // A second question is answered by a prompt in the agent session.
+      const second = yield* awaitActivity("elicitation");
+      yield* world.engine.dispatch({
+        type: "thread.activity.append",
+        commandId: world.commandId(),
+        threadId,
+        createdAt: now,
+        activity: {
+          id: EventId.make("activity-ask-second"),
+          tone: "info",
+          kind: "user-input.requested",
+          summary: "User input requested",
+          payload: {
+            requestId: "ask-owner:second",
+            responseMode: "message",
+            questions: [
+              {
+                id: "answer",
+                header: "Question",
+                question: "Include webhooks?",
+                options: [],
+                allowCustomAnswer: true,
+                multiSelect: false,
+              },
+            ],
+          },
+          turnId: null,
+          createdAt: now,
+        },
+      });
+      expect(yield* Deferred.await(second)).toMatchObject({ body: "Include webhooks?" });
+      const secondAnswered = world.nextEvent(
+        "thread.activity-appended",
+        (event) =>
+          event.payload.activity.kind === "user-input.resolved" &&
+          Predicate.isObject(event.payload.activity.payload) &&
+          event.payload.activity.payload.requestId === "ask-owner:second",
+      );
+      agentPrompts.set(`session-${world.issueId}`, [
+        {
+          id: "prompt-webhooks",
+          body: "Yes, webhooks too.",
+          createdAt: later(),
+          authorName: "Ana",
+          sourceCommentId: null,
+        },
+      ]);
+      yield* world.reactor.syncNow;
+      expect((yield* secondAnswered).payload.activity.payload).toMatchObject({
+        requestId: "ask-owner:second",
+        answers: { answer: "Yes, webhooks too." },
       });
     }).pipe(Effect.scoped),
   );
@@ -479,6 +628,28 @@ it.layer(layer)("LinearSyncReactor", (it) => {
       });
       yield* world.reactor.syncNow;
       expect(issues.get(world.issueId)?.priority).toBe(4);
+    }).pipe(Effect.scoped),
+  );
+});
+
+it.layer(focusLayer)("LinearSyncReactor on client focus", (it) => {
+  it.effect("syncs as soon as a client comes to the foreground", () =>
+    Effect.gen(function* () {
+      const engine = yield* OrchestrationEngineService;
+      const reactor = yield* LinearSyncReactor.LinearSyncReactor;
+      yield* engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("cmd-project-focus"),
+        projectId: ProjectId.make("project-focus"),
+        title: "focus",
+        workspaceRoot: "/tmp/focus",
+        createdAt: now,
+      });
+      // The first sweep runs on start; the clock never moves, so the second is the focus.
+      const swept = yield* Deferred.make<void>();
+      sweepWaiter = { count: sweeps + 2, deferred: swept };
+      yield* reactor.start();
+      yield* Deferred.await(swept);
     }).pipe(Effect.scoped),
   );
 });

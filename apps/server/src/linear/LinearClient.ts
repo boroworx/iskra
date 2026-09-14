@@ -75,6 +75,20 @@ export interface LinearIssueChanges {
   readonly priority?: CardPriority;
 }
 
+/** One activity in a Linear agent session, as the agent posts it. */
+export type LinearAgentActivityContent =
+  | { readonly type: "thought" | "elicitation" | "response" | "error"; readonly body: string }
+  | { readonly type: "action"; readonly action: string; readonly parameter: string };
+
+export interface LinearAgentPrompt {
+  readonly id: string;
+  readonly body: string;
+  readonly createdAt: string;
+  readonly authorName: string;
+  /** Set when the prompt was written as a comment, which comment sync already brings in. */
+  readonly sourceCommentId: string | null;
+}
+
 export class LinearClient extends Context.Service<
   LinearClient,
   {
@@ -106,6 +120,16 @@ export class LinearClient extends Context.Service<
       changes: LinearIssueChanges,
     ) => Effect.Effect<void, LinearApiError>;
     readonly createComment: (issueId: string, body: string) => Effect.Effect<void, LinearApiError>;
+    /** Opens the agent session a card's work shows in on its issue. */
+    readonly createAgentSession: (issueId: string) => Effect.Effect<string, LinearApiError>;
+    readonly createAgentActivity: (
+      agentSessionId: string,
+      content: LinearAgentActivityContent,
+    ) => Effect.Effect<void, LinearApiError>;
+    /** People's prompts in an agent session, oldest first. */
+    readonly agentPrompts: (
+      agentSessionId: string,
+    ) => Effect.Effect<ReadonlyArray<LinearAgentPrompt>, LinearApiError>;
   }
 >()("@iskra/cli/linear/LinearClient") {}
 
@@ -373,6 +397,68 @@ export const make = Effect.gen(function* () {
         { input: { issueId, body } },
         Schema.Struct({ commentCreate: Schema.Struct({ success: Schema.Boolean }) }),
       ).pipe(Effect.asVoid),
+    createAgentSession: (issueId) =>
+      graphql(
+        "open agent session",
+        "mutation ($input: AgentSessionCreateOnIssue!) { agentSessionCreateOnIssue(input: $input) { agentSession { id } } }",
+        { input: { issueId } },
+        Schema.Struct({
+          agentSessionCreateOnIssue: Schema.Struct({
+            agentSession: Schema.Struct({ id: Schema.String }),
+          }),
+        }),
+      ).pipe(Effect.map(({ agentSessionCreateOnIssue }) => agentSessionCreateOnIssue.agentSession.id)),
+    createAgentActivity: (agentSessionId, content) =>
+      graphql(
+        "agent activity",
+        "mutation ($input: AgentActivityCreateInput!) { agentActivityCreate(input: $input) { success } }",
+        { input: { agentSessionId, content } },
+        Schema.Struct({ agentActivityCreate: Schema.Struct({ success: Schema.Boolean }) }),
+      ).pipe(Effect.asVoid),
+    agentPrompts: (agentSessionId) =>
+      graphql(
+        "agent prompts",
+        "query ($id: ID!) { agentSession(id: $id) { activities(last: 50) { nodes { id createdAt user { name } sourceComment { id } content { __typename ... on AgentActivityPromptContent { body } } } } } }",
+        { id: agentSessionId },
+        Schema.Struct({
+          agentSession: Schema.NullOr(
+            Schema.Struct({
+              activities: Schema.Struct({
+                nodes: Schema.Array(
+                  Schema.Struct({
+                    id: Schema.String,
+                    createdAt: Schema.String,
+                    user: Schema.NullOr(Schema.Struct({ name: Schema.String })),
+                    sourceComment: Schema.NullOr(Schema.Struct({ id: Schema.String })),
+                    content: Schema.Struct({
+                      __typename: Schema.String,
+                      body: Schema.optional(Schema.String),
+                    }),
+                  }),
+                ),
+              }),
+            }),
+          ),
+        }),
+      ).pipe(
+        Effect.map(({ agentSession }) =>
+          (agentSession?.activities.nodes ?? [])
+            .flatMap((node) =>
+              node.content.__typename === "AgentActivityPromptContent" && node.content.body !== undefined
+                ? [
+                    {
+                      id: node.id,
+                      body: node.content.body,
+                      createdAt: node.createdAt,
+                      authorName: node.user?.name ?? "Linear",
+                      sourceCommentId: node.sourceComment?.id ?? null,
+                    },
+                  ]
+                : [],
+            )
+            .toSorted((left, right) => left.createdAt.localeCompare(right.createdAt)),
+        ),
+      ),
   } satisfies LinearClient["Service"];
 });
 

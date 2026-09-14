@@ -6,6 +6,7 @@ import {
   type CardLinearIssue,
   type CardStatus,
   type OrchestrationCard,
+  type OrchestrationCardShell,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type ProjectId,
@@ -25,6 +26,7 @@ import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
 import type * as Scope from "effect/Scope";
 
+import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as LinearClient from "../linear/LinearClient.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -103,6 +105,8 @@ const linkOf = (issue: LinearClient.LinearIssue): CardLinearIssue => ({
   stateId: issue.stateId,
   priority: issue.priority,
   commentsSyncedAt: issue.comments.at(-1)?.createdAt ?? null,
+  agentSessionId: null,
+  promptsSyncedAt: null,
 });
 
 const linksEqual = (left: CardLinearIssue, right: CardLinearIssue) =>
@@ -110,7 +114,9 @@ const linksEqual = (left: CardLinearIssue, right: CardLinearIssue) =>
   left.description === right.description &&
   left.stateId === right.stateId &&
   left.priority === right.priority &&
-  left.commentsSyncedAt === right.commentsSyncedAt;
+  left.commentsSyncedAt === right.commentsSyncedAt &&
+  left.agentSessionId === right.agentSessionId &&
+  left.promptsSyncedAt === right.promptsSyncedAt;
 
 /**
  * Two-way sync between cards and Linear issues, by polling so a server without a public URL works.
@@ -133,6 +139,7 @@ export const make = Effect.gen(function* () {
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const linear = yield* LinearClient.LinearClient;
   const crypto = yield* Crypto.Crypto;
+  const backgroundPolicy = yield* Effect.serviceOption(BackgroundPolicy.BackgroundPolicy);
   // Sync commands get fresh ids: the same change can recur, and a reused id would be a no-op.
   const freshCommandId = (tag: string) =>
     crypto.randomUUIDv4.pipe(
@@ -242,38 +249,61 @@ export const make = Effect.gen(function* () {
       });
     }
 
-    const fresh = issue.comments.filter(
+    const freshComments = issue.comments.filter(
       (comment) =>
         comment.authorId !== input.viewerId &&
         (link.commentsSyncedAt === null || comment.createdAt > link.commentsSyncedAt),
     );
-    // ponytail: the first new comment answers the delegate's open question, reply or not;
-    // match Linear comment threads if people talk past the question.
+    const prompts =
+      link.agentSessionId === null
+        ? []
+        : yield* linear.agentPrompts(link.agentSessionId).pipe(
+            Effect.catchCause((cause) =>
+              logSkipped("Linear agent prompts skipped", { cardId: card.id })(cause).pipe(
+                Effect.as<ReadonlyArray<LinearClient.LinearAgentPrompt>>([]),
+              ),
+            ),
+          );
+    // A prompt written as a comment already arrives with the comments.
+    const freshPrompts = prompts.filter(
+      (prompt) =>
+        prompt.sourceCommentId === null &&
+        (link.promptsSyncedAt === null || prompt.createdAt > link.promptsSyncedAt),
+    );
+    const replies = [
+      ...freshComments.map((comment) => ({ key: `comment:${comment.id}`, ...comment })),
+      ...freshPrompts.map((prompt) => ({ key: `prompt:${prompt.id}`, ...prompt })),
+    ].toSorted((left, right) => left.createdAt.localeCompare(right.createdAt));
+    // ponytail: the first new reply answers the delegate's open question, whether or not it was
+    // written as an answer; match Linear threads if people talk past the question.
     let question = input.ownerThreadId === null ? null : yield* openQuestion(input.ownerThreadId);
-    for (const comment of fresh) {
+    for (const reply of replies) {
       if (question !== null && input.ownerThreadId !== null) {
-        yield* dispatch({
+        const answered = yield* dispatch({
           type: "thread.user-input.respond",
-          commandId: CommandId.make(`server:linear-answer:${comment.id}`),
+          commandId: CommandId.make(`server:linear-answer:${reply.key}`),
           threadId: input.ownerThreadId,
           requestId: question,
-          answers: { answer: comment.body },
+          answers: { answer: reply.body },
           createdAt: input.nowIso,
-        });
+        }).pipe(
+          Effect.as(true),
+          Effect.catchTag("OrchestrationCommandInvariantError", () => Effect.succeed(false)),
+        );
         question = null;
-        continue;
+        if (answered) continue;
       }
       yield* dispatch({
         type: "card.message.record",
-        commandId: CommandId.make(`server:linear-comment:${comment.id}`),
+        commandId: CommandId.make(`server:linear-${reply.key}`),
         cardId: card.id,
-        messageId: MessageId.make(`linear-comment:${comment.id}`),
+        messageId: MessageId.make(`linear-${reply.key}`),
         authorKind: "linear",
-        authorId: comment.authorName,
-        body: comment.body,
+        authorId: reply.authorName,
+        body: reply.body,
         runThreadId: null,
         forOwner: true,
-        createdAt: comment.createdAt,
+        createdAt: reply.createdAt,
       });
     }
 
@@ -284,6 +314,7 @@ export const make = Effect.gen(function* () {
       priority: priority.value,
       stateId: restoreStateId ?? issue.stateId,
       commentsSyncedAt: issue.comments.at(-1)?.createdAt ?? link.commentsSyncedAt,
+      promptsSyncedAt: prompts.at(-1)?.createdAt ?? link.promptsSyncedAt,
     };
     if (!linksEqual(next, link)) {
       yield* dispatch({
@@ -409,7 +440,63 @@ export const make = Effect.gen(function* () {
     }
   });
 
-  /** A person's comment on a card, or a delegate's question, goes to the card's issue at once. */
+  // Issues that could not open an agent session this run; their questions go out as comments.
+  const sessionless = new Set<string>();
+
+  /** The owner session's card and its Linear issue, when the thread is one. */
+  const ownerLinkOf = Effect.fn("LinearSyncReactor.ownerLinkOf")(function* (threadId: ThreadId) {
+    const run = yield* snapshots.getRunByThreadId(threadId);
+    if (Option.isNone(run) || run.value.role !== "owner" || run.value.cardId === null) return null;
+    const card = yield* snapshots.getCardShellById(run.value.cardId);
+    if (Option.isNone(card) || card.value.linearIssue === null) return null;
+    return { run: run.value, card: card.value, link: card.value.linearIssue };
+  });
+
+  /** The card's agent session on its issue, opened the first time the delegate's work shows. */
+  const agentSessionFor = Effect.fn("LinearSyncReactor.agentSessionFor")(function* (
+    card: OrchestrationCardShell,
+    link: CardLinearIssue,
+  ) {
+    if (link.agentSessionId !== null) return link.agentSessionId;
+    if (sessionless.has(link.id)) return null;
+    const opened = yield* linear.createAgentSession(link.id).pipe(
+      Effect.map((id): string | null => id),
+      Effect.catchCause((cause) =>
+        logSkipped("Linear agent session unavailable; using comments", { cardId: card.id })(
+          cause,
+        ).pipe(Effect.as(null)),
+      ),
+    );
+    if (opened === null) {
+      sessionless.add(link.id);
+      return null;
+    }
+    yield* dispatch({
+      type: "card.linear.sync",
+      commandId: yield* freshCommandId("session"),
+      cardId: card.id,
+      issue: { ...link, agentSessionId: opened },
+      syncedAt: DateTime.formatIso(yield* DateTime.now),
+    });
+    return opened;
+  });
+
+  const questionText = (questions: unknown) =>
+    Array.isArray(questions)
+      ? questions
+          .map((question) =>
+            Predicate.isObject(question) && typeof question.question === "string"
+              ? question.question
+              : "",
+          )
+          .filter((question) => question.length > 0)
+          .join("\n\n")
+      : "";
+
+  /**
+   * What goes to Linear as it happens: a person's comment on a card, and the delegate's session as
+   * agent activity (each tool call an action, each reply a response, each question an elicitation).
+   */
   const push = Effect.fn("LinearSyncReactor.push")(function* (event: OrchestrationEvent) {
     if (!(yield* linear.configured)) return;
     if (event.type === "card.message-posted" && event.payload.authorKind === "human") {
@@ -418,33 +505,69 @@ export const make = Effect.gen(function* () {
       yield* linear.createComment(card.value.linearIssue.id, `**From Iskra:** ${event.payload.body}`);
       return;
     }
+    if (event.type === "thread.message-sent") {
+      if (event.payload.role !== "assistant" || event.payload.streaming) return;
+      const owned = yield* ownerLinkOf(event.payload.threadId);
+      if (owned === null) return;
+      // A completed message's event carries no text; its text is what its deltas built up.
+      const messageId = event.payload.messageId;
+      const text =
+        event.payload.text.trim().length > 0
+          ? event.payload.text
+          : Option.match(
+              yield* snapshots.getThreadDetailById(event.payload.threadId, { activityKinds: [] }),
+              {
+                onNone: () => "",
+                onSome: (thread) =>
+                  thread.messages.find((message) => message.id === messageId)?.text ?? "",
+              },
+            );
+      if (text.trim().length === 0) return;
+      const session = yield* agentSessionFor(owned.card, owned.link);
+      if (session !== null) {
+        yield* linear.createAgentActivity(session, { type: "response", body: text });
+      }
+      return;
+    }
+    if (event.type !== "thread.activity-appended") return;
+    const activity = event.payload.activity;
+    if (activity.kind === "tool.completed") {
+      const owned = yield* ownerLinkOf(event.payload.threadId);
+      if (owned === null) return;
+      const session = yield* agentSessionFor(owned.card, owned.link);
+      if (session === null) return;
+      const detail =
+        Predicate.isObject(activity.payload) && typeof activity.payload.detail === "string"
+          ? activity.payload.detail
+          : "";
+      yield* linear.createAgentActivity(session, {
+        type: "action",
+        action: activity.summary,
+        parameter: detail.slice(0, 500),
+      });
+      return;
+    }
     if (
-      event.type !== "thread.activity-appended" ||
-      event.payload.activity.kind !== "user-input.requested" ||
-      !Predicate.isObject(event.payload.activity.payload) ||
-      event.payload.activity.payload.responseMode !== "message"
+      activity.kind !== "user-input.requested" ||
+      !Predicate.isObject(activity.payload) ||
+      activity.payload.responseMode !== "message"
     )
       return;
-    const run = yield* snapshots.getRunByThreadId(event.payload.threadId);
-    if (Option.isNone(run) || run.value.role !== "owner" || run.value.cardId === null) return;
-    const card = yield* snapshots.getCardShellById(run.value.cardId);
-    if (Option.isNone(card) || card.value.linearIssue === null) return;
-    const agent = yield* snapshots.getAgentShellById(run.value.agentId);
-    const questions = event.payload.activity.payload.questions;
-    const text = Array.isArray(questions)
-      ? questions
-          .map((question) =>
-            Predicate.isObject(question) && typeof question.question === "string" ? question.question : "",
-          )
-          .filter((question) => question.length > 0)
-          .join("\n\n")
-      : "";
+    const owned = yield* ownerLinkOf(event.payload.threadId);
+    if (owned === null) return;
+    const text = questionText(activity.payload.questions);
     if (text.length === 0) return;
-    const name = Option.match(agent, { onNone: () => "The delegate", onSome: (value) => `@${value.name}` });
-    yield* linear.createComment(
-      card.value.linearIssue.id,
-      `**${name} asks:** ${text}\n\nReply here to answer.`,
-    );
+    const session = yield* agentSessionFor(owned.card, owned.link);
+    if (session !== null) {
+      yield* linear.createAgentActivity(session, { type: "elicitation", body: text });
+      return;
+    }
+    const agent = yield* snapshots.getAgentShellById(owned.run.agentId);
+    const name = Option.match(agent, {
+      onNone: () => "The delegate",
+      onSome: (value) => `@${value.name}`,
+    });
+    yield* linear.createComment(owned.link.id, `**${name} asks:** ${text}\n\nReply here to answer.`);
   });
 
   const worker = yield* makeDrainableWorker(
@@ -459,7 +582,9 @@ export const make = Effect.gen(function* () {
       const events = yield* engine.subscribeDomainEvents;
       yield* forkParked(
         Stream.runForEach(events, (event) =>
-          event.type === "card.message-posted" || event.type === "thread.activity-appended"
+          event.type === "card.message-posted" ||
+          event.type === "thread.activity-appended" ||
+          event.type === "thread.message-sent"
             ? worker.enqueue({ kind: "push", event })
             : Effect.void,
         ),
@@ -471,6 +596,19 @@ export const make = Effect.gen(function* () {
           Effect.asVoid,
         ),
       );
+      // A client coming to the foreground syncs at once instead of on the next minute.
+      if (Option.isSome(backgroundPolicy)) {
+        yield* forkParked(
+          Stream.runForEach(
+            backgroundPolicy.value.streamChanges.pipe(
+              Stream.map((snapshot) => snapshot.activeForegroundLeaseCount > 0),
+              Stream.changes,
+              Stream.filter((foreground) => foreground),
+            ),
+            () => worker.enqueue({ kind: "sweep" }),
+          ),
+        );
+      }
     },
   );
 

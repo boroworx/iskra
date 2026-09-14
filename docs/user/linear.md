@@ -15,7 +15,11 @@ on your own machine works without a public URL.
 
 ## What syncs
 
-- **Delegating an issue to Iskra** in Linear turns it into a card that is ready for work.
+- **Delegating an issue to Iskra** in Linear turns it into a card that is ready for work. Issues
+  with the project's Linear label come in too, waiting in triage.
+- **Priority** syncs both ways. Change it from the menu on a card on the board.
+- **The agent's work** shows in the issue's agent session. You'll see each action it takes, its
+  replies, and its questions. Answer a question right there, or by commenting on the issue.
 - **Approving a card** in Iskra creates an issue in the project's team.
 - **Title and description** sync both ways with the card's title and spec. If both sides changed,
   the later edit wins. Editing the description in Linear sends the spec back for approval.

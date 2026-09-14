@@ -791,15 +791,27 @@ intake, issue creation, both directions of title, spec and comments, a status mo
 and then a cancel abandoning the card, and a question answered from Linear. `LinearClient.test.ts`
 covers signing in once and decoding issues.
 
-Not built yet:
-- Intake by team and label.
-- Priority.
-- Linear agent activity. Sessions post plain comments rather than thought, action and elicitation
-  activity.
-- Webhooks, and syncing when a client gains focus.
-- A settings form for the app credentials.
+Since acceptance:
+- **Credentials.** The client ID and secret are entered in Settings → Integrations. The secret is
+  kept in server secrets and redacted for clients. The environment variables still work as a
+  fallback. The client reads credentials at each sign-in and signs in again when they change.
+- **Label intake.** A project's `linearLabel` brings the team's open issues with that label in as
+  triage cards.
+- **Priority.** Cards have a `priority` on Linear's 0–4 scale. It is set from a menu on the board card
+  and merged three ways like title and spec.
+- **Agent activity.** The first time a linked card's owner session does something, a Linear agent
+  session opens on the issue. Each tool call then posts an action activity, each final assistant
+  message a response, and each `ask_owner` question an elicitation. If no session can be opened,
+  questions fall back to comments. Prompts in the session come back like comments; prompts written
+  as comments are skipped so they don't arrive twice.
+- **Focus.** A client coming to the foreground triggers a sweep straight away.
 
-The GraphQL queries follow Linear's documented API but have not been run against a live workspace.
+`LinearSyncReactor.test.ts` covers all of these against the in-memory Linear, and
+`serverSettings.test.ts` covers the secret.
+
+Not built: webhooks, since polling covers a server without a public URL. The GraphQL follows
+Linear's published schema, but the issue fields used for delegation, labels and priority, and the
+agent-session calls, have not been run against a live workspace.
 
 **M2.11 — Channel lead.** _Accept when:_ an unmentioned request in a channel produces a `triage`
 card linked to the message, with reasoning and likely duplicates; an `@mention` bypasses the lead;
@@ -833,8 +845,8 @@ so it cannot answer and cannot wake anyone with a mention.
 **Limits:**
 - A lead run that takes later messages as further turns still links its proposals to the message
   that first woke it.
-- The board face does not yet show a proposal's reasoning. The reasoning lives in the card's decision
-  log and is handed to its sessions.
+- The reasoning is also kept as `proposalReasoning` on the card. The board's triage face and the
+  Needs you item show it.
 - No browser pass has been done on the lead picker.
 
 ### M3–M5 (not yet briefed)

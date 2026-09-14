@@ -668,6 +668,12 @@ export const CardLinearIssue = Schema.Struct({
   priority: CardPriority.pipe(Schema.withDecodingDefault(Effect.succeed(0 as const))),
   // The newest Linear comment already brought into the card.
   commentsSyncedAt: Schema.NullOr(IsoDateTime),
+  // The Linear agent session the delegate's work shows in, once one is opened.
+  agentSessionId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  // The newest prompt from that session already brought into the card.
+  promptsSyncedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
 });
 export type CardLinearIssue = typeof CardLinearIssue.Type;
 
