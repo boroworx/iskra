@@ -4,27 +4,29 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import { toPersistenceSqlError } from "../Errors.ts";
-import { OrchestrationRun } from "@iskra/contracts";
 
 import {
   EndProjectionRunInput,
   GetProjectionChannelInput,
   GetProjectionChannelMessageInput,
   ListOpenProjectionChannelDeliveriesInput,
-  ProjectionChannel,
+  PROJECTION_CHANNEL_MESSAGE_COLUMNS,
   ProjectionChannelDbRow,
   ProjectionChannelDelivery,
   ProjectionChannelMessage,
   ProjectionChannelRepository,
   ProjectionOpenChannelDelivery,
+  ProjectionRunDbRow,
   type ProjectionChannelRepositoryShape,
 } from "../Services/ProjectionChannels.ts";
 
 const makeProjectionChannelRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const query = (method: string) =>
+    Effect.mapError(toPersistenceSqlError(`ProjectionChannelRepository.${method}:query`));
 
   const upsertChannelRow = SqlSchema.void({
-    Request: ProjectionChannel,
+    Request: ProjectionChannelDbRow,
     execute: (row) =>
       sql`
         INSERT INTO projection_channels (
@@ -49,7 +51,7 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
           ${row.topic},
           ${row.pinnedSpec},
           ${row.wakeDepth},
-          ${JSON.stringify(row.memberAgentIds)},
+          ${row.memberAgentIds},
           ${row.leadAgentId},
           ${row.createdAt},
           ${row.updatedAt},
@@ -127,22 +129,14 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
     Result: ProjectionChannelMessage,
     execute: ({ messageId }) =>
       sql`
-        SELECT
-          message_id AS "messageId",
-          channel_id AS "channelId",
-          sequence,
-          author_kind AS "authorKind",
-          author_id AS "authorId",
-          body,
-          created_at AS "createdAt",
-          run_thread_id AS "runThreadId"
+        SELECT ${sql.literal(PROJECTION_CHANNEL_MESSAGE_COLUMNS)}
         FROM projection_channel_messages
         WHERE message_id = ${messageId}
       `,
   });
 
   const insertRunRow = SqlSchema.void({
-    Request: OrchestrationRun,
+    Request: ProjectionRunDbRow,
     execute: (row) =>
       sql`
         INSERT INTO projection_runs (
@@ -164,9 +158,9 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
           ${row.cardId},
           ${row.agentId},
           ${row.triggerMessageId},
-          ${JSON.stringify(row.capabilities)},
-          ${JSON.stringify(row.context)},
-          ${JSON.stringify(row.rendered)},
+          ${row.capabilities},
+          ${row.context},
+          ${row.rendered},
           ${row.startedAt}
         )
         ON CONFLICT (thread_id) DO NOTHING
@@ -189,15 +183,7 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
     Result: ProjectionChannelMessage,
     execute: ({ channelId }) =>
       sql`
-        SELECT
-          message_id AS "messageId",
-          channel_id AS "channelId",
-          sequence,
-          author_kind AS "authorKind",
-          author_id AS "authorId",
-          body,
-          created_at AS "createdAt",
-          run_thread_id AS "runThreadId"
+        SELECT ${sql.literal(PROJECTION_CHANNEL_MESSAGE_COLUMNS)}
         FROM projection_channel_messages
         WHERE channel_id = ${channelId}
         ORDER BY sequence DESC
@@ -263,75 +249,24 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
       `,
   });
 
-  const upsertDelivery: ProjectionChannelRepositoryShape["upsertDelivery"] = (row) =>
-    upsertDeliveryRow(row).pipe(
-      Effect.mapError(toPersistenceSqlError("ProjectionChannelRepository.upsertDelivery:query")),
-    );
-
-  const updateDeliveries: ProjectionChannelRepositoryShape["updateDeliveries"] = ({
-    messageIds,
-    ...delivery
-  }) =>
-    Effect.forEach(messageIds, (messageId) => upsertDeliveryRow({ ...delivery, messageId }), {
-      discard: true,
-    }).pipe(
-      Effect.mapError(toPersistenceSqlError("ProjectionChannelRepository.updateDeliveries:query")),
-    );
-
-  const listOpenDeliveries: ProjectionChannelRepositoryShape["listOpenDeliveries"] = (input) =>
-    listOpenDeliveryRows(input).pipe(
-      Effect.mapError(
-        toPersistenceSqlError("ProjectionChannelRepository.listOpenDeliveries:query"),
-      ),
-    );
-
-  const upsertChannel: ProjectionChannelRepositoryShape["upsertChannel"] = (row) =>
-    upsertChannelRow(row).pipe(
-      Effect.mapError(toPersistenceSqlError("ProjectionChannelRepository.upsertChannel:query")),
-    );
-
-  const getChannelById: ProjectionChannelRepositoryShape["getChannelById"] = (input) =>
-    getChannelRow(input).pipe(
-      Effect.mapError(toPersistenceSqlError("ProjectionChannelRepository.getChannelById:query")),
-    );
-
-  const appendMessage: ProjectionChannelRepositoryShape["appendMessage"] = (row) =>
-    appendMessageRow(row).pipe(
-      Effect.mapError(toPersistenceSqlError("ProjectionChannelRepository.appendMessage:query")),
-    );
-
-  const getMessageById: ProjectionChannelRepositoryShape["getMessageById"] = (input) =>
-    getMessageRow(input).pipe(
-      Effect.mapError(toPersistenceSqlError("ProjectionChannelRepository.getMessageById:query")),
-    );
-
-  const insertRun: ProjectionChannelRepositoryShape["insertRun"] = (row) =>
-    insertRunRow(row).pipe(
-      Effect.mapError(toPersistenceSqlError("ProjectionChannelRepository.insertRun:query")),
-    );
-
-  const endRun: ProjectionChannelRepositoryShape["endRun"] = (input) =>
-    endRunRow(input).pipe(
-      Effect.mapError(toPersistenceSqlError("ProjectionChannelRepository.endRun:query")),
-    );
-
-  const listWakeHistory: ProjectionChannelRepositoryShape["listWakeHistory"] = (input) =>
-    listWakeHistoryRows(input).pipe(
-      Effect.map((rows) => rows.toReversed()),
-      Effect.mapError(toPersistenceSqlError("ProjectionChannelRepository.listWakeHistory:query")),
-    );
-
   return {
-    upsertChannel,
-    getChannelById,
-    appendMessage,
-    getMessageById,
-    insertRun,
-    endRun,
-    listWakeHistory,
-    upsertDelivery,
-    updateDeliveries,
-    listOpenDeliveries,
+    upsertChannel: (row) => upsertChannelRow(row).pipe(query("upsertChannel")),
+    getChannelById: (input) => getChannelRow(input).pipe(query("getChannelById")),
+    appendMessage: (row) => appendMessageRow(row).pipe(query("appendMessage")),
+    getMessageById: (input) => getMessageRow(input).pipe(query("getMessageById")),
+    insertRun: (row) => insertRunRow(row).pipe(query("insertRun")),
+    endRun: (input) => endRunRow(input).pipe(query("endRun")),
+    listWakeHistory: (input) =>
+      listWakeHistoryRows(input).pipe(
+        Effect.map((rows) => rows.toReversed()),
+        query("listWakeHistory"),
+      ),
+    upsertDelivery: (row) => upsertDeliveryRow(row).pipe(query("upsertDelivery")),
+    updateDeliveries: ({ messageIds, ...delivery }) =>
+      Effect.forEach(messageIds, (messageId) => upsertDeliveryRow({ ...delivery, messageId }), {
+        discard: true,
+      }).pipe(query("updateDeliveries")),
+    listOpenDeliveries: (input) => listOpenDeliveryRows(input).pipe(query("listOpenDeliveries")),
   } satisfies ProjectionChannelRepositoryShape;
 });
 

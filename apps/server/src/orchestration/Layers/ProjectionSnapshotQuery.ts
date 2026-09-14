@@ -65,6 +65,7 @@ import {
   ProjectionAgentShellDbRow,
 } from "../../persistence/Services/ProjectionAgents.ts";
 import {
+  PROJECTION_CHANNEL_MESSAGE_COLUMNS,
   ProjectionAgentRunDbRow,
   ProjectionChannelDbRow,
   ProjectionChannelDelivery,
@@ -4037,15 +4038,7 @@ pending_approval_requests AS (
     Result: ProjectionChannelMessage,
     execute: ({ channelId, limit }) =>
       sql`
-        SELECT
-          message_id AS "messageId",
-          channel_id AS "channelId",
-          sequence,
-          author_kind AS "authorKind",
-          author_id AS "authorId",
-          body,
-          created_at AS "createdAt",
-          run_thread_id AS "runThreadId"
+        SELECT ${sql.literal(PROJECTION_CHANNEL_MESSAGE_COLUMNS)}
         FROM projection_channel_messages
         WHERE channel_id = ${channelId}
         ORDER BY sequence DESC

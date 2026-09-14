@@ -8,7 +8,6 @@ import { toPersistenceSqlError } from "../Errors.ts";
 import {
   GetProjectionCardInput,
   PROJECTION_CARD_COLUMNS,
-  ProjectionCard,
   ProjectionCardDbRow,
   ProjectionCardDecision,
   ProjectionCardDecisionDbRow,
@@ -20,9 +19,11 @@ import {
 
 const makeProjectionCardRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const query = (method: string) =>
+    Effect.mapError(toPersistenceSqlError(`ProjectionCardRepository.${method}:query`));
 
   const upsertProjectionCardRow = SqlSchema.void({
-    Request: ProjectionCard,
+    Request: ProjectionCardDbRow,
     execute: (row) =>
       sql`
         INSERT INTO projection_cards (
@@ -69,7 +70,7 @@ const makeProjectionCardRepository = Effect.gen(function* () {
           ${row.title},
           ${row.spec},
           ${row.specState},
-          ${JSON.stringify(row.tags)},
+          ${row.tags},
           ${row.status},
           ${row.ownerHumanId},
           ${row.delegateAgentId},
@@ -80,20 +81,20 @@ const makeProjectionCardRepository = Effect.gen(function* () {
           ${row.snoozedUntil},
           ${row.snoozedAt},
           ${row.activityAt},
-          ${JSON.stringify(row.diffStat)},
-          ${JSON.stringify(row.checks)},
+          ${row.diffStat},
+          ${row.checks},
           ${row.spentUsd},
           ${row.budgetCapUsd},
           ${row.unpricedTurns},
-          ${JSON.stringify(row.acceptsUnpriced)},
+          ${row.acceptsUnpriced},
           ${row.reviewReturns},
           ${row.attemptGroupId},
-          ${JSON.stringify(row.linearIssue)},
+          ${row.linearIssue},
           ${row.sourceMessageId},
           ${row.proposalReasoning},
           ${row.priority},
-          ${JSON.stringify(row.relations)},
-          ${JSON.stringify(row.createdBy)},
+          ${row.relations},
+          ${row.createdBy},
           ${row.createdAt},
           ${row.updatedAt}
         )
@@ -274,59 +275,19 @@ const makeProjectionCardRepository = Effect.gen(function* () {
       `,
   });
 
-  const upsert: ProjectionCardRepositoryShape["upsert"] = (row) =>
-    upsertProjectionCardRow(row).pipe(
-      Effect.mapError(toPersistenceSqlError("ProjectionCardRepository.upsert:query")),
-    );
-
-  const getById: ProjectionCardRepositoryShape["getById"] = (input) =>
-    getProjectionCardRow(input).pipe(
-      Effect.mapError(toPersistenceSqlError("ProjectionCardRepository.getById:query")),
-    );
-
-  const appendDecision: ProjectionCardRepositoryShape["appendDecision"] = (row) =>
-    insertProjectionCardDecision(row).pipe(
-      Effect.mapError(toPersistenceSqlError("ProjectionCardRepository.appendDecision:query")),
-    );
-
-  const recordSpend: ProjectionCardRepositoryShape["recordSpend"] = (row) =>
-    insertSpendRow(row).pipe(
-      Effect.mapError(toPersistenceSqlError("ProjectionCardRepository.recordSpend:query")),
-    );
-
-  const listDecisions: ProjectionCardRepositoryShape["listDecisions"] = (input) =>
-    listDecisionRows(input).pipe(
-      Effect.mapError(toPersistenceSqlError("ProjectionCardRepository.listDecisions:query")),
-    );
-
-  const appendMessage: ProjectionCardRepositoryShape["appendMessage"] = (row) =>
-    insertMessageRow(row).pipe(
-      Effect.mapError(toPersistenceSqlError("ProjectionCardRepository.appendMessage:query")),
-    );
-
-  const updateDeliveries: ProjectionCardRepositoryShape["updateDeliveries"] = (input) =>
-    input.messageIds.length === 0
-      ? Effect.void
-      : updateDeliveryRows(input).pipe(
-          Effect.mapError(toPersistenceSqlError("ProjectionCardRepository.updateDeliveries:query")),
-        );
-
-  const listOpenOwnerMessages: ProjectionCardRepositoryShape["listOpenOwnerMessages"] = (input) =>
-    listOpenOwnerMessageRows(input).pipe(
-      Effect.mapError(
-        toPersistenceSqlError("ProjectionCardRepository.listOpenOwnerMessages:query"),
-      ),
-    );
-
   return {
-    upsert,
-    getById,
-    appendDecision,
-    recordSpend,
-    listDecisions,
-    appendMessage,
-    updateDeliveries,
-    listOpenOwnerMessages,
+    upsert: (row) => upsertProjectionCardRow(row).pipe(query("upsert")),
+    getById: (input) => getProjectionCardRow(input).pipe(query("getById")),
+    appendDecision: (row) => insertProjectionCardDecision(row).pipe(query("appendDecision")),
+    recordSpend: (row) => insertSpendRow(row).pipe(query("recordSpend")),
+    listDecisions: (input) => listDecisionRows(input).pipe(query("listDecisions")),
+    appendMessage: (row) => insertMessageRow(row).pipe(query("appendMessage")),
+    updateDeliveries: (input) =>
+      input.messageIds.length === 0
+        ? Effect.void
+        : updateDeliveryRows(input).pipe(query("updateDeliveries")),
+    listOpenOwnerMessages: (input) =>
+      listOpenOwnerMessageRows(input).pipe(query("listOpenOwnerMessages")),
   } satisfies ProjectionCardRepositoryShape;
 });
 

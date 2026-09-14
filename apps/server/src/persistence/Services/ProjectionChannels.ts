@@ -73,6 +73,18 @@ export const ProjectionChannelMessage = Schema.Struct({
 });
 export type ProjectionChannelMessage = typeof ProjectionChannelMessage.Type;
 
+/** The `projection_channel_messages` columns as `ProjectionChannelMessage` reads them. */
+export const PROJECTION_CHANNEL_MESSAGE_COLUMNS = `
+  message_id AS "messageId",
+  channel_id AS "channelId",
+  sequence,
+  author_kind AS "authorKind",
+  author_id AS "authorId",
+  body,
+  created_at AS "createdAt",
+  run_thread_id AS "runThreadId"
+`;
+
 /** A stored message as clients and agents see it. */
 export function toOrchestrationChannelMessage(
   row: ProjectionChannelMessage,
@@ -88,23 +100,17 @@ export function toOrchestrationChannelMessage(
   };
 }
 
+const runJsonColumns = Struct.assign({
+  capabilities: Schema.fromJsonString(RunCapabilities),
+  context: Schema.fromJsonString(OrchestrationRun.fields.context),
+  rendered: Schema.fromJsonString(RenderedRunContext),
+});
+
 /** A `projection_runs` row as selected, with its JSON columns decoded. */
-export const ProjectionRunDbRow = OrchestrationRun.mapFields(
-  Struct.assign({
-    capabilities: Schema.fromJsonString(RunCapabilities),
-    context: Schema.fromJsonString(OrchestrationRun.fields.context),
-    rendered: Schema.fromJsonString(RenderedRunContext),
-  }),
-);
+export const ProjectionRunDbRow = OrchestrationRun.mapFields(runJsonColumns);
 
 /** A `projection_runs` row with its end time, JSON columns decoded. */
-export const ProjectionAgentRunDbRow = OrchestrationAgentRun.mapFields(
-  Struct.assign({
-    capabilities: Schema.fromJsonString(RunCapabilities),
-    context: Schema.fromJsonString(OrchestrationRun.fields.context),
-    rendered: Schema.fromJsonString(RenderedRunContext),
-  }),
-);
+export const ProjectionAgentRunDbRow = OrchestrationAgentRun.mapFields(runJsonColumns);
 
 export const GetProjectionChannelMessageInput = Schema.Struct({
   messageId: MessageId,

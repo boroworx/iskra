@@ -6,7 +6,6 @@ import * as Layer from "effect/Layer";
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
   GetProjectionAgentInput,
-  ProjectionAgent,
   ProjectionAgentDbRow,
   ProjectionAgentRepository,
   type ProjectionAgentRepositoryShape,
@@ -14,9 +13,11 @@ import {
 
 const makeProjectionAgentRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const query = (method: string) =>
+    Effect.mapError(toPersistenceSqlError(`ProjectionAgentRepository.${method}:query`));
 
   const upsertProjectionAgentRow = SqlSchema.void({
-    Request: ProjectionAgent,
+    Request: ProjectionAgentDbRow,
     execute: (row) =>
       sql`
         INSERT INTO projection_agents (
@@ -37,10 +38,10 @@ const makeProjectionAgentRepository = Effect.gen(function* () {
           ${row.projectId},
           ${row.name},
           ${row.avatar},
-          ${JSON.stringify(row.roleTags)},
+          ${row.roleTags},
           ${row.rolePrompt},
-          ${JSON.stringify(row.modelSelection)},
-          ${JSON.stringify(row.capabilities)},
+          ${row.modelSelection},
+          ${row.capabilities},
           ${row.createdAt},
           ${row.updatedAt},
           ${row.archivedAt}
@@ -82,19 +83,9 @@ const makeProjectionAgentRepository = Effect.gen(function* () {
       `,
   });
 
-  const upsert: ProjectionAgentRepositoryShape["upsert"] = (row) =>
-    upsertProjectionAgentRow(row).pipe(
-      Effect.mapError(toPersistenceSqlError("ProjectionAgentRepository.upsert:query")),
-    );
-
-  const getById: ProjectionAgentRepositoryShape["getById"] = (input) =>
-    getProjectionAgentRow(input).pipe(
-      Effect.mapError(toPersistenceSqlError("ProjectionAgentRepository.getById:query")),
-    );
-
   return {
-    upsert,
-    getById,
+    upsert: (row) => upsertProjectionAgentRow(row).pipe(query("upsert")),
+    getById: (input) => getProjectionAgentRow(input).pipe(query("getById")),
   } satisfies ProjectionAgentRepositoryShape;
 });
 
