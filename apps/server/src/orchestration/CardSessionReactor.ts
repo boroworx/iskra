@@ -23,7 +23,10 @@ import * as Stream from "effect/Stream";
 
 import { ProjectionCardRepositoryLive } from "../persistence/Layers/ProjectionCards.ts";
 import { ProjectionRunLivenessRepositoryLive } from "../persistence/Layers/ProjectionRunLiveness.ts";
-import { ProjectionCardRepository } from "../persistence/Services/ProjectionCards.ts";
+import {
+  ProjectionCardRepository,
+  type ProjectionCardActivity,
+} from "../persistence/Services/ProjectionCards.ts";
 import {
   ProjectionRunLivenessRepository,
   type ProjectionOwnerRun,
@@ -97,6 +100,16 @@ export const MAX_OWNER_RESTARTS_PER_HOUR = 3;
 /** Restarts before a new owner session: one more than a previous owner that failed, else none. */
 const restartsAfter = (previous: ProjectionOwnerRun | undefined) =>
   previous !== undefined && previous.sessionStatus === "error" ? previous.restarts + 1 : 0;
+
+/** A builder activity as the owner reads it in its next turn. */
+const asOwnerMessage = (activity: ProjectionCardActivity) => ({
+  messageId: MessageId.make(activity.activityId),
+  // A GitHub comment is a person writing, like one from Linear.
+  authorKind: activity.author.kind === "github" ? ("human" as const) : activity.author.kind,
+  authorId: activity.author.id,
+  body: activity.body,
+  createdAt: activity.createdAt,
+});
 
 const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngine.OrchestrationEngineService;
@@ -291,11 +304,11 @@ const make = Effect.gen(function* () {
     if (session === null || session.status !== "ready" || session.activeTurnId !== null) {
       return;
     }
-    const open = yield* cards.listOpenOwnerMessages({ cardId });
-    if (open.some((message) => message.deliveryThreadId === owner.threadId)) {
+    const open = yield* cards.listOpenBuilderActivities({ cardId });
+    if (open.some((activity) => activity.deliveryThreadId === owner.threadId)) {
       return; // A turn carrying earlier messages is already on its way.
     }
-    const waiting = open.filter((message) => message.deliveryStatus === "pending");
+    const waiting = open.filter((activity) => activity.delivery === "pending").map(asOwnerMessage);
     if (waiting.length === 0) {
       return;
     }
@@ -338,13 +351,13 @@ const make = Effect.gen(function* () {
     status: "pending" | "delivered" | "undelivered",
   ) =>
     Effect.gen(function* () {
-      const sent = (yield* cards.listOpenOwnerMessages({ cardId })).filter(
-        (message) => message.deliveryStatus === "sent" && message.deliveryThreadId === threadId,
+      const sent = (yield* cards.listOpenBuilderActivities({ cardId })).filter(
+        (activity) => activity.delivery === "sent" && activity.deliveryThreadId === threadId,
       );
       if (sent.length === 0) {
         return;
       }
-      const messageIds = sent.map((message) => message.messageId);
+      const messageIds = sent.map((activity) => MessageId.make(activity.activityId));
       yield* engine.dispatch({
         type: "card.delivery.update",
         commandId: CommandId.make(`card-delivery:${status}:${threadId}:${messageIds.join(",")}`),
@@ -583,8 +596,13 @@ const make = Effect.gen(function* () {
         return worker.enqueue({ kind: "session", role: "helper", event });
       case "card.spec-submitted":
         return worker.enqueue({ kind: "session", role: "critic", event });
+      // Legacy owner messages are recorded as builder activities too, so either event delivers.
       case "card.message-posted":
         return event.payload.forOwner
+          ? worker.enqueue({ kind: "deliver", cardId: event.payload.cardId })
+          : Effect.void;
+      case "card.activity-recorded":
+        return event.payload.deliverTo === "builder"
           ? worker.enqueue({ kind: "deliver", cardId: event.payload.cardId })
           : Effect.void;
       // A raised cap or an accepted model lets the card spend again. Starting a session, here or
