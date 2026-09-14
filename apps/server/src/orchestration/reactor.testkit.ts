@@ -15,6 +15,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Stream from "effect/Stream";
 
+import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { ServerConfig } from "../config.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../persistence/Layers/OrchestrationCommandReceipts.ts";
 import { OrchestrationEventStoreLive } from "../persistence/Layers/OrchestrationEventStore.ts";
@@ -24,6 +25,7 @@ import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolv
 import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import * as CardWorkspace from "./CardWorkspace.ts";
+import * as HostAdmission from "./HostAdmission.ts";
 import { OrchestrationEngineLive } from "./Layers/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./Layers/ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./Layers/ProjectionSnapshotQuery.ts";
@@ -54,6 +56,9 @@ export const cardWorkspaceTestLayer = (
 ) =>
   CardWorkspace.layer.pipe(
     Layer.provideMerge(
+      HostAdmission.layerWithSample(Effect.succeed({ load1: 0, cores: 8, freeMemRatio: 1 })),
+    ),
+    Layer.provideMerge(
       OrchestrationEngineLive.pipe(Layer.provide(OrchestrationProjectionPipelineLive)),
     ),
     Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
@@ -63,11 +68,12 @@ export const cardWorkspaceTestLayer = (
     Layer.provideMerge(OrchestrationCommandReceiptRepositoryLive),
     Layer.provide(RepositoryIdentityResolver.layer),
     Layer.provideMerge(SqlitePersistenceMemory),
+    Layer.provideMerge(ServerSecretStore.layer),
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix })),
     Layer.provideMerge(ProcessRunner.layer),
     Layer.provide(Net.layer),
     Layer.provide(terminals),
-    Layer.provide(ServerSettings.layerTest()),
+    Layer.provideMerge(ServerSettings.layerTest()),
     Layer.provideMerge(Layer.succeed(Crypto.Crypto, testCrypto)),
     Layer.provideMerge(NodeServices.layer),
   );

@@ -450,6 +450,9 @@ export const makeOrchestrationIntegrationHarness = (
           runChecks: () => Effect.die("card workspaces are not used by the engine harness"),
           changedFiles: () => Effect.die("card workspaces are not used by the engine harness"),
           land: () => Effect.die("card workspaces are not used by the engine harness"),
+          projectFile: () => Effect.die("card workspaces are not used by the engine harness"),
+          openCardChangedFiles: () =>
+            Effect.die("card workspaces are not used by the engine harness"),
         }),
       ),
       Layer.provideMerge(

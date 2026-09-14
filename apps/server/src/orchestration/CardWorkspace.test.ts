@@ -1,7 +1,11 @@
+// @effect-diagnostics nodeBuiltinImport:off - holds a real port to prove every port is probed.
+import * as NodeNet from "node:net";
+
 import {
   AgentId,
   CardId,
   CommandId,
+  DEFAULT_PROJECT_ORCHESTRATION,
   ProjectId,
   ProviderInstanceId,
   type OrchestrationEvent,
@@ -12,6 +16,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 
+import { ServerSecretStore } from "../auth/ServerSecretStore.ts";
+import { ServerSettingsService } from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import * as CardWorkspace from "./CardWorkspace.ts";
 import { cardWorkspaceTestLayer, makeGitRepo, now } from "./reactor.testkit.ts";
@@ -76,6 +82,19 @@ const makeProject = Effect.fn("makeProject")(function* (
   });
 
   return {
+    projectId,
+    /** Commits `.iskra/project.json` (and any other files) onto `main`. */
+    commitProjectFile: (file: unknown, extra: Record<string, string> = {}) =>
+      Effect.gen(function* () {
+        yield* fileSystem.makeDirectory(path.join(root, ".iskra"), { recursive: true });
+        // @effect-diagnostics-next-line preferSchemaOverJson:off - writes an arbitrary fixture file.
+        yield* fileSystem.writeFileString(path.join(root, ".iskra", "project.json"), JSON.stringify(file));
+        for (const [name, content] of Object.entries(extra)) {
+          yield* fileSystem.writeFileString(path.join(root, name), content);
+        }
+        yield* git("add", ".");
+        yield* git("commit", "-m", "project file");
+      }),
     engine,
     fileSystem,
     path,
@@ -333,4 +352,266 @@ it.layer(layer)("CardWorkspace", (it) => {
       }),
     ),
   );
+
+  it.effect("starts from origin's copy of the policy base branch and diffs untracked files", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const workspace = yield* CardWorkspace.CardWorkspace;
+        const engine = yield* OrchestrationEngineService;
+        const upstream = yield* makeGitRepo("iskra-card-upstream-");
+        const cloneParent = yield* upstream.fileSystem.makeTempDirectoryScoped({
+          prefix: "iskra-card-clone-",
+        });
+        const clone = upstream.path.join(cloneParent, "repo");
+        yield* upstream.git("clone", "--quiet", upstream.root, clone);
+        // Staging moves on origin after the clone, so only a fetch can see this commit.
+        yield* upstream.git("checkout", "--quiet", "-b", "staging");
+        yield* upstream.fileSystem.writeFileString(upstream.path.join(upstream.root, "staging.txt"), "s\n");
+        yield* upstream.git("add", ".");
+        yield* upstream.git("commit", "-m", "staging work");
+
+        const projectId = ProjectId.make("project-base-branch");
+        yield* engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.make("cmd-project-base-branch"),
+          projectId,
+          title: "Base branch",
+          workspaceRoot: clone,
+          createdAt: now,
+        });
+        yield* engine.dispatch({
+          type: "project.orchestration.set",
+          commandId: CommandId.make("cmd-policy-base-branch"),
+          projectId,
+          orchestration: { ...DEFAULT_PROJECT_ORCHESTRATION, baseBranch: "staging" },
+        });
+        const cardId = CardId.make("card-base-branch");
+        yield* engine.dispatch({
+          type: "card.create",
+          commandId: CommandId.make("cmd-card-base-branch"),
+          cardId,
+          projectId,
+          title: "On staging",
+          spec: "",
+          tags: [],
+          createdAt: now,
+        });
+
+        const info = yield* workspace.ensure(cardId);
+        expect(yield* upstream.gitIn(info.worktreePath, "log", "-1", "--format=%s")).toBe("staging work");
+        expect((yield* workspace.projectFile(cardId)).baseRef).toBe("origin/staging");
+
+        yield* upstream.fileSystem.writeFileString(upstream.path.join(info.worktreePath, "added.txt"), "new\n");
+        const { baseBranch, diff } = yield* workspace.diff(cardId);
+        expect(baseBranch).toBe("staging");
+        expect(diff).toContain("+++ b/added.txt");
+        expect(diff).not.toContain("staging.txt");
+        // The temp index leaves the worktree's own index alone.
+        expect(yield* upstream.gitIn(info.worktreePath, "status", "--porcelain")).toBe("?? added.txt");
+        expect(yield* workspace.changedFiles(cardId)).toEqual(["added.txt"]);
+      }),
+    ),
+  );
+
+  it.effect("runs checks in order with the card env, stopping at the first failure or timeout", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const workspace = yield* CardWorkspace.CardWorkspace;
+        const world = yield* makeProject("checks", []);
+        yield* world.commitProjectFile({
+          checks: [
+            {
+              id: "env",
+              name: "Env",
+              command: 'printf "workers=%s slug=%s" "$VITEST_MAX_WORKERS" "$ISKRA_CARD_SLUG"',
+              targetedCommand: "printf 'filter=%s' {filter}",
+            },
+            { id: "boom", name: "Boom", command: "echo boom; exit 3" },
+            { id: "never", name: "Never", command: "touch never.txt" },
+            { id: "ci", name: "CI only", command: "exit 1", source: "ci" },
+          ],
+        });
+        const cardId = CardId.make("card-checks");
+        yield* world.createCard(cardId, "Checks");
+        const info = yield* workspace.ensure(cardId);
+
+        const full = yield* workspace.runChecks({ cardId, scope: "full" });
+        expect(full.passed).toBe(false);
+        expect(full.results.map((result) => [result.id, result.exitCode, result.timedOut])).toEqual([
+          ["env", 0, false],
+          ["boom", 3, false],
+        ]);
+        expect(full.results[0]!.logTail).toMatch(/^workers=\d+ slug=cchecks$/);
+        expect(full.results[1]!.logTail).toBe("boom");
+        expect(yield* world.fileSystem.readFileString(full.results[1]!.logArtifactPath!)).toBe("boom\n");
+        expect(yield* world.fileSystem.exists(world.path.join(info.worktreePath, "never.txt"))).toBe(false);
+
+        const targeted = yield* workspace.runChecks({ cardId, scope: "targeted", filter: "a b'c" });
+        expect(targeted.results[0]!.logTail).toBe("filter=a b'c");
+      }),
+    ),
+  );
+
+  it.effect("renders env files with ports, slug and workspace secrets, and refuses setup-only ones", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const workspace = yield* CardWorkspace.CardWorkspace;
+        const settings = yield* ServerSettingsService;
+        const secretStore = yield* ServerSecretStore;
+        const setup = script("setup", 'printf "%s" "$DB_PASSWORD" > "$ISKRA_PROJECT_ROOT/setup-saw.txt"', {
+          role: "setup",
+        });
+        const env = yield* makeProject("env", [setup]);
+        const leak = yield* makeProject("leak", [setup]);
+        const secrets = [
+          { name: "TOKEN", exposure: "workspace" as const },
+          { name: "DB_PASSWORD", exposure: "setup" as const },
+        ];
+        const runtime = (yield* settings.getSettings).cardRuntime;
+        yield* settings.updateSettings({
+          cardRuntime: { ...runtime, secrets: { [env.projectId]: secrets, [leak.projectId]: secrets } },
+        });
+        for (const projectId of [env.projectId, leak.projectId]) {
+          yield* secretStore.set(
+            CardWorkspace.cardSecretStoreName(projectId, "TOKEN"),
+            new TextEncoder().encode("tok-123"),
+          );
+          yield* secretStore.set(
+            CardWorkspace.cardSecretStoreName(projectId, "DB_PASSWORD"),
+            new TextEncoder().encode("pw-456"),
+          );
+        }
+        const envFiles = [{ template: ".env.iskra", target: ".env.local" }];
+        yield* env.commitProjectFile(
+          { ports: { web: 0, api: 3 }, envFiles },
+          {
+            ".env.iskra": "WEB=${port:web}\nAPI=${port:api}\nDB=hc_${card:slug}\nTOKEN=${secret:TOKEN}\n",
+            ".gitignore": ".env.local\n",
+          },
+        );
+        yield* leak.commitProjectFile(
+          { envFiles },
+          { ".env.iskra": "DB=${secret:DB_PASSWORD}\n", ".gitignore": ".env.local\n" },
+        );
+
+        yield* env.createCard("card-env", "Env");
+        const info = yield* workspace.ensure(CardId.make("card-env"));
+        expect(
+          yield* env.fileSystem.readFileString(env.path.join(info.worktreePath, ".env.local")),
+        ).toBe(`WEB=${info.portBase}\nAPI=${info.portBase + 3}\nDB=hc_cardenv\nTOKEN=tok-123\n`);
+        expect(yield* env.fileSystem.readFileString(env.path.join(env.root, "setup-saw.txt"))).toBe("pw-456");
+
+        yield* leak.createCard("card-leak", "Leak");
+        const error = yield* Effect.flip(workspace.ensure(CardId.make("card-leak")));
+        expect(error.message).toBe("Secret DB_PASSWORD is setup-only and can't be written into the worktree.");
+        expect((yield* leak.card("card-leak"))?.worktreePath).toBeNull();
+        expect(yield* leak.cardBranches).toEqual([]);
+      }),
+    ),
+  );
+
+  it.effect("skips a port block when any of its ports is taken, not only the first", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const workspace = yield* CardWorkspace.CardWorkspace;
+        const snapshotQuery = yield* ProjectionSnapshotQuery;
+        const world = yield* makeProject("port-probe", []);
+        const listenOn = (port: number) =>
+          Effect.acquireRelease(
+            Effect.callback<NodeNet.Server | null>((resume) => {
+              const server = NodeNet.createServer();
+              server.once("error", () => resume(Effect.succeed(null)));
+              server.listen(port, "127.0.0.1", () => resume(Effect.succeed(server)));
+            }),
+            (server) => Effect.sync(() => server?.close()),
+          );
+        const taken = new Set(
+          ((yield* snapshotQuery.getCommandReadModel()).cards ?? []).flatMap((card) =>
+            card.portBase === null ? [] : [card.portBase],
+          ),
+        );
+        // The first block nobody holds whose seventh port we can take for ourselves.
+        let candidate = 42_000;
+        while (taken.has(candidate) || (yield* listenOn(candidate + 7)) === null) {
+          candidate += 10;
+        }
+
+        yield* world.createCard("card-probe", "Probe");
+        const info = yield* workspace.ensure(CardId.make("card-probe"));
+        expect(info.portBase).toBeGreaterThan(candidate);
+      }),
+    ),
+  );
+
+  it.effect("prepares two cards at once: locks are per card, not global", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const workspace = yield* CardWorkspace.CardWorkspace;
+        const settings = yield* ServerSettingsService;
+        const runtime = (yield* settings.getSettings).cardRuntime;
+        yield* settings.updateSettings({ cardRuntime: { ...runtime, heavyJobConcurrency: 2 } });
+        // Each setup waits until both have started; a global lock would time this out.
+        const world = yield* makeProject("parallel", [
+          script(
+            "setup",
+            'touch "$ISKRA_PROJECT_ROOT/started-$ISKRA_CARD_ID"; for i in $(seq 200); do [ "$(ls "$ISKRA_PROJECT_ROOT" | grep -c "^started-")" -ge 2 ] && exit 0; sleep 0.05; done; exit 1',
+            { role: "setup" },
+          ),
+        ]);
+        yield* world.createCard("card-left", "Left");
+        yield* world.createCard("card-right", "Right");
+
+        const [left, right] = yield* Effect.all(
+          [workspace.ensure(CardId.make("card-left")), workspace.ensure(CardId.make("card-right"))],
+          { concurrency: 2 },
+        );
+        expect(left.portBase).not.toBe(right.portBase);
+        expect(left.worktreePath).not.toBe(right.worktreePath);
+      }),
+    ),
+  );
 });
+
+it("finds the exclusive paths a card's changes touch and tells other cards what to do", () => {
+  const policy = {
+    exclusivePaths: [
+      { glob: "packages/core/db/migrations/**", afterRebase: "pnpm db:generate" },
+      { glob: "pnpm-lock.yaml", afterRebase: null },
+    ],
+  };
+  expect(
+    CardWorkspace.exclusivePathConflicts(
+      ["apps/web/page.tsx", "packages/core/db/migrations/0042_add.sql"],
+      policy,
+    ),
+  ).toEqual([policy.exclusivePaths[0]]);
+  expect(CardWorkspace.exclusivePathConflicts(["packages/core/db/schema.ts"], policy)).toEqual([]);
+  expect(
+    CardWorkspace.exclusivePathReturnMessage({ ...policy.exclusivePaths[0]!, baseRef: "origin/staging" }),
+  ).toBe(
+    "Another card changed packages/core/db/migrations/**. Rebase onto origin/staging, then run `pnpm db:generate` before asking for review.",
+  );
+});
+
+// Live clock, so the check's timeout really elapses.
+it.live("kills a check at its timeout and keeps the output it wrote", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const workspace = yield* CardWorkspace.CardWorkspace;
+      const world = yield* makeProject("slow-check", []);
+      yield* world.commitProjectFile({
+        checks: [{ id: "slow", name: "Slow", command: "echo started; sleep 30", timeoutMinutes: 0.02 }],
+      });
+      const cardId = CardId.make("card-slow-check");
+      yield* world.createCard(cardId, "Slow");
+      yield* workspace.ensure(cardId);
+
+      const slow = yield* workspace.runChecks({ cardId, scope: "full" });
+      expect(slow.passed).toBe(false);
+      expect(slow.results).toMatchObject([
+        { id: "slow", exitCode: null, timedOut: true, logTail: "started" },
+      ]);
+      expect(slow.results[0]!.durationMs).toBeLessThan(20_000);
+    }),
+  ).pipe(Effect.provide(cardWorkspaceTestLayer("iskra-card-slow-check-", fakeTerminals))),
+);

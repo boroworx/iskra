@@ -1,26 +1,36 @@
+// @effect-diagnostics nodeBuiltinImport:off - Effect's Path has no glob matching.
+import * as NodePath from "node:path";
+
 import {
   CARD_PORT_BLOCK_SIZE,
   CommandId,
+  projectOrchestrationOf,
   type CardId,
   type OrchestrationCard,
   type OrchestrationProject,
   type OrchestrationReadModel,
+  type ProjectId,
+  type ProjectOrchestration,
   type ProjectScript,
+  type ServerSettings,
 } from "@iskra/contracts";
 import { makeDrainableWorker } from "@iskra/shared/DrainableWorker";
 import { HostProcessPlatform } from "@iskra/shared/hostProcess";
 import * as Net from "@iskra/shared/Net";
 import {
   archiveProjectScript,
-  checkProjectScripts,
+  cardScriptEnv,
+  cardSlug,
   projectScriptRuntimeEnv,
   resolveProjectScripts,
   setupProjectScript,
 } from "@iskra/shared/projectScripts";
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
@@ -29,13 +39,22 @@ import type * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
+import { ServerSecretStore } from "../auth/ServerSecretStore.ts";
 import { ServerConfig } from "../config.ts";
 import { ProcessRunner } from "../processRunner.ts";
 import { forkParked } from "../serverActivation.ts";
-import * as ServerSettings from "../serverSettings.ts";
+import * as ServerSettingsService from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import { isFinishedCardStatus } from "./cardRules.ts";
-import type { ProjectCheck } from "./ProjectFile.ts";
+import { HostAdmission } from "./HostAdmission.ts";
+import {
+  projectChecks,
+  readProjectFile,
+  type ProjectCheck,
+  type ProjectFileConfig,
+  type ProjectServiceConfig,
+} from "./ProjectFile.ts";
+import { hostResourceEnv } from "./ResourceEnv.ts";
 import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
 
@@ -48,17 +67,11 @@ export class CardWorkspaceError extends Schema.TaggedError<CardWorkspaceError>()
   },
 ) {}
 
-/** How the project's check scripts went in a card's worktree. */
-export interface CardChecksResult {
-  readonly passed: boolean;
-  readonly summary: string;
-}
-
 /**
  * A server-run checks request. "full" runs each check's command; "targeted" runs its
- * targetedCommand with `{filter}` replaced (checks without one run their full command). `checks`
- * defaults to the card's project file checks; source "ci" checks are skipped here. Heavy: call it
- * inside HostAdmission.run.
+ * targetedCommand with `{filter}` replaced by the shell-quoted filter (checks without one run their
+ * full command). `checks` defaults to the card's project file checks; source "ci" checks are
+ * skipped here. Heavy and not admission-controlled itself: call it inside HostAdmission.run.
  */
 export interface RunChecksInput {
   readonly cardId: CardId;
@@ -93,7 +106,11 @@ export interface CardChecksRun {
 export type CardLandResult =
   | { readonly kind: "landed"; readonly baseBranch: string; readonly files: ReadonlyArray<string> }
   | { readonly kind: "conflict"; readonly baseBranch: string; readonly files: ReadonlyArray<string> }
-  | { readonly kind: "checksFailed"; readonly summary: string }
+  | {
+      readonly kind: "checksFailed";
+      readonly summary: string;
+      readonly results: ReadonlyArray<CardCheckResult>;
+    }
   | { readonly kind: "notMerged"; readonly message: string };
 
 export interface CardWorkspaceInfo {
@@ -102,39 +119,55 @@ export interface CardWorkspaceInfo {
   readonly portBase: number;
 }
 
+/** The card's base, the ref it resolves to on this machine, and the project file read there. */
+export interface CardProjectFile {
+  readonly baseBranch: string;
+  // origin/<base> when origin's copy is at least as new as the local branch, else <base>.
+  readonly baseRef: string;
+  readonly file: ProjectFileConfig | null;
+  readonly checks: ReadonlyArray<ProjectCheck>;
+}
+
 /**
- * A card's workspace: its own git worktree and branch, and a block of ports its
- * scripts receive as ISKRA_PORT. `ensure` creates it when work starts, running
- * the project's setup script and removing the worktree again if setup fails.
- * When a card lands or is abandoned the workspace is torn down: the archive
- * script runs, the card's terminals close, and the worktree and branch go.
- * `runChecks` runs the project's check scripts in the worktree, and `land`
- * commits, rebases, checks and fast-forwards the base branch (invariant 7).
+ * A card's workspace: its own git worktree and branch, and a block of ports its scripts receive.
+ * `ensure` creates it when work starts (fetch the base, add the worktree, render env files, run
+ * setup, start services), removing it again if any step fails. When a card lands or is abandoned
+ * the workspace is torn down: the archive script runs, the card's terminals close (stopping its
+ * services), and the worktree and branch go. `land` commits, rebases, checks and fast-forwards
+ * the base for local landing (invariant 7).
  */
 export class CardWorkspace extends Context.Service<
   CardWorkspace,
   {
     readonly start: () => Effect.Effect<void, never, Scope.Scope>;
     readonly ensure: (cardId: CardId) => Effect.Effect<CardWorkspaceInfo, CardWorkspaceError>;
-    /** The card's changes against its base branch; empty before it has a worktree. */
+    /** The card's changes against its base, untracked files included; empty before it has a worktree. */
     readonly diff: (
       cardId: CardId,
     ) => Effect.Effect<{ readonly baseBranch: string; readonly diff: string }, CardWorkspaceError>;
-    /** Runs every check script in the card's worktree; passes when all pass or there are none. */
-    readonly runChecks: (cardId: CardId) => Effect.Effect<CardChecksResult, CardWorkspaceError>;
+    readonly runChecks: (input: RunChecksInput) => Effect.Effect<CardChecksRun, CardWorkspaceError>;
     /** Files the card changes against its base: committed, uncommitted and untracked. */
     readonly changedFiles: (
       cardId: CardId,
     ) => Effect.Effect<ReadonlyArray<string>, CardWorkspaceError>;
     /**
-     * Lands the card: commits what its agent left uncommitted, rebases onto the base,
-     * runs the checks and fast-forwards the base. A conflict aborts the rebase.
+     * Lands the card locally: commits what its agent left uncommitted, rebases onto the base,
+     * runs the checks (admission-controlled) and fast-forwards the base. A conflict aborts the
+     * rebase. Cards touching the same exclusive path land one at a time.
      */
     readonly land: (cardId: CardId) => Effect.Effect<CardLandResult, CardWorkspaceError>;
     readonly runScript: (input: {
       readonly cardId: CardId;
       readonly scriptId: string;
     }) => Effect.Effect<{ readonly terminalId: string }, CardWorkspaceError>;
+    readonly projectFile: (cardId: CardId) => Effect.Effect<CardProjectFile, CardWorkspaceError>;
+    /** Every open card in the project with a worktree, and the files it changes. */
+    readonly openCardChangedFiles: (
+      projectId: ProjectId,
+    ) => Effect.Effect<
+      ReadonlyArray<{ readonly cardId: CardId; readonly files: ReadonlyArray<string> }>,
+      CardWorkspaceError
+    >;
   }
 >()("@iskra/cli/orchestration/CardWorkspace") {}
 
@@ -143,6 +176,8 @@ const CARD_PORT_RANGE_START = 42_000;
 const CARD_PORT_BLOCK_LIMIT = 500;
 const SCRIPT_TIMEOUT = "10 minutes";
 const SCRIPT_OUTPUT_TAIL = 2_000;
+const CHECK_LOG_MAX_BYTES = 1_048_576;
+const SECRET_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** A card's script terminals live under this terminal thread id. */
 export const cardTerminalThreadId = (cardId: CardId): string => `card:${cardId}`;
@@ -163,19 +198,141 @@ export const cardBranchName = (card: Pick<OrchestrationCard, "id" | "title">): s
   return `iskra/${slug}-${suffix}`;
 };
 
+/**
+ * The branch a card starts from and lands into: its own base, else its parent's branch (a plan's
+ * integration branch, or a builder's branch for its sub-cards), else the project's policy. Null
+ * means the repository's default branch.
+ */
+export const baseBranchOf = (
+  card: Pick<OrchestrationCard, "baseBranch" | "parentCardId" | "projectId">,
+  model: Pick<OrchestrationReadModel, "cards" | "projects">,
+): string | null => {
+  const parentBranch =
+    card.parentCardId === null
+      ? null
+      : ((model.cards ?? []).find((candidate) => candidate.id === card.parentCardId)?.branch ??
+        null);
+  const project = model.projects.find((candidate) => candidate.id === card.projectId);
+  return (
+    card.baseBranch ??
+    parentBranch ??
+    (project === undefined ? null : projectOrchestrationOf(project).baseBranch)
+  );
+};
+
+/** The exclusive paths a set of changed files touches. */
+export const exclusivePathConflicts = (
+  changedFiles: ReadonlyArray<string>,
+  policy: Pick<ProjectOrchestration, "exclusivePaths">,
+): ProjectOrchestration["exclusivePaths"] =>
+  policy.exclusivePaths.filter((entry) =>
+    changedFiles.some((file) => NodePath.posix.matchesGlob(file, entry.glob)),
+  );
+
+/** What an open card is told when another card landed changes to an exclusive path it touches. */
+export const exclusivePathReturnMessage = (input: {
+  readonly glob: string;
+  readonly baseRef: string;
+  readonly afterRebase: string | null;
+}): string =>
+  `Another card changed ${input.glob}. Rebase onto ${input.baseRef}${
+    input.afterRebase === null ? "" : `, then run \`${input.afterRebase}\``
+  } before asking for review.`;
+
+/** A project secret as a card's setup sees it; `value` is null when this machine has none. */
+export interface CardSecret {
+  readonly name: string;
+  readonly exposure: "setup" | "workspace";
+  readonly value: string | null;
+}
+
+/** Where a project's card secret value lives in the server secret store. */
+export const cardSecretStoreName = (projectId: ProjectId, name: string): string =>
+  `card-secret-${projectId}-${name}`;
+
+/**
+ * Fills `${port:NAME}`, `${card:slug}`, `${card:id}` and `${secret:NAME}`. Only "workspace"
+ * secrets may be written: the agent reads the worktree.
+ */
+export const renderEnvTemplate = (
+  template: string,
+  context: {
+    readonly cardId: string;
+    readonly ports: Readonly<Record<string, number>>;
+    readonly secrets: ReadonlyArray<CardSecret>;
+  },
+): { readonly ok: true; readonly text: string } | { readonly ok: false; readonly message: string } => {
+  const problems: Array<string> = [];
+  const text = template.replaceAll(
+    /\$\{(port|card|secret):([A-Za-z0-9_]+)\}/g,
+    (placeholder, kind: string, name: string) => {
+      if (kind === "port") {
+        const port = context.ports[name];
+        if (port === undefined) problems.push(`Port ${name} isn't in the project file's ports.`);
+        return port === undefined ? placeholder : String(port);
+      }
+      if (kind === "card") {
+        if (name === "slug") return cardSlug(context.cardId);
+        if (name === "id") return context.cardId;
+        problems.push(`Unknown placeholder ${placeholder}.`);
+        return placeholder;
+      }
+      const secret = context.secrets.find((candidate) => candidate.name === name);
+      if (secret === undefined) {
+        problems.push(`Secret ${name} isn't configured for this project.`);
+      } else if (secret.exposure === "setup") {
+        problems.push(`Secret ${name} is setup-only and can't be written into the worktree.`);
+      } else if (secret.value === null) {
+        problems.push(`Secret ${name} has no value on this machine.`);
+      } else {
+        return secret.value;
+      }
+      return placeholder;
+    },
+  );
+  return problems.length === 0 ? { ok: true, text } : { ok: false, message: problems.join(" ") };
+};
+
+const scrubSecrets = (text: string, secrets: ReadonlyArray<CardSecret>) =>
+  secrets.reduce(
+    (scrubbed, secret) =>
+      secret.value !== null && secret.value.length >= 4
+        ? scrubbed.replaceAll(secret.value, "[secret]")
+        : scrubbed,
+    text,
+  );
+
 const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngineService;
   const snapshotQuery = yield* ProjectionSnapshotQuery;
   const processRunner = yield* ProcessRunner;
   const net = yield* Net.NetService;
   const terminals = yield* TerminalManager.TerminalManager;
-  const serverSettings = yield* ServerSettings.ServerSettingsService;
+  const serverSettings = yield* ServerSettingsService.ServerSettingsService;
   const serverConfig = yield* ServerConfig;
+  const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const crypto = yield* Crypto.Crypto;
   const platform = yield* HostProcessPlatform;
-  // One workspace change at a time, so two cards never take the same ports or branch.
-  const semaphore = yield* Semaphore.make(1);
+  const secretStore = yield* ServerSecretStore;
+  const admission = yield* HostAdmission;
+
+  // Per-card locks serialize one card's ensure, land and teardown; per-project locks guard only
+  // port allocation, worktree add and the local fast-forward; per-glob locks serialize landings
+  // that touch one exclusive path.
+  // ponytail: locks are never dropped, one semaphore per card/project/glob ever seen; prune at teardown if it matters.
+  const locks = new Map<string, Semaphore.Semaphore>();
+  const withLock = (key: string) => {
+    let lock = locks.get(key);
+    if (lock === undefined) {
+      lock = Semaphore.makeUnsafe(1);
+      locks.set(key, lock);
+    }
+    return lock.withPermits(1);
+  };
+  // Port blocks this process handed out, held until teardown or rollback so a block isn't given
+  // twice while its card's workspace.set is still on the way.
+  const reservedPortBases = new Set<number>();
 
   const toError = (cardId: string, message: string) => (cause: unknown) =>
     new CardWorkspaceError({ cardId, message, cause });
@@ -206,16 +363,23 @@ const make = Effect.gen(function* () {
       return { model, card, project };
     });
 
-  const projectScripts = (cardId: CardId, project: OrchestrationProject) =>
+  const readSettings = (cardId: string) =>
     serverSettings.getSettings.pipe(
-      Effect.map((settings) => resolveProjectScripts(settings, project)),
-      Effect.mapError(toError(cardId, "Could not read the project's scripts.")),
+      Effect.mapError(toError(cardId, "Could not read the server settings.")),
     );
 
+  const projectScripts = (cardId: CardId, project: OrchestrationProject) =>
+    readSettings(cardId).pipe(Effect.map((settings) => resolveProjectScripts(settings, project)));
+
   /** A git run whose exit code the caller reads. */
-  const gitRun = (cardId: string, cwd: string, args: ReadonlyArray<string>) =>
+  const gitRun = (
+    cardId: string,
+    cwd: string,
+    args: ReadonlyArray<string>,
+    env?: Record<string, string>,
+  ) =>
     processRunner
-      .run({ command: "git", args: ["-C", cwd, ...args], timeout: "2 minutes" })
+      .run({ command: "git", args: ["-C", cwd, ...args], timeout: "2 minutes", env })
       .pipe(Effect.mapError(toError(cardId, `git ${args[0]} could not run.`)));
 
   const git = (cardId: string, cwd: string, args: ReadonlyArray<string>) =>
@@ -255,6 +419,78 @@ const make = Effect.gen(function* () {
       return yield* git(cardId, root, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
     });
 
+  const resolveBaseBranch = (
+    cardId: CardId,
+    model: OrchestrationReadModel,
+    card: OrchestrationCard,
+    root: string,
+  ) =>
+    Effect.gen(function* () {
+      return baseBranchOf(card, model) ?? (yield* defaultBranch(cardId, root));
+    });
+
+  const refExists = (cardId: string, root: string, ref: string) =>
+    gitRun(cardId, root, ["rev-parse", "--verify", "--quiet", ref]).pipe(
+      Effect.map((output) => output.code === 0),
+    );
+
+  /** Brings origin's copy of the base up to date; offline or local-only bases keep what they have. */
+  const fetchBase = (cardId: string, root: string, baseBranch: string) =>
+    Effect.gen(function* () {
+      if ((yield* gitRun(cardId, root, ["remote", "get-url", "origin"])).code !== 0) {
+        return;
+      }
+      const fetched = yield* gitRun(cardId, root, [
+        "fetch",
+        "--quiet",
+        "origin",
+        `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`,
+      ]);
+      if (fetched.code !== 0) {
+        yield* Effect.logDebug("card base fetch failed", {
+          cardId,
+          baseBranch,
+          stderr: fetched.stderr.trim(),
+        });
+      }
+    });
+
+  /** The newer of origin/<base> and <base>: origin's when the local branch is missing or behind it. */
+  const baseRefOf = (cardId: string, root: string, baseBranch: string) =>
+    Effect.gen(function* () {
+      if (!(yield* refExists(cardId, root, `refs/remotes/origin/${baseBranch}`))) {
+        return baseBranch;
+      }
+      if (!(yield* refExists(cardId, root, `refs/heads/${baseBranch}`))) {
+        return `origin/${baseBranch}`;
+      }
+      const behind = yield* gitRun(cardId, root, [
+        "merge-base",
+        "--is-ancestor",
+        `refs/heads/${baseBranch}`,
+        `refs/remotes/origin/${baseBranch}`,
+      ]);
+      return behind.code === 0 ? `origin/${baseBranch}` : baseBranch;
+    });
+
+  const loadProjectFile = (
+    cardId: CardId,
+    model: OrchestrationReadModel,
+    card: OrchestrationCard,
+    project: OrchestrationProject,
+  ) =>
+    Effect.gen(function* () {
+      const root = project.workspaceRoot;
+      const baseBranch = yield* resolveBaseBranch(cardId, model, card, root);
+      const baseRef = yield* baseRefOf(cardId, root, baseBranch);
+      const file = yield* readProjectFile({ root, ref: baseRef }).pipe(
+        Effect.provideService(ProcessRunner, processRunner),
+        Effect.mapError((error) => new CardWorkspaceError({ cardId, message: error.message })),
+      );
+      const checks = projectChecks(file, yield* projectScripts(cardId, project));
+      return { baseBranch, baseRef, file, checks } satisfies CardProjectFile;
+    });
+
   /** Removes a worktree and its card branch, tolerating either already being gone. */
   const removeGitWorkspace = (cardId: string, root: string, worktreePath: string, branch: string) =>
     Effect.gen(function* () {
@@ -271,15 +507,48 @@ const make = Effect.gen(function* () {
       ? { command: "cmd.exe", args: ["/d", "/s", "/c", command] }
       : { command: "sh", args: ["-c", command] };
 
-  const scriptEnv = (project: OrchestrationProject, worktreePath: string, portBase: number) =>
-    projectScriptRuntimeEnv({
-      project: { cwd: project.workspaceRoot },
-      worktreePath,
-      extraEnv: {
-        ISKRA_PORT: String(portBase),
-        ISKRA_PORT_COUNT: String(CARD_PORT_BLOCK_SIZE),
-      },
-    });
+  const quoteShellArg = (value: string) =>
+    platform === "win32" ? `"${value.replaceAll('"', "")}"` : `'${value.replaceAll("'", "'\\''")}'`;
+
+  /** The env every card script gets: project paths, the card contract and resource throttling. */
+  const scriptEnv = (input: {
+    readonly cardId: CardId;
+    readonly project: OrchestrationProject;
+    readonly worktreePath: string;
+    readonly portBase: number;
+    readonly file: ProjectFileConfig | null;
+    readonly settings: ServerSettings;
+  }): Record<string, string> => ({
+    ...projectScriptRuntimeEnv({
+      project: { cwd: input.project.workspaceRoot },
+      worktreePath: input.worktreePath,
+    }),
+    ...cardScriptEnv({
+      cardId: input.cardId,
+      portBase: input.portBase,
+      portCount: CARD_PORT_BLOCK_SIZE,
+      ports: input.file?.ports ?? {},
+    }),
+    ...hostResourceEnv(input.file?.resourceProfile, input.settings.cardRuntime.resourceProfile),
+  });
+
+  /** The project's declared secrets with their values from the secret store. */
+  const projectSecrets = (cardId: CardId, project: OrchestrationProject, settings: ServerSettings) =>
+    Effect.forEach(settings.cardRuntime.secrets[project.id] ?? [], (declared) =>
+      (SECRET_NAME.test(declared.name) && /^[A-Za-z0-9_-]+$/.test(project.id)
+        ? secretStore.get(cardSecretStoreName(project.id, declared.name))
+        : Effect.succeed(Option.none<Uint8Array>())
+      ).pipe(
+        Effect.map(
+          (value): CardSecret => ({
+            name: declared.name,
+            exposure: declared.exposure,
+            value: Option.isSome(value) ? new TextDecoder().decode(value.value) : null,
+          }),
+        ),
+        Effect.mapError(toError(cardId, `Could not read secret ${declared.name}.`)),
+      ),
+    );
 
   /** Runs a setup or archive script to completion; a non-zero exit is a failure. */
   const runAwaitedScript = (
@@ -287,6 +556,7 @@ const make = Effect.gen(function* () {
     script: ProjectScript,
     cwd: string,
     env: Record<string, string>,
+    secrets: ReadonlyArray<CardSecret> = [],
   ) =>
     processRunner
       .run({
@@ -308,12 +578,16 @@ const make = Effect.gen(function* () {
                   cardId,
                   message: output.timedOut
                     ? `The ${script.name} script timed out.`
-                    : `The ${script.name} script failed: ${(output.stderr || output.stdout).trim().slice(-SCRIPT_OUTPUT_TAIL)}`,
+                    : `The ${script.name} script failed: ${scrubSecrets(
+                        (output.stderr || output.stdout).trim(),
+                        secrets,
+                      ).slice(-SCRIPT_OUTPUT_TAIL)}`,
                 }),
               ),
         ),
       );
 
+  /** A free block: not held by an open card or this process, and every one of its ports unbound. */
   const allocatePortBase = (cardId: string, model: OrchestrationReadModel) =>
     Effect.gen(function* () {
       const taken = new Set(
@@ -323,10 +597,19 @@ const make = Effect.gen(function* () {
       );
       for (let block = 0; block < CARD_PORT_BLOCK_LIMIT; block += 1) {
         const base = CARD_PORT_RANGE_START + block * CARD_PORT_BLOCK_SIZE;
-        // ponytail: probes only the block's first port; probe all ten if card scripts collide in practice.
-        if (!taken.has(base) && (yield* net.isPortAvailableOnLoopback(base))) {
+        if (taken.has(base) || reservedPortBases.has(base)) {
+          continue;
+        }
+        reservedPortBases.add(base);
+        const free = yield* Effect.forEach(
+          Array.from({ length: CARD_PORT_BLOCK_SIZE }, (_, offset) => base + offset),
+          (port) => net.isPortAvailableOnLoopback(port),
+          { concurrency: "unbounded" },
+        );
+        if (free.every(Boolean)) {
           return base;
         }
+        reservedPortBases.delete(base);
       }
       return yield* new CardWorkspaceError({
         cardId,
@@ -334,40 +617,180 @@ const make = Effect.gen(function* () {
       });
     });
 
-  /** A sub-card starts from its parent's branch; otherwise the card's base or the repository default. */
-  const baseBranchOf = (
-    cardId: CardId,
-    model: OrchestrationReadModel,
-    card: OrchestrationCard,
-    root: string,
-  ) =>
+  const openCardTerminal = (input: {
+    readonly cardId: CardId;
+    readonly terminalId: string;
+    readonly worktreePath: string;
+    readonly env: Record<string, string>;
+    readonly command: string;
+    readonly label: string;
+  }) =>
     Effect.gen(function* () {
-      const parent =
-        card.parentCardId === null
-          ? undefined
-          : (model.cards ?? []).find((candidate) => candidate.id === card.parentCardId);
-      return card.baseBranch ?? parent?.branch ?? (yield* defaultBranch(cardId, root));
+      const threadId = cardTerminalThreadId(input.cardId);
+      yield* terminals
+        .open({
+          threadId,
+          terminalId: input.terminalId,
+          cwd: input.worktreePath,
+          worktreePath: input.worktreePath,
+          env: input.env,
+        })
+        .pipe(
+          Effect.mapError(toError(input.cardId, `Could not open a terminal for ${input.label}.`)),
+        );
+      yield* terminals
+        .write({ threadId, terminalId: input.terminalId, data: `${input.command}\r` })
+        .pipe(Effect.mapError(toError(input.cardId, `Could not start ${input.label}.`)));
+    });
+
+  const serviceReady = (service: ProjectServiceConfig, port: number) =>
+    service.ready.kind === "tcp"
+      ? net.hasListenerOnHost(port, "127.0.0.1")
+      : Effect.tryPromise(() =>
+          // @effect-diagnostics-next-line globalFetchInEffect:off - a loopback readiness probe needs no HttpClient layer.
+          fetch(
+            `http://127.0.0.1:${port}${service.ready.path.startsWith("/") ? "" : "/"}${service.ready.path}`,
+            { signal: AbortSignal.timeout(2_000) },
+          ),
+        ).pipe(
+          Effect.map((response) => response.status < 500),
+          Effect.orElseSucceed(() => false),
+        );
+
+  /** Starts the project's services in order in the card's terminals, each waiting until ready. */
+  const startServices = (input: {
+    readonly cardId: CardId;
+    readonly worktreePath: string;
+    readonly env: Record<string, string>;
+    readonly file: ProjectFileConfig;
+    readonly portBase: number;
+  }) =>
+    Effect.forEach(
+      input.file.services,
+      (service) =>
+        Effect.gen(function* () {
+          yield* openCardTerminal({
+            cardId: input.cardId,
+            terminalId: `service-${service.name}`,
+            worktreePath: input.worktreePath,
+            env: input.env,
+            command: service.start,
+            label: service.name,
+          });
+          const port = input.portBase + (input.file.ports[service.port] ?? 0);
+          const deadline = (yield* Clock.currentTimeMillis) + service.ready.timeoutSeconds * 1_000;
+          while (!(yield* serviceReady(service, port))) {
+            if ((yield* Clock.currentTimeMillis) > deadline) {
+              return yield* new CardWorkspaceError({
+                cardId: input.cardId,
+                message: `Service ${service.name} wasn't ready on port ${port} within ${service.ready.timeoutSeconds}s.`,
+              });
+            }
+            yield* Effect.sleep("500 millis");
+          }
+        }),
+      { discard: true },
+    );
+
+  /** Writes each env file from its template; targets must be gitignored so landing can't commit them. */
+  const renderEnvFiles = (input: {
+    readonly cardId: CardId;
+    readonly worktreePath: string;
+    readonly file: ProjectFileConfig;
+    readonly portBase: number;
+    readonly secrets: ReadonlyArray<CardSecret>;
+  }) =>
+    Effect.forEach(
+      input.file.envFiles,
+      (envFile) =>
+        Effect.gen(function* () {
+          const { cardId, worktreePath } = input;
+          const ignored = yield* gitRun(cardId, worktreePath, [
+            "check-ignore",
+            "--quiet",
+            "--no-index",
+            envFile.target,
+          ]);
+          if (ignored.code !== 0) {
+            return yield* new CardWorkspaceError({
+              cardId,
+              message: `The env file ${envFile.target} isn't gitignored; ignore it so what Iskra renders there is never committed.`,
+            });
+          }
+          const template = yield* fileSystem
+            .readFileString(path.join(worktreePath, envFile.template))
+            .pipe(Effect.mapError(toError(cardId, `Could not read the env template ${envFile.template}.`)));
+          const rendered = renderEnvTemplate(template, {
+            cardId,
+            ports: Object.fromEntries(
+              Object.entries(input.file.ports).map(([name, offset]) => [name, input.portBase + offset]),
+            ),
+            secrets: input.secrets,
+          });
+          if (!rendered.ok) {
+            return yield* new CardWorkspaceError({ cardId, message: rendered.message });
+          }
+          const target = path.join(worktreePath, envFile.target);
+          yield* fileSystem.makeDirectory(path.dirname(target), { recursive: true }).pipe(
+            Effect.flatMap(() => fileSystem.writeFileString(target, rendered.text)),
+            Effect.mapError(toError(cardId, `Could not write the env file ${envFile.target}.`)),
+          );
+        }),
+      { discard: true },
+    );
+
+  /** A temp copy of the worktree's index with untracked files marked intent-to-add. */
+  const intentToAddIndex = (cardId: CardId, worktreePath: string) =>
+    Effect.gen(function* () {
+      const directory = yield* fileSystem
+        .makeTempDirectoryScoped({ prefix: "iskra-card-index-" })
+        .pipe(Effect.mapError(toError(cardId, "Could not make a temporary index.")));
+      const index = path.join(directory, "index");
+      const source = path.resolve(
+        worktreePath,
+        yield* git(cardId, worktreePath, ["rev-parse", "--git-path", "index"]),
+      );
+      yield* fileSystem
+        .copyFile(source, index)
+        .pipe(Effect.mapError(toError(cardId, "Could not copy the worktree's index.")));
+      const added = yield* gitRun(cardId, worktreePath, ["add", "--intent-to-add", "--", "."], {
+        GIT_INDEX_FILE: index,
+      });
+      if (added.code !== 0) {
+        return yield* new CardWorkspaceError({
+          cardId,
+          message: `git add --intent-to-add failed: ${added.stderr.trim().slice(-SCRIPT_OUTPUT_TAIL)}`,
+        });
+      }
+      return index;
     });
 
   const diff: CardWorkspace["Service"]["diff"] = (cardId) =>
     Effect.gen(function* () {
       const { model, card, project } = yield* readCard(cardId);
-      const baseBranch = yield* baseBranchOf(cardId, model, card, project.workspaceRoot);
+      const baseBranch = yield* resolveBaseBranch(cardId, model, card, project.workspaceRoot);
       if (card.worktreePath === null) {
         return { baseBranch, diff: "" };
       }
-      const mergeBase = yield* git(cardId, card.worktreePath, ["merge-base", baseBranch, "HEAD"]);
-      // Against the working tree, so uncommitted edits count.
-      // ponytail: untracked files are left out; add `git add -N` first if briefs miss new files.
-      const output = yield* processRunner
-        .run({
-          command: "git",
-          args: ["-C", card.worktreePath, "diff", mergeBase],
-          timeout: "2 minutes",
-          maxOutputBytes: 1_048_576,
-          outputMode: "truncate",
-        })
-        .pipe(Effect.mapError(toError(cardId, "git diff could not run.")));
+      const worktreePath = card.worktreePath;
+      const baseRef = yield* baseRefOf(cardId, project.workspaceRoot, baseBranch);
+      const mergeBase = yield* git(cardId, worktreePath, ["merge-base", baseRef, "HEAD"]);
+      // Against the working tree through a temp index, so uncommitted edits and new files count.
+      const output = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const index = yield* intentToAddIndex(cardId, worktreePath);
+          return yield* processRunner
+            .run({
+              command: "git",
+              args: ["-C", worktreePath, "diff", mergeBase],
+              env: { GIT_INDEX_FILE: index },
+              timeout: "2 minutes",
+              maxOutputBytes: 1_048_576,
+              outputMode: "truncate",
+            })
+            .pipe(Effect.mapError(toError(cardId, "git diff could not run.")));
+        }),
+      );
       if (output.code !== 0) {
         return yield* new CardWorkspaceError({
           cardId,
@@ -377,34 +800,157 @@ const make = Effect.gen(function* () {
       return { baseBranch, diff: output.stdout };
     });
 
-  const runChecks: CardWorkspace["Service"]["runChecks"] = (cardId) =>
+  /** Keeps the log's last 1MB on disk and returns its last few kilobytes. */
+  const capLog = (logPath: string) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const size = Number((yield* fileSystem.stat(logPath)).size);
+        const kept = Math.min(size, CHECK_LOG_MAX_BYTES);
+        const handle = yield* fileSystem.open(logPath, { flag: "r" });
+        yield* handle.seek(size - kept, "start");
+        const bytes = kept === 0 ? Option.none() : yield* handle.readAlloc(kept);
+        const content = Option.getOrElse(bytes, () => new Uint8Array());
+        if (size > CHECK_LOG_MAX_BYTES) {
+          yield* fileSystem.writeFile(logPath, content);
+        }
+        return new TextDecoder().decode(content.slice(-8_192));
+      }),
+    );
+
+  const runCheck = (input: {
+    readonly check: ProjectCheck;
+    readonly command: string;
+    readonly cwd: string;
+    readonly env: Record<string, string>;
+    readonly logDir: string;
+    readonly secrets: ReadonlyArray<CardSecret>;
+  }) =>
     Effect.gen(function* () {
-      const { card, project } = yield* readCard(cardId);
-      if (card.worktreePath === null || card.portBase === null) {
-        return { passed: false, summary: "The card has no worktree to check." };
-      }
-      const checks = checkProjectScripts(yield* projectScripts(cardId, project));
-      if (checks.length === 0) {
-        return { passed: true, summary: "The project has no check scripts." };
-      }
-      const failures: Array<string> = [];
-      for (const script of checks) {
-        const failure = yield* runAwaitedScript(
-          cardId,
-          script,
-          card.worktreePath,
-          scriptEnv(project, card.worktreePath, card.portBase),
-        ).pipe(
-          Effect.as(null),
-          Effect.catch((error) => Effect.succeed(error.message)),
+      const uuid = yield* crypto.randomUUIDv4.pipe(Effect.orDie);
+      const logPath = path.join(
+        input.logDir,
+        `${input.check.id.replaceAll(/[^A-Za-z0-9_-]/g, "_")}-${uuid}.log`,
+      );
+      // Output goes straight to the log so a timed-out check still leaves its tail; niced so a
+      // suite doesn't starve the agents and the UI.
+      const shell =
+        platform === "win32"
+          ? {
+              command: "cmd.exe",
+              args: ["/d", "/s", "/c", `${input.command} > "%ISKRA_CHECK_LOG%" 2>&1`],
+            }
+          : {
+              command: "nice",
+              args: ["-n", "10", "sh", "-c", `exec >"$ISKRA_CHECK_LOG" 2>&1\n${input.command}`],
+            };
+      const startedAt = yield* Clock.currentTimeMillis;
+      const outcome = yield* processRunner
+        .run({
+          ...shell,
+          cwd: input.cwd,
+          env: { ...input.env, ISKRA_CHECK_LOG: logPath },
+          timeout: `${Math.round(input.check.timeoutMinutes * 60_000)} millis`,
+          timeoutBehavior: "timedOutResult",
+          maxOutputBytes: 65_536,
+          outputMode: "truncate",
+        })
+        .pipe(
+          Effect.map((output) => ({ exitCode: output.code, timedOut: output.timedOut, error: "" })),
+          Effect.catch((error) =>
+            Effect.succeed({ exitCode: null, timedOut: false, error: error.message }),
+          ),
         );
-        if (failure !== null) {
-          failures.push(failure);
+      const durationMs = (yield* Clock.currentTimeMillis) - startedAt;
+      const tail = yield* capLog(logPath).pipe(
+        Effect.map(Option.some),
+        Effect.orElseSucceed(() => Option.none<string>()),
+      );
+      return {
+        id: input.check.id,
+        name: input.check.name,
+        exitCode: outcome.exitCode,
+        timedOut: outcome.timedOut,
+        durationMs,
+        logTail: scrubSecrets(
+          `${Option.getOrElse(tail, () => "")}${outcome.error === "" ? "" : `\n${outcome.error}`}`,
+          input.secrets,
+        )
+          .trim()
+          .slice(-SCRIPT_OUTPUT_TAIL),
+        logArtifactPath: Option.isSome(tail) ? logPath : null,
+      } satisfies CardCheckResult;
+    });
+
+  const checkPassed = (result: CardCheckResult) => !result.timedOut && result.exitCode === 0;
+
+  const runChecks: CardWorkspace["Service"]["runChecks"] = (input) =>
+    Effect.gen(function* () {
+      const { cardId } = input;
+      const { model, card, project } = yield* readCard(cardId);
+      if (card.worktreePath === null || card.portBase === null) {
+        return { passed: false, summary: "The card has no worktree to check.", results: [] };
+      }
+      const config = yield* loadProjectFile(cardId, model, card, project);
+      const checks = (input.checks ?? config.checks).filter((check) => check.source !== "ci");
+      if (checks.length === 0) {
+        return {
+          passed: false,
+          summary: "The project has no checks to run on this machine.",
+          results: [],
+        };
+      }
+      const settings = yield* readSettings(cardId);
+      // Scrubbing only: check processes never receive secrets.
+      const secrets = yield* projectSecrets(cardId, project, settings).pipe(
+        Effect.orElseSucceed((): ReadonlyArray<CardSecret> => []),
+      );
+      const env = scriptEnv({
+        cardId,
+        project,
+        worktreePath: card.worktreePath,
+        portBase: card.portBase,
+        file: config.file,
+        settings,
+      });
+      const logDir = path.join(serverConfig.attachmentsDir, `card-evidence-${cardId}`, "checks");
+      yield* fileSystem
+        .makeDirectory(logDir, { recursive: true })
+        .pipe(Effect.mapError(toError(cardId, "Could not make the card's check log folder.")));
+
+      const results: Array<CardCheckResult> = [];
+      for (const check of checks) {
+        const command =
+          input.scope === "targeted" && check.targetedCommand !== null
+            ? check.targetedCommand.replaceAll("{filter}", quoteShellArg(input.filter ?? ""))
+            : check.command;
+        const result = yield* runCheck({
+          check,
+          command,
+          cwd: card.worktreePath,
+          env,
+          logDir,
+          secrets,
+        });
+        results.push(result);
+        if (!checkPassed(result)) {
+          break;
         }
       }
-      return failures.length === 0
-        ? { passed: true, summary: `${checks.map((script) => script.name).join(", ")} passed.` }
-        : { passed: false, summary: failures.join("\n\n") };
+      const failed = results.find((result) => !checkPassed(result));
+      return {
+        passed: failed === undefined,
+        summary:
+          failed === undefined
+            ? `${results.map((result) => result.name).join(", ")} passed.`
+            : `${failed.name} ${
+                failed.timedOut
+                  ? "timed out"
+                  : failed.exitCode === null
+                    ? "could not run"
+                    : `failed with exit code ${failed.exitCode}`
+              }.\n\n${failed.logTail}`,
+        results,
+      };
     });
 
   const changedFiles: CardWorkspace["Service"]["changedFiles"] = (cardId) =>
@@ -413,8 +959,9 @@ const make = Effect.gen(function* () {
       if (card.worktreePath === null) {
         return [];
       }
-      const baseBranch = yield* baseBranchOf(cardId, model, card, project.workspaceRoot);
-      const mergeBase = yield* git(cardId, card.worktreePath, ["merge-base", baseBranch, "HEAD"]);
+      const baseBranch = yield* resolveBaseBranch(cardId, model, card, project.workspaceRoot);
+      const baseRef = yield* baseRefOf(cardId, project.workspaceRoot, baseBranch);
+      const mergeBase = yield* git(cardId, card.worktreePath, ["merge-base", baseRef, "HEAD"]);
       const tracked = yield* git(cardId, card.worktreePath, ["diff", "--name-only", mergeBase]);
       const untracked = yield* git(cardId, card.worktreePath, [
         "ls-files",
@@ -422,6 +969,25 @@ const make = Effect.gen(function* () {
         "--exclude-standard",
       ]);
       return [...new Set([...lines(tracked), ...lines(untracked)])];
+    });
+
+  const openCardChangedFiles: CardWorkspace["Service"]["openCardChangedFiles"] = (projectId) =>
+    Effect.gen(function* () {
+      const model = yield* snapshotQuery
+        .getCommandReadModel()
+        .pipe(Effect.mapError(toError(projectId, "Could not read the project's cards.")));
+      const open = (model.cards ?? []).filter(
+        (card) =>
+          card.projectId === projectId &&
+          card.worktreePath !== null &&
+          !isFinishedCardStatus(card.status),
+      );
+      return yield* Effect.forEach(open, (card) =>
+        changedFiles(card.id).pipe(
+          Effect.map((files) => ({ cardId: card.id, files })),
+          Effect.orElseSucceed(() => ({ cardId: card.id, files: [] as ReadonlyArray<string> })),
+        ),
+      );
     });
 
   /** The worktree that has `branch` checked out, from `git worktree list --porcelain`. */
@@ -444,51 +1010,87 @@ const make = Effect.gen(function* () {
       }
       const root = project.workspaceRoot;
       const worktree = card.worktreePath;
-      const baseBranch = yield* baseBranchOf(cardId, model, card, root);
+      const branch = card.branch;
+      const policy = projectOrchestrationOf(project);
+      const baseBranch = yield* resolveBaseBranch(cardId, model, card, root);
 
       // What the agent left uncommitted lands too, as one commit named for the card.
       if ((yield* git(cardId, worktree, ["status", "--porcelain"])).length > 0) {
         yield* git(cardId, worktree, ["add", "--all"]);
         yield* git(cardId, worktree, ["commit", "--quiet", "--message", card.title]);
       }
+      yield* fetchBase(cardId, root, baseBranch);
+      const baseRef = yield* baseRefOf(cardId, root, baseBranch);
 
-      const rebase = yield* gitRun(cardId, worktree, ["rebase", baseBranch]);
-      if (rebase.code !== 0) {
-        const conflicted = yield* optionalGit(cardId, worktree, [
-          "diff",
-          "--name-only",
-          "--diff-filter=U",
-        ]);
-        yield* optionalGit(cardId, worktree, ["rebase", "--abort"]);
-        return {
-          kind: "conflict" as const,
-          baseBranch,
-          files: Option.isSome(conflicted) ? lines(conflicted.value) : [],
-        };
-      }
+      const rebaseCheckAndMerge = Effect.gen(function* () {
+        const rebase = yield* gitRun(cardId, worktree, ["rebase", baseRef]);
+        if (rebase.code !== 0) {
+          const conflicted = yield* optionalGit(cardId, worktree, [
+            "diff",
+            "--name-only",
+            "--diff-filter=U",
+          ]);
+          yield* optionalGit(cardId, worktree, ["rebase", "--abort"]);
+          return {
+            kind: "conflict" as const,
+            baseBranch,
+            files: Option.isSome(conflicted) ? lines(conflicted.value) : [],
+          };
+        }
 
-      const checks = yield* runChecks(cardId);
-      if (!checks.passed) {
-        return { kind: "checksFailed" as const, summary: checks.summary };
-      }
-      const files = lines(yield* git(cardId, worktree, ["diff", "--name-only", baseBranch, "HEAD"]));
+        const checks = yield* admission.run(
+          {
+            cardId,
+            projectId: project.id,
+            priority: card.priority,
+            label: `Checks before landing ${card.title}`,
+            kind: "landing",
+          },
+          runChecks({ cardId, scope: "full" }),
+        );
+        if (checks.results.length === 0 ? !policy.checksWaived : !checks.passed) {
+          return {
+            kind: "checksFailed" as const,
+            summary:
+              checks.results.length === 0
+                ? "The project has no checks to run on this machine, and they aren't waived."
+                : checks.summary,
+            results: checks.results,
+          };
+        }
+        const files = lines(yield* git(cardId, worktree, ["diff", "--name-only", baseRef, "HEAD"]));
 
-      // Fast-forward the base where it is checked out, so that checkout moves with it; else move the ref.
-      const checkedOutAt = worktreeOfBranch(
-        yield* git(cardId, root, ["worktree", "list", "--porcelain"]),
-        baseBranch,
-      );
-      const merge =
-        checkedOutAt === null
-          ? yield* gitRun(cardId, root, ["fetch", "--quiet", ".", `${card.branch}:${baseBranch}`])
-          : yield* gitRun(cardId, checkedOutAt, ["merge", "--ff-only", "--quiet", card.branch]);
-      if (merge.code !== 0) {
-        return {
-          kind: "notMerged" as const,
-          message: `Fast-forwarding ${baseBranch} failed: ${merge.stderr.trim().slice(-SCRIPT_OUTPUT_TAIL)}`,
-        };
+        // Fast-forward the base where it is checked out, so that checkout moves with it; else move the ref.
+        return yield* withLock(`project:${project.id}`)(
+          Effect.gen(function* () {
+            const checkedOutAt = worktreeOfBranch(
+              yield* git(cardId, root, ["worktree", "list", "--porcelain"]),
+              baseBranch,
+            );
+            const merge =
+              checkedOutAt === null
+                ? yield* gitRun(cardId, root, ["fetch", "--quiet", ".", `${branch}:${baseBranch}`])
+                : yield* gitRun(cardId, checkedOutAt, ["merge", "--ff-only", "--quiet", branch]);
+            if (merge.code !== 0) {
+              return {
+                kind: "notMerged" as const,
+                message: `Fast-forwarding ${baseBranch} failed: ${merge.stderr.trim().slice(-SCRIPT_OUTPUT_TAIL)}`,
+              };
+            }
+            return { kind: "landed" as const, baseBranch, files };
+          }),
+        );
+      });
+
+      // One card at a time lands changes to an exclusive path; locks are taken in a stable order.
+      const touched = lines(yield* git(cardId, worktree, ["diff", "--name-only", `${baseRef}...HEAD`]));
+      let serialized: Effect.Effect<CardLandResult, CardWorkspaceError> = rebaseCheckAndMerge;
+      for (const { glob } of exclusivePathConflicts(touched, policy).toSorted((a, b) =>
+        a.glob.localeCompare(b.glob),
+      )) {
+        serialized = withLock(`exclusive:${project.id}:${glob}`)(serialized);
       }
-      return { kind: "landed" as const, baseBranch, files };
+      return yield* serialized;
     });
 
   const ensureUnlocked = (cardId: CardId) =>
@@ -504,67 +1106,106 @@ const make = Effect.gen(function* () {
         });
       }
       const root = project.workspaceRoot;
-      const base = yield* baseBranchOf(cardId, model, card, root);
+      yield* fetchBase(cardId, root, yield* resolveBaseBranch(cardId, model, card, root));
+      const { baseRef, file } = yield* loadProjectFile(cardId, model, card, project);
+      const settings = yield* readSettings(cardId);
       const branch = cardBranchName(card);
-      const portBase = yield* allocatePortBase(cardId, model);
       const worktreePath = path.join(
         serverConfig.worktreesDir,
         path.basename(root),
         branch.replaceAll("/", "-"),
       );
 
-      yield* git(cardId, root, ["worktree", "add", "-b", branch, worktreePath, base]);
-      const rollback = removeGitWorkspace(cardId, root, worktreePath, branch);
-      const setup = setupProjectScript(
-        yield* projectScripts(cardId, project).pipe(Effect.tapError(() => rollback)),
+      const portBase = yield* withLock(`project:${project.id}`)(
+        Effect.gen(function* () {
+          const { model: current } = yield* readCard(cardId);
+          const base = yield* allocatePortBase(cardId, current);
+          yield* git(cardId, root, ["worktree", "add", "-b", branch, worktreePath, baseRef]).pipe(
+            Effect.tapError(() => Effect.sync(() => reservedPortBases.delete(base))),
+          );
+          return base;
+        }),
       );
-      if (setup !== null) {
-        yield* runAwaitedScript(
-          cardId,
-          setup,
-          worktreePath,
-          scriptEnv(project, worktreePath, portBase),
-        ).pipe(
-          // A worktree whose setup failed is not a workspace; remove it so the next try starts clean.
-          Effect.tapError(() => rollback),
-        );
-      }
-      yield* engine
-        .dispatch({
-          type: "card.workspace.set",
-          commandId: yield* commandId("set"),
-          cardId,
-          branch,
-          worktreePath,
-          portBase,
-        })
-        .pipe(
-          Effect.mapError(toError(cardId, "Could not record the card's workspace.")),
-          Effect.tapError(() => rollback),
-        );
+      const rollback = Effect.gen(function* () {
+        yield* terminals
+          .close({ threadId: cardTerminalThreadId(cardId), deleteHistory: true })
+          .pipe(Effect.orElseSucceed(() => undefined));
+        yield* removeGitWorkspace(cardId, root, worktreePath, branch);
+        reservedPortBases.delete(portBase);
+      });
+
+      // Everything before the agent session: env files, setup (with secrets), services.
+      const prepare = Effect.gen(function* () {
+        const secrets = yield* projectSecrets(cardId, project, settings);
+        const env = scriptEnv({ cardId, project, worktreePath, portBase, file, settings });
+        if (file !== null) {
+          yield* renderEnvFiles({ cardId, worktreePath, file, portBase, secrets });
+        }
+        const setup = setupProjectScript(yield* projectScripts(cardId, project));
+        if (setup !== null) {
+          // Only setup sees secret values; later scripts run code the agent may have changed.
+          const secretEnv = Object.fromEntries(
+            secrets.flatMap((secret) => (secret.value === null ? [] : [[secret.name, secret.value]])),
+          );
+          yield* admission.run(
+            {
+              cardId,
+              projectId: project.id,
+              priority: card.priority,
+              label: `Setting up ${card.title}`,
+              kind: "setup",
+            },
+            runAwaitedScript(cardId, setup, worktreePath, { ...env, ...secretEnv }, secrets),
+          );
+        }
+        if (file !== null) {
+          // ponytail: services start once per workspace; after a server restart they stay down until the card is set up again.
+          yield* startServices({ cardId, worktreePath, env, file, portBase });
+        }
+        yield* engine
+          .dispatch({
+            type: "card.workspace.set",
+            commandId: yield* commandId("set"),
+            cardId,
+            branch,
+            worktreePath,
+            portBase,
+          })
+          .pipe(Effect.mapError(toError(cardId, "Could not record the card's workspace.")));
+      });
+      // A worktree whose preparation failed is not a workspace; remove it so the next try starts clean.
+      yield* prepare.pipe(Effect.tapError(() => rollback));
       return { branch, worktreePath, portBase };
     });
 
   const teardownUnlocked = (cardId: CardId) =>
     Effect.gen(function* () {
-      const { card, project } = yield* readCard(cardId);
+      const { model, card, project } = yield* readCard(cardId);
       if (card.branch === null || card.worktreePath === null || card.portBase === null) {
         return;
       }
       const root = project.workspaceRoot;
       const archive = archiveProjectScript(yield* projectScripts(cardId, project));
       if (archive !== null) {
-        yield* runAwaitedScript(
+        const file = yield* loadProjectFile(cardId, model, card, project).pipe(
+          Effect.map((config) => config.file),
+          Effect.catch((error) => Effect.logWarning(error.message).pipe(Effect.as(null))),
+        );
+        const env = scriptEnv({
           cardId,
-          archive,
-          card.worktreePath,
-          scriptEnv(project, card.worktreePath, card.portBase),
-        ).pipe(
+          project,
+          worktreePath: card.worktreePath,
+          portBase: card.portBase,
+          file,
+          settings: yield* readSettings(cardId),
+        });
+        yield* runAwaitedScript(cardId, archive, card.worktreePath, env).pipe(
           // The worktree goes anyway: a finished card must not keep its branch because cleanup failed.
           Effect.tapError((error) => Effect.logWarning(error.message)),
           Effect.orElseSucceed(() => undefined),
         );
       }
+      // Closing the card's terminals also stops its run scripts and services.
       yield* terminals
         .close({ threadId: cardTerminalThreadId(cardId), deleteHistory: true })
         .pipe(Effect.orElseSucceed(() => undefined));
@@ -576,6 +1217,7 @@ const make = Effect.gen(function* () {
           cardId,
         })
         .pipe(Effect.mapError(toError(cardId, "Could not clear the card's workspace.")));
+      reservedPortBases.delete(card.portBase);
     });
 
   const runScript: CardWorkspace["Service"]["runScript"] = ({ cardId, scriptId }) =>
@@ -610,24 +1252,27 @@ const make = Effect.gen(function* () {
           }
         }
       }
-      const threadId = cardTerminalThreadId(card.id);
-      yield* terminals
-        .open({
-          threadId,
-          terminalId,
-          cwd: card.worktreePath,
+      const { file } = yield* loadProjectFile(cardId, model, card, project);
+      yield* openCardTerminal({
+        cardId,
+        terminalId,
+        worktreePath: card.worktreePath,
+        env: scriptEnv({
+          cardId,
+          project,
           worktreePath: card.worktreePath,
-          env: scriptEnv(project, card.worktreePath, card.portBase),
-        })
-        .pipe(Effect.mapError(toError(cardId, `Could not open a terminal for ${script.name}.`)));
-      yield* terminals
-        .write({ threadId, terminalId, data: `${script.command}\r` })
-        .pipe(Effect.mapError(toError(cardId, `Could not start ${script.name}.`)));
+          portBase: card.portBase,
+          file,
+          settings: yield* readSettings(cardId),
+        }),
+        command: script.command,
+        label: script.name,
+      });
       return { terminalId };
     });
 
   const worker = yield* makeDrainableWorker((cardId: CardId) =>
-    semaphore.withPermits(1)(teardownUnlocked(cardId)).pipe(
+    withLock(`card:${cardId}`)(teardownUnlocked(cardId)).pipe(
       Effect.catchCause((cause) =>
         Cause.hasInterruptsOnly(cause)
           ? Effect.failCause(cause)
@@ -652,12 +1297,17 @@ const make = Effect.gen(function* () {
 
   return {
     start,
-    ensure: (cardId) => semaphore.withPermits(1)(ensureUnlocked(cardId)),
+    ensure: (cardId) => withLock(`card:${cardId}`)(ensureUnlocked(cardId)),
     diff,
     runChecks,
     changedFiles,
-    land: (cardId) => semaphore.withPermits(1)(landUnlocked(cardId)),
+    land: (cardId) => withLock(`card:${cardId}`)(landUnlocked(cardId)),
     runScript,
+    projectFile: (cardId) =>
+      readCard(cardId).pipe(
+        Effect.flatMap(({ model, card, project }) => loadProjectFile(cardId, model, card, project)),
+      ),
+    openCardChangedFiles,
   } satisfies CardWorkspace["Service"];
 });
 

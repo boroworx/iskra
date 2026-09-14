@@ -269,7 +269,11 @@ const ReactorLayerLive = Layer.empty.pipe(
     ),
   ),
   Layer.provideMerge(
-    CardWorkspace.layer.pipe(Layer.provide(ProcessRunner.layer), Layer.provide(NetService.layer)),
+    CardWorkspace.layer.pipe(
+      Layer.provide(ProcessRunner.layer),
+      Layer.provide(NetService.layer),
+      Layer.provide(ServerSecretStore.layer),
+    ),
   ),
   Layer.provideMerge(HostAdmission.layer),
   Layer.provideMerge(AgentAwarenessRelay.layer.pipe(Layer.provide(ServerSecretStore.layer))),

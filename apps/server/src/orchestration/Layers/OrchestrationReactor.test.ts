@@ -145,6 +145,8 @@ describe("OrchestrationReactor", () => {
             changedFiles: () => Effect.die("not used"),
             land: () => Effect.die("not used"),
             runScript: () => Effect.die("not used"),
+            projectFile: () => Effect.die("not used"),
+            openCardChangedFiles: () => Effect.die("not used"),
           }),
         ),
         Layer.provideMerge(
