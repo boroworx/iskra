@@ -11,7 +11,15 @@ import {
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
-import { CARD_BRIEF_DIFF_LIMIT, buildCardBrief, diffStatOf, renderCardBrief } from "./cardBrief.ts";
+import {
+  CARD_BRIEF_DIFF_LIMIT,
+  CARD_WORKLOG_LIMIT,
+  buildCardBrief,
+  diffStatOf,
+  renderCardBrief,
+  type CardWorklogInput,
+} from "./cardBrief.ts";
+import type { CardActivity } from "@iskra/contracts";
 
 const decodeCardBrief = Schema.decodeUnknownSync(CardBriefPayload);
 const projectId = ProjectId.make("project-brief");
@@ -169,5 +177,178 @@ describe("renderCardBrief", () => {
     expect(renderCardBrief(brief).firstMessage).toContain(
       "The diff was cut short; run `git diff` in the worktree for the rest.",
     );
+  });
+});
+
+const at = (minute: number) => `2026-01-02T00:${String(minute).padStart(2, "0")}:00.000Z`;
+
+const entry = (
+  activityId: string,
+  kind: CardActivity["kind"],
+  body: string,
+  minute: number,
+  extra: Partial<CardActivity> = {},
+): CardActivity => ({
+  activityId,
+  cardId: card.id,
+  kind,
+  author: { kind: "agent", id: backend.id },
+  body,
+  runThreadId: null,
+  deliverTo: null,
+  delivery: null,
+  elicitation: null,
+  answers: null,
+  status: null,
+  evidenceId: null,
+  reason: null,
+  createdAt: at(minute),
+  ...extra,
+});
+
+const worklog = (overrides: Partial<CardWorklogInput> = {}): CardWorklogInput => ({
+  activities: [],
+  evidenceItems: [],
+  projectRules: null,
+  restarts: 0,
+  ...overrides,
+});
+
+const ownerBrief = (
+  cardOverrides: Partial<OrchestrationCard>,
+  log: CardWorklogInput,
+  diffText = diff,
+) =>
+  renderCardBrief(
+    buildCardBrief({
+      agent: backend,
+      role: "owner",
+      card: { ...card, ...cardOverrides },
+      agents: [backend, reviewer],
+      decisions: [],
+      baseBranch: "main",
+      diff: diffText,
+      question: null,
+      worklog: log,
+    }),
+  ).firstMessage;
+
+describe("card worklog", () => {
+  it("hands a restarted owner its criteria first, then the whole record, exactly", () => {
+    const text = ownerBrief(
+      {
+        acceptance: {
+          criteria: [
+            { id: "c1", text: "A key over 100 a minute gets a 429.", verification: "automated" },
+            { id: "c2", text: "The limit shows on the dashboard.", verification: "manual" },
+          ],
+          state: "confirmed",
+        },
+        premise: { goal: "Stop abusive clients.", getsThere: true, pushback: null },
+        evidence: {
+          evidenceId: "ev-1",
+          headSha: "abcdef1234",
+          purpose: "review",
+          passed: false,
+          checkCount: 2,
+          failedChecks: ["test"],
+          unavailable: [],
+          flags: [{ kind: "skippedTest", path: "limits.test.ts", detail: "it.skip", hard: true }],
+          flagsAcknowledgedAt: null,
+          recordedAt: at(9),
+        },
+      },
+      worklog({
+        restarts: 1,
+        projectRules: "### AGENTS.md\n\nUse pnpm.",
+        activities: [
+          entry("d1", "decision", "Use a token bucket.", 1, {
+            author: { kind: "human", id: "human" },
+          }),
+          entry("p1", "plan", "- [x] Limiter", 2),
+          entry("p2", "plan", "- [x] Limiter\n- [~] Router", 3),
+          entry("q1", "elicitation", "Per key or account?", 4, {
+            elicitation: {
+              question: "Per key or account?",
+              options: [
+                { id: "o1", label: "Key" },
+                { id: "o2", label: "Account" },
+              ],
+              recommendedOptionId: "o1",
+              allowText: true,
+            },
+          }),
+          entry("r1", "response", "Key", 5, {
+            author: { kind: "human", id: "human" },
+            answers: { questionId: "q1", optionId: "o1" },
+          }),
+          entry("m1", "message", "The checks failed.", 6, {
+            author: { kind: "system", id: "system" },
+          }),
+        ],
+        evidenceItems: [
+          {
+            itemId: "i1",
+            kind: "check",
+            source: "local",
+            name: "lint",
+            criterionId: null,
+            exitCode: 0,
+            timedOut: false,
+            durationMs: 10,
+            logTail: "ok",
+            artifactPath: null,
+            unavailable: null,
+          },
+          {
+            itemId: "i2",
+            kind: "check",
+            source: "local",
+            name: "test",
+            criterionId: null,
+            exitCode: 1,
+            timedOut: false,
+            durationMs: 10,
+            logTail: "FAIL limits.test.ts\n",
+            artifactPath: null,
+            unavailable: null,
+          },
+        ],
+      }),
+    );
+
+    expect(text).toBe(
+      [
+        "# Handoff brief: Rate limiting",
+        "Branch `iskra/rate-limiting-limits`, based on `main`.",
+        "## Restarted\n\nYour previous session on this card ended before the work was done. This worklog is everything recorded since; check the worktree's state before you continue.",
+        "## Acceptance criteria\n\n- [c1] A key over 100 a minute gets a 429.\n- [c2] The limit shows on the dashboard. (a person checks this one)",
+        "## Premise\n\nGoal: Stop abusive clients.",
+        "## Spec\n\nLimit each API key to 100 requests a minute.",
+        "## Plan\n\n- [x] Limiter\n- [~] Router",
+        `## Decisions\n\n- [${at(1)}] user: Use a token bucket.`,
+        "## Questions and answers\n\n- Q (@backend): Per key or account? (Key / Account)\n  A: user: Key",
+        `## Messages\n\n[${at(6)}] Iskra: The checks failed.`,
+        "## Last evidence\n\nReview evidence on abcdef1: failed.\n- lint (local): exit 0\n- test (local): exit 1\n```\nFAIL limits.test.ts\n```\n- Flag (needs a person): skippedTest limits.test.ts: it.skip",
+        "## Project rules\n\n### AGENTS.md\n\nUse pnpm.",
+        "## Changes so far\n\n```diff\ndiff --git a/limits.ts b/limits.ts\n+export const LIMIT = 100;\n```",
+      ].join("\n\n"),
+    );
+  });
+
+  it("digests older messages and drops the digest first when the worklog runs over", () => {
+    const messages = Array.from({ length: 14 }, (_, index) =>
+      entry(`m${index}`, "message", `message ${index}`, index),
+    );
+    const text = ownerBrief({}, worklog({ activities: messages }), "");
+    expect(text).toContain("Earlier, in brief:\n");
+    expect(text).toContain(`- [${at(3)}] @backend: message 3\n\nMost recent:`);
+    expect(text).toContain(`[${at(13)}] @backend: message 13`);
+
+    const long = messages.map((message) => ({ ...message, body: "x".repeat(9_000) }));
+    const trimmed = ownerBrief({}, worklog({ activities: long }), "");
+    expect(trimmed).not.toContain("Earlier, in brief");
+    expect(trimmed.length).toBeLessThanOrEqual(CARD_WORKLOG_LIMIT + 1_000);
+    expect(trimmed).toContain("No acceptance criteria.");
   });
 });
