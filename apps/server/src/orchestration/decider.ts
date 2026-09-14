@@ -80,26 +80,26 @@ const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
 type ReadModelChannel = NonNullable<OrchestrationReadModel["channels"]>[number];
 
-/** Why an agent cannot lead a channel, or null: a lead is an active agent of the project, not a member. */
+/** Why an agent cannot lead a channel, or null: a lead is any active agent of the project. */
 function channelLeadProblem(input: {
   readonly readModel: OrchestrationReadModel;
   readonly projectId: ReadModelChannel["projectId"];
   readonly kind: ReadModelChannel["kind"];
   readonly leadAgentId: ReadModelChannel["leadAgentId"];
-  readonly memberAgentIds: ReadModelChannel["memberAgentIds"];
 }): string | null {
   if (input.leadAgentId === null) return null;
   if (input.kind !== "channel") return "Only a channel can have a lead, not a DM.";
   const agent = (input.readModel.agents ?? []).find(
     (candidate) => candidate.id === input.leadAgentId,
   );
-  if (agent === undefined || agent.projectId !== input.projectId || agent.archivedAt !== null) {
-    return "A channel's lead must be an active agent of its project.";
-  }
-  return input.memberAgentIds.includes(agent.id)
-    ? `@${agent.name} is a member of this channel; a lead is not a member.`
+  return agent === undefined || agent.projectId !== input.projectId || agent.archivedAt !== null
+    ? "A channel's lead must be an active agent of its project."
     : null;
 }
+
+/** Said in a channel when a message wakes nobody. */
+export const NOBODY_WOKEN_NOTE =
+  "Nobody was woken. @mention an agent, or choose a lead in channel settings.";
 const decodeUserInputRequestedPayload = Schema.decodeUnknownOption(UserInputRequestedPayload);
 const threadPullRequestLinksEqual = Schema.toEquivalence(Schema.NullOr(ThreadLinkedPullRequest));
 
@@ -3339,7 +3339,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         projectId: command.projectId,
         kind: command.kind,
         leadAgentId: command.leadAgentId ?? null,
-        memberAgentIds: command.memberAgentIds,
       });
       if (createLeadProblem !== null) {
         return yield* refuse(command, createLeadProblem);
@@ -3374,14 +3373,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           exceptChannelId: channel.id,
         });
       }
-      if (command.leadAgentId !== undefined || command.memberAgentIds !== undefined) {
+      if (command.leadAgentId !== undefined) {
         const updateLeadProblem = channelLeadProblem({
           readModel,
           projectId: channel.projectId,
           kind: channel.kind,
-          leadAgentId:
-            command.leadAgentId === undefined ? channel.leadAgentId : command.leadAgentId,
-          memberAgentIds: command.memberAgentIds ?? channel.memberAgentIds,
+          leadAgentId: command.leadAgentId,
         });
         if (updateLeadProblem !== null) {
           return yield* refuse(command, updateLeadProblem);
@@ -3484,6 +3481,21 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             ? mentions
             : [channel.leadAgentId];
       const events: PlannedOrchestrationEvent[] = [messageEvent];
+      if (targets.length === 0) {
+        events.push(
+          yield* planned(command, "channel", command.channelId, command.createdAt, {
+            type: "channel.message-posted",
+            payload: {
+              channelId: command.channelId,
+              messageId: MessageId.make(`${command.messageId}:system:nobody`),
+              authorKind: "system",
+              authorId: CHANNEL_SYSTEM_AUTHOR_ID,
+              body: NOBODY_WOKEN_NOTE,
+              createdAt: command.createdAt,
+            },
+          }),
+        );
+      }
       let newRuns = 0;
       for (const agentId of targets) {
         const agent = projectAgents.find((candidate) => candidate.id === agentId);

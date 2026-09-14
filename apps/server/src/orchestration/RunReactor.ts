@@ -32,6 +32,7 @@ import {
   renderRunContext,
   toRunContextMessage,
 } from "./runContext.ts";
+import { parseMentions } from "./mentions.ts";
 import * as OrchestrationEngine from "./Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts";
 
@@ -141,7 +142,10 @@ const make = Effect.gen(function* () {
       (candidate) => candidate.projectId === channel.projectId,
     );
     const history = yield* channels.listWakeHistory({ channelId });
-    const lead = channel.leadAgentId === agentId;
+    // The lead triages what mentions no one; mentioned by name, it converses and replies like any member.
+    const lead =
+      channel.leadAgentId === agentId &&
+      !parseMentions(trigger.value.body, projectAgents).includes(agentId);
     const context = buildRunContext({
       agent,
       channel,

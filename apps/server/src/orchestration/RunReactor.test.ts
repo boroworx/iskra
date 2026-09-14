@@ -281,6 +281,41 @@ it.layer(layer)("RunReactor", (it) => {
       }),
     ),
   );
+  it.effect("wakes a lead mentioned by name as a conversation that replies", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const world = yield* startChannel("memberlead");
+        const snapshotQuery = yield* ProjectionSnapshotQuery;
+        const memberChannelId = ChannelId.make("channel-memberlead");
+        yield* world.engine.dispatch({
+          type: "channel.update",
+          commandId: CommandId.make("cmd-member-lead-set"),
+          channelId: memberChannelId,
+          leadAgentId: AgentId.make("agent-memberlead"),
+        });
+
+        yield* world.post("message-member-lead", "@memberlead is the export fixed?");
+        const threadId = ThreadId.make(
+          (yield* world.nextEvent("thread.turn-start-requested")).aggregateId,
+        );
+        const run = yield* snapshotQuery
+          .getRunByThreadId(threadId)
+          .pipe(Effect.map(Option.getOrThrow));
+        expect(run.role).toBe("conversation");
+
+        yield* world.setSession(threadId, "running", "turn-member-lead");
+        yield* world.answer(threadId, "turn-member-lead", "Yes, since this morning.");
+        yield* world.setSession(threadId, "ready", null);
+        yield* world.nextEvent("thread.session-stop-requested");
+        const messages = yield* snapshotQuery.listChannelMessages(memberChannelId, 50);
+        expect(messages.map((message) => [message.authorKind, message.body])).toEqual([
+          ["human", "@memberlead is the export fixed?"],
+          ["agent", "Yes, since this morning."],
+        ]);
+      }),
+    ),
+  );
+
   it.effect("wakes a channel's lead on a message that mentions no one, and the lead posts nothing", () =>
     Effect.scoped(
       Effect.gen(function* () {

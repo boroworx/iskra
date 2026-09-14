@@ -184,7 +184,7 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
     }),
   );
 
-  it.effect("wakes exactly the member agents a message mentions, and nobody otherwise", () =>
+  it.effect("wakes exactly the member agents a message mentions, and says when it wakes nobody", () =>
     Effect.gen(function* () {
       const base = [
         ...setup,
@@ -201,7 +201,16 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
       expect(mentioned[1]).toMatchObject({ payload: { agentId: frontend } });
 
       const silent = yield* decidePost(base, "general", "just thinking out loud");
-      expect(silent.map((event) => event.type)).toEqual(["channel.message-posted"]);
+      expect(silent.map((event) => event.type)).toEqual([
+        "channel.message-posted",
+        "channel.message-posted",
+      ]);
+      expect(silent[1]).toMatchObject({
+        payload: {
+          authorKind: "system",
+          body: "Nobody was woken. @mention an agent, or choose a lead in channel settings.",
+        },
+      });
 
       const outsider = yield* decidePost(base, "general", "@reviewer any thoughts?");
       expect(outsider.map((event) => event.type)).toEqual([
@@ -288,9 +297,10 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
       const base = [...setup, createChannel("general", "channel", [backend])];
 
       const readModel = yield* applyCommands(base);
-      expect(yield* decide(readModel, postMessage("general", "hello"))).toMatchObject([
-        { type: "channel.message-posted", payload: { authorKind: "human", body: "hello" } },
-      ]);
+      expect((yield* decide(readModel, postMessage("general", "hello")))[0]).toMatchObject({
+        type: "channel.message-posted",
+        payload: { authorKind: "human", body: "hello" },
+      });
 
       yield* Effect.flip(
         applyCommands([
@@ -332,10 +342,16 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
         ]);
         expect(mentioned[1]).toMatchObject({ payload: { agentId: backend } });
 
-        const member = yield* Effect.flip(
-          applyCommands([...setup, createChannel("both", "channel", [backend], backend)]),
+        // Any member may lead: an unaddressed message wakes it to triage.
+        const memberLed = yield* decidePost(
+          [...setup, createChannel("both", "channel", [backend], backend)],
+          "both",
+          "the export button is broken",
         );
-        expect(member.message).toContain("a lead is not a member");
+        expect(memberLed[1]).toMatchObject({
+          type: "channel.agent-wake-requested",
+          payload: { agentId: backend },
+        });
         const dm = yield* Effect.flip(
           applyCommands([
             ...setup,

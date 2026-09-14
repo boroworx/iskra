@@ -1039,8 +1039,10 @@ describe("OrchestrationEngine", () => {
     const system = await createOrchestrationSystem();
     const projectId = asProjectId("channels-project");
     const channelId = ChannelId.make("channel-general");
-    const bodies = (messages: ReadonlyArray<{ readonly body: string }>) =>
-      messages.map((message) => message.body);
+    // Each post wakes nobody, so a system note follows it; limits count both.
+    const bodies = (
+      messages: ReadonlyArray<{ readonly body: string; readonly authorKind: string }>,
+    ) => messages.filter((message) => message.authorKind === "human").map((message) => message.body);
     try {
       await system.run(
         system.engine.dispatch({
@@ -1060,7 +1062,7 @@ describe("OrchestrationEngine", () => {
           projectId,
           kind: "channel",
           name: "general",
-          wakeDepth: 3,
+          wakeDepth: 6,
           memberAgentIds: [],
           createdAt: now(),
         }),
@@ -1079,7 +1081,7 @@ describe("OrchestrationEngine", () => {
       }
       const channels = await system.channelRepository();
 
-      const newest = await system.run(system.snapshotQuery.listChannelMessages(channelId, 2));
+      const newest = await system.run(system.snapshotQuery.listChannelMessages(channelId, 4));
       expect(bodies(newest)).toEqual(["message 4", "message 5"]);
 
       expect(bodies(await system.run(channels.listWakeHistory({ channelId })))).toEqual([
@@ -1092,7 +1094,7 @@ describe("OrchestrationEngine", () => {
           type: "channel.update",
           commandId: CommandId.make("cmd-channel-general-depth"),
           channelId,
-          wakeDepth: 1,
+          wakeDepth: 2,
         }),
       );
       expect(bodies(await system.run(channels.listWakeHistory({ channelId })))).toEqual([
