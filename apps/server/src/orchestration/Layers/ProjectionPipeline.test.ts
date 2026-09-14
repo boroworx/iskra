@@ -1,11 +1,15 @@
 import {
+  AgentId,
   ApprovalRequestId,
+  CardId,
+  ChannelId,
   CheckpointRef,
   CommandId,
   CorrelationId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
   MessageId,
+  type OrchestrationEvent,
   ProjectId,
   ThreadId,
   type ThreadPullRequestSnapshot,
@@ -16,6 +20,7 @@ import {
 import * as Option from "effect/Option";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
+import { expect } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -31,6 +36,8 @@ import {
   SqlitePersistenceMemory,
 } from "../../persistence/Layers/Sqlite.ts";
 import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
+import { ProjectionCardRepository } from "../../persistence/Services/ProjectionCards.ts";
+import { ProjectionChannelRepository } from "../../persistence/Services/ProjectionChannels.ts";
 import { ProjectionStateRepository } from "../../persistence/Services/ProjectionState.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
@@ -44,6 +51,7 @@ import * as ThreadBackgroundLiveness from "../ThreadBackgroundLiveness.ts";
 import * as ThreadPlanProgress from "../ThreadPlanProgress.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipeline } from "../Services/ProjectionPipeline.ts";
+import { createEmptyReadModel, projectEvent } from "../projector.ts";
 import { ServerConfig } from "../../config.ts";
 
 const makeProjectionPipelinePrefixedTestLayer = (prefix: string) =>
@@ -4634,6 +4642,564 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
         (yield* cleanupCursor)[0]!.lastAppliedSequence,
         cursorBeforeRetry[0]!.lastAppliedSequence,
       );
+    }),
+  );
+});
+
+// Pins card, agent and channel projection: each of their events folds the same in memory and in
+// SQL, and the SQL reads over those rows keep their shape.
+const cardAgentChannelLayer = it.layer(
+  OrchestrationProjectionSnapshotQueryLive.pipe(
+    Layer.provide(ThreadBackgroundLiveness.layer),
+    Layer.provide(ThreadPlanProgress.layer),
+    Layer.provide(RepositoryIdentityResolver.layer),
+    Layer.provideMerge(makeProjectionPipelinePrefixedTestLayer("iskra-projection-cards-")),
+  ),
+);
+
+cardAgentChannelLayer("card, agent and channel projection", (it) => {
+  it.effect("projects every card, agent and channel event the same in memory and in SQL", () =>
+    Effect.gen(function* () {
+      const eventStore = yield* OrchestrationEventStore;
+      const pipeline = yield* OrchestrationProjectionPipeline;
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const cardRepository = yield* ProjectionCardRepository;
+      const channelRepository = yield* ProjectionChannelRepository;
+      const at = (minute: number) => `2026-03-01T00:${String(minute).padStart(2, "0")}:00.000Z`;
+      const projectId = ProjectId.make("project-cards");
+      const [api, web] = [AgentId.make("agent-api"), AgentId.make("agent-web")];
+      const [general, old] = [ChannelId.make("channel-general"), ChannelId.make("channel-old")];
+      const [card1, card2, card3] = [
+        CardId.make("card-1"),
+        CardId.make("card-2"),
+        CardId.make("card-3"),
+      ];
+      const [message, cardMessage] = [
+        MessageId.make("message-1"),
+        MessageId.make("card-message-1"),
+      ];
+      const [conversation, owner] = [
+        ThreadId.make("thread-conversation"),
+        ThreadId.make("thread-owner"),
+      ];
+      const human = { kind: "human", id: "human" } as const;
+      const rendered = { systemPrompt: "system", firstMessage: "first" };
+      const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" };
+      const apiBrief = { id: api, name: "api", rolePrompt: "" };
+      const createCard = { projectId, parentCardId: null, spec: "", specState: "draft", tags: [] };
+      const cardDefaults = {
+        ...createCard,
+        status: "triage",
+        ownerHumanId: "human",
+        createdBy: human,
+      };
+      const events: ReadonlyArray<
+        readonly [
+          OrchestrationEvent["type"],
+          OrchestrationEvent["aggregateId"],
+          OrchestrationEvent["payload"],
+        ]
+      > = [
+        [
+          "agent.created",
+          api,
+          {
+            agentId: api,
+            projectId,
+            name: "api",
+            avatar: null,
+            roleTags: ["backend"],
+            rolePrompt: "Own the API.",
+            modelSelection,
+            capabilities: ["read", "write"],
+            createdAt: at(1),
+            updatedAt: at(1),
+          },
+        ],
+        [
+          "agent.created",
+          web,
+          {
+            agentId: web,
+            projectId,
+            name: "web",
+            avatar: "W",
+            roleTags: [],
+            rolePrompt: "",
+            modelSelection,
+            capabilities: ["read"],
+            createdAt: at(2),
+            updatedAt: at(2),
+          },
+        ],
+        [
+          "agent.updated",
+          api,
+          {
+            agentId: api,
+            roleTags: ["backend", "docs"],
+            rolePrompt: "Own the API and its docs.",
+            updatedAt: at(3),
+          },
+        ],
+        ["agent.archived", web, { agentId: web, archivedAt: at(4) }],
+        ["agent.unarchived", web, { agentId: web, updatedAt: at(5) }],
+        [
+          "channel.created",
+          general,
+          {
+            channelId: general,
+            projectId,
+            kind: "channel",
+            name: "general",
+            topic: "",
+            pinnedSpec: "",
+            wakeDepth: 2,
+            memberAgentIds: [api],
+            leadAgentId: api,
+            createdAt: at(6),
+            updatedAt: at(6),
+          },
+        ],
+        [
+          "channel.created",
+          old,
+          {
+            channelId: old,
+            projectId,
+            kind: "dm",
+            name: "old",
+            topic: "t",
+            pinnedSpec: "s",
+            wakeDepth: 0,
+            memberAgentIds: [],
+            createdAt: at(7),
+            updatedAt: at(7),
+          },
+        ],
+        [
+          "channel.updated",
+          general,
+          {
+            channelId: general,
+            topic: "Ship it",
+            memberAgentIds: [api, web],
+            leadAgentId: null,
+            updatedAt: at(8),
+          },
+        ],
+        ["channel.archived", old, { channelId: old, archivedAt: at(9) }],
+        ["channel.unarchived", old, { channelId: old, updatedAt: at(10) }],
+        ["channel.archived", old, { channelId: old, archivedAt: at(11) }],
+        [
+          "channel.message-posted",
+          general,
+          {
+            channelId: general,
+            messageId: message,
+            authorKind: "human",
+            authorId: "human",
+            body: "@api hello",
+            createdAt: at(12),
+            mentions: [api],
+          },
+        ],
+        [
+          "channel.agent-wake-requested",
+          general,
+          { channelId: general, agentId: api, triggerMessageId: message, requestedAt: at(13) },
+        ],
+        [
+          "channel.run-started",
+          general,
+          {
+            threadId: conversation,
+            channelId: general,
+            agentId: api,
+            triggerMessageId: message,
+            capabilities: ["read"],
+            context: {
+              agent: apiBrief,
+              channel: { id: general, kind: "channel", name: "general", topic: "Ship it" },
+              pinnedSpec: "",
+              wakeDepth: 2,
+              history: [],
+              trigger: {
+                messageId: message,
+                authorKind: "human",
+                authorName: "human",
+                body: "@api hello",
+                createdAt: at(12),
+              },
+            },
+            rendered,
+            startedAt: at(14),
+          },
+        ],
+        [
+          "channel.delivery-updated",
+          general,
+          {
+            channelId: general,
+            agentId: api,
+            messageIds: [message],
+            status: "sent",
+            runThreadId: conversation,
+            updatedAt: at(15),
+          },
+        ],
+        [
+          "card.created",
+          card1,
+          {
+            ...cardDefaults,
+            cardId: card1,
+            channelId: general,
+            title: "Rate limiting",
+            baseBranch: "main",
+            createdAt: at(16),
+            updatedAt: at(16),
+          },
+        ],
+        [
+          "card.created",
+          card2,
+          {
+            ...cardDefaults,
+            cardId: card2,
+            attemptGroupId: "attempts-1",
+            sourceMessageId: message,
+            proposalReasoning: "Asked for.",
+            priority: 2,
+            channelId: null,
+            parentCardId: card1,
+            title: "Auth",
+            specState: "approved",
+            tags: ["auth"],
+            status: "ready",
+            baseBranch: null,
+            createdBy: { kind: "lead", id: api },
+            createdAt: at(17),
+            updatedAt: at(17),
+          },
+        ],
+        [
+          "card.created",
+          card3,
+          {
+            ...cardDefaults,
+            cardId: card3,
+            channelId: null,
+            title: "Duplicate",
+            baseBranch: null,
+            createdAt: at(18),
+            updatedAt: at(18),
+          },
+        ],
+        [
+          "card.updated",
+          card1,
+          {
+            cardId: card1,
+            title: "Rate limit the API",
+            spec: "Use Redis.",
+            tags: ["api"],
+            priority: 1,
+            updatedAt: at(19),
+          },
+        ],
+        [
+          "card.status-changed",
+          card1,
+          { cardId: card1, from: "triage", to: "ready", move: "approve", updatedAt: at(20) },
+        ],
+        [
+          "card.delegate-changed",
+          card1,
+          { cardId: card1, delegateAgentId: api, updatedAt: at(21) },
+        ],
+        [
+          "card.relation-added",
+          card1,
+          { cardId: card1, kind: "blockedBy", otherCardId: card2, updatedAt: at(22) },
+        ],
+        [
+          "card.relation-added",
+          card1,
+          { cardId: card1, kind: "duplicateOf", otherCardId: card3, updatedAt: at(23) },
+        ],
+        [
+          "card.relation-added",
+          card2,
+          { cardId: card2, kind: "related", otherCardId: card3, updatedAt: at(24) },
+        ],
+        [
+          "card.relation-removed",
+          card2,
+          { cardId: card2, kind: "related", otherCardId: card3, updatedAt: at(25) },
+        ],
+        [
+          "card.workspace-set",
+          card1,
+          {
+            cardId: card1,
+            branch: "iskra/rate-limit",
+            worktreePath: "/tmp/rate-limit",
+            portBase: 4100,
+            updatedAt: at(26),
+          },
+        ],
+        ["card.session-requested", card1, { cardId: card1, agentId: api, requestedAt: at(27) }],
+        [
+          "card.session-started",
+          card1,
+          {
+            threadId: owner,
+            cardId: card1,
+            agentId: api,
+            role: "owner",
+            capabilities: ["read", "write"],
+            context: {
+              agent: apiBrief,
+              role: "owner",
+              card: {
+                id: card1,
+                title: "Rate limit the API",
+                spec: "Use Redis.",
+                branch: "iskra/rate-limit",
+                baseBranch: "main",
+              },
+              decisions: [],
+              diff: "",
+              diffTruncated: false,
+              question: null,
+            },
+            rendered,
+            startedAt: at(28),
+          },
+        ],
+        [
+          "card.status-changed",
+          card1,
+          {
+            cardId: card1,
+            from: "ready",
+            to: "inProgress",
+            move: "workStarted",
+            updatedAt: at(29),
+          },
+        ],
+        ["card.spec-submitted", card1, { cardId: card1, agentId: api, submittedAt: at(30) }],
+        [
+          "card.spec-state-changed",
+          card1,
+          { cardId: card1, from: "draft", to: "approved", by: human, updatedAt: at(31) },
+        ],
+        [
+          "card.message-posted",
+          card1,
+          {
+            cardId: card1,
+            messageId: cardMessage,
+            authorKind: "human",
+            authorId: "human",
+            body: "Also cap bursts.",
+            runThreadId: null,
+            forOwner: true,
+            createdAt: at(32),
+          },
+        ],
+        [
+          "card.delivery-updated",
+          card1,
+          {
+            cardId: card1,
+            messageIds: [cardMessage],
+            status: "sent",
+            threadId: owner,
+            updatedAt: at(33),
+          },
+        ],
+        [
+          "card.helper-requested",
+          card1,
+          {
+            cardId: card1,
+            agentId: web,
+            messageId: MessageId.make("card-question-1"),
+            question: "Which store?",
+            requestedAt: at(34),
+          },
+        ],
+        [
+          "card.status-changed",
+          card1,
+          {
+            cardId: card1,
+            from: "inProgress",
+            to: "inReview",
+            move: "requestReview",
+            updatedAt: at(35),
+          },
+        ],
+        [
+          "card.status-changed",
+          card1,
+          {
+            cardId: card1,
+            from: "inReview",
+            to: "inProgress",
+            move: "returnToWork",
+            reason: "Checks failed.",
+            updatedAt: at(36),
+          },
+        ],
+        [
+          "card.spend-recorded",
+          card1,
+          {
+            cardId: card1,
+            threadId: owner,
+            agentId: api,
+            turnId: TurnId.make("turn-1"),
+            costUsd: 0.25,
+            costSource: "modelPriced",
+            recordedAt: at(37),
+          },
+        ],
+        [
+          "card.spend-recorded",
+          card1,
+          {
+            cardId: card1,
+            threadId: owner,
+            agentId: api,
+            turnId: TurnId.make("turn-2"),
+            costUsd: 0,
+            costSource: "unpriced",
+            recordedAt: at(38),
+          },
+        ],
+        ["card.budget-set", card1, { cardId: card1, capUsd: 25, updatedAt: at(39) }],
+        ["card.unpriced-accepted", card1, { cardId: card1, accepts: true, updatedAt: at(40) }],
+        [
+          "card.checks-updated",
+          card1,
+          {
+            cardId: card1,
+            checks: { state: "failed", failedRuns: 1, summary: "lint", updatedAt: at(41) },
+          },
+        ],
+        [
+          "card.diff-measured",
+          card1,
+          {
+            cardId: card1,
+            diffStat: { files: 3, additions: 40, deletions: 2 },
+            measuredAt: at(42),
+          },
+        ],
+        [
+          "card.linear-synced",
+          card1,
+          {
+            cardId: card1,
+            issue: {
+              id: "linear-1",
+              identifier: "ISK-1",
+              url: "https://linear.app/issue/ISK-1",
+              teamId: "team",
+              title: "Rate limit the API",
+              description: "Use Redis.",
+              stateId: "state",
+              priority: 1,
+              commentsSyncedAt: null,
+              agentSessionId: null,
+              promptsSyncedAt: null,
+            },
+            syncedAt: at(43),
+          },
+        ],
+        ["card.snoozed", card2, { cardId: card2, snoozedUntil: at(59), snoozedAt: at(44) }],
+        ["card.unsnoozed", card2, { cardId: card2, updatedAt: at(45) }],
+        ["card.snoozed", card3, { cardId: card3, snoozedUntil: null, snoozedAt: at(46) }],
+        [
+          "card.decision-recorded",
+          card2,
+          {
+            cardId: card2,
+            decisionId: "decision-1",
+            author: human,
+            text: "Use JWT.",
+            createdAt: at(47),
+          },
+        ],
+        [
+          "card.workspace-set",
+          card2,
+          {
+            cardId: card2,
+            branch: "iskra/auth",
+            worktreePath: "/tmp/auth",
+            portBase: 4200,
+            updatedAt: at(48),
+          },
+        ],
+        ["card.workspace-cleared", card2, { cardId: card2, updatedAt: at(49) }],
+      ];
+
+      let model = createEmptyReadModel(at(0));
+      for (const [index, [type, aggregateId, payload]] of events.entries()) {
+        const event = yield* eventStore.append({
+          type,
+          eventId: EventId.make(`evt-cards-${index}`),
+          aggregateKind: type.startsWith("card.")
+            ? "card"
+            : type.startsWith("agent.")
+              ? "agent"
+              : "channel",
+          aggregateId,
+          occurredAt: at(index + 1),
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          payload,
+        });
+        yield* pipeline.projectEvent(event);
+        model = yield* projectEvent(model, event);
+      }
+
+      const { agents, channels, cards, liveRuns } = yield* snapshotQuery.getCommandReadModel();
+      const readModel = { agents, channels, cards, liveRuns };
+      assert.deepEqual(readModel, {
+        agents: model.agents,
+        channels: model.channels,
+        cards: model.cards,
+        liveRuns: model.liveRuns,
+      });
+      const shell = yield* snapshotQuery.getShellSnapshot();
+      expect({
+        readModel,
+        shell: { agents: shell.agents, channels: shell.channels, cards: shell.cards },
+        agentById: yield* snapshotQuery.getAgentById(api),
+        agentShellById: yield* snapshotQuery.getAgentShellById(web),
+        cardShellById: yield* snapshotQuery.getCardShellById(card1),
+        channelShellById: yield* snapshotQuery.getChannelShellById(general),
+        channelMessages: yield* snapshotQuery.listChannelMessages(general, 10),
+        runsByAgent: yield* snapshotQuery.listRunsByAgent(api, 10),
+        run: yield* snapshotQuery.getRunByThreadId(owner),
+        cardRow: yield* cardRepository.getById({ cardId: card1 }),
+        decisions: yield* cardRepository.listDecisions({ cardId: card1 }),
+        openOwnerMessages: yield* cardRepository.listOpenOwnerMessages({ cardId: card1 }),
+        channelRow: yield* channelRepository.getChannelById({ channelId: old }),
+        message: yield* channelRepository.getMessageById({ messageId: message }),
+        wakeHistory: yield* channelRepository.listWakeHistory({ channelId: general }),
+        openDeliveries: yield* channelRepository.listOpenDeliveries({
+          agentId: api,
+          channelId: general,
+        }),
+      }).toMatchSnapshot();
     }),
   );
 });
