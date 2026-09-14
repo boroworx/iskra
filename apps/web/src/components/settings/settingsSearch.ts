@@ -641,6 +641,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["commands scripts setup run dev server checkout worktree iskra.json import"],
   },
   {
+    id: "project-orchestration",
+    title: "Agent orchestration",
+    to: "/settings/projects",
+    searchTerms: [
+      "cards agents base branch session cap pull requests landing fix rounds checks waived egress network allowlist deny domains exclusive paths migrations heavy commands sub-cards side-effect guard kill switch secrets",
+    ],
+  },
+  {
     id: "environment-icon",
     title: "Environment icon",
     to: "/settings/connections",
@@ -724,6 +732,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/connections",
     searchTerms: [
       "automatic machine environment resources cpu memory capacity preference weight shared projects",
+    ],
+  },
+  {
+    id: "card-runtime",
+    title: "Card runtime",
+    to: "/settings/connections",
+    searchTerms: [
+      "heavy jobs concurrency agent sessions admission load memory resource profile turbo vitest node heap cards",
     ],
   },
   {

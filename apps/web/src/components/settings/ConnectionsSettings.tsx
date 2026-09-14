@@ -76,6 +76,7 @@ import {
 } from "./EnvironmentRow";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
 import { LoadBalancingSettings } from "./LoadBalancingSettings";
+import { CardRuntimeSettings } from "./ProjectOrchestrationSettings";
 import { GitHubRoutingSettings } from "./GitHubRoutingSettings";
 import { Input } from "../ui/input";
 import { CommandShortcut } from "../ui/command";
@@ -3748,6 +3749,7 @@ export function ConnectionsSettings() {
         />
       </SettingsSection>
       <LoadBalancingSettings environments={loadBalancingEnvironments} />
+      <CardRuntimeSettings environmentId={primaryEnvironmentId} />
       <GitHubRoutingSettings environments={loadBalancingEnvironments} />
     </SettingsPageContainer>
   );

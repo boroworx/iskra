@@ -39,6 +39,7 @@ import {
   ProjectFaviconPickerDialog,
 } from "./ProjectFaviconPickerDialog";
 import { ProjectActionsSettings } from "./ProjectActionsSettings";
+import { ProjectOrchestrationSettings } from "./ProjectOrchestrationSettings";
 import { projectGroupTitleNeedsUpdate } from "./ProjectSettingsPanel.logic";
 import { useSettingsProjectGroups } from "./useSettingsProjectGroups";
 
@@ -479,6 +480,7 @@ function ProjectDetail({
           />
         </SettingsSection>
         <ProjectActionsSettings />
+        <ProjectOrchestrationSettings members={group.memberProjects} />
         {hasMultipleCheckouts ? checkoutChoices : null}
         <SettingsSection title="Danger">
           <SettingsRow
