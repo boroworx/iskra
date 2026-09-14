@@ -443,13 +443,11 @@ export const makeOrchestrationIntegrationHarness = (
         Layer.succeed(CardWorkspace.CardWorkspace, {
           start: () => Effect.void,
           ensure: () => Effect.die("card workspaces are not used by the engine harness"),
-          teardown: () => Effect.die("card workspaces are not used by the engine harness"),
           runScript: () => Effect.die("card workspaces are not used by the engine harness"),
           diff: () => Effect.die("card workspaces are not used by the engine harness"),
           runChecks: () => Effect.die("card workspaces are not used by the engine harness"),
           changedFiles: () => Effect.die("card workspaces are not used by the engine harness"),
           land: () => Effect.die("card workspaces are not used by the engine harness"),
-          drain: Effect.void,
         }),
       ),
       Layer.provideMerge(

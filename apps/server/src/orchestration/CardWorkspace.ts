@@ -80,7 +80,6 @@ export class CardWorkspace extends Context.Service<
   {
     readonly start: () => Effect.Effect<void, never, Scope.Scope>;
     readonly ensure: (cardId: CardId) => Effect.Effect<CardWorkspaceInfo, CardWorkspaceError>;
-    readonly teardown: (cardId: CardId) => Effect.Effect<void, CardWorkspaceError>;
     /** The card's changes against its base branch; empty before it has a worktree. */
     readonly diff: (
       cardId: CardId,
@@ -100,7 +99,6 @@ export class CardWorkspace extends Context.Service<
       readonly cardId: CardId;
       readonly scriptId: string;
     }) => Effect.Effect<{ readonly terminalId: string }, CardWorkspaceError>;
-    readonly drain: Effect.Effect<void>;
   }
 >()("@iskra/cli/orchestration/CardWorkspace") {}
 
@@ -620,13 +618,11 @@ const make = Effect.gen(function* () {
   return {
     start,
     ensure: (cardId) => semaphore.withPermits(1)(ensureUnlocked(cardId)),
-    teardown: (cardId) => semaphore.withPermits(1)(teardownUnlocked(cardId)),
     diff,
     runChecks,
     changedFiles,
     land: (cardId) => semaphore.withPermits(1)(landUnlocked(cardId)),
     runScript,
-    drain: worker.drain,
   } satisfies CardWorkspace["Service"];
 });
 

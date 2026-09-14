@@ -138,13 +138,11 @@ describe("OrchestrationReactor", () => {
               return Effect.void;
             },
             ensure: () => Effect.die("not used"),
-            teardown: () => Effect.die("not used"),
             diff: () => Effect.die("not used"),
             runChecks: () => Effect.die("not used"),
             changedFiles: () => Effect.die("not used"),
             land: () => Effect.die("not used"),
             runScript: () => Effect.die("not used"),
-            drain: Effect.void,
           }),
         ),
         Layer.provideMerge(
