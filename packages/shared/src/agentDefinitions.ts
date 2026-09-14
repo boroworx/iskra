@@ -16,6 +16,10 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 /** Where a project's agents are defined, relative to its workspace root. */
 export const AGENT_DEFINITIONS_DIR = ".iskra/agents";
 
+/** The model an agent runs when its file names none, and imported agents fall back to. */
+export const DEFAULT_CLAUDE_AGENT_MODEL =
+  DEFAULT_MODEL_BY_PROVIDER[ProviderDriverKind.make("claudeAgent")] ?? DEFAULT_MODEL;
+
 /** Agent definitions from other tools that can be imported into a project. */
 export const IMPORTABLE_AGENT_SOURCES = [{ dir: ".claude/agents" }, { dir: ".github/agents" }] as const;
 
@@ -86,10 +90,7 @@ export function parseAgentFile(contents: string, fileName: string): AgentFileRes
         tags: frontmatter.tags ?? [],
         modelSelection: decodeModelSelection({
           instanceId,
-          model:
-            frontmatter.model ??
-            DEFAULT_MODEL_BY_PROVIDER[ProviderDriverKind.make("claudeAgent")] ??
-            DEFAULT_MODEL,
+          model: frontmatter.model ?? DEFAULT_CLAUDE_AGENT_MODEL,
           ...(frontmatter.options !== undefined ? { options: frontmatter.options } : {}),
         }),
         capabilities: frontmatter.capabilities ?? ["read"],

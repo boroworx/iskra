@@ -2,9 +2,6 @@ import {
   AgentDefinitionError,
   AgentId,
   CommandId,
-  DEFAULT_MODEL,
-  DEFAULT_MODEL_BY_PROVIDER,
-  ProviderDriverKind,
   ProviderInstanceId,
   type ModelSelection,
   type OrchestrationAgent,
@@ -15,6 +12,7 @@ import {
 } from "@iskra/contracts";
 import {
   AGENT_DEFINITIONS_DIR,
+  DEFAULT_CLAUDE_AGENT_MODEL,
   IMPORTABLE_AGENT_SOURCES,
   importAgentFile,
   parseAgentFile,
@@ -73,8 +71,6 @@ export class AgentDefinitionSync extends Context.Service<
 >()("@iskra/cli/orchestration/AgentDefinitionSync") {}
 
 const CLAUDE_INSTANCE = ProviderInstanceId.make("claudeAgent");
-const DEFAULT_CLAUDE_MODEL =
-  DEFAULT_MODEL_BY_PROVIDER[ProviderDriverKind.make("claudeAgent")] ?? DEFAULT_MODEL;
 
 /**
  * Imported agents run on Claude. A Claude alias or slug the catalog knows is
@@ -86,7 +82,7 @@ export function resolveImportedModel(model: string | null): ModelSelection {
     slug !== null && BUNDLED_CLAUDE_MODEL_CATALOG.models.some((entry) => entry.model.slug === slug);
   return {
     instanceId: CLAUDE_INSTANCE,
-    model: known && slug !== null ? slug : DEFAULT_CLAUDE_MODEL,
+    model: known && slug !== null ? slug : DEFAULT_CLAUDE_AGENT_MODEL,
   };
 }
 
@@ -364,9 +360,10 @@ const make = Effect.gen(function* () {
   const save: AgentDefinitionSync["Service"]["save"] = ({ projectId, definition }) =>
     semaphore.withPermits(1)(
       Effect.gen(function* () {
-        const project = yield* findProject(yield* readModel, projectId);
+        const model = yield* readModel;
+        const project = yield* findProject(model, projectId);
         // Write out a project's existing agents first, so creating the folder archives nothing.
-        yield* reconcileProject(project, yield* readModel);
+        yield* reconcileProject(project, model);
         const dir = agentsDir(project);
         yield* fileSystem.makeDirectory(dir, { recursive: true });
         const files = yield* readAgentFiles(dir);
@@ -412,8 +409,9 @@ const make = Effect.gen(function* () {
   const importDefinitions: AgentDefinitionSync["Service"]["importDefinitions"] = (projectId) =>
     semaphore.withPermits(1)(
       Effect.gen(function* () {
-        const project = yield* findProject(yield* readModel, projectId);
-        yield* reconcileProject(project, yield* readModel);
+        const model = yield* readModel;
+        const project = yield* findProject(model, projectId);
+        yield* reconcileProject(project, model);
         const dir = agentsDir(project);
         const takenNames = new Set(
           ((yield* readModel).agents ?? [])
