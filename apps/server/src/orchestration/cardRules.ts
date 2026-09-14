@@ -250,6 +250,10 @@ export function nextCardStatus(card: CardFacts, move: CardMove): CardMoveResult 
         : reject("Only a card in the merge queue can be taken out of it.");
     case "landed":
       return from === "landing" ? to("landed") : reject("Only a landing card can land.");
+    case "mergedOnHost":
+      return from === "inReview" || from === "landing"
+        ? to("landed")
+        : reject("Only a card in review or landing can be merged on its host.");
     case "abandon":
       return isFinishedCardStatus(from)
         ? reject("A card that has landed or been abandoned cannot be abandoned.")

@@ -717,6 +717,8 @@ export const CardMove = Schema.Literals([
   "reopen",
   // A plan child or an auto-merge project entering landing with no person's approval.
   "beginLanding",
+  // A person merged the card's pull request on its host: the card lands from review or landing.
+  "mergedOnHost",
 ]);
 export type CardMove = typeof CardMove.Type;
 
@@ -1399,9 +1401,6 @@ export function runSessionState(input: {
   }
   return session.status === "running" || session.activeTurnId !== null ? "active" : "complete";
 }
-
-/** Live runs allowed at once in one project. */
-export const DEFAULT_PROJECT_RUN_CAP = 3;
 
 /** A run ends when its session stops or fails; a finished turn alone leaves it live. */
 export const isRunEndingSessionStatus = (status: OrchestrationSessionStatus): boolean =>
@@ -2564,7 +2563,11 @@ const CardDecisionRecordCommand = Schema.Struct({
 // Server-only: dispatched by the session reactor, agent tools, checks and the merge queue.
 const CardWorkStartCommand = cardStatusCommand("card.work.start");
 const CardReviewRequestCommand = cardStatusCommand("card.review.request");
-const CardLandCommand = cardStatusCommand("card.land");
+const CardLandCommand = Schema.Struct({
+  ...cardStatusCommand("card.land").fields,
+  // The merged pull request, when a person merged it on the host rather than through Iskra.
+  mergedOnHostUrl: Schema.optional(TrimmedNonEmptyString),
+});
 
 const CardWorkReturnCommand = Schema.Struct({
   type: Schema.Literal("card.work.return"),

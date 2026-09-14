@@ -351,21 +351,13 @@ const make = Effect.gen(function* () {
     }
   });
 
-  const landCard = (card: OrchestrationCard, key: string, reason: string | null) =>
-    Effect.gen(function* () {
-      yield* engine.dispatch({
-        type: "card.land",
-        commandId: CommandId.make(`card-land:${key}`),
-        cardId: card.id,
-      });
-      if (reason !== null) {
-        yield* record(card.id, `landed:${key}`, {
-          kind: "message",
-          body: reason,
-          deliverTo: null,
-          reason: { code: "mergedOnHost", text: reason },
-        });
-      }
+  /** Lands the card; a merge a person made on the host lands it straight from review. */
+  const landCard = (card: OrchestrationCard, key: string, mergedOnHostUrl: string | null) =>
+    engine.dispatch({
+      type: "card.land",
+      commandId: CommandId.make(`card-land:${key}`),
+      cardId: card.id,
+      ...(mergedOnHostUrl === null ? {} : { mergedOnHostUrl }),
     });
 
   const land = Effect.fn("CardLandingReactor.land")(function* (cardId: CardId, key: string) {
@@ -465,13 +457,8 @@ const make = Effect.gen(function* () {
     const head = card.evidence?.headSha ?? "unknown";
 
     if (detail.state === "merged") {
-      if (card.status === "inReview") {
-        // A person merged it on the host: that is their approval.
-        yield* engine
-          .dispatch({ type: "card.merge.approve", commandId: CommandId.make(`card-host-merge:${card.id}`), cardId: card.id })
-          .pipe(Effect.ignore);
-      }
-      yield* landCard(card, `host-merge:${card.id}`, card.status === "inReview" ? `Merged on the host: ${detail.url}` : null);
+      // A person merging on the host is their approval.
+      yield* landCard(card, `host-merge:${card.id}`, card.status === "inReview" ? detail.url : null);
       const files = yield* workspace.changedFiles(card.id).pipe(Effect.orElseSucceed(() => []));
       return yield* afterLanding(card, files, `host-merge:${card.id}`);
     }

@@ -2472,7 +2472,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       });
     }
     case "card.land":
-      return yield* decideCardMove({ readModel, command, move: "landed" });
+      return command.mergedOnHostUrl === undefined
+        ? yield* decideCardMove({ readModel, command, move: "landed" })
+        : yield* decideCardMove({
+            readModel,
+            command,
+            move: "mergedOnHost",
+            reason: `Merged on the host: ${command.mergedOnHostUrl}`,
+          });
 
     case "card.assign":
     case "card.unassign": {

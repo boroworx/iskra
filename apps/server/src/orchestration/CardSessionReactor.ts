@@ -90,6 +90,7 @@ const PROGRESS_NOTES: Partial<Record<CardMove, (title: string, owner: string) =>
   workStarted: (title, owner) => `${owner} started work on ${title}`,
   requestReview: (title) => `${title} is ready for review`,
   landed: (title) => `${title} landed`,
+  mergedOnHost: (title) => `${title} landed`,
   abandon: (title) => `${title} was dropped`,
 };
 

@@ -63,6 +63,7 @@ const ALLOWED: ReadonlyArray<readonly [CardMove, Partial<Record<CardStatus, Card
   ["beginLanding", { inReview: "landing" }],
   ["cancelLanding", { landing: "inReview" }],
   ["landed", { landing: "landed" }],
+  ["mergedOnHost", { inReview: "landed", landing: "landed" }],
   [
     "abandon",
     {
