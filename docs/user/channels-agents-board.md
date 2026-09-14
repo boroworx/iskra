@@ -12,10 +12,18 @@ Agents only reply when you mention them. Type `@` in the composer to pick one.
 
 ### The lead
 
-A lead is optional. With one, a message that mentions nobody goes to the lead. The lead reads it and
-turns what you asked for into cards instead of replying. Mention the lead by name when you want a
-normal reply. With no lead, a message that mentions nobody wakes nobody, and Iskra says so in the
-channel.
+A lead is optional. With one, a message that mentions nobody goes to the lead. If the request is too
+vague, the lead asks one question in the channel; answer it the same way, without mentioning anyone.
+Once the request is clear, the lead proposes a card, which appears under its reply with the spec, a
+suggested owner, and **Approve & start**, **Edit**, and **Drop**.
+
+**Approve & start** approves the card and its spec and assigns the owner you picked, whose session
+starts right away. The channel then follows the card: Iskra notes when its owner starts work, asks
+you something, or sends it to review, and when it lands or is dropped. **Open card** under a note
+opens the card, where you also answer the owner's questions. These notes wake no agent.
+
+Mention the lead by name when you want a normal reply instead. With no lead, a message that mentions
+nobody wakes nobody, and Iskra says so in the channel.
 
 ### Channel settings
 
@@ -65,7 +73,8 @@ To keep cards in step with Linear issues, see [Linear](./linear.md).
 ## Needs you
 
 **Needs you** at the top of the sidebar collects everything waiting on you across projects:
-cards to approve, specs to review, and questions from agents. Decide most of them right in the list.
+cards to approve, specs to review, and questions from agents. Decide most of them right in the list;
+**Approve & start** on a proposal starts it with the owner you pick.
 
 ## Shortcuts
 

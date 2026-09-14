@@ -11,15 +11,18 @@ import { Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
 import { cardEnvironment } from "~/state/cards";
-import { useEnvironmentCards, useProjects } from "~/state/entities";
+import { useEnvironmentAgents, useEnvironmentCards, useProjects } from "~/state/entities";
 import { usePrimaryEnvironmentId } from "~/state/environments";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { ApproveAndStart } from "../channels/CardProposal";
+import { agentListEntries, type AgentEntry } from "../channels/channels.logic";
 import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
 import { toastCommandFailure } from "../toastCommandFailure";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 
 const HOUR_MS = 60 * 60_000;
+const NO_AGENTS: ReadonlyArray<AgentEntry> = [];
 
 const refused = (title: string) => (result: AtomCommandResult<unknown, unknown>) =>
   toastCommandFailure(result, title, "The request was refused.");
@@ -32,6 +35,7 @@ const refused = (title: string) => (result: AtomCommandResult<unknown, unknown>)
 export function NeedsYouView() {
   const environmentId = usePrimaryEnvironmentId();
   const cards = useEnvironmentCards(environmentId);
+  const agents = useEnvironmentAgents(environmentId);
   const projects = useProjects();
   const snooze = useAtomCommand(cardEnvironment.snooze);
   const unsnooze = useAtomCommand(cardEnvironment.unsnooze);
@@ -50,6 +54,16 @@ export function NeedsYouView() {
   );
   const snoozed = useMemo(() => cards.filter((card) => isCardSnoozed(card, now)), [cards, now]);
   const cardById = useMemo(() => new Map(cards.map((card) => [card.id, card])), [cards]);
+  // Who can own a proposal, per project, for Approve & start.
+  const agentsByProject = useMemo(() => {
+    const byProject = new Map<string, ReadonlyArray<AgentEntry>>();
+    for (const agent of agents) {
+      if (!byProject.has(agent.projectId)) {
+        byProject.set(agent.projectId, agentListEntries(agents, agent.projectId));
+      }
+    }
+    return byProject;
+  }, [agents]);
   const proposalReasoningOf = (cardId: CardId) => cardById.get(cardId)?.proposalReasoning ?? null;
   const projectTitle = (projectId: string) =>
     projects.find((project) => project.environmentId === environmentId && project.id === projectId)
@@ -114,9 +128,16 @@ export function NeedsYouView() {
                     waiting {waitingLabel(item.since, now)}
                   </span>
                   {item.kind === "triage" ? (
-                    <div className="flex shrink-0 gap-1">
-                      {actionButton("Approve", () =>
-                        decideOn(item.cardId, "card.approve", "The card was not approved"),
+                    <div className="flex shrink-0 flex-wrap items-center gap-1">
+                      {environmentId === null ? null : (
+                        <ApproveAndStart
+                          card={{
+                            id: item.cardId,
+                            suggestedAgentId: cardById.get(item.cardId)?.suggestedAgentId ?? null,
+                          }}
+                          agents={agentsByProject.get(item.projectId) ?? NO_AGENTS}
+                          environmentId={environmentId}
+                        />
                       )}
                       {actionButton("Drop", () =>
                         decideOn(item.cardId, "card.abandon", "The card was not dropped"),
