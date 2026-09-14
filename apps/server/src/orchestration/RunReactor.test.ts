@@ -414,7 +414,7 @@ it.layer(layer)("RunReactor", (it) => {
           triggerMessageId: "message-lead-request",
           capabilities: ["read"],
         });
-        expect(run.rendered.systemPrompt).toContain("one short clarifying question");
+        expect(run.rendered.systemPrompt).toContain("call ask_clarification with one short question");
         expect(run.rendered.systemPrompt).toContain("@leadworld");
         expect(run.rendered.firstMessage).toContain("## Open cards");
 
