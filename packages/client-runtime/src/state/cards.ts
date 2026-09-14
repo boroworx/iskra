@@ -4,6 +4,7 @@ import type { Atom } from "effect/unstable/reactivity";
 
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import {
+  acknowledgeCardFlags,
   addCardRelation,
   approveAndStartCard,
   assignCard,
@@ -12,12 +13,16 @@ import {
   decideCard,
   postCardMessage,
   removeCardRelation,
+  resolveCardCheckpoint,
   setCardBudget,
+  setCardCriteria,
+  setProjectOrchestration,
   startCardAttempts,
   snoozeCard,
   unsnoozeCard,
   updateCard,
 } from "../operations/commands.ts";
+import { createCardActivityAtomFamily } from "./cardActivity.ts";
 import { createEnvironmentCommand, createEnvironmentRpcQueryAtomFamily } from "./runtime.ts";
 
 /** A person's commands on cards: the board's decisions and Needs you snoozes. */
@@ -25,6 +30,23 @@ export function createCardEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | Crypto.Crypto | R, E>,
 ) {
   return {
+    activity: createCardActivityAtomFamily(runtime),
+    setCriteria: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:card:set-criteria",
+      execute: setCardCriteria,
+    }),
+    resolveCheckpoint: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:card:resolve-checkpoint",
+      execute: resolveCardCheckpoint,
+    }),
+    acknowledgeFlags: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:card:acknowledge-flags",
+      execute: acknowledgeCardFlags,
+    }),
+    setOrchestration: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:project:set-orchestration",
+      execute: setProjectOrchestration,
+    }),
     decide: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:card:decide",
       execute: decideCard,

@@ -163,7 +163,11 @@ export type CardDecisionInput = CommandInput<"card.approve"> & {
     | "card.unassign"
     | "card.spec.approve"
     | "card.spec.skip"
-    | "card.spec.reopen";
+    | "card.spec.reopen"
+    | "card.criteria.confirm"
+    | "card.fix-rounds.reset"
+    | "card.pause"
+    | "card.resume";
 };
 
 export const decideCard: (input: CardDecisionInput) => CommandEffect = Effect.fn(
@@ -192,6 +196,21 @@ export const postCardMessage = timestampedCommand("postCardMessage", "card.messa
 export const commentOnCardReview = timestampedCommand("commentOnCardReview", "card.review.comment");
 export const addCardRelation = command("addCardRelation", "card.relation.add");
 export const removeCardRelation = command("removeCardRelation", "card.relation.remove");
+/** A person's acceptance criteria: a draft in triage, confirmed once the card is approved. */
+export const setCardCriteria = command("setCardCriteria", "card.criteria.set");
+/** A person's answer to the owner's checkpoint: continue, redirect with a note, or stop. */
+export const resolveCardCheckpoint = command("resolveCardCheckpoint", "card.checkpoint.resolve");
+export const acknowledgeCardFlags = command("acknowledgeCardFlags", "card.flags.acknowledge");
+/** A person answering a lead's question with an offered option or their own words. */
+export const answerChannelElicitation = timestampedCommand(
+  "answerChannelElicitation",
+  "channel.elicitation.answer",
+);
+/** A person replacing a project's whole orchestration policy. */
+export const setProjectOrchestration = command(
+  "setProjectOrchestration",
+  "project.orchestration.set",
+);
 
 export const updateProject: (input: UpdateProjectInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.updateProject",

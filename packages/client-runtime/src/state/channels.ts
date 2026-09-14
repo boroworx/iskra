@@ -9,6 +9,7 @@ import type { Atom } from "effect/unstable/reactivity";
 
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import {
+  answerChannelElicitation,
   archiveChannel,
   createAgent,
   createChannel,
@@ -82,6 +83,10 @@ export function createChannelEnvironmentAtoms<R, E>(
     postMessage: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:channel:post-message",
       execute: postChannelMessage,
+    }),
+    answerElicitation: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:channel:answer-elicitation",
+      execute: answerChannelElicitation,
     }),
     sessionMessage: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:agent:session-message",

@@ -19,6 +19,14 @@
       "types": "./src/cards.ts",
       "default": "./src/cards.ts"
     },
+    "./card-review": {
+      "types": "./src/cardReview.ts",
+      "default": "./src/cardReview.ts"
+    },
+    "./card-preview": {
+      "types": "./src/cardPreview.ts",
+      "default": "./src/cardPreview.ts"
+    },
     "./connection": {
       "types": "./src/connection/index.ts",
       "default": "./src/connection/index.ts"
