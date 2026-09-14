@@ -75,6 +75,7 @@ import Migration0060 from "./Migrations/060_ProjectionCardSnooze.ts";
 import Migration0061 from "./Migrations/061_ProjectionCardChecks.ts";
 import Migration0062 from "./Migrations/062_ProjectionCardBudgets.ts";
 import Migration0063 from "./Migrations/063_ProjectionCardAttempts.ts";
+import Migration0064 from "./Migrations/064_ProjectionCardLinearIssues.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -150,6 +151,7 @@ const migrationEntries = [
   [61, "ProjectionCardChecks", Migration0061],
   [62, "ProjectionCardBudgets", Migration0062],
   [63, "ProjectionCardAttempts", Migration0063],
+  [64, "ProjectionCardLinearIssues", Migration0064],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

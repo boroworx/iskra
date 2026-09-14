@@ -765,6 +765,42 @@ card; a card approved in Iskra creates an issue; title, description and comments
 Linear status change that is not a decision is overwritten with a comment; a question from the
 delegate is answered from Linear; all of it works by polling with no public URL.
 
+_Accepted:_ Iskra signs in as a Linear OAuth app using the client credentials grant, so a local server
+needs no redirect URL and no webhooks. The client ID and secret come from `ISKRA_LINEAR_CLIENT_ID` and
+`ISKRA_LINEAR_CLIENT_SECRET`, and the app token is kept in server secrets. A project joins sync
+through the project setting `linearTeamId`. A card can carry `linearIssue`: the issue it is linked
+to, plus the title, description and state both sides agreed on at the last sync. `LinearSyncReactor`
+polls once a minute and does three things:
+- It turns open issues delegated to Iskra into cards with `card.linear.intake`. The card is created
+  in `triage` with Linear as its author, and the delegation is applied as the person's approval, so
+  it lands in `ready`.
+- It opens an issue for each approved card in a project with a team.
+- It reconciles every linked card.
+  - Title and description ↔ spec merge three ways against the last synced values, and the later edit
+    wins when both sides changed. A spec changed from Linear goes back to `draft`.
+  - Linear state follows the card's derived status. Two moves in Linear count as decisions: moving
+    a triage issue to a to-do state approves the card, and canceling it abandons the card. Any other
+    move is set back, with a comment explaining why.
+  - New Linear comments become card messages to the owner. If the owner session has an open question,
+    the first new comment answers it through `thread.user-input.respond`.
+
+Two things go to Linear as soon as they happen: a person's card comment, and a delegate's
+message-mode question such as `ask_owner`. The app's own comments are never pulled back.
+`LinearSyncReactor.test.ts` runs the real engine against an in-memory Linear and covers delegated
+intake, issue creation, both directions of title, spec and comments, a status move being set back
+and then a cancel abandoning the card, and a question answered from Linear. `LinearClient.test.ts`
+covers signing in once and decoding issues.
+
+Not built yet:
+- Intake by team and label.
+- Priority.
+- Linear agent activity. Sessions post plain comments rather than thought, action and elicitation
+  activity.
+- Webhooks, and syncing when a client gains focus.
+- A settings form for the app credentials.
+
+The GraphQL queries follow Linear's documented API but have not been run against a live workspace.
+
 **M2.11 — Channel lead.** _Accept when:_ an unmentioned request in a channel produces a `triage`
 card linked to the message, with reasoning and likely duplicates; an `@mention` bypasses the lead;
 the lead cannot answer, assign, approve or wake another agent.

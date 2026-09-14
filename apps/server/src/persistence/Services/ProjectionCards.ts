@@ -23,6 +23,7 @@ import {
   CardDiffStat,
   CardChecks,
   UsageCostSource,
+  CardLinearIssue,
 } from "@iskra/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
@@ -59,6 +60,7 @@ export const ProjectionCard = Schema.Struct({
   acceptsUnpriced: Schema.Boolean,
   reviewReturns: Schema.Number,
   attemptGroupId: Schema.NullOr(Schema.String),
+  linearIssue: Schema.NullOr(CardLinearIssue),
   relations: Schema.Array(CardRelation),
   createdBy: CardAuthor,
   createdAt: IsoDateTime,
@@ -75,6 +77,7 @@ export const ProjectionCardDbRow = ProjectionCard.mapFields(
     diffStat: Schema.fromJsonString(Schema.NullOr(CardDiffStat)),
     checks: Schema.fromJsonString(Schema.NullOr(CardChecks)),
     acceptsUnpriced: Schema.fromJsonString(Schema.Boolean),
+    linearIssue: Schema.fromJsonString(Schema.NullOr(CardLinearIssue)),
   }),
 );
 

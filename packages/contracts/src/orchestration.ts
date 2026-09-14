@@ -647,6 +647,23 @@ export const CARD_ATTEMPTS_MAX = 4;
 /** Ports reserved for each card's worktree, starting at its `portBase` (ISKRA_PORT). */
 export const CARD_PORT_BLOCK_SIZE = 10;
 
+/**
+ * The Linear issue a card syncs with. `title`, `description` and `stateId` are the values both
+ * sides agreed on at the last sync, so whichever side differs from them is the side that changed.
+ */
+export const CardLinearIssue = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  identifier: TrimmedNonEmptyString,
+  url: TrimmedNonEmptyString,
+  teamId: TrimmedNonEmptyString,
+  title: Schema.String,
+  description: Schema.String,
+  stateId: Schema.String,
+  // The newest Linear comment already brought into the card.
+  commentsSyncedAt: Schema.NullOr(IsoDateTime),
+});
+export type CardLinearIssue = typeof CardLinearIssue.Type;
+
 export const OrchestrationCard = Schema.Struct({
   id: CardId,
   projectId: ProjectId,
@@ -689,6 +706,7 @@ export const OrchestrationCard = Schema.Struct({
   reviewReturns: NonNegativeInt,
   // Set on the sibling sub-cards of one best-of-N run; an attempt never lands on its own.
   attemptGroupId: Schema.NullOr(TrimmedNonEmptyString),
+  linearIssue: Schema.NullOr(CardLinearIssue).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   relations: Schema.Array(CardRelation),
   createdBy: CardAuthor,
   createdAt: IsoDateTime,
@@ -1780,6 +1798,27 @@ const CardBudgetSetCommand = Schema.Struct({
 const CardUnpricedAcceptCommand = cardStatusCommand("card.unpriced.accept");
 const CardUnpricedRefuseCommand = cardStatusCommand("card.unpriced.refuse");
 
+// Server-only: Linear sync. An issue becomes a card in triage; delegating it in Linear is a
+// person's approval.
+const CardLinearIntakeCommand = Schema.Struct({
+  type: Schema.Literal("card.linear.intake"),
+  commandId: CommandId,
+  cardId: CardId,
+  projectId: ProjectId,
+  title: TrimmedNonEmptyString,
+  issue: CardLinearIssue,
+  delegated: Schema.Boolean,
+  createdAt: IsoDateTime,
+});
+
+const CardLinearSyncCommand = Schema.Struct({
+  type: Schema.Literal("card.linear.sync"),
+  commandId: CommandId,
+  cardId: CardId,
+  issue: CardLinearIssue,
+  syncedAt: IsoDateTime,
+});
+
 // Server-only: what agents do through board tools. Tools never approve, assign or land.
 const CardProposeCommand = Schema.Struct({
   type: Schema.Literal("card.propose"),
@@ -1881,7 +1920,7 @@ const CardMessageRecordCommand = Schema.Struct({
   commandId: CommandId,
   cardId: CardId,
   messageId: MessageId,
-  authorKind: Schema.Literals(["agent", "system"]),
+  authorKind: Schema.Literals(["agent", "system", "linear"]),
   authorId: TrimmedNonEmptyString,
   body: Schema.String,
   runThreadId: Schema.NullOr(ThreadId),
@@ -2551,6 +2590,8 @@ const InternalOrchestrationCommand = Schema.Union([
   CardSpendRecordCommand,
   CardProposeCommand,
   CardDecisionAgentRecordCommand,
+  CardLinearIntakeCommand,
+  CardLinearSyncCommand,
   ChannelAgentWakeCommand,
   ChannelRunStartCommand,
   ChannelMessageAgentPostCommand,
@@ -2609,6 +2650,7 @@ export const OrchestrationEventType = Schema.Literals([
   "card.spend-recorded",
   "card.budget-set",
   "card.unpriced-accepted",
+  "card.linear-synced",
   "channel.created",
   "channel.updated",
   "channel.archived",
@@ -2822,7 +2864,7 @@ export const CardHelperRequestedPayload = Schema.Struct({
   requestedAt: IsoDateTime,
 });
 
-export const CardMessageAuthorKind = Schema.Literals(["human", "agent", "system"]);
+export const CardMessageAuthorKind = Schema.Literals(["human", "agent", "system", "linear"]);
 export type CardMessageAuthorKind = typeof CardMessageAuthorKind.Type;
 
 /** A message in a card's activity. `forOwner` messages wait for the owner session's next turn. */
@@ -2887,6 +2929,12 @@ export const CardBudgetSetPayload = Schema.Struct({
   cardId: CardId,
   capUsd: Schema.Number,
   updatedAt: IsoDateTime,
+});
+
+export const CardLinearSyncedPayload = Schema.Struct({
+  cardId: CardId,
+  issue: CardLinearIssue,
+  syncedAt: IsoDateTime,
 });
 
 export const CardUnpricedAcceptedPayload = Schema.Struct({
@@ -3379,6 +3427,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("card.budget-set"),
     payload: CardBudgetSetPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.linear-synced"),
+    payload: CardLinearSyncedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

@@ -149,13 +149,16 @@ export function renderCardMessages(
     .map((message) =>
       renderNewMessage({
         messageId: message.messageId,
-        authorKind: message.authorKind,
+        // A Linear comment is a person writing, from Linear.
+        authorKind: message.authorKind === "linear" ? "human" : message.authorKind,
         authorName:
           message.authorKind === "agent"
             ? (agents.find((agent) => agent.id === message.authorId)?.name ?? message.authorId)
             : message.authorKind === "human"
               ? "user"
-              : "system",
+              : message.authorKind === "linear"
+                ? `${message.authorId} on Linear`
+                : "system",
         body: message.body,
         createdAt: message.createdAt,
       }),

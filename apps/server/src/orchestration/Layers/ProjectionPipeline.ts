@@ -699,6 +699,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               acceptsUnpriced: false,
               reviewReturns: 0,
               attemptGroupId: event.payload.attemptGroupId ?? null,
+              linearIssue: null,
               createdBy: event.payload.createdBy,
               createdAt: event.payload.createdAt,
               updatedAt: event.payload.updatedAt,
@@ -812,6 +813,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               costSource: payload.costSource,
               recordedAt: payload.recordedAt,
             });
+            return;
+          }
+
+          case "card.linear-synced": {
+            const payload = event.payload;
+            yield* patchCard(payload.cardId, (row) => ({ ...row, linearIssue: payload.issue }));
             return;
           }
 

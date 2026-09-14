@@ -2571,6 +2571,86 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    // Invariants 5 and 15: a Linear issue enters as a triage card; only a person's delegation in
+    // Linear approves it.
+    case "card.linear.intake": {
+      if (command.delegated) {
+        return yield* decideCommandSequence({
+          readModel,
+          commands: [
+            { ...command, delegated: false },
+            { type: "card.approve", commandId: command.commandId, cardId: command.cardId },
+          ],
+        });
+      }
+      yield* requireProject({ readModel, command, projectId: command.projectId });
+      yield* requireCardAbsent({ readModel, command, cardId: command.cardId });
+      if ((readModel.cards ?? []).some((card) => card.linearIssue?.id === command.issue.id)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Linear issue ${command.issue.identifier} already has a card.`,
+        });
+      }
+      const eventBase = withEventBase({
+        aggregateKind: "card",
+        aggregateId: command.cardId,
+        occurredAt: command.createdAt,
+        commandId: command.commandId,
+      });
+      return [
+        {
+          ...(yield* eventBase),
+          type: "card.created",
+          payload: {
+            cardId: command.cardId,
+            projectId: command.projectId,
+            channelId: null,
+            parentCardId: null,
+            title: command.title,
+            spec: command.issue.description,
+            specState: "draft",
+            tags: [],
+            status: "triage",
+            ownerHumanId: CHANNEL_HUMAN_AUTHOR_ID,
+            baseBranch: null,
+            createdBy: { kind: "linear", id: command.issue.identifier },
+            createdAt: command.createdAt,
+            updatedAt: command.createdAt,
+          },
+        },
+        {
+          ...(yield* eventBase),
+          type: "card.linear-synced",
+          payload: { cardId: command.cardId, issue: command.issue, syncedAt: command.createdAt },
+        },
+      ];
+    }
+
+    case "card.linear.sync": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      if (
+        (card.linearIssue !== null && card.linearIssue.id !== command.issue.id) ||
+        (readModel.cards ?? []).some(
+          (other) => other.id !== card.id && other.linearIssue?.id === command.issue.id,
+        )
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A card has at most one Linear issue, and an issue at most one card.",
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "card",
+          aggregateId: command.cardId,
+          occurredAt: command.syncedAt,
+          commandId: command.commandId,
+        })),
+        type: "card.linear-synced",
+        payload: { cardId: command.cardId, issue: command.issue, syncedAt: command.syncedAt },
+      };
+    }
+
     // Invariant 5: a card an agent proposes enters triage; only a person promotes it.
     case "card.propose": {
       yield* requireProject({ readModel, command, projectId: command.projectId });

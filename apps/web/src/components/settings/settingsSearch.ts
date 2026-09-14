@@ -474,6 +474,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["allow disable enable open drive preview tools sessions project override"],
   },
   {
+    id: "linear-team",
+    title: "Linear team",
+    to: "/settings/integrations",
+    scope: "project-defaults",
+    searchTerms: ["issues sync cards board tracker two-way delegate project override"],
+  },
+  {
     id: "device-hosts",
     title: "Device hosts",
     to: "/settings/integrations",

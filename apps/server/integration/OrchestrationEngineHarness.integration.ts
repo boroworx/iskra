@@ -92,6 +92,7 @@ import * as RunReactor from "../src/orchestration/RunReactor.ts";
 import * as AgentDefinitionSync from "../src/orchestration/AgentDefinitionSync.ts";
 import * as CardReviewReactor from "../src/orchestration/CardReviewReactor.ts";
 import * as CardSpendReactor from "../src/orchestration/CardSpendReactor.ts";
+import * as LinearSyncReactor from "../src/orchestration/LinearSyncReactor.ts";
 import * as CardSessionReactor from "../src/orchestration/CardSessionReactor.ts";
 import * as CardWorkspace from "../src/orchestration/CardWorkspace.ts";
 import * as PullRequestService from "../src/pullRequest/PullRequestService.ts";
@@ -468,6 +469,12 @@ export const makeOrchestrationIntegrationHarness = (
           start: () => Effect.void,
           recordTurn: () => Effect.void,
           drain: Effect.void,
+        }),
+      ),
+      Layer.provideMerge(
+        Layer.succeed(LinearSyncReactor.LinearSyncReactor, {
+          start: () => Effect.void,
+          syncNow: Effect.void,
         }),
       ),
     );

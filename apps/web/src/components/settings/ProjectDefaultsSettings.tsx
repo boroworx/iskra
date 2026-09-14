@@ -24,6 +24,7 @@ import { PULL_REQUEST_MERGE_METHOD_LABELS } from "../pullRequest/pullRequestDeta
 import { TraitsPicker } from "../chat/TraitsPicker";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
+import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import type { ProjectSettingsCategory } from "./ProjectSettingsPanel";
 import { searchableSetting } from "./settingsSearch";
@@ -72,6 +73,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   const PermissionIcon = runtimeModeConfig[settings.defaultRuntimeMode].icon;
   const mixedWorkspace = useScopedSettingsMixed(["defaultThreadEnvMode"]);
   const mixedBrowser = useScopedSettingsMixed(["enableAgentBrowserAccess"]);
+  const mixedLinearTeam = useScopedSettingsMixed(["linearTeamId"]);
   const mixedAutoPull = useScopedSettingsMixed(["defaultAutoPull"]);
   const mixedMergeMethod = useScopedSettingsMixed(["pullRequestMergeMethod"]);
   const modelSource = useScopedSettingSource(["defaultModelSelection"]);
@@ -449,6 +451,31 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
                 mixed={mixedBrowser}
                 checked={mixedBrowser ? false : settings.enableAgentBrowserAccess}
                 onCheckedChange={(enabled) => updateSettings({ enableAgentBrowserAccess: enabled })}
+              />
+            }
+          />
+          <SettingsRow
+            serverScoped
+            settingKeys={["linearTeamId"]}
+            mixed={mixedLinearTeam}
+            id={searchableSetting("linear-team").id}
+            title="Linear team"
+            description={
+              isProjectScope
+                ? "Sync this project's cards with issues in this Linear team, by team ID. Leave it empty to not sync."
+                : "The Linear team whose issues sync with cards. Projects can set their own."
+            }
+            control={
+              <Input
+                key={mixedLinearTeam ? "mixed" : settings.linearTeamId}
+                aria-label="Linear team ID"
+                className="w-48"
+                placeholder={mixedLinearTeam ? "Mixed" : "Team ID"}
+                defaultValue={mixedLinearTeam ? "" : settings.linearTeamId}
+                onBlur={(event) => {
+                  const linearTeamId = event.currentTarget.value.trim();
+                  if (linearTeamId !== settings.linearTeamId) updateSettings({ linearTeamId });
+                }}
               />
             }
           />

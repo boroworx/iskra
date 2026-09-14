@@ -127,6 +127,7 @@ import * as ThreadPlanProgress from "./orchestration/ThreadPlanProgress.ts";
 import * as AgentDefinitionSync from "./orchestration/AgentDefinitionSync.ts";
 import * as CardReviewReactor from "./orchestration/CardReviewReactor.ts";
 import * as CardSpendReactor from "./orchestration/CardSpendReactor.ts";
+import * as LinearSyncReactor from "./orchestration/LinearSyncReactor.ts";
 import * as CardSessionReactor from "./orchestration/CardSessionReactor.ts";
 import * as CardWorkspace from "./orchestration/CardWorkspace.ts";
 import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
@@ -993,6 +994,9 @@ const buildAppUnderTest = (options?: {
             start: () => Effect.void,
           }),
           Layer.mock(CardSpendReactor.CardSpendReactor)({
+            start: () => Effect.void,
+          }),
+          Layer.mock(LinearSyncReactor.LinearSyncReactor)({
             start: () => Effect.void,
           }),
         ),
@@ -9897,6 +9901,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   acceptsUnpriced: false,
                   reviewReturns: 0,
                   attemptGroupId: null,
+                  linearIssue: null,
                   createdBy: { kind: "human" as const, id: "human" },
                   createdAt: now,
                   updatedAt: now,

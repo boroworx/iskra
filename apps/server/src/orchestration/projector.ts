@@ -1260,6 +1260,7 @@ export function projectEvent(
             acceptsUnpriced: false,
             reviewReturns: 0,
             attemptGroupId: payload.attemptGroupId ?? null,
+            linearIssue: null,
             createdBy: payload.createdBy,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
@@ -1499,6 +1500,15 @@ export function projectEvent(
           ...card,
           spentUsd: card.spentUsd + event.payload.costUsd,
           unpricedTurns: card.unpricedTurns + (event.payload.costSource === "unpriced" ? 1 : 0),
+        })),
+      });
+
+    case "card.linear-synced":
+      return Effect.succeed({
+        ...nextBase,
+        cards: updateCard(nextBase.cards ?? [], event.payload.cardId, (card) => ({
+          ...card,
+          linearIssue: event.payload.issue,
         })),
       });
 
