@@ -888,58 +888,34 @@ const makeWsRpcLayer = (
           ),
         );
 
-      const agentUpsertOrRemove = (
-        agentId: AgentId,
-        sequence: number,
+      // An agent or channel with no row was removed; one that has a row is upserted.
+      const upsertOrRemove = <A, E>(
+        aggregateKind: "agent" | "channel",
+        aggregateId: string,
+        read: Effect.Effect<Option.Option<A>, E>,
+        removed: () => OrchestrationShellStreamEvent,
+        upserted: (row: A) => OrchestrationShellStreamEvent,
       ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> =>
-        retryShellProjectionRead(
+        retryShellProjectionRead(aggregateKind, aggregateId, read).pipe(
+          Effect.map(Option.map(Option.match({ onNone: removed, onSome: upserted }))),
+        );
+
+      const agentUpsertOrRemove = (agentId: AgentId, sequence: number) =>
+        upsertOrRemove(
           "agent",
           agentId,
           projectionSnapshotQuery.getAgentShellById(agentId),
-        ).pipe(
-          Effect.map(
-            Option.map((agent) =>
-              Option.match(agent, {
-                onNone: (): OrchestrationShellStreamEvent => ({
-                  kind: "agent-removed",
-                  sequence,
-                  agentId,
-                }),
-                onSome: (nextAgent): OrchestrationShellStreamEvent => ({
-                  kind: "agent-upserted",
-                  sequence,
-                  agent: nextAgent,
-                }),
-              }),
-            ),
-          ),
+          () => ({ kind: "agent-removed", sequence, agentId }),
+          (agent) => ({ kind: "agent-upserted", sequence, agent }),
         );
 
-      const channelUpsertOrRemove = (
-        channelId: ChannelId,
-        sequence: number,
-      ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> =>
-        retryShellProjectionRead(
+      const channelUpsertOrRemove = (channelId: ChannelId, sequence: number) =>
+        upsertOrRemove(
           "channel",
           channelId,
           projectionSnapshotQuery.getChannelShellById(channelId),
-        ).pipe(
-          Effect.map(
-            Option.map((channel) =>
-              Option.match(channel, {
-                onNone: (): OrchestrationShellStreamEvent => ({
-                  kind: "channel-removed",
-                  sequence,
-                  channelId,
-                }),
-                onSome: (nextChannel): OrchestrationShellStreamEvent => ({
-                  kind: "channel-upserted",
-                  sequence,
-                  channel: nextChannel,
-                }),
-              }),
-            ),
-          ),
+          () => ({ kind: "channel-removed", sequence, channelId }),
+          (channel) => ({ kind: "channel-upserted", sequence, channel }),
         );
 
       // A card is never deleted, so a card with no row emits nothing.
