@@ -62,11 +62,38 @@ The probe was a one-off script modelled on `docs/findings/repro/m0.2-claude-deny
 - Runs pass `strictMcpConfig: true` with only the `iskra` server, and `disallowedTools` includes
   `mcp__claude_ai_*`.
 
-## Not verified
+## Git from the sandboxed shell
 
-- Git from the sandboxed shell. A card worktree's git dir lives in the main repository's `.git`,
-  outside the worktree, so `git add`/`git commit` are expected to fail there. Iskra commits
-  leftovers server-side before review, so builders don't need them.
+Probe (M1 integration): Claude Code 2.1.271, the run's exact sandbox shape (`denyRead` Iskra home,
+`allowRead` the worktree, no `allowWrite`), a repository with a linked worktree
+(`git worktree add -b iskra/probe`) under `~/Library/Caches`. Commands ran through Bash.
+
+| Command from the worktree                        | Result  | Evidence                                             |
+| ------------------------------------------------ | ------- | ---------------------------------------------------- |
+| `git status`, `git diff --stat`                  | allowed | `inside.txt \| 1 +`                                  |
+| `git add -A`, `git commit`, `git commit -am`     | allowed | `git log` outside the sandbox shows the new commit   |
+| `git branch -f side HEAD`, `git branch iskra/x`  | allowed | the other branches moved/appeared in the main repo   |
+| `git update-ref refs/heads/main HEAD`            | allowed | the main checkout's `main` now points at the commit  |
+| write `.git/info/exclude`, `git -C <main> gc`    | allowed | no error                                             |
+| write `.git/hooks/pre-commit`                    | blocked | `operation not permitted`                            |
+| append to `.git/config`                          | blocked | `operation not permitted`                            |
+| write a file in the main checkout's working tree | blocked | `operation not permitted`                            |
+| write a file next to the repository              | blocked | `operation not permitted`                            |
+| read the Iskra home                              | blocked | `Operation not permitted`                            |
+
+Adding `allowWrite` for the worktree's git dir, `objects` and the branch's ref directories changed
+nothing: Claude Code already lets a worktree's shell write the repository's common `.git`, except
+`hooks/` and `config`. So Iskra adds no git paths to the sandbox; builders can commit themselves,
+and the server still commits leftovers before review.
+
+Residual risk: a builder's shell can write anything in the shared `.git` but hooks and config. It
+can move or create any ref (including the branch checked out in the person's main checkout, via
+`update-ref`), write objects, edit `info/exclude` and run `gc`. It can't run code through hooks or
+config, and can't touch the main checkout's files. Review evidence is pinned to the card's head commit, but
+a ref moved elsewhere is not detected. Worktrees under `~/.claude`
+still get a read-only shell (finding 5).
+
+## Not verified
 
 - Failure when the sandbox can't start. `failIfUnavailable` is documented to exit at startup; the
   adapter then reports a session error. It was not forced here.
