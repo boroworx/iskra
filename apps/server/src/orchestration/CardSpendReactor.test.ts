@@ -194,7 +194,7 @@ const makeWorld = Effect.fn("makeWorld")(function* (name: string, model: string)
     .getAgentShellById(agentId)
     .pipe(Effect.map((agent) => Option.getOrThrow(agent).spentUsd));
 
-  return { ownerThreadId, plainThreadId, finished, card, agentSpend };
+  return { cardId, agentId, ownerThreadId, plainThreadId, finished, card, agentSpend };
 });
 
 it.layer(layer)("CardSpendReactor", (it) => {
@@ -216,6 +216,60 @@ it.layer(layer)("CardSpendReactor", (it) => {
       yield* world.finished(world.ownerThreadId, "turn-1", { outputTokens: 500 });
 
       expect(yield* world.card).toMatchObject({ spentUsd: 0.5, unpricedTurns: 0 });
+    }),
+  );
+
+  it.effect("counts an attempt's spend against its card's budget", () =>
+    Effect.gen(function* () {
+      const world = yield* makeWorld("attempt", "any-model");
+      const engine = yield* OrchestrationEngineService;
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const attemptId = CardId.make("card-attempt-one");
+      const attemptThreadId = ThreadId.make("card-session-attempt-one");
+      yield* engine.dispatch({
+        type: "card.attempts.start",
+        commandId: CommandId.make("cmd-attempts-attempt"),
+        cardId: world.cardId,
+        attempts: [
+          { cardId: attemptId, agentId: world.agentId },
+          { cardId: CardId.make("card-attempt-two"), agentId: world.agentId },
+        ],
+        createdAt: now,
+      });
+      yield* engine.dispatch({
+        type: "card.workspace.set",
+        commandId: CommandId.make("cmd-workspace-attempt-one"),
+        cardId: attemptId,
+        branch: "iskra/attempt-one",
+        worktreePath: "/tmp/worktrees/attempt-one",
+        portBase: 42010,
+      });
+      yield* engine.dispatch({
+        type: "card.session.record",
+        commandId: CommandId.make("cmd-session-attempt-one"),
+        threadId: attemptThreadId,
+        cardId: attemptId,
+        agentId: world.agentId,
+        role: "owner",
+        capabilities: ["read", "write"],
+        context: {
+          agent: { id: world.agentId, name: "attempt", rolePrompt: "" },
+          role: "owner",
+          card: { id: attemptId, title: "Attempt", spec: "", branch: null, baseBranch: "main" },
+          decisions: [],
+          diff: "",
+          diffTruncated: false,
+          question: null,
+        },
+        rendered: { systemPrompt: "system", firstMessage: "brief" },
+        startedAt: now,
+      });
+
+      yield* world.finished(attemptThreadId, "turn-1", { totalCostUsd: 2 });
+
+      const cards = (yield* snapshotQuery.getCommandReadModel()).cards ?? [];
+      expect(cards.find((card) => card.id === world.cardId)?.spentUsd).toBe(2);
+      expect(cards.find((card) => card.id === attemptId)?.spentUsd).toBe(0);
     }),
   );
 

@@ -99,6 +99,7 @@ import {
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as AgentDefinitionSync from "./orchestration/AgentDefinitionSync.ts";
+import * as CardWorkspace from "./orchestration/CardWorkspace.ts";
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor.ts";
 import {
   observeRpcEffect as instrumentRpcEffect,
@@ -497,6 +498,7 @@ const makeWsRpcLayer = (
       const sql = yield* SqlClient.SqlClient;
       const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
       const agentDefinitionSync = yield* AgentDefinitionSync.AgentDefinitionSync;
+      const cardWorkspace = yield* CardWorkspace.CardWorkspace;
       /** A reference's host-level link key; the project's own host where the ref names none. */
       const resolvePullRequestSyncKey = (reference: PullRequestRef) =>
         reference.host !== undefined && reference.repository.includes("/")
@@ -2061,6 +2063,26 @@ const makeWsRpcLayer = (
                 (cause) =>
                   new OrchestrationGetSnapshotError({
                     message: `Failed to load runs for agent ${input.agentId}`,
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.getCardDiff]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.getCardDiff,
+            cardWorkspace.diff(input.cardId).pipe(
+              // ponytail: a fixed cut keeps a huge diff off the socket; page it if reviews need more.
+              Effect.map(({ baseBranch, diff }) => ({
+                baseBranch,
+                diff: diff.slice(0, 200_000),
+                truncated: diff.length > 200_000,
+              })),
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationGetSnapshotError({
+                    message: `Failed to load the diff of card ${input.cardId}: ${cause.message}`,
                     cause,
                   }),
               ),

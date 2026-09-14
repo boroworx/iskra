@@ -20,6 +20,9 @@ import {
   type ThreadPullRequestLink,
   type OrchestrationThreadActivity,
   DEFAULT_PROJECT_RUN_CAP,
+  CARD_ATTEMPTS_MAX,
+  CARD_ATTEMPTS_MIN,
+  type OrchestrationCard,
 } from "@iskra/contracts";
 import {
   legacyLinkedPullRequestOf,
@@ -272,6 +275,12 @@ const decideCommandSequence = Effect.fn("decideCommandSequence")(function* ({
 
   return plannedEvents;
 });
+
+/** The card whose budget a card spends from: an attempt spends from its parent's. */
+const budgetCardOf = (readModel: OrchestrationReadModel, card: OrchestrationCard) =>
+  card.attemptGroupId !== null && card.parentCardId !== null
+    ? (readModel.cards?.find((candidate) => candidate.id === card.parentCardId) ?? card)
+    : card;
 
 /** The card's live owner session, if it has one. */
 const liveOwnerRun = (readModel: OrchestrationReadModel, cardId: CardId) =>
@@ -1372,7 +1381,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         budgetRun === undefined
           ? undefined
           : readModel.cards?.find((candidate) => candidate.id === budgetRun.cardId);
-      const budgetRefusal = budgetCard === undefined ? null : cardBudgetRefusal(budgetCard);
+      const budgetRefusal = budgetCard === undefined ? null : cardBudgetRefusal(budgetCardOf(readModel, budgetCard));
       if (budgetRefusal !== null) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
@@ -2357,8 +2366,17 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       return yield* decideCardMove({ readModel, command, move: "approve" });
     case "card.unapprove":
       return yield* decideCardMove({ readModel, command, move: "unapprove" });
-    case "card.merge.approve":
+    case "card.merge.approve": {
+      // Invariant 16: an attempt lands only by being promoted into its card.
+      const attempt = yield* requireCard({ readModel, command, cardId: command.cardId });
+      if (attempt.attemptGroupId !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "An attempt lands only by being promoted into its card.",
+        });
+      }
       return yield* decideCardMove({ readModel, command, move: "approveMerge" });
+    }
     case "card.merge.cancel":
       return yield* decideCardMove({ readModel, command, move: "cancelLanding" });
     case "card.abandon":
@@ -2551,6 +2569,183 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           createdAt: command.createdAt,
         },
       };
+    }
+
+    case "card.attempts.start": {
+      const parent = yield* requireCard({ readModel, command, cardId: command.cardId });
+      const refuse = (detail: string) =>
+        new OrchestrationCommandInvariantError({ commandType: command.type, detail });
+      if (parent.status !== "ready") {
+        return yield* refuse("Attempts start on a ready card, before its work begins.");
+      }
+      if (parent.attemptGroupId !== null) {
+        return yield* refuse("An attempt cannot run attempts of its own.");
+      }
+      if (
+        (readModel.cards ?? []).some(
+          (card) =>
+            card.parentCardId === parent.id &&
+            card.attemptGroupId !== null &&
+            !isFinishedCardStatus(card.status),
+        )
+      ) {
+        return yield* refuse("The card already has attempts running.");
+      }
+      if (
+        command.attempts.length < CARD_ATTEMPTS_MIN ||
+        command.attempts.length > CARD_ATTEMPTS_MAX
+      ) {
+        return yield* refuse(
+          `Start between ${CARD_ATTEMPTS_MIN} and ${CARD_ATTEMPTS_MAX} attempts.`,
+        );
+      }
+      if (parent.specState === "draft") {
+        return yield* refuse(PLAN_GATE_REASON);
+      }
+      const overBudget = cardBudgetRefusal(parent);
+      if (overBudget !== null) {
+        return yield* refuse(overBudget);
+      }
+      const attemptGroupId = `attempts:${command.commandId}`;
+      const events: PlannedOrchestrationEvent[] = [];
+      for (const [index, attempt] of command.attempts.entries()) {
+        yield* requireCardAbsent({ readModel, command, cardId: attempt.cardId });
+        const agent = yield* requireAgent({ readModel, command, agentId: attempt.agentId });
+        if (agent.projectId !== parent.projectId || agent.archivedAt !== null) {
+          return yield* refuse(`@${agent.name} isn't an active agent of this card's project.`);
+        }
+        const attemptEventBase = () =>
+          withEventBase({
+            aggregateKind: "card",
+            aggregateId: attempt.cardId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          });
+        events.push({
+          ...(yield* attemptEventBase()),
+          type: "card.created",
+          payload: {
+            cardId: attempt.cardId,
+            attemptGroupId,
+            projectId: parent.projectId,
+            channelId: parent.channelId,
+            parentCardId: parent.id,
+            title: `${parent.title} · attempt ${index + 1}`,
+            spec: parent.spec,
+            specState: parent.specState,
+            tags: parent.tags,
+            // Approved with its card: an attempt is the card's own work, not a proposal.
+            status: "ready",
+            ownerHumanId: parent.ownerHumanId,
+            baseBranch: parent.baseBranch,
+            createdBy: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
+            createdAt: command.createdAt,
+            updatedAt: command.createdAt,
+          },
+        });
+        events.push({
+          ...(yield* attemptEventBase()),
+          type: "card.delegate-changed",
+          payload: {
+            cardId: attempt.cardId,
+            delegateAgentId: agent.id,
+            updatedAt: command.createdAt,
+          },
+        });
+      }
+      return events;
+    }
+
+    case "card.attempt.promote": {
+      const attempt = yield* requireCard({ readModel, command, cardId: command.cardId });
+      const refuse = (detail: string) =>
+        new OrchestrationCommandInvariantError({ commandType: command.type, detail });
+      if (attempt.attemptGroupId === null || attempt.parentCardId === null) {
+        return yield* refuse("Only an attempt can be promoted.");
+      }
+      if (isFinishedCardStatus(attempt.status)) {
+        return yield* refuse("That attempt was already promoted or dropped.");
+      }
+      if (attempt.branch === null || attempt.worktreePath === null || attempt.portBase === null) {
+        return yield* refuse("The attempt has no work to promote yet.");
+      }
+      const parent = yield* requireCard({ readModel, command, cardId: attempt.parentCardId });
+      if (isFinishedCardStatus(parent.status)) {
+        return yield* refuse("A card that has landed or been abandoned takes no attempt.");
+      }
+      if (parent.worktreePath !== null) {
+        return yield* refuse("The card already has its branch.");
+      }
+      const occurredAt = yield* nowIso;
+      const eventBase = (cardId: CardId) =>
+        withEventBase({
+          aggregateKind: "card",
+          aggregateId: cardId,
+          occurredAt,
+          commandId: command.commandId,
+        });
+      const events: PlannedOrchestrationEvent[] = [
+        // The attempt's worktree becomes the card's; it is not torn down with the attempt.
+        {
+          ...(yield* eventBase(parent.id)),
+          type: "card.workspace-set",
+          payload: {
+            cardId: parent.id,
+            branch: attempt.branch,
+            worktreePath: attempt.worktreePath,
+            portBase: attempt.portBase,
+            updatedAt: occurredAt,
+          },
+        },
+        {
+          ...(yield* eventBase(attempt.id)),
+          type: "card.workspace-cleared",
+          payload: { cardId: attempt.id, updatedAt: occurredAt },
+        },
+        {
+          ...(yield* eventBase(parent.id)),
+          type: "card.decision-recorded",
+          payload: {
+            cardId: parent.id,
+            decisionId: `promote:${command.commandId}`,
+            author: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
+            text: `Promoted "${attempt.title}".`,
+            createdAt: occurredAt,
+          },
+        },
+      ];
+      if (attempt.delegateAgentId !== null) {
+        events.push({
+          ...(yield* eventBase(parent.id)),
+          type: "card.delegate-changed",
+          payload: {
+            cardId: parent.id,
+            delegateAgentId: attempt.delegateAgentId,
+            updatedAt: occurredAt,
+          },
+        });
+      }
+      // Invariant 16: promoting drops every attempt of the group, the promoted one included.
+      for (const sibling of (readModel.cards ?? []).filter(
+        (card) => card.attemptGroupId === attempt.attemptGroupId && !isFinishedCardStatus(card.status),
+      )) {
+        events.push({
+          ...(yield* eventBase(sibling.id)),
+          type: "card.status-changed",
+          payload: {
+            cardId: sibling.id,
+            from: sibling.status,
+            to: "abandoned",
+            move: "abandon",
+            reason:
+              sibling.id === attempt.id
+                ? "Promoted into its card."
+                : "Another attempt was promoted.",
+            updatedAt: occurredAt,
+          },
+        });
+      }
+      return events;
     }
 
     case "card.spend.record": {
@@ -3035,7 +3230,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       if (projectLiveRunCount(readModel, card.projectId) >= DEFAULT_PROJECT_RUN_CAP) {
         return yield* refuse(sessionCapReason);
       }
-      const overBudget = cardBudgetRefusal(card);
+      const overBudget = cardBudgetRefusal(budgetCardOf(readModel, card));
       if (overBudget !== null) {
         return yield* refuse(overBudget);
       }

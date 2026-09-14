@@ -111,6 +111,8 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "card.budget.set":
     case "card.unpriced.accept":
     case "card.unpriced.refuse":
+    case "card.attempts.start":
+    case "card.attempt.promote":
       return {
         aggregateKind: "card",
         aggregateId: command.cardId,

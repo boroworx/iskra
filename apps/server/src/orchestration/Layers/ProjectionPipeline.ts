@@ -698,6 +698,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               unpricedTurns: 0,
               acceptsUnpriced: false,
               reviewReturns: 0,
+              attemptGroupId: event.payload.attemptGroupId ?? null,
               createdBy: event.payload.createdBy,
               createdAt: event.payload.createdAt,
               updatedAt: event.payload.updatedAt,

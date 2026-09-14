@@ -47,6 +47,7 @@ export const ORCHESTRATION_WS_METHODS = {
   subscribeThread: "orchestration.subscribeThread",
   subscribeChannel: "orchestration.subscribeChannel",
   listAgentRuns: "orchestration.listAgentRuns",
+  getCardDiff: "orchestration.getCardDiff",
   saveAgentDefinition: "orchestration.saveAgentDefinition",
   importAgentDefinitions: "orchestration.importAgentDefinitions",
 } as const;
@@ -639,6 +640,10 @@ export const CARD_AUTOFIX_ATTEMPTS = 3;
 /** A card's spending cap until a person raises it. */
 export const DEFAULT_CARD_BUDGET_USD = 10;
 
+/** How many attempts a person can start on one card at a time. */
+export const CARD_ATTEMPTS_MIN = 2;
+export const CARD_ATTEMPTS_MAX = 4;
+
 /** Ports reserved for each card's worktree, starting at its `portBase` (ISKRA_PORT). */
 export const CARD_PORT_BLOCK_SIZE = 10;
 
@@ -682,6 +687,8 @@ export const OrchestrationCard = Schema.Struct({
   acceptsUnpriced: Schema.Boolean,
   // Times checks, a review comment or landing sent the card back to work.
   reviewReturns: NonNegativeInt,
+  // Set on the sibling sub-cards of one best-of-N run; an attempt never lands on its own.
+  attemptGroupId: Schema.NullOr(TrimmedNonEmptyString),
   relations: Schema.Array(CardRelation),
   createdBy: CardAuthor,
   createdAt: IsoDateTime,
@@ -1749,6 +1756,18 @@ const CardOverlapFlagCommand = Schema.Struct({
   otherCardId: CardId,
 });
 
+/** A person trying a ready card with several agents at once; each attempt is a sub-card on its own branch. */
+const CardAttemptsStartCommand = Schema.Struct({
+  type: Schema.Literal("card.attempts.start"),
+  commandId: CommandId,
+  cardId: CardId,
+  attempts: Schema.Array(Schema.Struct({ cardId: CardId, agentId: AgentId })),
+  createdAt: IsoDateTime,
+});
+
+/** Makes one attempt's branch the card's branch and drops the other attempts (invariant 16). */
+const CardAttemptPromoteCommand = cardStatusCommand("card.attempt.promote");
+
 /** A person's cap on what a card may spend; setting it above the spend lets turns start again. */
 const CardBudgetSetCommand = Schema.Struct({
   type: Schema.Literal("card.budget.set"),
@@ -2269,6 +2288,8 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   CardBudgetSetCommand,
   CardUnpricedAcceptCommand,
   CardUnpricedRefuseCommand,
+  CardAttemptsStartCommand,
+  CardAttemptPromoteCommand,
   ChannelCreateCommand,
   ChannelUpdateCommand,
   ChannelArchiveCommand,
@@ -2338,6 +2359,8 @@ export const ClientOrchestrationCommand = Schema.Union([
   CardBudgetSetCommand,
   CardUnpricedAcceptCommand,
   CardUnpricedRefuseCommand,
+  CardAttemptsStartCommand,
+  CardAttemptPromoteCommand,
   ChannelCreateCommand,
   ChannelUpdateCommand,
   ChannelArchiveCommand,
@@ -2678,6 +2701,8 @@ export const AgentUnarchivedPayload = Schema.Struct({
 
 export const CardCreatedPayload = Schema.Struct({
   cardId: CardId,
+  // Optional so events from before attempts still decode.
+  attemptGroupId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   projectId: ProjectId,
   channelId: Schema.NullOr(ChannelId),
   parentCardId: Schema.NullOr(CardId),
@@ -3717,6 +3742,19 @@ export const OrchestrationListAgentRunsResult = Schema.Struct({
 });
 export type OrchestrationListAgentRunsResult = typeof OrchestrationListAgentRunsResult.Type;
 
+export const OrchestrationGetCardDiffInput = Schema.Struct({
+  cardId: CardId,
+});
+export type OrchestrationGetCardDiffInput = typeof OrchestrationGetCardDiffInput.Type;
+
+/** A card's changes against its base branch, for reviewing attempts side by side. */
+export const OrchestrationGetCardDiffResult = Schema.Struct({
+  baseBranch: Schema.String,
+  diff: Schema.String,
+  truncated: Schema.Boolean,
+});
+export type OrchestrationGetCardDiffResult = typeof OrchestrationGetCardDiffResult.Type;
+
 /** An agent as a client sends it to be written to `.iskra/agents/<name>.md`. */
 export const AgentDefinitionInput = Schema.Struct({
   id: Schema.NullOr(AgentId),
@@ -3825,6 +3863,10 @@ export const OrchestrationRpcSchemas = {
   listAgentRuns: {
     input: OrchestrationListAgentRunsInput,
     output: OrchestrationListAgentRunsResult,
+  },
+  getCardDiff: {
+    input: OrchestrationGetCardDiffInput,
+    output: OrchestrationGetCardDiffResult,
   },
   saveAgentDefinition: {
     input: OrchestrationSaveAgentDefinitionInput,

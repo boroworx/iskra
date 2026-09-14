@@ -56,6 +56,13 @@ const make = Effect.gen(function* () {
     if (Option.isNone(run) || run.value.cardId === null) {
       return;
     }
+    // An attempt spends from its card's budget (invariant 13 over best-of-N).
+    const cards = (yield* snapshotQuery.getCommandReadModel()).cards ?? [];
+    const card = cards.find((candidate) => candidate.id === run.value.cardId);
+    const spendCardId =
+      card !== undefined && card.attemptGroupId !== null && card.parentCardId !== null
+        ? card.parentCardId
+        : run.value.cardId;
     const thread = yield* snapshotQuery.getThreadShellById(event.threadId);
     const model = Option.isSome(thread) ? thread.value.modelSelection.model : "";
     const priced = yield* usage.priceTurn({
@@ -68,7 +75,7 @@ const make = Effect.gen(function* () {
       type: "card.spend.record",
       // The turn names the record, so a repeated completion is counted once.
       commandId: CommandId.make(`card-spend:${event.threadId}:${event.turnId}`),
-      cardId: run.value.cardId,
+      cardId: spendCardId,
       threadId: event.threadId,
       agentId: run.value.agentId,
       turnId: event.turnId,

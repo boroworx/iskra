@@ -177,7 +177,8 @@ export type CardDecisionInput = CommandInput<"card.approve"> & {
     | "card.abandon"
     | "card.reopen"
     | "card.unpriced.accept"
-    | "card.unpriced.refuse";
+    | "card.unpriced.refuse"
+    | "card.attempt.promote";
 };
 
 export const decideCard: (input: CardDecisionInput) => CommandEffect = Effect.fn(
@@ -201,7 +202,22 @@ export const decideCard: (input: CardDecisionInput) => CommandEffect = Effect.fn
       return yield* dispatch({ ...base, type: "card.unpriced.accept" });
     case "card.unpriced.refuse":
       return yield* dispatch({ ...base, type: "card.unpriced.refuse" });
+    case "card.attempt.promote":
+      return yield* dispatch({ ...base, type: "card.attempt.promote" });
   }
+});
+
+export type StartCardAttemptsInput = CommandInput<"card.attempts.start">;
+export const startCardAttempts: (input: StartCardAttemptsInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.startCardAttempts",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "card.attempts.start",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
 });
 
 export type SetCardBudgetInput = CommandInput<"card.budget.set">;

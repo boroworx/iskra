@@ -716,6 +716,22 @@ waits on a person; the review count is kept per card and credited to the card's 
 **M2.8 — Best-of-N attempts.** _Accept when:_ three attempts run in parallel on separate branches;
 review shows their diffs side by side; promoting one removes the others' worktrees and branches;
 attempt spend counts against the parent's budget.
+_Accepted:_ `card.attempts.start` turns a ready card whose spec passed the plan gate into two to
+four sibling sub-cards sharing an `attemptGroupId`. Each copies the card's spec, starts ready, and
+is assigned its own agent, so the session reactor starts their sessions side by side.
+`card.attempt.promote` moves the promoted attempt's branch, worktree and ports to the card, gives
+the card that attempt's agent, logs the promotion in the card's decisions, and abandons every
+attempt of the group; the promoted one hands its worktree over rather than having it torn down, and
+workspace teardown removes the rest. `CardAttempts.test.ts` runs against a real git repository:
+three attempts get three branches and worktrees, and promoting the second leaves only its worktree
+and branch, now the card's. `decider.attempts.test.ts` refuses attempts on a card that is not ready
+or not past its plan gate, a second group while one runs, fewer than two or more than four, merging
+an attempt on its own (invariant 16), promoting before an attempt has work, and promoting twice; it
+also stops an attempt's turns once its card's budget is spent. `CardSpendReactor.test.ts` records an
+attempt's spend on its card. `orchestration.getCardDiff` serves a card's diff against its base, and
+the attempts page (`/attempts/<environment>/<card>`, linked from ready cards and cards with attempts
+on the board) picks the agents, then shows each attempt's agent, session state, diff size and diff
+side by side with a Promote button. The page was checked by typecheck, not yet in a paired browser.
 
 **M2.9 — Board tools for agents.** The MCP tools. _Accept when:_ a delegate's `propose_card`
 creates a `triage` card; `record_decision` appears in the log and in the next handoff brief;

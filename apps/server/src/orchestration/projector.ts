@@ -1259,6 +1259,7 @@ export function projectEvent(
             unpricedTurns: 0,
             acceptsUnpriced: false,
             reviewReturns: 0,
+            attemptGroupId: payload.attemptGroupId ?? null,
             createdBy: payload.createdBy,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,

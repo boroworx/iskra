@@ -27,6 +27,7 @@ import {
   useSensors,
   type DragEndEvent,
 } from "@dnd-kit/core";
+import { Link } from "@tanstack/react-router";
 import { memo, useMemo, useState } from "react";
 
 import { cn } from "~/lib/utils";
@@ -129,6 +130,7 @@ export function BoardView(props: {
                 allCards={cards}
                 agents={agents}
                 now={now}
+                environmentId={props.environmentId}
               />
             ))}
           </div>
@@ -144,6 +146,7 @@ function BoardColumnView(props: {
   readonly allCards: ReadonlyArray<OrchestrationCardShell>;
   readonly agents: ReadonlyArray<OrchestrationAgentShell>;
   readonly now: number;
+  readonly environmentId: EnvironmentId;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: props.column });
   return (
@@ -167,6 +170,7 @@ function BoardColumnView(props: {
               allCards={props.allCards}
               agents={props.agents}
               now={props.now}
+              environmentId={props.environmentId}
             />
           </li>
         ))}
@@ -180,6 +184,7 @@ const CardFace = memo(function CardFace(props: {
   readonly allCards: ReadonlyArray<OrchestrationCardShell>;
   readonly agents: ReadonlyArray<OrchestrationAgentShell>;
   readonly now: number;
+  readonly environmentId: EnvironmentId;
 }) {
   const { card } = props;
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -261,6 +266,17 @@ const CardFace = memo(function CardFace(props: {
         {session?.planProgress != null ? (
           <dd className="tabular-nums">
             {session.planProgress.completedSteps}/{session.planProgress.totalSteps} steps
+          </dd>
+        ) : null}
+        {card.status === "ready" || children.some((child) => child.attemptGroupId !== null) ? (
+          <dd>
+            <Link
+              to="/attempts/$environmentId/$cardId"
+              params={{ environmentId: props.environmentId, cardId: card.id }}
+              className="underline-offset-2 hover:text-foreground hover:underline"
+            >
+              Attempts
+            </Link>
           </dd>
         ) : null}
         {card.spentUsd > 0 ? (

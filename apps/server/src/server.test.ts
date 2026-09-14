@@ -9895,6 +9895,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   unpricedTurns: 0,
                   acceptsUnpriced: false,
                   reviewReturns: 0,
+                  attemptGroupId: null,
                   createdBy: { kind: "human" as const, id: "human" },
                   createdAt: now,
                   updatedAt: now,

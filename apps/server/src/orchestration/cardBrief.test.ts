@@ -59,6 +59,7 @@ const card: OrchestrationCard = {
   unpricedTurns: 0,
   acceptsUnpriced: false,
   reviewReturns: 0,
+  attemptGroupId: null,
   createdBy: { kind: "human", id: "human" },
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
