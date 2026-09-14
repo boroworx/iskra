@@ -1,14 +1,10 @@
 import type { EnvironmentProject } from "@iskra/client-runtime/state/models";
-import type { AgentId, ModelSelection, ServerProvider } from "@iskra/contracts";
+import type { AgentId, ModelSelection } from "@iskra/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useId, useState } from "react";
 
-import {
-  deriveProviderInstanceEntries,
-  getDefaultProviderInstanceModel,
-} from "~/providerInstances";
 import { channelEnvironment } from "~/state/channels";
-import { useEnvironmentChannels, useServerConfigs } from "~/state/entities";
+import { useEnvironmentChannels } from "~/state/entities";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { Button } from "../ui/button";
 import {
@@ -23,36 +19,12 @@ import {
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
+import {
+  AgentModelPicker,
+  resolveAgentModelSelection,
+  useEnvironmentProviders,
+} from "./AgentModelPicker";
 import { toAgentName } from "./channels.logic";
-
-const EMPTY_PROVIDERS: ReadonlyArray<ServerProvider> = [];
-
-/**
- * The model a new agent runs on. Channel runs are read-only and only the Claude
- * adapter enforces that, so agents use Claude: the project's default model when
- * it is a Claude one, otherwise the first available Claude instance's default.
- */
-function resolveAgentModelSelection(
-  providers: ReadonlyArray<ServerProvider>,
-  projectDefault: ModelSelection | null,
-): ModelSelection | null {
-  const claudeEntries = deriveProviderInstanceEntries(providers).filter(
-    (entry) => entry.driverKind === "claudeAgent" && entry.enabled && entry.installed,
-  );
-  if (
-    projectDefault !== null &&
-    claudeEntries.some((entry) => entry.instanceId === projectDefault.instanceId)
-  ) {
-    return projectDefault;
-  }
-  for (const entry of claudeEntries) {
-    const model = getDefaultProviderInstanceModel(providers, entry.instanceId);
-    if (model !== undefined) {
-      return { instanceId: entry.instanceId, model };
-    }
-  }
-  return null;
-}
 
 /**
  * Creates an agent by writing its file to `.iskra/agents`, or imports agents
@@ -65,7 +37,7 @@ export function CreateAgentDialog(props: {
   readonly project: EnvironmentProject;
 }) {
   const { environmentId, id: projectId } = props.project;
-  const providers = useServerConfigs().get(environmentId)?.providers ?? EMPTY_PROVIDERS;
+  const providers = useEnvironmentProviders(environmentId);
   const channels = useEnvironmentChannels(environmentId);
   const saveAgentDefinition = useAtomCommand(channelEnvironment.saveAgentDefinition);
   const importAgentDefinitions = useAtomCommand(channelEnvironment.importAgentDefinitions);
@@ -76,7 +48,9 @@ export function CreateAgentDialog(props: {
   const [busy, setBusy] = useState(false);
   const formId = useId();
   const agentName = toAgentName(name);
-  const modelSelection = resolveAgentModelSelection(providers, props.project.defaultModelSelection);
+  const [chosenModel, setChosenModel] = useState<ModelSelection | null>(null);
+  const modelSelection =
+    chosenModel ?? resolveAgentModelSelection(providers, props.project.defaultModelSelection);
 
   const joinChannels = async (agentIds: ReadonlyArray<AgentId>) => {
     for (const channel of channels) {
@@ -119,6 +93,7 @@ export function CreateAgentDialog(props: {
     setBusy(false);
     setName("");
     setRole("");
+    setChosenModel(null);
     props.onOpenChange(false);
     void navigate({ to: "/agents/$environmentId/$agentId", params: { environmentId, agentId } });
   };
@@ -198,7 +173,11 @@ export function CreateAgentDialog(props: {
                 Agents need Claude. Turn on a Claude provider in Settings, Providers.
               </p>
             ) : (
-              <p className="text-xs text-muted-foreground">Runs on {modelSelection.model}</p>
+              <AgentModelPicker
+                environmentId={environmentId}
+                value={modelSelection}
+                onChange={setChosenModel}
+              />
             )}
           </form>
         </DialogPanel>
