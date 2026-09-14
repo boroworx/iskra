@@ -10,6 +10,7 @@ import {
 } from "@iskra/client-runtime/cards";
 import {
   CARD_AUTOFIX_ATTEMPTS,
+  type CardId,
   type CardPriority,
   type EnvironmentId,
   type OrchestrationAgentShell,
@@ -39,14 +40,32 @@ import { toastManager } from "../ui/toast";
 import { toastCommandFailure } from "../toastCommandFailure";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 
-const SESSION_BADGE: Partial<Record<RunSessionState, string>> = {
-  pending: "Starting",
-  active: "Working",
-  awaitingInput: "Needs you",
-  complete: "Waiting",
-  error: "Failed",
-  stale: "Stale",
+type Badge = readonly [label: string, alarming: boolean];
+
+const SESSION_BADGE: Partial<Record<RunSessionState, Badge>> = {
+  pending: ["Starting", false],
+  active: ["Working", false],
+  awaitingInput: ["Needs you", true],
+  complete: ["Waiting", false],
+  error: ["Failed", true],
+  stale: ["Stale", false],
 };
+
+/** Which cards wait on an unlanded blocker, and each card's sub-cards, in one pass over the board. */
+function relatedCards(cards: ReadonlyArray<OrchestrationCardShell>) {
+  const landed = new Set(cards.filter((card) => card.status === "landed").map((card) => card.id));
+  const blocked = new Set<CardId>();
+  const subCards = new Map<CardId, ReadonlyArray<OrchestrationCardShell>>();
+  for (const card of cards) {
+    if (card.relations.some((relation) => relation.kind === "blockedBy" && !landed.has(relation.cardId))) {
+      blocked.add(card.id);
+    }
+    if (card.parentCardId !== null) {
+      subCards.set(card.parentCardId, [...(subCards.get(card.parentCardId) ?? []), card]);
+    }
+  }
+  return { blocked, subCards };
+}
 
 /**
  * A project's cards by status. Cards move on their own as work happens; a person
@@ -81,6 +100,8 @@ export function BoardView(props: {
     }
     return byColumn;
   }, [cards]);
+  // Faces get plain values from this, so a face whose own facts did not change skips rendering.
+  const related = useMemo(() => relatedCards(cards), [cards]);
 
   const onDragEnd = async (event: DragEndEvent) => {
     const card = cards.find((candidate) => candidate.id === event.active.id);
@@ -121,7 +142,7 @@ export function BoardView(props: {
                 key={column}
                 column={column}
                 cards={columns.get(column) ?? []}
-                allCards={cards}
+                related={related}
                 agents={agents}
                 now={now}
                 environmentId={props.environmentId}
@@ -137,7 +158,7 @@ export function BoardView(props: {
 function BoardColumnView(props: {
   readonly column: BoardColumn;
   readonly cards: ReadonlyArray<OrchestrationCardShell>;
-  readonly allCards: ReadonlyArray<OrchestrationCardShell>;
+  readonly related: ReturnType<typeof relatedCards>;
   readonly agents: ReadonlyArray<OrchestrationAgentShell>;
   readonly now: number;
   readonly environmentId: EnvironmentId;
@@ -161,8 +182,9 @@ function BoardColumnView(props: {
           <li key={card.id}>
             <CardFace
               card={card}
-              allCards={props.allCards}
-              agents={props.agents}
+              blocked={props.related.blocked.has(card.id)}
+              subCards={props.related.subCards.get(card.id)}
+              delegateName={props.agents.find((agent) => agent.id === card.delegateAgentId)?.name}
               now={props.now}
               environmentId={props.environmentId}
             />
@@ -175,39 +197,36 @@ function BoardColumnView(props: {
 
 const CardFace = memo(function CardFace(props: {
   readonly card: OrchestrationCardShell;
-  readonly allCards: ReadonlyArray<OrchestrationCardShell>;
-  readonly agents: ReadonlyArray<OrchestrationAgentShell>;
+  readonly blocked: boolean;
+  readonly subCards: ReadonlyArray<OrchestrationCardShell> | undefined;
+  readonly delegateName: string | undefined;
   readonly now: number;
   readonly environmentId: EnvironmentId;
 }) {
   const { card } = props;
+  const children = props.subCards ?? [];
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: card.id,
   });
-  const delegate = props.agents.find((agent) => agent.id === card.delegateAgentId);
   const update = useAtomCommand(cardEnvironment.update);
-  const statusById = new Map(props.allCards.map((candidate) => [candidate.id, candidate.status]));
-  const children = props.allCards.filter((candidate) => candidate.parentCardId === card.id);
-  const blocked = card.relations.some(
-    (relation) => relation.kind === "blockedBy" && statusById.get(relation.cardId) !== "landed",
-  );
   const session = card.ownerSession;
   const sessionBadge = session === null ? undefined : SESSION_BADGE[session.state];
-  const badges = [
-    card.specState === "draft" && card.status !== "triage" ? "Spec draft" : null,
-    blocked ? "Blocked" : null,
-    isCardSnoozed(card, props.now) ? "Snoozed" : null,
-    sessionBadge ?? null,
-    card.checks === null || card.status !== "inReview"
-      ? null
-      : card.checks.state === "running"
-        ? "Checks running"
+  const badges: Badge[] = [];
+  if (card.specState === "draft" && card.status !== "triage") badges.push(["Spec draft", false]);
+  if (props.blocked) badges.push(["Blocked", true]);
+  if (isCardSnoozed(card, props.now)) badges.push(["Snoozed", false]);
+  if (sessionBadge !== undefined) badges.push(sessionBadge);
+  if (card.checks !== null && card.status === "inReview") {
+    badges.push(
+      card.checks.state === "running"
+        ? ["Checks running", false]
         : card.checks.state === "passed"
-          ? "Checks passed"
-          : `Checks failed ${card.checks.failedRuns}/${CARD_AUTOFIX_ATTEMPTS}`,
-    card.spentUsd >= card.budgetCapUsd && card.status !== "landed" ? "Budget reached" : null,
-    card.unpricedTurns > 0 && !card.acceptsUnpriced ? "Unpriced model" : null,
-  ].filter((badge): badge is string => badge !== null);
+          ? ["Checks passed", false]
+          : [`Checks failed ${card.checks.failedRuns}/${CARD_AUTOFIX_ATTEMPTS}`, true],
+    );
+  }
+  if (card.spentUsd >= card.budgetCapUsd && card.status !== "landed") badges.push(["Budget reached", true]);
+  if (card.unpricedTurns > 0 && !card.acceptsUnpriced) badges.push(["Unpriced model", true]);
 
   return (
     <article
@@ -231,22 +250,15 @@ const CardFace = memo(function CardFace(props: {
       ) : null}
       {badges.length > 0 ? (
         <ul className="flex flex-wrap gap-1">
-          {badges.map((badge) => (
+          {badges.map(([label, alarming]) => (
             <li
-              key={badge}
+              key={label}
               className={cn(
                 "rounded px-1.5 py-0.5 text-[11px] leading-none",
-                badge === "Needs you" ||
-                  badge === "Failed" ||
-                  badge === "Blocked" ||
-                  badge.startsWith("Checks failed") ||
-                  badge === "Budget reached" ||
-                  badge === "Unpriced model"
-                  ? "bg-destructive/15 text-destructive-foreground"
-                  : "bg-muted text-muted-foreground",
+                alarming ? "bg-destructive/15 text-destructive-foreground" : "bg-muted text-muted-foreground",
               )}
             >
-              {badge}
+              {label}
             </li>
           ))}
         </ul>
@@ -284,7 +296,7 @@ const CardFace = memo(function CardFace(props: {
             </SelectPopup>
           </Select>
         </dd>
-        {delegate !== undefined ? <dd>@{delegate.name}</dd> : null}
+        {props.delegateName !== undefined ? <dd>@{props.delegateName}</dd> : null}
         {card.branch !== null ? (
           <dd className="max-w-full truncate font-mono">{card.branch}</dd>
         ) : null}
