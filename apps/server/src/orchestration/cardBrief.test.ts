@@ -63,6 +63,7 @@ const card: OrchestrationCard = {
   linearIssue: null,
   sourceMessageId: null,
   proposalReasoning: null,
+  suggestedAgentId: null,
   priority: 0,
   createdBy: { kind: "human", id: "human" },
   createdAt: "2026-01-01T00:00:00.000Z",

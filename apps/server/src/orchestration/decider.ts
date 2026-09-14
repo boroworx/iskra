@@ -2600,6 +2600,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           return yield* refuse(command, `Card '${duplicateId}' is not a card of this project.`);
         }
       }
+      // The lead's suggested owner, when it names an active agent of the project; otherwise none.
+      // Only a person makes it the delegate, since assigning starts a session.
+      const suggestedName = lead?.suggestedAgentName?.replace(/^@/, "");
+      const suggestedAgent = (readModel.agents ?? []).find(
+        (candidate) =>
+          candidate.projectId === command.projectId &&
+          candidate.archivedAt === null &&
+          candidate.name === suggestedName,
+      );
       const author = { kind: lead === undefined ? "agent" : "lead", id: agent.id } as const;
       const created = yield* planned(command, "card", command.cardId, command.createdAt, {
         type: "card.created",
@@ -2607,6 +2616,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           cardId: command.cardId,
           sourceMessageId: lead?.sourceMessageId ?? null,
           proposalReasoning: lead?.reasoning ?? null,
+          suggestedAgentId: suggestedAgent?.id ?? null,
           projectId: command.projectId,
           channelId,
           parentCardId,

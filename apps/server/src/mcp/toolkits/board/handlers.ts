@@ -104,6 +104,7 @@ const make = Effect.gen(function* () {
             sourceMessageId: session.triggerMessageId,
             reasoning: input.reasoning,
             likelyDuplicateCardIds: (input.likelyDuplicateCardIds ?? []).map((id) => CardId.make(id)),
+            ...(input.suggestedAgent === undefined ? {} : { suggestedAgentName: input.suggestedAgent }),
           },
           createdAt: yield* nowIso,
         });

@@ -163,6 +163,12 @@ const ProposeTriageCardTool = Tool.make("propose_triage_card", {
         description: "Ids of open cards that may already cover this work.",
       }),
     ),
+    suggestedAgent: Schema.optional(
+      TrimmedNonEmptyString.annotate({
+        description:
+          "The name of the channel member best suited to own the card. A person confirms it when they start the work.",
+      }),
+    ),
     tags: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   }),
   success: Schema.Struct({ cardId: Schema.String }),

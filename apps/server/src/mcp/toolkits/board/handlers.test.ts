@@ -255,6 +255,7 @@ describe("board toolkit handlers", () => {
           spec: "Webhooks need their own limit.",
           reasoning: "Asked for in #api; the open card leaves webhooks out.",
           likelyDuplicateCardIds: ["card-limits"],
+          suggestedAgent: "frontend",
         },
         ["lead"],
       );
@@ -264,7 +265,11 @@ describe("board toolkit handlers", () => {
           agentId: AGENT_ID,
           projectId: PROJECT_ID,
           channelId: CHANNEL_ID,
-          lead: { sourceMessageId: "message-export", likelyDuplicateCardIds: ["card-limits"] },
+          lead: {
+            sourceMessageId: "message-export",
+            likelyDuplicateCardIds: ["card-limits"],
+            suggestedAgentName: "frontend",
+          },
         },
       ]);
       expect(

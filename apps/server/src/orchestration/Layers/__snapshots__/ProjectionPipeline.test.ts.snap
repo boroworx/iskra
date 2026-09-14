@@ -111,6 +111,7 @@ exports[`card, agent and channel projection > projects every card, agent and cha
       "specState": "approved",
       "spentUsd": 0.25,
       "status": "inProgress",
+      "suggestedAgentId": null,
       "tags": [
         "api",
       ],
@@ -193,6 +194,7 @@ exports[`card, agent and channel projection > projects every card, agent and cha
       "specState": "approved",
       "spentUsd": 0.25,
       "status": "inProgress",
+      "suggestedAgentId": null,
       "tags": [
         "api",
       ],
@@ -412,6 +414,7 @@ exports[`card, agent and channel projection > projects every card, agent and cha
         "specState": "approved",
         "spentUsd": 0.25,
         "status": "inProgress",
+        "suggestedAgentId": null,
         "tags": [
           "api",
         ],
@@ -458,6 +461,7 @@ exports[`card, agent and channel projection > projects every card, agent and cha
         "specState": "approved",
         "spentUsd": 0,
         "status": "ready",
+        "suggestedAgentId": "agent-api",
         "tags": [
           "auth",
         ],
@@ -499,6 +503,7 @@ exports[`card, agent and channel projection > projects every card, agent and cha
         "specState": "draft",
         "spentUsd": 0,
         "status": "triage",
+        "suggestedAgentId": null,
         "tags": [],
         "title": "Duplicate",
         "unpricedTurns": 0,
@@ -782,6 +787,7 @@ exports[`card, agent and channel projection > projects every card, agent and cha
         "specState": "approved",
         "spentUsd": 0.25,
         "status": "inProgress",
+        "suggestedAgentId": null,
         "tags": [
           "api",
         ],
@@ -829,6 +835,7 @@ exports[`card, agent and channel projection > projects every card, agent and cha
         "specState": "approved",
         "spentUsd": 0,
         "status": "ready",
+        "suggestedAgentId": "agent-api",
         "tags": [
           "auth",
         ],
@@ -871,6 +878,7 @@ exports[`card, agent and channel projection > projects every card, agent and cha
         "specState": "draft",
         "spentUsd": 0,
         "status": "triage",
+        "suggestedAgentId": null,
         "tags": [],
         "title": "Duplicate",
         "unpricedTurns": 0,

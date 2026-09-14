@@ -4870,6 +4870,7 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
             attemptGroupId: "attempts-1",
             sourceMessageId: message,
             proposalReasoning: "Asked for.",
+            suggestedAgentId: api,
             priority: 2,
             channelId: null,
             parentCardId: card1,

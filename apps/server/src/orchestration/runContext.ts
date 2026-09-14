@@ -53,6 +53,14 @@ export function toRunContextMessage(
   };
 }
 
+const ROLE_SUMMARY_LIMIT = 160;
+
+/** The first line of a role prompt, cut short: enough for a lead to choose an owner. */
+function roleSummary(rolePrompt: string): string {
+  const line = rolePrompt.split("\n").find((candidate) => candidate.trim().length > 0)?.trim() ?? "";
+  return line.length > ROLE_SUMMARY_LIMIT ? `${line.slice(0, ROLE_SUMMARY_LIMIT - 1)}…` : line;
+}
+
 /**
  * Builds what an agent is handed when it wakes. Pure: the caller loads the
  * messages, and this decides which of them the agent sees.
@@ -75,7 +83,17 @@ export function buildRunContext(input: RunContextInput): RunContextPayload {
           lead: {
             members: channel.memberAgentIds.flatMap((memberId) => {
               const member = input.agents.find((candidate) => candidate.id === memberId);
-              return member === undefined ? [] : [{ name: member.name, roleTags: member.roleTags }];
+              if (member === undefined) {
+                return [];
+              }
+              const summary = roleSummary(member.rolePrompt);
+              return [
+                {
+                  name: member.name,
+                  roleTags: member.roleTags,
+                  ...(summary.length > 0 ? { summary } : {}),
+                },
+              ];
             }),
             openCards: input.lead.cards
               .filter((card) => card.projectId === channel.projectId && !isFinishedCardStatus(card.status))
@@ -117,7 +135,7 @@ export function renderRunContext(payload: RunContextPayload): RenderedRunContext
           "Your final text is posted in the channel as your reply, so keep it short. You never assign, approve or wake agents.",
           "Read the recent messages first: a reply to a question you asked completes the request it was about.",
           "If the request is too vague to act on, reply with one short clarifying question and propose nothing yet.",
-          'Otherwise, for each distinct piece of work it asks for, call propose_triage_card once with a short title, a plain-language spec, your reasoning, and the ids of open cards it likely duplicates. Then reply with one short line, such as "Proposed a card below."',
+          'Otherwise, for each distinct piece of work it asks for, call propose_triage_card once with a short title, a plain-language spec, your reasoning, the ids of open cards it likely duplicates, and as suggestedAgent the channel member best suited to own it. Then reply with one short line, such as "Proposed a card below."',
           "If the message asks for no work, answer it in a sentence or two.",
         ]),
     payload.agent.rolePrompt.trim(),
@@ -128,7 +146,7 @@ export function renderRunContext(payload: RunContextPayload): RenderedRunContext
       (lead?.members ?? [])
         .map(
           (member) =>
-            `- @${member.name}${member.roleTags.length > 0 ? ` (${member.roleTags.join(", ")})` : ""}`,
+            `- @${member.name}${member.roleTags.length > 0 ? ` (${member.roleTags.join(", ")})` : ""}${member.summary === undefined ? "" : `: ${member.summary}`}`,
         )
         .join("\n"),
     ),

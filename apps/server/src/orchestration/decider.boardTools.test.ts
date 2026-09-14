@@ -96,7 +96,7 @@ it.layer(NodeServices.layer)("decider board tools", (it) => {
           ...setup,
           createChannel(channelId, "channel", [backend], reviewer),
         ]);
-        const propose = (agentId: AgentId): OrchestrationCommand => ({
+        const propose = (agentId: AgentId, suggestedAgentName = "backend"): OrchestrationCommand => ({
           type: "card.propose",
           commandId: nextCommandId(),
           cardId: CardId.make("card-limits-webhooks"),
@@ -110,6 +110,7 @@ it.layer(NodeServices.layer)("decider board tools", (it) => {
             sourceMessageId,
             reasoning: "The message asks for limits on webhooks, which the open card leaves out.",
             likelyDuplicateCardIds: [cardId],
+            suggestedAgentName,
           },
           createdAt: now,
         });
@@ -125,6 +126,7 @@ it.layer(NodeServices.layer)("decider board tools", (it) => {
             status: "triage",
             sourceMessageId,
             proposalReasoning: expect.stringContaining("webhooks"),
+            suggestedAgentId: backend,
             createdBy: { kind: "lead", id: reviewer },
           },
         });
@@ -138,6 +140,10 @@ it.layer(NodeServices.layer)("decider board tools", (it) => {
 
         const notLead = yield* Effect.flip(decide(readModel, propose(backend)));
         expect(notLead.message).toContain("doesn't lead this channel");
+
+        // An unknown suggested owner is dropped; the proposal still goes through.
+        const [unknown] = yield* decide(readModel, propose(reviewer, "ghost"));
+        expect(unknown).toMatchObject({ payload: { suggestedAgentId: null } });
       }),
   );
 });

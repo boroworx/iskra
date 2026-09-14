@@ -725,6 +725,8 @@ export const OrchestrationCard = Schema.Struct({
   sourceMessageId: Schema.NullOr(MessageId).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   // Why the channel's lead proposed the card, for the person triaging it.
   proposalReasoning: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  // The agent the lead suggested to own the card; set as its delegate only when a person starts it.
+  suggestedAgentId: Schema.NullOr(AgentId).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   priority: CardPriority.pipe(Schema.withDecodingDefault(Effect.succeed(0 as const))),
   relations: Schema.Array(CardRelation),
   createdBy: CardAuthor,
@@ -813,7 +815,12 @@ export const RunContextPayload = Schema.Struct({
   lead: Schema.optional(
     Schema.Struct({
       members: Schema.Array(
-        Schema.Struct({ name: AgentName, roleTags: Schema.Array(TrimmedNonEmptyString) }),
+        Schema.Struct({
+          name: AgentName,
+          roleTags: Schema.Array(TrimmedNonEmptyString),
+          // The first line of the agent's role prompt. Optional so earlier runs still decode.
+          summary: Schema.optional(Schema.String),
+        }),
       ),
       openCards: Schema.Array(
         Schema.Struct({ id: CardId, title: TrimmedNonEmptyString, status: CardStatus }),
@@ -1618,6 +1625,7 @@ export const CardCreatedPayload = Schema.Struct({
   attemptGroupId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   sourceMessageId: Schema.optional(Schema.NullOr(MessageId)),
   proposalReasoning: Schema.optional(Schema.NullOr(Schema.String)),
+  suggestedAgentId: Schema.optional(Schema.NullOr(AgentId)),
   priority: Schema.optional(CardPriority),
   projectId: ProjectId,
   channelId: Schema.NullOr(ChannelId),
@@ -2125,6 +2133,8 @@ const CardProposeCommand = Schema.Struct({
       sourceMessageId: MessageId,
       reasoning: TrimmedNonEmptyString,
       likelyDuplicateCardIds: Schema.Array(CardId),
+      // A project agent's name; an unknown or archived one is dropped, not refused.
+      suggestedAgentName: Schema.optional(TrimmedNonEmptyString),
     }),
   ),
   createdAt: IsoDateTime,

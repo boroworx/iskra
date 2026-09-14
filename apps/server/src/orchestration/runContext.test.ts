@@ -167,10 +167,24 @@ describe("renderRunContext", () => {
       messages: [message(4), trigger],
       trigger,
     });
+    // A lead reads each member's role in a line, to suggest who owns what it proposes.
+    expect(
+      buildRunContext({
+        agent: backend,
+        channel: channel(),
+        agents: [backend, frontend],
+        messages: [],
+        trigger,
+        lead: { cards: [] },
+      }).lead?.members,
+    ).toEqual([
+      { name: "backend", roleTags: [], summary: "You own the API." },
+      { name: "frontend", roleTags: [] },
+    ]);
     const lead = {
       members: [
         { name: backend.name, roleTags: [] },
-        { name: frontend.name, roleTags: ["ui", "css"] },
+        { name: frontend.name, roleTags: ["ui", "css"], summary: "Builds the web UI." },
       ],
       openCards: [{ id: CardId.make("card-1"), title: "Rate limiting", status: "ready" as const }],
     };
@@ -181,11 +195,11 @@ describe("renderRunContext", () => {
         "Your final text is posted in the channel as your reply, so keep it short. You never assign, approve or wake agents.",
         "Read the recent messages first: a reply to a question you asked completes the request it was about.",
         "If the request is too vague to act on, reply with one short clarifying question and propose nothing yet.",
-        'Otherwise, for each distinct piece of work it asks for, call propose_triage_card once with a short title, a plain-language spec, your reasoning, and the ids of open cards it likely duplicates. Then reply with one short line, such as "Proposed a card below."',
+        'Otherwise, for each distinct piece of work it asks for, call propose_triage_card once with a short title, a plain-language spec, your reasoning, the ids of open cards it likely duplicates, and as suggestedAgent the channel member best suited to own it. Then reply with one short line, such as "Proposed a card below."',
         "If the message asks for no work, answer it in a sentence or two.",
         "You own the API.",
         "## Channel topic\n\nAPI work",
-        "## Channel members\n\n- @backend\n- @frontend (ui, css)",
+        "## Channel members\n\n- @backend\n- @frontend (ui, css): Builds the web UI.",
       ].join("\n\n"),
       firstMessage: [
         "Recent messages in #backend:\n[2026-01-01T00:00:04.000Z] user: message 4",

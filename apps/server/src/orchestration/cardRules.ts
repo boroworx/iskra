@@ -221,6 +221,7 @@ export function newCard(
     linearIssue: null,
     sourceMessageId: payload.sourceMessageId ?? null,
     proposalReasoning: payload.proposalReasoning ?? null,
+    suggestedAgentId: payload.suggestedAgentId ?? null,
     priority: payload.priority ?? 0,
     createdBy: payload.createdBy,
     createdAt: payload.createdAt,
