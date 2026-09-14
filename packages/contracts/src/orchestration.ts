@@ -730,16 +730,6 @@ export const OrchestrationCard = Schema.Struct({
 });
 export type OrchestrationCard = typeof OrchestrationCard.Type;
 
-/** One entry of a card's decision log. Paged from its projection, never in the read model. */
-export const OrchestrationCardDecision = Schema.Struct({
-  decisionId: TrimmedNonEmptyString,
-  cardId: CardId,
-  author: CardAuthor,
-  text: TrimmedNonEmptyString,
-  createdAt: IsoDateTime,
-});
-export type OrchestrationCardDecision = typeof OrchestrationCardDecision.Type;
-
 export const ChannelMessageAuthorKind = Schema.Literals(["human", "agent", "system", "webhook"]);
 export type ChannelMessageAuthorKind = typeof ChannelMessageAuthorKind.Type;
 
