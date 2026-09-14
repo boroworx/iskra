@@ -10,6 +10,7 @@
 
 import {
   type CanUseTool,
+  type HookCallback,
   query,
   getSessionMessages,
   forkSession,
@@ -39,6 +40,7 @@ import {
   ProviderInstanceId,
   type ModelSelection,
   ProviderItemId,
+  type ProviderRunRestrictions,
   type ProviderRuntimeEvent,
   type ProviderRuntimeTurnStatus,
   type ProviderSendTurnInput,
@@ -88,15 +90,19 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
-import {
-  BOARD_CLAUDE_TOOL_NAMES,
-  LEAD_CLAUDE_TOOL_NAMES,
-} from "../../mcp/toolkits/board/tools.ts";
+import { BOARD_CLAUDE_TOOL_NAMES, LEAD_CLAUDE_TOOL_NAMES } from "../../mcp/toolkits/board/tools.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
 import { claudeSignedOutMessage, makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import { planClaudeSkillDispatch } from "../Drivers/ClaudeSkillDispatch.ts";
 import { discoverClaudeSkills } from "../Drivers/ClaudeSkills.ts";
 import { buildRuntimeInstructions } from "../RuntimeInstructions.ts";
+import {
+  DEFAULT_HEAVY_COMMANDS,
+  HEAVY_COMMAND_REFUSAL,
+  claudeRunEnvNames,
+  isHeavyCommand,
+  runEnvironment,
+} from "../runEnforcement.ts";
 import {
   BUNDLED_CLAUDE_MODEL_CATALOG,
   type ClaudeModelCatalog,
@@ -1457,13 +1463,53 @@ const CLAUDE_SETTING_SOURCES = [
   "project",
   "local",
 ] as const satisfies ReadonlyArray<SettingSource>;
-// The Claude tools each run capability allows. Bash can write, so `shell` is only honored together with `write`.
-const CLAUDE_TOOLS_BY_RUN_CAPABILITY = {
-  read: ["Read", "Glob", "Grep"],
-  write: ["Edit", "Write", "NotebookEdit"],
-  shell: ["Bash"],
-  network: ["WebFetch", "WebSearch"],
-} as const;
+/**
+ * What a run's capabilities allow in Claude. A bare file tool reaches every path, so file tools
+ * are scoped to the run's directory. Bash can write, so `shell` needs `write`, and it runs in the
+ * OS sandbox: network only to the project's allowed domains, no reads of the Iskra home, never
+ * unsandboxed. WebFetch reaches only allowed domains; WebSearch can't be scoped, so runs never
+ * get it. Evidence: docs/findings/m1-claude-run-enforcement.md.
+ * ponytail: POSIX rule paths; Windows rule syntax is unverified.
+ */
+function claudeRunPermissions(
+  run: ProviderRunRestrictions,
+  paths: { readonly cwd: string | undefined; readonly iskraHome: string },
+) {
+  const has = (capability: ProviderRunRestrictions["capabilities"][number]) =>
+    run.capabilities.includes(capability);
+  const scoped = (tools: ReadonlyArray<string>) =>
+    paths.cwd === undefined ? [] : tools.map((tool) => `${tool}(/${paths.cwd}/**)`);
+  const shell = has("shell") && has("write");
+  const egress = run.egress ?? { mode: "none", allow: [], deny: [] };
+  const allowedDomains = egress.mode === "allowlist" ? [...egress.allow] : [];
+  const heavyCommands =
+    run.heavyCommands !== undefined && run.heavyCommands.length > 0
+      ? run.heavyCommands
+      : DEFAULT_HEAVY_COMMANDS;
+  return {
+    allowedTools: [
+      ...(has("read") ? scoped(["Read", "Glob", "Grep"]) : []),
+      ...(has("write") ? scoped(["Edit", "Write", "NotebookEdit"]) : []),
+      ...(shell ? ["Bash"] : []),
+      ...(has("network") ? allowedDomains.map((domain) => `WebFetch(domain:${domain})`) : []),
+    ],
+    // Exact-command rules deny the bare forms up front; the PreToolUse hook catches the rest.
+    disallowedTools: shell ? heavyCommands.map((command) => `Bash(${command})`) : [],
+    heavyCommands: shell ? heavyCommands : undefined,
+    sandbox: shell
+      ? ({
+          enabled: true,
+          failIfUnavailable: true,
+          allowUnsandboxedCommands: false,
+          network: { allowedDomains, deniedDomains: [...egress.deny], strictAllowlist: true },
+          filesystem: {
+            denyRead: [paths.iskraHome],
+            ...(paths.cwd === undefined ? {} : { allowRead: [paths.cwd] }),
+          },
+        } satisfies NonNullable<ClaudeQueryOptions["sandbox"]>)
+      : undefined,
+  };
+}
 
 function buildPromptText(
   input: ProviderSendTurnInput,
@@ -3054,6 +3100,28 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         },
       });
 
+      // Sandboxed Bash reports blocked network access only in its output; surface it as a denial.
+      const sandboxViolations = context.startInput.run
+        ? /<sandbox_violations>\s*([\s\S]*?)\s*<\/sandbox_violations>/.exec(toolResult.text)?.[1]
+        : undefined;
+      if (sandboxViolations) {
+        const deniedStamp = yield* makeEventStamp();
+        yield* offerRuntimeEvent({
+          type: "tool.denied",
+          eventId: deniedStamp.eventId,
+          provider: PROVIDER,
+          createdAt: deniedStamp.createdAt,
+          threadId: context.session.threadId,
+          ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
+          providerRefs: nativeProviderRefs(context, { providerItemId: tool.itemId }),
+          payload: {
+            toolName: tool.toolName,
+            toolUseId: toolResult.toolUseId,
+            reason: sandboxViolations,
+          },
+        });
+      }
+
       const streamKind = toolResultStreamKind(tool.itemType);
       if (streamKind && toolResult.text.length > 0 && context.turnState) {
         const deltaStamp = yield* makeEventStamp();
@@ -4229,6 +4297,19 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         });
       }
 
+      const egress = input.run?.egress;
+      const allowedAndDenied =
+        egress?.mode === "allowlist"
+          ? egress.allow.filter((domain) => egress.deny.includes(domain))
+          : [];
+      if (allowedAndDenied.length > 0) {
+        return yield* new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "startSession",
+          issue: `The project's egress policy both allows and denies ${allowedAndDenied.join(", ")}; remove each from one list.`,
+        });
+      }
+
       const existingContext = sessions.get(input.threadId);
       if (existingContext) {
         yield* Effect.logWarning("claude.session.replacing", {
@@ -4726,16 +4807,54 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             : runtimeModeToPermission[input.runtimeMode]));
       const passthroughArgs = input.run ? {} : extraArgs;
       const settingSources = input.run ? [] : [...CLAUDE_SETTING_SOURCES];
-      const runCapabilities = input.run?.capabilities ?? [];
-      const allowedTools = [
-        ...new Set(
-          runCapabilities.flatMap((capability) =>
-            capability === "shell" && !runCapabilities.includes("write")
-              ? []
-              : CLAUDE_TOOLS_BY_RUN_CAPABILITY[capability],
-          ),
-        ),
-      ];
+      const runPermissions = input.run
+        ? claudeRunPermissions(input.run, { cwd: input.cwd, iskraHome: serverConfig.baseDir })
+        : undefined;
+      const allowedTools = runPermissions?.allowedTools ?? [];
+      const heavyCommands = runPermissions?.heavyCommands;
+      // A PreToolUse deny emits no SDK permission_denied, so the refusal is reported here.
+      const refuseHeavyCommands: HookCallback = (hookInput) => {
+        if (hookInput.hook_event_name !== "PreToolUse" || heavyCommands === undefined) {
+          return Promise.resolve({});
+        }
+        const command = (hookInput.tool_input as { readonly command?: unknown } | undefined)
+          ?.command;
+        if (typeof command !== "string" || !isHeavyCommand(command, heavyCommands)) {
+          return Promise.resolve({});
+        }
+        const toolUseId = hookInput.tool_use_id;
+        return runPromise(
+          Effect.gen(function* () {
+            const context = yield* Ref.get(contextRef);
+            if (context) {
+              const stamp = yield* makeEventStamp();
+              yield* offerRuntimeEvent({
+                type: "tool.denied",
+                eventId: stamp.eventId,
+                provider: PROVIDER,
+                createdAt: stamp.createdAt,
+                threadId: context.session.threadId,
+                ...(context.turnState
+                  ? { turnId: asCanonicalTurnId(context.turnState.turnId) }
+                  : {}),
+                providerRefs: nativeProviderRefs(context),
+                payload: {
+                  toolName: "Bash",
+                  ...(toolUseId ? { toolUseId } : {}),
+                  reason: HEAVY_COMMAND_REFUSAL,
+                },
+              });
+            }
+            return {
+              hookSpecificOutput: {
+                hookEventName: "PreToolUse" as const,
+                permissionDecision: "deny" as const,
+                permissionDecisionReason: HEAVY_COMMAND_REFUSAL,
+              },
+            };
+          }),
+        );
+      };
       const settings = {
         ...(typeof thinking === "boolean" ? { alwaysThinkingEnabled: thinking } : {}),
         ...(fastMode ? { fastMode: true } : {}),
@@ -4770,12 +4889,17 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           type: "preset",
           preset: "claude_code",
           // Model and effort can change after this session-level prompt is set.
-          append:
-            input.run?.systemPrompt ??
-            buildRuntimeInstructions({ harness: "Claude Code" }),
+          append: input.run?.systemPrompt ?? buildRuntimeInstructions({ harness: "Claude Code" }),
         },
         settingSources,
         ...(input.run ? { allowedTools: runAllowedTools } : {}),
+        ...(runPermissions && runPermissions.disallowedTools.length > 0
+          ? { disallowedTools: runPermissions.disallowedTools }
+          : {}),
+        ...(runPermissions?.sandbox ? { sandbox: runPermissions.sandbox } : {}),
+        ...(heavyCommands
+          ? { hooks: { PreToolUse: [{ matcher: "Bash", hooks: [refuseHeavyCommands] }] } }
+          : {}),
         // `ultracode` is a Claude Code setting, not an API effort level. It is
         // normalized to `xhigh` above and paired with `settings.ultracode`.
         ...(effectiveEffort
@@ -4794,7 +4918,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         canUseTool,
         onUserDialog,
         supportedDialogKinds: ["resume_return"],
-        env: McpProviderSession.withAgentDeviceEnvironment(claudeEnvironment, mcpSession),
+        // The SDK's env replaces the CLI's environment, so a run inherits only the allowlist.
+        env: McpProviderSession.withAgentDeviceEnvironment(
+          input.run
+            ? runEnvironment(claudeEnvironment, claudeRunEnvNames(claudeEnvironment))
+            : claudeEnvironment,
+          mcpSession,
+        ),
         additionalDirectories,
         ...(Object.keys(passthroughArgs).length > 0 ? { extraArgs: passthroughArgs } : {}),
         ...(mcpSession

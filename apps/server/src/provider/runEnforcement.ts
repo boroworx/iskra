@@ -159,11 +159,16 @@ export function isHeavyCommand(
     const programIndex = words.findIndex((word) => !isPrefixWord(word));
     const program = programIndex === -1 ? undefined : words[programIndex];
     if (program !== undefined && SHELLS.has(program)) {
-      const flag = words.findIndex((word, index) => index > programIndex && /^-\w*c\w*$/.test(word));
+      const flag = words.findIndex(
+        (word, index) => index > programIndex && /^-\w*c\w*$/.test(word),
+      );
       const script = flag === -1 ? undefined : words[flag + 1];
       if (script !== undefined && isHeavyCommand(script, heavyCommands, depth + 1)) return true;
     }
-    if (program === "eval" && isHeavyCommand(words.slice(programIndex + 1).join(" "), heavyCommands, depth + 1)) {
+    if (
+      program === "eval" &&
+      isHeavyCommand(words.slice(programIndex + 1).join(" "), heavyCommands, depth + 1)
+    ) {
       return true;
     }
     return patterns.some((pattern) => matchesHeavy(words, pattern));

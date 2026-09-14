@@ -6,6 +6,7 @@ import {
   type OrchestrationEvent,
   ProviderDriverKind,
   type ProjectId,
+  projectOrchestrationOf,
   type OrchestrationSession,
   ThreadId,
   type ProviderSession,
@@ -828,7 +829,16 @@ const make = Effect.gen(function* () {
           ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
           ...(run
             ? {
-                run: { systemPrompt: run.rendered.systemPrompt, capabilities: run.capabilities },
+                run: {
+                  systemPrompt: run.rendered.systemPrompt,
+                  capabilities: run.capabilities,
+                  ...(project
+                    ? {
+                        egress: projectOrchestrationOf(project).egress,
+                        heavyCommands: projectOrchestrationOf(project).heavyCommands,
+                      }
+                    : {}),
+                },
               }
             : {}),
           runtimeMode: desiredRuntimeMode,

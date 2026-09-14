@@ -6,6 +6,7 @@ import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type {
+  HookCallback,
   Options as ClaudeQueryOptions,
   PermissionMode,
   PermissionResult,
@@ -19,6 +20,7 @@ import {
   ProviderDriverKind,
   ProviderItemId,
   ProviderRuntimeEvent,
+  type ProviderRunRestrictions,
   type RunCapability,
   type RuntimeMode,
   ThreadId,
@@ -53,6 +55,7 @@ import { ProviderAdapterProcessError, ProviderAdapterValidationError } from "../
 import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import type { ClaudeScopedLimitNames } from "./claudeUsageLimits.ts";
 import { makeClaudeAdapter, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
+import { DEFAULT_HEAVY_COMMANDS, HEAVY_COMMAND_REFUSAL } from "../runEnforcement.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 const encodeUnknownJsonString = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
@@ -6750,13 +6753,21 @@ describe("ClaudeAdapterLive", () => {
             resume: "550e8400-e29b-41d4-a716-446655440000",
             turnCount: 3,
           },
+          cwd: "/work/tree",
           run: { systemPrompt: "You are @backend.", capabilities: ["read"] },
         });
 
         const options = harness.getLastCreateQueryInput()?.options;
         assert.equal(options?.permissionMode, "dontAsk");
         assert.equal(options?.allowDangerouslySkipPermissions, undefined);
-        assert.deepEqual(options?.allowedTools, ["Read", "Glob", "Grep"]);
+        assert.deepEqual(options?.allowedTools, [
+          "Read(//work/tree/**)",
+          "Glob(//work/tree/**)",
+          "Grep(//work/tree/**)",
+        ]);
+        assert.equal(options?.sandbox, undefined);
+        assert.equal(options?.disallowedTools, undefined);
+        assert.equal(options?.hooks, undefined);
         assert.deepEqual(options?.settingSources, []);
         assert.equal(options?.resume, undefined);
         assert.equal(options?.extraArgs, undefined);
@@ -6773,25 +6784,36 @@ describe("ClaudeAdapterLive", () => {
     },
   );
 
-  it.effect.each<{ capabilities: ReadonlyArray<RunCapability>; tools: ReadonlyArray<string> }>([
-    { capabilities: ["read", "shell"], tools: ["Read", "Glob", "Grep"] },
+  it.effect.each<{
+    capabilities: ReadonlyArray<RunCapability>;
+    egress?: ProviderRunRestrictions["egress"];
+    tools: ReadonlyArray<string>;
+  }>([
+    {
+      capabilities: ["read", "shell"],
+      tools: ["Read(//work/tree/**)", "Glob(//work/tree/**)", "Grep(//work/tree/**)"],
+    },
+    {
+      capabilities: ["read", "network"],
+      tools: ["Read(//work/tree/**)", "Glob(//work/tree/**)", "Grep(//work/tree/**)"],
+    },
     {
       capabilities: ["read", "write", "shell", "network"],
+      egress: { mode: "allowlist", allow: ["registry.npmjs.org"], deny: [] },
       tools: [
-        "Read",
-        "Glob",
-        "Grep",
-        "Edit",
-        "Write",
-        "NotebookEdit",
+        "Read(//work/tree/**)",
+        "Glob(//work/tree/**)",
+        "Grep(//work/tree/**)",
+        "Edit(//work/tree/**)",
+        "Write(//work/tree/**)",
+        "NotebookEdit(//work/tree/**)",
         "Bash",
-        "WebFetch",
-        "WebSearch",
+        "WebFetch(domain:registry.npmjs.org)",
       ],
     },
   ])(
-    "grants a run only the tools its capabilities allow ($capabilities)",
-    ({ capabilities, tools }) => {
+    "grants a run only the tools its capabilities allow ($capabilities, $egress.mode)",
+    ({ capabilities, egress, tools }) => {
       const harness = makeHarness();
       return Effect.gen(function* () {
         const adapter = yield* ClaudeAdapter;
@@ -6799,7 +6821,8 @@ describe("ClaudeAdapterLive", () => {
           threadId: THREAD_ID,
           provider: ProviderDriverKind.make("claudeAgent"),
           runtimeMode: "full-access",
-          run: { systemPrompt: "", capabilities },
+          cwd: "/work/tree",
+          run: { systemPrompt: "", capabilities, ...(egress ? { egress } : {}) },
         });
 
         assert.deepEqual(harness.getLastCreateQueryInput()?.options.allowedTools, tools);
@@ -6835,14 +6858,13 @@ describe("ClaudeAdapterLive", () => {
 
       const options = harness.getLastCreateQueryInput()?.options;
       assert.deepEqual(options?.allowedTools, [
-        "Read",
-        "Glob",
-        "Grep",
         "mcp__iskra__propose_card",
         "mcp__iskra__record_decision",
         "mcp__iskra__update_plan",
         "mcp__iskra__request_review",
+        "mcp__iskra__request_checkpoint",
         "mcp__iskra__ask_owner",
+        "mcp__iskra__propose_criteria_change",
       ]);
       assert.deepEqual(Object.keys(options?.mcpServers ?? {}), ["iskra"]);
     }).pipe(
@@ -6877,14 +6899,246 @@ describe("ClaudeAdapterLive", () => {
 
       const options = harness.getLastCreateQueryInput()?.options;
       assert.deepEqual(options?.allowedTools, [
-        "Read",
-        "Glob",
-        "Grep",
         "mcp__iskra__propose_triage_card",
+        "mcp__iskra__ask_clarification",
       ]);
       assert.deepEqual(Object.keys(options?.mcpServers ?? {}), ["iskra"]);
     }).pipe(
       Effect.scoped,
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("sandboxes a run's shell to the project's egress, outside the Iskra home", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const { baseDir } = yield* ServerConfig;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+        cwd: "/work/tree",
+        run: {
+          systemPrompt: "",
+          capabilities: ["read", "write", "shell"],
+          egress: { mode: "allowlist", allow: ["registry.npmjs.org"], deny: ["api.stripe.com"] },
+        },
+      });
+
+      const options = harness.getLastCreateQueryInput()?.options;
+      assert.deepEqual(options?.sandbox, {
+        enabled: true,
+        failIfUnavailable: true,
+        allowUnsandboxedCommands: false,
+        network: {
+          allowedDomains: ["registry.npmjs.org"],
+          deniedDomains: ["api.stripe.com"],
+          strictAllowlist: true,
+        },
+        filesystem: { denyRead: [baseDir], allowRead: ["/work/tree"] },
+      });
+      assert.deepEqual(
+        options?.disallowedTools,
+        DEFAULT_HEAVY_COMMANDS.map((command) => `Bash(${command})`),
+      );
+      assert.equal(options?.hooks?.PreToolUse?.[0]?.matcher, "Bash");
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("refuses a run whose egress policy both allows and denies a domain", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const error = yield* adapter
+        .startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+          cwd: "/work/tree",
+          run: {
+            systemPrompt: "",
+            capabilities: ["read", "write", "shell"],
+            egress: { mode: "allowlist", allow: ["x.dev", "y.dev"], deny: ["y.dev"] },
+          },
+        })
+        .pipe(Effect.flip);
+
+      assert.instanceOf(error, ProviderAdapterValidationError);
+      assert.equal(
+        (error as ProviderAdapterValidationError).issue,
+        "The project's egress policy both allows and denies y.dev; remove each from one list.",
+      );
+      assert.equal(harness.getLastCreateQueryInput(), undefined);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("refuses a run's untargeted heavy commands and reports each as tool.denied", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+        cwd: "/work/tree",
+        run: { systemPrompt: "", capabilities: ["read", "write", "shell"] },
+      });
+      const hook = harness.getLastCreateQueryInput()?.options.hooks?.PreToolUse?.[0]?.hooks[0];
+      assert.isDefined(hook);
+      const deniedFiber = yield* Stream.filter(
+        adapter.streamEvents,
+        (event) => event.type === "tool.denied",
+      ).pipe(Stream.runHead, Effect.forkChild);
+      const bash = (command: string) =>
+        ({
+          hook_event_name: "PreToolUse",
+          tool_name: "Bash",
+          tool_input: { command },
+          tool_use_id: "tool-bash-1",
+          session_id: "sdk-session-run",
+          transcript_path: "",
+          cwd: "/work/tree",
+        }) as unknown as Parameters<HookCallback>[0];
+      const signal = { signal: new AbortController().signal };
+
+      const targeted = yield* Effect.promise(() =>
+        hook!(bash("pnpm test src/a.test.ts"), "tool-bash-0", signal),
+      );
+      assert.deepEqual(targeted, {});
+      const refused = yield* Effect.promise(() =>
+        hook!(bash("cd web && pnpm test"), "tool-bash-1", signal),
+      );
+      assert.deepEqual(refused, {
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason: HEAVY_COMMAND_REFUSAL,
+        },
+      });
+
+      const denied = yield* Fiber.join(deniedFiber);
+      assert.deepEqual(
+        denied._tag === "Some" && denied.value.type === "tool.denied"
+          ? denied.value.payload
+          : undefined,
+        { toolName: "Bash", toolUseId: "tool-bash-1", reason: HEAVY_COMMAND_REFUSAL },
+      );
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("reports network the sandbox blocked for a run's shell as tool.denied", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+        cwd: "/work/tree",
+        run: { systemPrompt: "", capabilities: ["read", "write", "shell"] },
+      });
+      const deniedFiber = yield* Stream.filter(
+        adapter.streamEvents,
+        (event) => event.type === "tool.denied",
+      ).pipe(Stream.runHead, Effect.forkChild);
+      yield* adapter.sendTurn({ threadId: session.threadId, input: "fetch it", attachments: [] });
+
+      harness.query.emit({
+        type: "stream_event",
+        session_id: "sdk-session-sandbox",
+        uuid: "stream-curl-start",
+        parent_tool_use_id: null,
+        event: {
+          type: "content_block_start",
+          index: 0,
+          content_block: {
+            type: "tool_use",
+            id: "tool-curl-1",
+            name: "Bash",
+            input: { command: "curl https://example.com" },
+          },
+        },
+      } as unknown as SDKMessage);
+      harness.query.emit({
+        type: "stream_event",
+        session_id: "sdk-session-sandbox",
+        uuid: "stream-curl-stop",
+        parent_tool_use_id: null,
+        event: { type: "content_block_stop", index: 0 },
+      } as unknown as SDKMessage);
+      harness.query.emit({
+        type: "user",
+        session_id: "sdk-session-sandbox",
+        uuid: "user-curl-result",
+        parent_tool_use_id: null,
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool-curl-1",
+              is_error: true,
+              content:
+                "curl: (56) CONNECT tunnel failed, response 403\n<sandbox_violations>\ndeny network-outbound example.com:443 (host is not on the allow list)\n</sandbox_violations>",
+            },
+          ],
+        },
+      } as unknown as SDKMessage);
+
+      const denied = yield* Fiber.join(deniedFiber);
+      assert.deepEqual(
+        denied._tag === "Some" && denied.value.type === "tool.denied"
+          ? denied.value.payload
+          : undefined,
+        {
+          toolName: "Bash",
+          toolUseId: "tool-curl-1",
+          reason: "deny network-outbound example.com:443 (host is not on the allow list)",
+        },
+      );
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("gives a run only the allowlisted environment", () => {
+    const harness = makeHarness({
+      environment: {
+        PATH: "/usr/bin",
+        HOME: "/Users/dev",
+        GH_TOKEN: "gh",
+        AWS_SECRET_ACCESS_KEY: "aws",
+        ANTHROPIC_API_KEY: "anthropic",
+      },
+    });
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+        run: { systemPrompt: "", capabilities: ["read"] },
+      });
+
+      assert.deepEqual(harness.getLastCreateQueryInput()?.options.env, {
+        PATH: "/usr/bin",
+        HOME: "/Users/dev",
+        ANTHROPIC_API_KEY: "anthropic",
+        GIT_TERMINAL_PROMPT: "0",
+      });
+    }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
     );
