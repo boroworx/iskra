@@ -1,9 +1,10 @@
-import type {
-  CardId,
-  CardStatus,
-  OrchestrationCard,
-  ProjectId,
-  RunSessionState,
+import {
+  CARD_AUTOFIX_ATTEMPTS,
+  type CardId,
+  type CardStatus,
+  type OrchestrationCard,
+  type ProjectId,
+  type RunSessionState,
 } from "@iskra/contracts";
 
 /** The board's columns, left to right. Landed and abandoned cards share Done. */
@@ -99,7 +100,13 @@ export interface CardSessionSummary {
   readonly since: string;
 }
 
-export type NeedsYouKind = "triage" | "spec" | "awaitingInput" | "sessionFailed";
+export type NeedsYouKind =
+  | "triage"
+  | "spec"
+  | "awaitingInput"
+  | "sessionFailed"
+  | "readyToMerge"
+  | "checksExhausted";
 
 export interface NeedsYouItem {
   readonly key: string;
@@ -118,6 +125,8 @@ export const NEEDS_YOU_LABEL: Record<NeedsYouKind, string> = {
   spec: "Approve or skip the spec",
   awaitingInput: "Its agent is waiting on you",
   sessionFailed: "Its session stopped without finishing",
+  readyToMerge: "Checks passed; approve the merge",
+  checksExhausted: "Checks kept failing; its agent stopped retrying",
 };
 
 /**
@@ -142,6 +151,23 @@ export function needsYouItems(input: {
       card.status !== "abandoned"
     ) {
       items.push({ ...base, key: `spec:${card.id}`, kind: "spec", since: card.updatedAt });
+    }
+    if (card.status === "inReview" && card.checks !== null) {
+      if (card.checks.state === "passed") {
+        items.push({
+          ...base,
+          key: `merge:${card.id}`,
+          kind: "readyToMerge",
+          since: card.checks.updatedAt,
+        });
+      } else if (card.checks.state === "failed" && card.checks.failedRuns >= CARD_AUTOFIX_ATTEMPTS) {
+        items.push({
+          ...base,
+          key: `checks:${card.id}`,
+          kind: "checksExhausted",
+          since: card.checks.updatedAt,
+        });
+      }
     }
   }
   for (const session of input.sessions) {

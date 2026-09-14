@@ -482,8 +482,12 @@ const make = Effect.gen(function* () {
           ? worker.enqueue({ kind: "deliver", cardId: event.payload.cardId })
           : Effect.void;
       case "card.status-changed":
-        return isFinishedCardStatus(event.payload.to)
-          ? worker.enqueue({ kind: "finished", cardId: event.payload.cardId, key: event.eventId })
+        if (isFinishedCardStatus(event.payload.to)) {
+          return worker.enqueue({ kind: "finished", cardId: event.payload.cardId, key: event.eventId });
+        }
+        // Back to work after failed checks, a comment or a conflict: its agent needs a live session.
+        return event.payload.move === "returnToWork"
+          ? worker.enqueue({ kind: "assigned", cardId: event.payload.cardId, key: event.eventId })
           : Effect.void;
       case "thread.session-set": {
         const { threadId, session } = event.payload;

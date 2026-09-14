@@ -21,6 +21,7 @@ import {
   ProjectId,
   ThreadId,
   CardDiffStat,
+  CardChecks,
 } from "@iskra/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
@@ -50,6 +51,7 @@ export const ProjectionCard = Schema.Struct({
   snoozedAt: Schema.NullOr(IsoDateTime),
   activityAt: IsoDateTime,
   diffStat: Schema.NullOr(CardDiffStat),
+  checks: Schema.NullOr(CardChecks),
   relations: Schema.Array(CardRelation),
   createdBy: CardAuthor,
   createdAt: IsoDateTime,
@@ -64,6 +66,7 @@ export const ProjectionCardDbRow = ProjectionCard.mapFields(
     relations: Schema.fromJsonString(Schema.Array(CardRelation)),
     createdBy: Schema.fromJsonString(CardAuthor),
     diffStat: Schema.fromJsonString(Schema.NullOr(CardDiffStat)),
+    checks: Schema.fromJsonString(Schema.NullOr(CardChecks)),
   }),
 );
 

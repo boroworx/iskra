@@ -38,6 +38,7 @@ const card = (id: string, overrides: Partial<OrchestrationCard> = {}): Orchestra
   snoozedAt: null,
   activityAt: at(0),
   diffStat: null,
+  checks: null,
   ...overrides,
 });
 
@@ -125,6 +126,32 @@ describe("needsYouItems", () => {
     const untilActivity = { ...snoozed, snoozedUntil: null };
     expect(isCardSnoozed(untilActivity, Date.parse("2026-01-08T00:00:00.000Z"))).toBe(true);
     expect(isCardSnoozed({ ...untilActivity, activityAt: at(11) }, Date.parse(at(30)))).toBe(false);
+  });
+});
+
+describe("needsYouItems in review", () => {
+  it("asks for a merge once checks pass, and for a person once the agent's retries run out", () => {
+    const checks = (state: "passed" | "failed", failedRuns: number) => ({
+      state,
+      failedRuns,
+      summary: "",
+      updatedAt: at(3),
+    });
+    const items = needsYouItems({
+      cards: [
+        card("passing", { status: "inReview", specState: "approved", checks: checks("passed", 0) }),
+        card("retrying", { status: "inReview", specState: "approved", checks: checks("failed", 2) }),
+        card("exhausted", { status: "inReview", specState: "approved", checks: checks("failed", 3) }),
+        card("unchecked", { status: "inReview", specState: "approved" }),
+      ],
+      sessions: [],
+      now: Date.parse(at(10)),
+    });
+
+    expect(items.map((item) => [item.kind, item.cardId])).toEqual([
+      ["readyToMerge", "passing"],
+      ["checksExhausted", "exhausted"],
+    ]);
   });
 });
 

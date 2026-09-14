@@ -691,6 +691,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               snoozedAt: null,
               activityAt: event.payload.createdAt,
               diffStat: null,
+              checks: null,
               createdBy: event.payload.createdBy,
               createdAt: event.payload.createdAt,
               updatedAt: event.payload.updatedAt,
@@ -786,6 +787,14 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             }));
             return;
           }
+
+          case "card.checks-updated":
+            yield* patchCard(event.payload.cardId, (row) => ({
+              ...row,
+              checks: event.payload.checks,
+              activityAt: event.payload.checks.updatedAt,
+            }));
+            return;
 
           case "card.diff-measured":
             yield* patchCard(event.payload.cardId, (row) => ({

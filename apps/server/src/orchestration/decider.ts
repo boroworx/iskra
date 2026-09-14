@@ -2537,6 +2537,114 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "card.checks.record": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      const previousFailures = card.checks?.failedRuns ?? 0;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "card",
+          aggregateId: command.cardId,
+          occurredAt: command.updatedAt,
+          commandId: command.commandId,
+        })),
+        type: "card.checks-updated",
+        payload: {
+          cardId: command.cardId,
+          checks: {
+            state: command.state,
+            // A pass clears the streak; a run in progress keeps it until it ends.
+            failedRuns:
+              command.state === "passed"
+                ? 0
+                : command.state === "failed"
+                  ? previousFailures + 1
+                  : previousFailures,
+            summary: command.summary,
+            updatedAt: command.updatedAt,
+          },
+        },
+      };
+    }
+
+    // Invariant 8: overlaps are flagged by the server when a card lands.
+    case "card.overlap.flag": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      const other = yield* requireCard({ readModel, command, cardId: command.otherCardId });
+      if (other.id === card.id || other.projectId !== card.projectId) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Only two different cards of one project can overlap.",
+        });
+      }
+      if (
+        card.relations.some(
+          (relation) => relation.kind === "overlaps" && relation.cardId === other.id,
+        )
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "These cards are already flagged as overlapping.",
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "card",
+          aggregateId: command.cardId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "card.relation-added",
+        payload: {
+          cardId: command.cardId,
+          kind: "overlaps",
+          otherCardId: command.otherCardId,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "card.review.comment": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      if (isFinishedCardStatus(card.status)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A card that has landed or been abandoned takes no review comments.",
+        });
+      }
+      const comment: PlannedOrchestrationEvent = {
+        ...(yield* withEventBase({
+          aggregateKind: "card",
+          aggregateId: command.cardId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "card.message-posted",
+        payload: {
+          cardId: command.cardId,
+          messageId: command.messageId,
+          authorKind: "human",
+          authorId: CHANNEL_HUMAN_AUTHOR_ID,
+          body: command.body,
+          runThreadId: null,
+          forOwner: true,
+          createdAt: command.createdAt,
+        },
+      };
+      // A comment on a card in review sends it back to work, with the comment as its next turn.
+      return card.status === "inReview" || card.status === "landing"
+        ? [
+            comment,
+            yield* decideCardMove({
+              readModel,
+              command,
+              move: "returnToWork",
+              reason: "A review comment came in.",
+            }),
+          ]
+        : comment;
+    }
+
     case "card.diff.record": {
       yield* requireCard({ readModel, command, cardId: command.cardId });
       return {

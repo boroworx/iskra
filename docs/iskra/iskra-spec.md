@@ -675,6 +675,22 @@ review with comments to the delegate, approve merge, serialized landing, sub-car
 `blockedBy` holds, overlap relations. _Accept when:_ a failing check is fixed by the delegate with
 no human action; a third failure raises Needs you; two approved cards land one after the other; a
 conflicting card returns to `inProgress` with the conflict in its next turn; an overlap is flagged.
+_Accepted:_ project scripts with the `check` role are the project's checks. `CardReviewReactor`
+runs them in the card's worktree when it enters `inReview` and records `card.checks-updated`
+with the run's state, a summary and failed runs in a row. `CardReviewReactor.test.ts` runs against
+a real git repository: a failing check returns the card to work with the output as its agent's next
+turn, and once the worktree is fixed and review requested again the checks pass with no person
+involved; the third failure in a row leaves the card in review, which Needs you lists as checks
+exhausted (and a card with passing checks as ready to merge, in `cards.test.ts`). Landing is one
+card at a time: the card's uncommitted work is committed, rebased onto its base, checked again and
+fast-forwarded where the base is checked out. Two approved cards land in order with both changes
+on `main` and its checkout clean; a card whose rebase conflicts returns to `inProgress` with the
+conflicting files in its next turn, the rebase aborted and `main` untouched. When a card lands,
+`blockedBy` on the cards it blocked becomes `related`, and a card in progress changing the same
+files gets an `overlaps` relation and a note to rebase. When a card returns to work, its agent's
+owner session starts again if none is live. A review comment (`card.review.comment`) goes to the
+agent and sends a card in review back to work (`decider.review.test.ts`). The board shows the
+checks on cards in review. A side-by-side diff review view comes with M2.8.
 
 **M2.7 — Budgets.** Spend per card from usage pricing, the default cap, stopping at the cap,
 raising it, accepting unpriced models. _Accept when:_ a turn is refused at the cap and resumes after

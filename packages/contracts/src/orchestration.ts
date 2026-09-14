@@ -408,7 +408,7 @@ export const ProjectScriptIcon = Schema.Literals([
 export type ProjectScriptIcon = typeof ProjectScriptIcon.Type;
 
 /** What a script does for a card's worktree: prepare it, run the app, or clean up before removal. */
-export const ProjectScriptRole = Schema.Literals(["setup", "run", "archive"]);
+export const ProjectScriptRole = Schema.Literals(["setup", "run", "archive", "check"]);
 export type ProjectScriptRole = typeof ProjectScriptRole.Type;
 
 export const ProjectScript = Schema.Struct({
@@ -622,6 +622,19 @@ export const CardDiffStat = Schema.Struct({
 });
 export type CardDiffStat = typeof CardDiffStat.Type;
 
+/** A card's project checks: running, or how the last run ended and how many failed in a row. */
+export const CardChecks = Schema.Struct({
+  state: Schema.Literals(["running", "passed", "failed"]),
+  failedRuns: NonNegativeInt,
+  // The failing scripts and the tail of their output, or why nothing ran.
+  summary: Schema.String,
+  updatedAt: IsoDateTime,
+});
+export type CardChecks = typeof CardChecks.Type;
+
+/** Failed check runs in a row after which a card stops going back to its agent and waits for a person. */
+export const CARD_AUTOFIX_ATTEMPTS = 3;
+
 /** Ports reserved for each card's worktree, starting at its `portBase` (ISKRA_PORT). */
 export const CARD_PORT_BLOCK_SIZE = 10;
 
@@ -655,6 +668,8 @@ export const OrchestrationCard = Schema.Struct({
   activityAt: IsoDateTime,
   // The worktree's changes against the base, measured when an owner turn settles.
   diffStat: Schema.NullOr(CardDiffStat),
+  // The last run of the project's check scripts, from review or landing.
+  checks: Schema.NullOr(CardChecks),
   relations: Schema.Array(CardRelation),
   createdBy: CardAuthor,
   createdAt: IsoDateTime,
@@ -1703,6 +1718,33 @@ const CardDiffRecordCommand = Schema.Struct({
   measuredAt: IsoDateTime,
 });
 
+// Server-only: the review reactor records check runs, and flags overlaps when a card lands.
+const CardChecksRecordCommand = Schema.Struct({
+  type: Schema.Literal("card.checks.record"),
+  commandId: CommandId,
+  cardId: CardId,
+  state: CardChecks.fields.state,
+  summary: Schema.String,
+  updatedAt: IsoDateTime,
+});
+
+const CardOverlapFlagCommand = Schema.Struct({
+  type: Schema.Literal("card.overlap.flag"),
+  commandId: CommandId,
+  cardId: CardId,
+  otherCardId: CardId,
+});
+
+/** A person's review comment: it goes to the card's agent, and a card in review goes back to work. */
+const CardReviewCommentCommand = Schema.Struct({
+  type: Schema.Literal("card.review.comment"),
+  commandId: CommandId,
+  cardId: CardId,
+  messageId: MessageId,
+  body: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
 const CardSessionStartCommand = Schema.Struct({
   type: Schema.Literal("card.session.start"),
   commandId: CommandId,
@@ -2184,6 +2226,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   CardSpecSubmitCommand,
   CardSnoozeCommand,
   CardUnsnoozeCommand,
+  CardReviewCommentCommand,
   ChannelCreateCommand,
   ChannelUpdateCommand,
   ChannelArchiveCommand,
@@ -2249,6 +2292,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   CardSpecSubmitCommand,
   CardSnoozeCommand,
   CardUnsnoozeCommand,
+  CardReviewCommentCommand,
   ChannelCreateCommand,
   ChannelUpdateCommand,
   ChannelArchiveCommand,
@@ -2409,6 +2453,8 @@ const InternalOrchestrationCommand = Schema.Union([
   CardMessageRecordCommand,
   CardDeliveryUpdateCommand,
   CardDiffRecordCommand,
+  CardChecksRecordCommand,
+  CardOverlapFlagCommand,
   ChannelAgentWakeCommand,
   ChannelRunStartCommand,
   ChannelMessageAgentPostCommand,
@@ -2463,6 +2509,7 @@ export const OrchestrationEventType = Schema.Literals([
   "card.snoozed",
   "card.unsnoozed",
   "card.diff-measured",
+  "card.checks-updated",
   "channel.created",
   "channel.updated",
   "channel.archived",
@@ -2718,6 +2765,11 @@ export const CardDiffMeasuredPayload = Schema.Struct({
   cardId: CardId,
   diffStat: CardDiffStat,
   measuredAt: IsoDateTime,
+});
+
+export const CardChecksUpdatedPayload = Schema.Struct({
+  cardId: CardId,
+  checks: CardChecks,
 });
 
 /** A plan gate decision and who made it; each also joins the card's decision log. */
@@ -3189,6 +3241,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("card.diff-measured"),
     payload: CardDiffMeasuredPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.checks-updated"),
+    payload: CardChecksUpdatedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

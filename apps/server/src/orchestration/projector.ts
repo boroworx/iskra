@@ -1252,6 +1252,7 @@ export function projectEvent(
             snoozedAt: null,
             activityAt: payload.createdAt,
             diffStat: null,
+            checks: null,
             createdBy: payload.createdBy,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
@@ -1480,6 +1481,16 @@ export function projectEvent(
           ...card,
           snoozedUntil: event.payload.snoozedUntil,
           snoozedAt: event.payload.snoozedAt,
+        })),
+      });
+
+    case "card.checks-updated":
+      return Effect.succeed({
+        ...nextBase,
+        cards: updateCard(nextBase.cards ?? [], event.payload.cardId, (card) => ({
+          ...card,
+          checks: event.payload.checks,
+          activityAt: event.payload.checks.updatedAt,
         })),
       });
 

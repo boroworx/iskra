@@ -104,6 +104,9 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "card.snooze":
     case "card.unsnooze":
     case "card.diff.record":
+    case "card.checks.record":
+    case "card.overlap.flag":
+    case "card.review.comment":
       return {
         aggregateKind: "card",
         aggregateId: command.cardId,

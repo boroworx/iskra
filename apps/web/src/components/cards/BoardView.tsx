@@ -10,12 +10,13 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@iskra/client-runtime/state/runtime";
-import type {
-  EnvironmentId,
-  OrchestrationAgentShell,
-  OrchestrationCardShell,
-  ProjectId,
-  RunSessionState,
+import {
+  CARD_AUTOFIX_ATTEMPTS,
+  type EnvironmentId,
+  type OrchestrationAgentShell,
+  type OrchestrationCardShell,
+  type ProjectId,
+  type RunSessionState,
 } from "@iskra/contracts";
 import {
   DndContext,
@@ -197,6 +198,13 @@ const CardFace = memo(function CardFace(props: {
     blocked ? "Blocked" : null,
     isCardSnoozed(card, props.now) ? "Snoozed" : null,
     sessionBadge ?? null,
+    card.checks === null || card.status !== "inReview"
+      ? null
+      : card.checks.state === "running"
+        ? "Checks running"
+        : card.checks.state === "passed"
+          ? "Checks passed"
+          : `Checks failed ${card.checks.failedRuns}/${CARD_AUTOFIX_ATTEMPTS}`,
   ].filter((badge): badge is string => badge !== null);
 
   return (
@@ -223,7 +231,10 @@ const CardFace = memo(function CardFace(props: {
               key={badge}
               className={cn(
                 "rounded px-1.5 py-0.5 text-[11px] leading-none",
-                badge === "Needs you" || badge === "Failed" || badge === "Blocked"
+                badge === "Needs you" ||
+                  badge === "Failed" ||
+                  badge === "Blocked" ||
+                  badge.startsWith("Checks failed")
                   ? "bg-destructive/15 text-destructive-foreground"
                   : "bg-muted text-muted-foreground",
               )}

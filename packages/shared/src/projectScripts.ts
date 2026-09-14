@@ -79,6 +79,11 @@ export function setupProjectScript(scripts: readonly ProjectScript[]): ProjectSc
   );
 }
 
+/** The scripts that verify a card's worktree: tests, lint, a verify command. All must pass. */
+export function checkProjectScripts(scripts: readonly ProjectScript[]): readonly ProjectScript[] {
+  return scripts.filter((script) => script.role === "check");
+}
+
 /** The script that cleans up a card's worktree before it is removed. */
 export function archiveProjectScript(scripts: readonly ProjectScript[]): ProjectScript | null {
   return scripts.find((script) => script.role === "archive") ?? null;

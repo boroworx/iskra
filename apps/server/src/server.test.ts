@@ -124,6 +124,7 @@ import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSna
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor.ts";
 import * as PullRequestSyncReactor from "./orchestration/PullRequestSyncReactor.ts";
 import * as AgentDefinitionSync from "./orchestration/AgentDefinitionSync.ts";
+import * as CardReviewReactor from "./orchestration/CardReviewReactor.ts";
 import * as CardSessionReactor from "./orchestration/CardSessionReactor.ts";
 import * as CardWorkspace from "./orchestration/CardWorkspace.ts";
 import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
@@ -984,6 +985,9 @@ const buildAppUnderTest = (options?: {
             start: () => Effect.void,
           }),
           Layer.mock(CardSessionReactor.CardSessionReactor)({
+            start: () => Effect.void,
+          }),
+          Layer.mock(CardReviewReactor.CardReviewReactor)({
             start: () => Effect.void,
           }),
         ),
@@ -9881,6 +9885,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   snoozedAt: null,
                   activityAt: now,
                   diffStat: null,
+                  checks: null,
                   createdBy: { kind: "human" as const, id: "human" },
                   createdAt: now,
                   updatedAt: now,

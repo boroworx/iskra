@@ -45,7 +45,7 @@ export const IskraProjectFileScript = Schema.Struct({
   role: Schema.optionalKey(
     ProjectScriptRole.annotate({
       description:
-        'What the script does for a card\'s worktree: "setup" prepares it, "run" starts the app, "archive" cleans up before it is removed.',
+        'What the script does for a card\'s worktree: "setup" prepares it, "run" starts the app, "check" verifies it before review and landing, "archive" cleans up before it is removed.',
     }),
   ),
   exclusive: Schema.optionalKey(
