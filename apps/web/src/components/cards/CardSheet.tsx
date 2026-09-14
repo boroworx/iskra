@@ -11,6 +11,7 @@ import {
   CardRelationKind,
   MessageId,
   type AgentId,
+  type CardActivity,
   type CardId,
   type CardStatus,
   type EnvironmentId,
@@ -23,7 +24,9 @@ import { useMemo, useState, type ReactNode } from "react";
 
 import { randomUUID } from "~/lib/utils";
 import { cardEnvironment } from "~/state/cards";
+import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { CardActivityTimeline } from "./CardActivityTimeline";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -102,6 +105,12 @@ function CardSheetBody(props: {
   const setBudget = useAtomCommand(cardEnvironment.setBudget);
   const snooze = useAtomCommand(cardEnvironment.snooze);
   const unsnooze = useAtomCommand(cardEnvironment.unsnooze);
+
+  // The body only exists while the sheet is open, so the card's stream lives exactly that long.
+  const activity = useEnvironmentQuery(
+    cardEnvironment.activity({ environmentId, input: { cardId: card.id } }),
+  );
+  const activities = activity.data?.activities ?? NO_ACTIVITIES;
 
   const [title, setTitle] = useState(card.title);
   const [spec, setSpec] = useState(card.spec);
@@ -548,10 +557,20 @@ function CardSheetBody(props: {
             </div>
           </Section>
         ) : null}
+
+        <Section label="Activity">
+          <CardActivityTimeline
+            activities={activities}
+            agents={props.agents}
+            error={activity.error}
+          />
+        </Section>
       </SheetPanel>
     </>
   );
 }
+
+const NO_ACTIVITIES: ReadonlyArray<CardActivity> = [];
 
 function Section(props: { readonly label: string; readonly children: ReactNode }) {
   return (
