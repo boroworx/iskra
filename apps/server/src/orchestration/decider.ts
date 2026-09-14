@@ -2171,16 +2171,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "agent.create": {
-      yield* requireProject({
-        readModel,
-        command,
-        projectId: command.projectId,
-      });
-      yield* requireAgentAbsent({
-        readModel,
-        command,
-        agentId: command.agentId,
-      });
+      yield* requireProject({ readModel, command, projectId: command.projectId });
+      yield* requireAgentAbsent({ readModel, command, agentId: command.agentId });
       yield* requireAgentNameAvailable({
         readModel,
         command,
@@ -2205,11 +2197,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "agent.update": {
-      const agent = yield* requireAgent({
-        readModel,
-        command,
-        agentId: command.agentId,
-      });
+      const agent = yield* requireAgent({ readModel, command, agentId: command.agentId });
       if (command.name !== undefined) {
         yield* requireAgentNameAvailable({
           readModel,
@@ -2238,11 +2226,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "agent.archive": {
-      const agent = yield* requireAgent({
-        readModel,
-        command,
-        agentId: command.agentId,
-      });
+      const agent = yield* requireAgent({ readModel, command, agentId: command.agentId });
       if (agent.archivedAt !== null) {
         return yield* refuse(command, `Agent '${command.agentId}' is already archived.`);
       }
@@ -2257,11 +2241,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "agent.unarchive": {
-      const agent = yield* requireAgent({
-        readModel,
-        command,
-        agentId: command.agentId,
-      });
+      const agent = yield* requireAgent({ readModel, command, agentId: command.agentId });
       if (agent.archivedAt === null) {
         return yield* refuse(command, `Agent '${command.agentId}' is not archived.`);
       }
@@ -2276,16 +2256,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "card.create": {
-      yield* requireProject({
-        readModel,
-        command,
-        projectId: command.projectId,
-      });
-      yield* requireCardAbsent({
-        readModel,
-        command,
-        cardId: command.cardId,
-      });
+      yield* requireProject({ readModel, command, projectId: command.projectId });
+      yield* requireCardAbsent({ readModel, command, cardId: command.cardId });
       const channelId = command.channelId ?? null;
       if (
         channelId !== null &&
@@ -3353,16 +3325,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "channel.create": {
-      yield* requireProject({
-        readModel,
-        command,
-        projectId: command.projectId,
-      });
-      yield* requireChannelAbsent({
-        readModel,
-        command,
-        channelId: command.channelId,
-      });
+      yield* requireProject({ readModel, command, projectId: command.projectId });
+      yield* requireChannelAbsent({ readModel, command, channelId: command.channelId });
       yield* requireValidChannelMembers({
         readModel,
         command,
@@ -3399,11 +3363,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "channel.update": {
-      const channel = yield* requireChannel({
-        readModel,
-        command,
-        channelId: command.channelId,
-      });
+      const channel = yield* requireChannel({ readModel, command, channelId: command.channelId });
       if (command.memberAgentIds !== undefined) {
         yield* requireValidChannelMembers({
           readModel,
@@ -3446,11 +3406,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "channel.archive": {
-      const channel = yield* requireChannel({
-        readModel,
-        command,
-        channelId: command.channelId,
-      });
+      const channel = yield* requireChannel({ readModel, command, channelId: command.channelId });
       if (channel.archivedAt !== null) {
         return yield* refuse(command, `Channel '${command.channelId}' is already archived.`);
       }
@@ -3465,11 +3421,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "channel.unarchive": {
-      const channel = yield* requireChannel({
-        readModel,
-        command,
-        channelId: command.channelId,
-      });
+      const channel = yield* requireChannel({ readModel, command, channelId: command.channelId });
       if (channel.archivedAt === null) {
         return yield* refuse(command, `Channel '${command.channelId}' is not archived.`);
       }
@@ -3493,11 +3445,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "channel.message.post": {
-      const channel = yield* requireChannel({
-        readModel,
-        command,
-        channelId: command.channelId,
-      });
+      const channel = yield* requireChannel({ readModel, command, channelId: command.channelId });
       if (channel.archivedAt !== null) {
         return yield* refuse(
           command,
@@ -3582,16 +3530,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "channel.agent.wake": {
-      const channel = yield* requireChannel({
-        readModel,
-        command,
-        channelId: command.channelId,
-      });
-      const agent = yield* requireAgent({
-        readModel,
-        command,
-        agentId: command.agentId,
-      });
+      const channel = yield* requireChannel({ readModel, command, channelId: command.channelId });
+      const agent = yield* requireAgent({ readModel, command, agentId: command.agentId });
       if (channel.archivedAt !== null) {
         return yield* refuse(
           command,
@@ -3617,16 +3557,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "channel.run.start": {
-      yield* requireChannel({
-        readModel,
-        command,
-        channelId: command.channelId,
-      });
-      yield* requireAgent({
-        readModel,
-        command,
-        agentId: command.agentId,
-      });
+      yield* requireChannel({ readModel, command, channelId: command.channelId });
+      yield* requireAgent({ readModel, command, agentId: command.agentId });
       // Invariant 1: a conversation run never writes. Writing needs a card.
       if (command.capabilities.some((capability) => capability !== "read")) {
         return yield* refuse(
@@ -3658,11 +3590,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "channel.delivery.update": {
-      yield* requireChannel({
-        readModel,
-        command,
-        channelId: command.channelId,
-      });
+      yield* requireChannel({ readModel, command, channelId: command.channelId });
       return yield* planned(command, "channel", command.channelId, command.updatedAt, {
         type: "channel.delivery-updated",
         payload: {
@@ -3677,16 +3605,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "channel.message.agent.post": {
-      const channel = yield* requireChannel({
-        readModel,
-        command,
-        channelId: command.channelId,
-      });
-      yield* requireAgent({
-        readModel,
-        command,
-        agentId: command.agentId,
-      });
+      const channel = yield* requireChannel({ readModel, command, channelId: command.channelId });
+      yield* requireAgent({ readModel, command, agentId: command.agentId });
       if (channel.archivedAt !== null) {
         return yield* refuse(
           command,
