@@ -4,7 +4,7 @@
 
 - [Install Iskra](./user/install.md)
 - [Messages and context](./user/composer.md)
-- [Working with threads](./user/thread-sidebar.md)
+- [Channels, agents, and the board](./user/channels-agents-board.md)
 - [Permission modes](./user/permission-modes.md)
 - [Terminal history](./user/terminal.md)
 - [Source control](./user/source-control.md)

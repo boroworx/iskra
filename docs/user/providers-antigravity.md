@@ -102,8 +102,7 @@ mean this provider can use it.
 
 Antigravity groups subagent activity into batches. You cannot open or control
 individual subagents, and an idle batch does not confirm that every child
-succeeded. See [agent work](./thread-sidebar.md#inspect-agent-work) for where to
-inspect activity.
+succeeded.
 
 ## Accounts and removal
 
