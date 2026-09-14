@@ -1,13 +1,17 @@
 import {
   CARD_PORT_BLOCK_SIZE,
+  CommandId,
   ProviderInstanceId,
   ThreadId,
+  type CardActivity,
   type CardEvidenceItem,
   type CardId,
+  type CardPriority,
   type CardRiskClaims,
   type CardScopeFlag,
   type EnvironmentId,
   type PreviewAutomationSnapshot,
+  type ProjectId,
   type ProjectScript,
   type Reason,
 } from "@iskra/contracts";
@@ -24,6 +28,108 @@ import { toSafeThreadAttachmentSegment } from "../attachmentStore.ts";
 import { ServerConfig } from "../config.ts";
 import * as PreviewAutomationBroker from "../mcp/PreviewAutomationBroker.ts";
 import { ProcessRunner } from "../processRunner.ts";
+import type * as CardWorkspace from "./CardWorkspace.ts";
+import type * as HostAdmission from "./HostAdmission.ts";
+import type * as OrchestrationEngine from "./Services/OrchestrationEngine.ts";
+
+// ---------------------------------------------------------------------------------------------
+// run_checks
+
+export const RUN_CHECKS_RESULT_CODE = "runChecksResult";
+/** A queued run_checks job; one without a result activity is queued again after a restart. */
+export const RUN_CHECKS_REQUESTED_CODE = "runChecksRequested";
+
+type RunChecksScope = "targeted" | "full";
+
+/** The text a run_checks request is recorded with, which `runChecksRequestOf` reads back. */
+export const runChecksRequestBody = (scope: RunChecksScope, filter: string | undefined) =>
+  `run_checks (${scope}${filter === undefined ? "" : `: ${filter}`}) is queued.`;
+
+const RUN_CHECKS_REQUEST = /^run_checks \((full|targeted)(?:: ([\s\S]+))?\) is queued\.$/;
+
+/** The job a run_checks request activity queued, or null for any other activity. */
+export function runChecksRequestOf(
+  activity: Pick<CardActivity, "activityId" | "body" | "reason">,
+): { readonly jobId: string; readonly scope: RunChecksScope; readonly filter: string | undefined } | null {
+  const match = activity.reason?.code === RUN_CHECKS_REQUESTED_CODE ? RUN_CHECKS_REQUEST.exec(activity.body) : null;
+  if (match === null || !activity.activityId.endsWith(":request")) return null;
+  return {
+    jobId: activity.activityId.slice(0, -":request".length),
+    scope: match[1] as RunChecksScope,
+    filter: match[2],
+  };
+}
+
+/** The text a run_checks result reaches the owner as. */
+export function renderRunChecksResult(scope: RunChecksScope, run: CardWorkspace.CardChecksRun): string {
+  if (run.results.length === 0) {
+    return `run_checks (${scope}) ran nothing.${run.summary.trim().length > 0 ? ` ${run.summary.trim()}` : ""}`;
+  }
+  return [
+    `run_checks (${scope}) ${run.passed ? "passed" : "failed"}.`,
+    ...run.results.map((result) => {
+      const failed = result.exitCode !== 0 || result.timedOut;
+      const line = `- ${result.name}: ${result.timedOut ? "timed out" : `exit ${result.exitCode ?? "none"}`} in ${Math.round(result.durationMs / 1000)}s`;
+      return failed && result.logTail.trim().length > 0
+        ? `${line}\n\`\`\`\n${result.logTail.trimEnd()}\n\`\`\``
+        : line;
+    }),
+  ].join("\n");
+}
+
+/**
+ * Runs a run_checks job through machine admission and records its result for the owner's next
+ * turn; the result's activity id is the job id, so a job run twice records one result.
+ */
+export const runChecksJob = (input: {
+  readonly engine: OrchestrationEngine.OrchestrationEngineService["Service"];
+  readonly admission: HostAdmission.HostAdmission["Service"];
+  readonly workspace: CardWorkspace.CardWorkspace["Service"];
+  readonly card: { readonly id: CardId; readonly projectId: ProjectId; readonly priority: CardPriority };
+  readonly threadId: ThreadId | null;
+  readonly jobId: string;
+  readonly scope: RunChecksScope;
+  readonly filter: string | undefined;
+}): Effect.Effect<void> => {
+  const deliver = (body: string) =>
+    Effect.gen(function* () {
+      yield* input.engine.dispatch({
+        type: "card.activity.record",
+        commandId: CommandId.make(`server:mcp-board-run-checks:${input.jobId}`),
+        activityId: input.jobId,
+        cardId: input.card.id,
+        kind: "message",
+        author: { kind: "system", id: "system" },
+        body,
+        runThreadId: input.threadId,
+        deliverTo: "builder",
+        elicitation: null,
+        answers: null,
+        status: null,
+        evidenceId: null,
+        reason: { code: RUN_CHECKS_RESULT_CODE, text: body.split("\n")[0]!.slice(0, 200) },
+        createdAt: DateTime.formatIso(yield* DateTime.now),
+      });
+    });
+  return input.admission
+    .run(
+      {
+        cardId: input.card.id,
+        projectId: input.card.projectId,
+        priority: input.card.priority,
+        label: `run_checks ${input.scope}`,
+        kind: "runChecks",
+      },
+      input.workspace.runChecks({ cardId: input.card.id, scope: input.scope, filter: input.filter }),
+    )
+    .pipe(
+      Effect.flatMap((run) => deliver(renderRunChecksResult(input.scope, run))),
+      Effect.catch((error) => deliver(`run_checks (${input.scope}) couldn't run: ${error.message}`)),
+      Effect.catchCause((cause) =>
+        Effect.logWarning("run_checks result was not delivered", { jobId: input.jobId, cause }),
+      ),
+    );
+};
 
 /** The reason code a builder's review request is recorded with; the review gate starts on it. */
 export const REVIEW_REQUESTED_CODE = "reviewRequested";

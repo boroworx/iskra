@@ -24,6 +24,11 @@ import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as CardReviewReactor from "./CardReviewReactor.ts";
+import {
+  RUN_CHECKS_REQUESTED_CODE,
+  RUN_CHECKS_RESULT_CODE,
+  runChecksRequestBody,
+} from "./CardEvidence.ts";
 import * as CardWorkspace from "./CardWorkspace.ts";
 import * as HostAdmission from "./HostAdmission.ts";
 import { OrchestrationEngineLive } from "./Layers/OrchestrationEngine.ts";
@@ -169,12 +174,16 @@ const layer = CardReviewReactor.layer.pipe(
  */
 const makeWorld = Effect.fn("makeWorld")(function* (
   name: string,
-  options: { readonly ciFixRounds?: number; readonly checksWaived?: boolean } = {},
+  options: {
+    readonly ciFixRounds?: number;
+    readonly checksWaived?: boolean;
+    readonly startReactor?: boolean;
+  } = {},
 ) {
   const engine = yield* OrchestrationEngineService;
   const snapshotQuery = yield* ProjectionSnapshotQuery;
   const reactor = yield* CardReviewReactor.CardReviewReactor;
-  yield* reactor.start();
+  if (options.startReactor !== false) yield* reactor.start();
   const events = yield* engine.subscribeDomainEvents;
   const nextEvent = nextEventOn(events);
   const repo = yield* makeGitRepo(`iskra-review-${name}-`);
@@ -419,6 +428,46 @@ it.layer(layer)("CardReviewReactor", (it) => {
       yield* waived.write("a.ts", "export const a = 3;\n");
       yield* waived.requestReview();
       yield* waived.enteredReview();
+    }),
+  );
+
+  it.effect("queues a run_checks request again after a restart, until its result is in", () =>
+    Effect.gen(function* () {
+      yield* setFakes({ checks: [check("test")], passes: true, webPort: null, admitted: [] });
+      const world = yield* makeWorld("resume", { startReactor: false });
+      const record = (activityId: string, code: string, body: string) =>
+        world.engine.dispatch({
+          type: "card.activity.record",
+          commandId: world.commandId(),
+          activityId,
+          cardId: world.cardId,
+          kind: "message",
+          author: { kind: "system", id: "system" },
+          body,
+          runThreadId: null,
+          deliverTo: code === RUN_CHECKS_RESULT_CODE ? "builder" : null,
+          elicitation: null,
+          answers: null,
+          status: null,
+          evidenceId: null,
+          reason: { code, text: body },
+          createdAt: now,
+        });
+      yield* record("run-checks-lost:request", RUN_CHECKS_REQUESTED_CODE, runChecksRequestBody("full", undefined));
+      yield* record("run-checks-done:request", RUN_CHECKS_REQUESTED_CODE, runChecksRequestBody("targeted", "limits"));
+      yield* record("run-checks-done", RUN_CHECKS_RESULT_CODE, "run_checks (targeted) passed.");
+
+      const resumed = world.nextEvent(
+        "card.activity-recorded",
+        (event) => event.payload.activityId === "run-checks-lost",
+      );
+      yield* world.reactor.start();
+      expect((yield* resumed).payload).toMatchObject({
+        deliverTo: "builder",
+        reason: { code: RUN_CHECKS_RESULT_CODE },
+      });
+      yield* world.reactor.drain;
+      expect(fakes.admitted).toEqual(["runChecks"]);
     }),
   );
 

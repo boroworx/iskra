@@ -30,6 +30,9 @@ import {
   judgeScope,
   REVIEW_REQUESTED_CODE,
   riskClaimsOf,
+  RUN_CHECKS_RESULT_CODE,
+  runChecksJob,
+  runChecksRequestOf,
   runScriptOf,
   uiEvidenceRequired,
 } from "./CardEvidence.ts";
@@ -359,9 +362,39 @@ const make = Effect.gen(function* () {
     }
   };
 
+  /** run_checks jobs a restart dropped: every request on a card at work without its result runs again. */
+  const resumeRunChecks = Effect.fn("CardReviewReactor.resumeRunChecks")(function* () {
+    const model = yield* readModel();
+    for (const card of model.cards ?? []) {
+      if (card.status !== "inProgress" || card.worktreePath === null) continue;
+      const { activities } = yield* snapshotQuery.getCardActivity(card.id, 200);
+      const answered = new Set(
+        activities.flatMap((activity) =>
+          activity.reason?.code === RUN_CHECKS_RESULT_CODE ? [activity.activityId] : [],
+        ),
+      );
+      for (const activity of activities) {
+        const request = runChecksRequestOf(activity);
+        if (request === null || answered.has(request.jobId)) continue;
+        yield* Effect.forkScoped(
+          runChecksJob({ engine, admission, workspace, card, threadId: activity.runThreadId, ...request }),
+        );
+      }
+    }
+  });
+
   const start = Effect.fn("CardReviewReactor.start")(function* () {
     const events = yield* engine.subscribeDomainEvents;
     yield* forkParked(Stream.runForEach(events, processEvent));
+    yield* forkParked(
+      resumeRunChecks().pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.failCause(cause)
+            : Effect.logWarning("queued run_checks jobs were not resumed", { cause: Cause.pretty(cause) }),
+        ),
+      ),
+    );
   });
 
   return { start, drain } satisfies CardReviewReactor["Service"];

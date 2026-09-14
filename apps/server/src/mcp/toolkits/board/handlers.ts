@@ -18,6 +18,9 @@ import * as Option from "effect/Option";
 import {
   REVIEW_REQUESTED_CODE,
   renderReviewRequest,
+  RUN_CHECKS_REQUESTED_CODE,
+  runChecksJob,
+  runChecksRequestBody,
 } from "../../../orchestration/CardEvidence.ts";
 import * as CardWorkspace from "../../../orchestration/CardWorkspace.ts";
 import * as HostAdmission from "../../../orchestration/HostAdmission.ts";
@@ -62,28 +65,6 @@ export const elicitationOf = (
     kind: "question",
   };
 };
-
-/** The text a run_checks result reaches the owner as. */
-export function renderRunChecksResult(
-  scope: "targeted" | "full",
-  run: CardWorkspace.CardChecksRun,
-): string {
-  if (run.results.length === 0) {
-    return `run_checks (${scope}) ran nothing.${run.summary.trim().length > 0 ? ` ${run.summary.trim()}` : ""}`;
-  }
-  return [
-    `run_checks (${scope}) ${run.passed ? "passed" : "failed"}.`,
-    ...run.results.map((result) => {
-      const failed = result.exitCode !== 0 || result.timedOut;
-      const line = `- ${result.name}: ${result.timedOut ? "timed out" : `exit ${result.exitCode ?? "none"}`} in ${Math.round(result.durationMs / 1000)}s`;
-      return failed && result.logTail.trim().length > 0
-        ? `${line}\n\`\`\`\n${result.logTail.trimEnd()}\n\`\`\``
-        : line;
-    }),
-  ].join("\n");
-}
-
-export const RUN_CHECKS_RESULT_CODE = "runChecksResult";
 
 const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngine.OrchestrationEngineService;
@@ -328,47 +309,37 @@ const make = Effect.gen(function* () {
         );
         const jobId = `run-checks-${yield* uuid}`;
         const position = (yield* admission.snapshot).waiting.length;
-        const deliver = (body: string) =>
-          Effect.gen(function* () {
-            yield* engine.dispatch({
-              type: "card.activity.record",
-              commandId: CommandId.make(`server:mcp-board-run-checks:${jobId}`),
-              activityId: jobId,
-              cardId: session.cardId,
-              kind: "message",
-              author: { kind: "system", id: "system" },
-              body,
-              runThreadId: session.threadId,
-              deliverTo: "builder",
-              elicitation: null,
-              answers: null,
-              status: null,
-              evidenceId: null,
-              reason: { code: RUN_CHECKS_RESULT_CODE, text: body.split("\n")[0]!.slice(0, 200) },
-              createdAt: yield* nowIso,
-            });
-          });
+        // Recorded first, so a server restart queues the run again (see CardReviewReactor).
+        const body = runChecksRequestBody(input.scope, input.filter);
+        yield* dispatch({
+          type: "card.activity.record",
+          commandId: yield* commandId("run-checks-request", session.threadId),
+          activityId: `${jobId}:request`,
+          cardId: session.cardId,
+          kind: "message",
+          author: { kind: "system", id: "system" },
+          body,
+          runThreadId: session.threadId,
+          deliverTo: null,
+          elicitation: null,
+          answers: null,
+          status: null,
+          evidenceId: null,
+          reason: { code: RUN_CHECKS_REQUESTED_CODE, text: body },
+          createdAt: yield* nowIso,
+        });
         // The call returns at once so a long suite can't time the tool out; the result is the
         // owner's next turn.
-        // ponytail: a server restart loses a queued run; rebuild the queue from these activities if
-        // that bites.
-        yield* admission
-          .run(
-            {
-              cardId: card.id,
-              projectId: card.projectId,
-              priority: card.priority,
-              label: `run_checks ${input.scope}`,
-              kind: "runChecks",
-            },
-            workspace.runChecks({ cardId: card.id, scope: input.scope, filter: input.filter }),
-          )
-          .pipe(
-            Effect.flatMap((run) => deliver(renderRunChecksResult(input.scope, run))),
-            Effect.catch((error) => deliver(`run_checks (${input.scope}) couldn't run: ${error.message}`)),
-            Effect.catchCause((cause) => Effect.logWarning("run_checks result was not delivered", { jobId, cause })),
-            Effect.forkDetach,
-          );
+        yield* runChecksJob({
+          engine,
+          admission,
+          workspace,
+          card,
+          threadId: session.threadId,
+          jobId,
+          scope: input.scope,
+          filter: input.filter,
+        }).pipe(Effect.forkDetach);
         return { jobId, position };
       }),
     request_checkpoint: (input) =>
