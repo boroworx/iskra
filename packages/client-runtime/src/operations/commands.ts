@@ -143,6 +143,10 @@ export const sendAgentSessionMessage = timestampedCommand(
   "sendAgentSessionMessage",
   "agent.session.message",
 );
+/** A direct message to an agent, opening its DM channel on the first one. */
+export const postAgentDm = timestampedCommand("postAgentDm", "agent.dm.post");
+export const archiveChannel = command("archiveChannel", "channel.archive");
+export const unarchiveChannel = command("unarchiveChannel", "channel.unarchive");
 
 /** A human decision on a card: its reverse is another of these. */
 export type CardDecisionInput = CommandInput<"card.approve"> & {
@@ -155,7 +159,11 @@ export type CardDecisionInput = CommandInput<"card.approve"> & {
     | "card.reopen"
     | "card.unpriced.accept"
     | "card.unpriced.refuse"
-    | "card.attempt.promote";
+    | "card.attempt.promote"
+    | "card.unassign"
+    | "card.spec.approve"
+    | "card.spec.skip"
+    | "card.spec.reopen";
 };
 
 export const decideCard: (input: CardDecisionInput) => CommandEffect = Effect.fn(
@@ -171,6 +179,14 @@ export const snoozeCard = timestampedCommand("snoozeCard", "card.snooze");
 /** A person's edit of a card's fields: title, spec, tags or priority. */
 export const updateCard = command("updateCard", "card.update");
 export const unsnoozeCard = command("unsnoozeCard", "card.unsnooze");
+/** A person's new card; the client names its id. Priority is set afterwards with `updateCard`. */
+export const createCard = timestampedCommand("createCard", "card.create");
+export const assignCard = command("assignCard", "card.assign");
+/** A person's message for the card's owner session. */
+export const postCardMessage = timestampedCommand("postCardMessage", "card.message.post");
+export const commentOnCardReview = timestampedCommand("commentOnCardReview", "card.review.comment");
+export const addCardRelation = command("addCardRelation", "card.relation.add");
+export const removeCardRelation = command("removeCardRelation", "card.relation.remove");
 
 export const updateProject: (input: UpdateProjectInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.updateProject",

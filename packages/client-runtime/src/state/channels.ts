@@ -9,10 +9,13 @@ import type { Atom } from "effect/unstable/reactivity";
 
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import {
+  archiveChannel,
   createAgent,
   createChannel,
+  postAgentDm,
   postChannelMessage,
   sendAgentSessionMessage,
+  unarchiveChannel,
   updateChannel,
 } from "../operations/commands.ts";
 import { request, subscribe, type EnvironmentRpcInput } from "../rpc/client.ts";
@@ -83,6 +86,28 @@ export function createChannelEnvironmentAtoms<R, E>(
     sessionMessage: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:agent:session-message",
       execute: sendAgentSessionMessage,
+    }),
+    dmPost: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:agent:dm-post",
+      execute: postAgentDm,
+    }),
+    archive: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:channel:archive",
+      execute: archiveChannel,
+    }),
+    unarchive: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:channel:unarchive",
+      execute: unarchiveChannel,
+    }),
+    agentDefinitions: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:agents:definitions",
+      tag: ORCHESTRATION_WS_METHODS.listAgentDefinitions,
+    }),
+    archiveAgentDefinition: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:agent:archive-definition",
+      execute: (
+        input: EnvironmentRpcInput<typeof ORCHESTRATION_WS_METHODS.archiveAgentDefinition>,
+      ) => request(ORCHESTRATION_WS_METHODS.archiveAgentDefinition, input),
     }),
     create: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:channel:create",

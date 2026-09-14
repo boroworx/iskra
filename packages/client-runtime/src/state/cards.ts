@@ -4,7 +4,13 @@ import type { Atom } from "effect/unstable/reactivity";
 
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import {
+  addCardRelation,
+  assignCard,
+  commentOnCardReview,
+  createCard,
   decideCard,
+  postCardMessage,
+  removeCardRelation,
   setCardBudget,
   startCardAttempts,
   snoozeCard,
@@ -45,6 +51,30 @@ export function createCardEnvironmentAtoms<R, E>(
     unsnooze: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:card:unsnooze",
       execute: unsnoozeCard,
+    }),
+    create: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:card:create",
+      execute: createCard,
+    }),
+    assign: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:card:assign",
+      execute: assignCard,
+    }),
+    postMessage: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:card:post-message",
+      execute: postCardMessage,
+    }),
+    reviewComment: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:card:review-comment",
+      execute: commentOnCardReview,
+    }),
+    addRelation: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:card:add-relation",
+      execute: addCardRelation,
+    }),
+    removeRelation: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:card:remove-relation",
+      execute: removeCardRelation,
     }),
   };
 }
