@@ -54,6 +54,7 @@ import * as SchemaIssue from "effect/SchemaIssue";
 import * as Stream from "effect/Stream";
 
 import { appendUserInputAttachmentPaths } from "../userInputAttachments.ts";
+import { runRefusal } from "../runEnforcement.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import * as ServerConfig from "../../config.ts";
 import * as DeviceService from "../../device/DeviceService.ts";
@@ -1544,13 +1545,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           }
         }
         const adapter = yield* registry.getByInstance(resolvedInstanceId);
-        // Only the Claude adapter enforces a run's restrictions (tool allowlist, no
-        // MCP, no resume). Any other adapter would ignore them and run unrestricted.
-        if (input.run !== undefined && adapter.provider !== "claudeAgent") {
-          return yield* toValidationError(
-            "ProviderService.startSession",
-            `Agent runs need a Claude provider; '${adapter.provider}' cannot enforce run restrictions.`,
-          );
+        // An adapter that can't enforce a run's restrictions would ignore them and run unrestricted.
+        const refusal = input.run === undefined ? null : runRefusal(adapter.provider, input.run);
+        if (refusal !== null) {
+          return yield* toValidationError("ProviderService.startSession", refusal);
         }
         yield* clearTurnAnalyticsSession(resolvedInstanceId, threadId);
         yield* prepareMcpSession(threadId, resolvedInstanceId);

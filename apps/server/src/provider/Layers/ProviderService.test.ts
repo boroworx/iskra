@@ -2884,24 +2884,49 @@ routing.layer("ProviderServiceLive routing", (it) => {
       }),
   );
 
-  it.effect("refuses to start a run on a provider that cannot enforce its restrictions", () =>
+  it.effect.each([
+    {
+      driver: CODEX_DRIVER,
+      instanceId: codexInstanceId,
+      run: { systemPrompt: "You are @backend.", capabilities: ["read" as const] },
+      issue: "Agent runs on 'codex' can't enforce read; choose a provider that can.",
+    },
+    {
+      driver: CODEX_DRIVER,
+      instanceId: codexInstanceId,
+      run: {
+        systemPrompt: "You are @backend.",
+        capabilities: ["read" as const, "write" as const, "shell" as const],
+        egress: { mode: "allowlist" as const, allow: ["registry.npmjs.org"], deny: [] },
+      },
+      issue: "Agent runs on 'codex' can't enforce an egress allowlist; choose a provider that can.",
+    },
+    {
+      driver: CURSOR_DRIVER,
+      instanceId: ProviderInstanceId.make("cursor"),
+      run: { systemPrompt: "You are @backend.", capabilities: ["read" as const] },
+      issue: "Agent runs on 'cursor' can't enforce read; choose a provider that can.",
+    },
+  ])("refuses a run $driver can't enforce: $issue", ({ driver, instanceId, run, issue }) =>
     Effect.gen(function* () {
       const provider = yield* ProviderService.ProviderService;
-      routing.codex.startSession.mockClear();
+      const adapter = driver === CODEX_DRIVER ? routing.codex : routing.cursor;
+      adapter.startSession.mockClear();
 
       const error = yield* provider
-        .startSession(asThreadId("thread-codex-run"), {
-          provider: CODEX_DRIVER,
-          providerInstanceId: codexInstanceId,
-          threadId: asThreadId("thread-codex-run"),
-          cwd: fixtureCwd("project-codex-run"),
+        .startSession(asThreadId(`thread-${driver}-run`), {
+          provider: driver,
+          providerInstanceId: instanceId,
+          threadId: asThreadId(`thread-${driver}-run`),
+          cwd: fixtureCwd(`project-${driver}-run`),
           runtimeMode: "full-access",
-          run: { systemPrompt: "You are @backend.", capabilities: ["read" as const] },
+          run,
         })
         .pipe(Effect.flip);
 
-      assert.equal(error._tag, "ProviderValidationError");
-      assert.equal(routing.codex.startSession.mock.calls.length, 0);
+      assert.instanceOf(error, ProviderValidationError);
+      assert.equal((error as ProviderValidationError).issue, issue);
+      assert.equal(adapter.startSession.mock.calls.length, 0);
     }),
   );
 
@@ -5019,6 +5044,7 @@ describe("agent browser access", () => {
       );
       const projectionLayer = Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
         getTurnStartMessage: () => Effect.die("unused"),
+        getCardActivity: () => Effect.die("unused"),
         getImportedAgentSessionSources: () => Effect.die("unused"),
         getUserInputActivity: () => Effect.die("unused"),
         getRunByThreadId: () => Effect.succeed(Option.none()),
