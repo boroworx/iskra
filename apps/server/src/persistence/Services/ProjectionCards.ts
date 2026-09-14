@@ -86,6 +86,44 @@ export const ProjectionCardDbRow = ProjectionCard.mapFields(
   }),
 );
 
+/** The `projection_cards` columns as `ProjectionCardDbRow` reads them. */
+export const PROJECTION_CARD_COLUMNS = `
+  card_id AS "cardId",
+  project_id AS "projectId",
+  channel_id AS "channelId",
+  parent_card_id AS "parentCardId",
+  title,
+  spec,
+  spec_state AS "specState",
+  tags_json AS "tags",
+  status,
+  owner_human_id AS "ownerHumanId",
+  delegate_agent_id AS "delegateAgentId",
+  base_branch AS "baseBranch",
+  branch,
+  worktree_path AS "worktreePath",
+  port_base AS "portBase",
+  snoozed_until AS "snoozedUntil",
+  snoozed_at AS "snoozedAt",
+  activity_at AS "activityAt",
+  COALESCE(diff_stat_json, 'null') AS "diffStat",
+  COALESCE(checks_json, 'null') AS "checks",
+  spent_usd AS "spentUsd",
+  budget_cap_usd AS "budgetCapUsd",
+  unpriced_turns AS "unpricedTurns",
+  accepts_unpriced_json AS "acceptsUnpriced",
+  review_returns AS "reviewReturns",
+  attempt_group_id AS "attemptGroupId",
+  COALESCE(linear_issue_json, 'null') AS "linearIssue",
+  source_message_id AS "sourceMessageId",
+  proposal_reasoning AS "proposalReasoning",
+  priority,
+  relations_json AS "relations",
+  created_by_json AS "createdBy",
+  created_at AS "createdAt",
+  updated_at AS "updatedAt"
+`;
+
 export const ProjectionCardDecision = Schema.Struct({
   decisionId: Schema.String,
   cardId: CardId,
