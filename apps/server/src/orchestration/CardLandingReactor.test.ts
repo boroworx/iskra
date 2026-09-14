@@ -162,6 +162,7 @@ const makeWorld = Effect.fn("makeWorld")(function* (
   name: string,
   options: {
     readonly landing?: "pullRequest" | "local";
+    readonly autoMerge?: boolean;
     readonly ciFixRounds?: number;
     readonly exclusivePaths?: ReadonlyArray<{ readonly glob: string; readonly afterRebase: string | null }>;
   } = {},
@@ -191,6 +192,7 @@ const makeWorld = Effect.fn("makeWorld")(function* (
     orchestration: {
       ...DEFAULT_PROJECT_ORCHESTRATION,
       landing: options.landing ?? "pullRequest",
+      autoMerge: { enabled: options.autoMerge ?? false, minSatisfaction: 0.9 },
       ciFixRounds: options.ciFixRounds ?? 2,
       exclusivePaths: options.exclusivePaths ?? [],
       sideEffectGuard: { acknowledgedAt: now, killSwitchEnv: null },
@@ -398,6 +400,22 @@ it.layer(layer)("CardLandingReactor", (it) => {
       const [refused] = yield* world.withReason(blocked.cardId, "landingBlocked");
       expect(refused?.body).toContain("Required status check is expected.");
       expect((yield* world.cardOf(blocked.cardId)).status).toBe("inReview");
+    }),
+  );
+
+  it.effect("lands a card with passing evidence on its own only when the project turned on auto-merge", () =>
+    Effect.gen(function* () {
+      const manual = yield* makeWorld("manual-merge", { landing: "local" });
+      const waiting = yield* manual.cardInReview("waits");
+      yield* manual.reactor.drain;
+      expect((yield* manual.cardOf(waiting.cardId)).status).toBe("inReview");
+
+      const auto = yield* makeWorld("auto-merge", { landing: "local", autoMerge: true });
+      const landed = yield* auto.cardInReview("lands");
+      yield* auto.reactor.drain;
+      // Entering landing queues the local land as its own job.
+      yield* auto.reactor.drain;
+      expect((yield* auto.cardOf(landed.cardId)).status).toBe("landed");
     }),
   );
 

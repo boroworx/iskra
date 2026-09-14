@@ -265,6 +265,40 @@ const make = Effect.gen(function* () {
     });
   });
 
+  /**
+   * A plan child, or a card in a project with auto-merge on, lands without a person approving its
+   * merge. The decider refuses anything else (see landingBeginRefusal); a refused card simply waits
+   * for a person.
+   */
+  const beginLandingIfAllowed = Effect.fn("CardLandingReactor.beginLandingIfAllowed")(function* (
+    cardId: CardId,
+  ) {
+    const model = yield* readModel();
+    const card = cardIn(model, cardId);
+    const project = model.projects.find((candidate) => candidate.id === card?.projectId);
+    if (card === undefined || project === undefined || card.status !== "inReview") return;
+    const parent = card.parentCardId === null ? undefined : cardIn(model, card.parentCardId);
+    const reason =
+      parent?.kind === "plan"
+        ? ("planChild" as const)
+        : projectOrchestrationOf(project).autoMerge.enabled
+          ? ("autoMergePolicy" as const)
+          : null;
+    if (reason === null) return;
+    yield* engine
+      .dispatch({
+        type: "card.landing.begin",
+        commandId: CommandId.make(`card-landing-begin:${cardId}:${reason}:${card.evidence?.evidenceId ?? "none"}`),
+        cardId,
+        reason,
+      })
+      .pipe(
+        Effect.catchTag("OrchestrationCommandInvariantError", (refusal) =>
+          Effect.logInfo("card waits for a person to approve its merge", { cardId, detail: refusal.detail }),
+        ),
+      );
+  });
+
   /** Frees what a landed card blocked and tells open cards touching its exclusive paths to rebase. */
   const afterLanding = Effect.fn("CardLandingReactor.afterLanding")(function* (
     landed: OrchestrationCard,
@@ -594,7 +628,9 @@ const make = Effect.gen(function* () {
 
   const worker = yield* makeDrainableWorker((job: LandingJob) =>
     job.kind === "open"
-      ? guarded(job.kind)(openPullRequest(job.cardId))
+      ? guarded(job.kind)(
+          openPullRequest(job.cardId).pipe(Effect.andThen(beginLandingIfAllowed(job.cardId))),
+        )
       : job.kind === "land"
         ? guarded(job.kind)(land(job.cardId, job.key))
         : guarded(job.kind)(poll()),
