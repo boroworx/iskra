@@ -22,7 +22,7 @@ import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { SidebarInset } from "../ui/sidebar";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
-import { MessageComposer, PresenceBadge } from "./ChannelView";
+import { MessageComposer, PresenceBadge, useStickToNewest } from "./ChannelView";
 import { dmTargets } from "./channels.logic";
 import { RunBlock } from "./RunBlock";
 
@@ -71,14 +71,7 @@ export function AgentView(props: {
   const [chosenThreadId, setChosenThreadId] = useState<ThreadId | null>(null);
   const target = targets.find((entry) => entry.threadId === chosenThreadId) ?? targets[0] ?? null;
 
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const newestId = sessions.at(-1)?.threadId;
-  useEffect(() => {
-    const element = scrollRef.current;
-    if (element !== null && newestId !== undefined) {
-      element.scrollTop = element.scrollHeight;
-    }
-  }, [newestId]);
+  const scrollRef = useStickToNewest(sessions.at(-1)?.threadId);
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">

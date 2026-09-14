@@ -139,6 +139,18 @@ interface TimelineSource {
   readonly environmentId: EnvironmentId;
 }
 
+/** A scroll container's ref that jumps to the bottom whenever the newest item changes. */
+export function useStickToNewest(newestId: string | undefined) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (element !== null && newestId !== undefined) {
+      element.scrollTop = element.scrollHeight;
+    }
+  }, [newestId]);
+  return scrollRef;
+}
+
 const messageTimeFormat = new Intl.DateTimeFormat(undefined, {
   hour: "numeric",
   minute: "2-digit",
@@ -149,15 +161,8 @@ const Timeline = memo(function Timeline(props: TimelineSource) {
     () => channelMessageRows(props.messages, props.agents),
     [props.messages, props.agents],
   );
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const newestId = rows.at(-1)?.message.id;
   // Keep the newest message in view as messages arrive.
-  useEffect(() => {
-    const element = scrollRef.current;
-    if (element !== null && newestId !== undefined) {
-      element.scrollTop = element.scrollHeight;
-    }
-  }, [newestId]);
+  const scrollRef = useStickToNewest(rows.at(-1)?.message.id);
 
   return (
     <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
