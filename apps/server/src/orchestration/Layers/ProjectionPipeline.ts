@@ -702,6 +702,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               linearIssue: null,
               sourceMessageId: event.payload.sourceMessageId ?? null,
               proposalReasoning: event.payload.proposalReasoning ?? null,
+              priority: event.payload.priority ?? 0,
               createdBy: event.payload.createdBy,
               createdAt: event.payload.createdAt,
               updatedAt: event.payload.updatedAt,
@@ -716,6 +717,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               ...(payload.spec !== undefined ? { spec: payload.spec } : {}),
               ...(payload.specState !== undefined ? { specState: payload.specState } : {}),
               ...(payload.tags !== undefined ? { tags: payload.tags } : {}),
+              ...(payload.priority !== undefined ? { priority: payload.priority } : {}),
               updatedAt: payload.updatedAt,
               activityAt: payload.updatedAt,
             }));

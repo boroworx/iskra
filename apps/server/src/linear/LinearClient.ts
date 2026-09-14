@@ -7,6 +7,8 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 
+import type { CardPriority } from "@iskra/contracts";
+
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 
 const API_URL = "https://api.linear.app/graphql";
@@ -53,6 +55,7 @@ export interface LinearIssue {
   readonly updatedAt: string;
   readonly stateId: string;
   readonly stateType: string;
+  readonly priority: CardPriority;
   readonly delegateId: string | null;
   readonly comments: ReadonlyArray<LinearComment>;
 }
@@ -68,6 +71,7 @@ export interface LinearIssueChanges {
   readonly title?: string;
   readonly description?: string;
   readonly stateId?: string;
+  readonly priority?: CardPriority;
 }
 
 export class LinearClient extends Context.Service<
@@ -82,13 +86,18 @@ export class LinearClient extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<LinearWorkflowState>, LinearApiError>;
     /** Open issues delegated to the app. */
     readonly delegatedIssues: Effect.Effect<ReadonlyArray<LinearIssue>, LinearApiError>;
+    /** Open issues of a team carrying a label, delegated or not. */
+    readonly labeledIssues: (
+      teamId: string,
+      label: string,
+    ) => Effect.Effect<ReadonlyArray<LinearIssue>, LinearApiError>;
     readonly issuesByIds: (
       ids: ReadonlyArray<string>,
     ) => Effect.Effect<ReadonlyArray<LinearIssue>, LinearApiError>;
     readonly createIssue: (
       input: { readonly teamId: string; readonly title: string; readonly description: string } & Pick<
         LinearIssueChanges,
-        "stateId"
+        "stateId" | "priority"
       >,
     ) => Effect.Effect<LinearIssue, LinearApiError>;
     readonly updateIssue: (
@@ -111,6 +120,7 @@ const IssueNode = Schema.Struct({
   title: Schema.String,
   description: Schema.NullOr(Schema.String),
   updatedAt: Schema.String,
+  priority: Schema.Number,
   team: Schema.Struct({ id: Schema.String }),
   state: Schema.Struct({ id: Schema.String, type: Schema.String }),
   delegate: Schema.NullOr(Schema.Struct({ id: Schema.String })),
@@ -126,9 +136,15 @@ const IssueNode = Schema.Struct({
   }),
 });
 
-const ISSUE_FIELDS = `id identifier url title description updatedAt
+const ISSUE_FIELDS = `id identifier url title description updatedAt priority
   team { id } state { id type } delegate { id }
   comments(first: 100) { nodes { id body createdAt user { id name } } }`;
+
+/** Linear reports priority as a number; anything off its 0–4 scale reads as no priority. */
+const toPriority = (value: number): CardPriority => {
+  const rounded = Math.round(value);
+  return rounded === 1 || rounded === 2 || rounded === 3 || rounded === 4 ? rounded : 0;
+};
 
 const toIssue = (node: typeof IssueNode.Type): LinearIssue => ({
   id: node.id,
@@ -140,6 +156,7 @@ const toIssue = (node: typeof IssueNode.Type): LinearIssue => ({
   updatedAt: node.updatedAt,
   stateId: node.state.id,
   stateType: node.state.type,
+  priority: toPriority(node.priority),
   delegateId: node.delegate?.id ?? null,
   comments: node.comments.nodes
     .map((comment) => ({
@@ -290,6 +307,13 @@ export const make = Effect.gen(function* () {
       {},
       IssueList,
     ).pipe(Effect.map(({ issues }) => issues.nodes.map(toIssue))),
+    labeledIssues: (teamId, label) =>
+      graphql(
+        "labeled issues",
+        `query ($teamId: ID!, $label: String!) { issues(first: ${ISSUES_PER_REQUEST}, filter: { team: { id: { eq: $teamId } }, labels: { some: { name: { eqIgnoreCase: $label } } }, state: { type: { nin: ["completed", "canceled"] } } }) { nodes { ${ISSUE_FIELDS} } } }`,
+        { teamId, label },
+        IssueList,
+      ).pipe(Effect.map(({ issues }) => issues.nodes.map(toIssue))),
     issuesByIds: (ids) =>
       Effect.forEach(
         Array.from({ length: Math.ceil(ids.length / ISSUES_PER_REQUEST) }, (_, index) =>

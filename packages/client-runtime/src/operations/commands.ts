@@ -240,6 +240,14 @@ export const snoozeCard: (input: SnoozeCardInput) => CommandEffect = Effect.fn(
   });
 });
 
+/** A person's edit of a card's fields: title, spec, tags or priority. */
+export type UpdateCardInput = CommandInput<"card.update">;
+export const updateCard: (input: UpdateCardInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.updateCard",
+)(function* (input) {
+  return yield* dispatch({ ...input, type: "card.update", commandId: yield* commandId(input) });
+});
+
 export type UnsnoozeCardInput = CommandInput<"card.unsnooze">;
 export const unsnoozeCard: (input: UnsnoozeCardInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.unsnoozeCard",

@@ -1,6 +1,8 @@
 import {
   BOARD_COLUMNS,
   BOARD_COLUMN_LABEL,
+  CARD_PRIORITIES,
+  CARD_PRIORITY_LABEL,
   boardColumnOf,
   cardDropDecision,
   isCardSnoozed,
@@ -12,6 +14,7 @@ import {
 } from "@iskra/client-runtime/state/runtime";
 import {
   CARD_AUTOFIX_ATTEMPTS,
+  type CardPriority,
   type EnvironmentId,
   type OrchestrationAgentShell,
   type OrchestrationCardShell,
@@ -34,6 +37,7 @@ import { cn } from "~/lib/utils";
 import { cardEnvironment } from "~/state/cards";
 import { useEnvironmentAgents, useEnvironmentCards, useProjects } from "~/state/entities";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { SidebarInset } from "../ui/sidebar";
 import { toastManager } from "../ui/toast";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
@@ -191,6 +195,7 @@ const CardFace = memo(function CardFace(props: {
     id: card.id,
   });
   const delegate = props.agents.find((agent) => agent.id === card.delegateAgentId);
+  const update = useAtomCommand(cardEnvironment.update);
   const statusById = new Map(props.allCards.map((candidate) => [candidate.id, candidate.status]));
   const children = props.allCards.filter((candidate) => candidate.parentCardId === card.id);
   const blocked = card.relations.some(
@@ -257,6 +262,38 @@ const CardFace = memo(function CardFace(props: {
         </ul>
       ) : null}
       <dl className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+        <dd>
+          <Select
+            value={String(card.priority)}
+            disabled={card.status === "landed" || card.status === "abandoned"}
+            onValueChange={(value) => {
+              if (value === null) return;
+              void update({
+                environmentId: props.environmentId,
+                input: { cardId: card.id, priority: Number(value) as CardPriority },
+              });
+            }}
+          >
+            <SelectTrigger
+              aria-label="Priority"
+              className={cn(
+                "h-auto min-h-0 w-auto gap-1 border-0 bg-transparent p-0 text-xs shadow-none",
+                card.priority === 1 && "text-destructive-foreground",
+              )}
+            >
+              <SelectValue>
+                {(value: string | null) => CARD_PRIORITY_LABEL[Number(value ?? 0) as CardPriority]}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup>
+              {CARD_PRIORITIES.map((priority) => (
+                <SelectItem key={priority} value={String(priority)}>
+                  {CARD_PRIORITY_LABEL[priority]}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+        </dd>
         {delegate !== undefined ? <dd>@{delegate.name}</dd> : null}
         {card.branch !== null ? (
           <dd className="max-w-full truncate font-mono">{card.branch}</dd>

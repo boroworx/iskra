@@ -24,6 +24,7 @@ import {
   CardChecks,
   UsageCostSource,
   CardLinearIssue,
+  CardPriority,
 } from "@iskra/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
@@ -63,6 +64,7 @@ export const ProjectionCard = Schema.Struct({
   linearIssue: Schema.NullOr(CardLinearIssue),
   sourceMessageId: Schema.NullOr(MessageId),
   proposalReasoning: Schema.NullOr(Schema.String),
+  priority: CardPriority,
   relations: Schema.Array(CardRelation),
   createdBy: CardAuthor,
   createdAt: IsoDateTime,

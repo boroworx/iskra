@@ -474,6 +474,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["allow disable enable open drive preview tools sessions project override"],
   },
   {
+    id: "linear-label",
+    title: "Linear label",
+    to: "/settings/integrations",
+    scope: "project-defaults",
+    searchTerms: ["issues intake triage tag cards project override"],
+  },
+  {
     id: "linear-team",
     title: "Linear team",
     to: "/settings/integrations",

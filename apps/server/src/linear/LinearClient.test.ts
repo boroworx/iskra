@@ -15,6 +15,7 @@ const issueNode = {
   title: "Rate limit the API",
   description: null,
   updatedAt: "2026-02-01T00:00:02.000Z",
+  priority: 2,
   team: { id: "team-eng" },
   state: { id: "state-todo", type: "unstarted" },
   delegate: { id: "user-iskra" },
@@ -84,6 +85,7 @@ it.effect("signs in as the app once, keeps the token, and reads issues with it",
         updatedAt: "2026-02-01T00:00:02.000Z",
         stateId: "state-todo",
         stateType: "unstarted",
+        priority: 2,
         delegateId: "user-iskra",
         comments: [
           {

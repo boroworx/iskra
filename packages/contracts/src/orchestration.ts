@@ -649,6 +649,10 @@ export const CARD_ATTEMPTS_MAX = 4;
 /** Ports reserved for each card's worktree, starting at its `portBase` (ISKRA_PORT). */
 export const CARD_PORT_BLOCK_SIZE = 10;
 
+/** How urgent a card is, on Linear's scale: 0 none, 1 urgent, 2 high, 3 medium, 4 low. */
+export const CardPriority = Schema.Literals([0, 1, 2, 3, 4]);
+export type CardPriority = typeof CardPriority.Type;
+
 /**
  * The Linear issue a card syncs with. `title`, `description` and `stateId` are the values both
  * sides agreed on at the last sync, so whichever side differs from them is the side that changed.
@@ -661,6 +665,7 @@ export const CardLinearIssue = Schema.Struct({
   title: Schema.String,
   description: Schema.String,
   stateId: Schema.String,
+  priority: CardPriority.pipe(Schema.withDecodingDefault(Effect.succeed(0 as const))),
   // The newest Linear comment already brought into the card.
   commentsSyncedAt: Schema.NullOr(IsoDateTime),
 });
@@ -713,6 +718,7 @@ export const OrchestrationCard = Schema.Struct({
   sourceMessageId: Schema.NullOr(MessageId).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   // Why the channel's lead proposed the card, for the person triaging it.
   proposalReasoning: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  priority: CardPriority.pipe(Schema.withDecodingDefault(Effect.succeed(0 as const))),
   relations: Schema.Array(CardRelation),
   createdBy: CardAuthor,
   createdAt: IsoDateTime,
@@ -1672,6 +1678,7 @@ const CardUpdateCommand = Schema.Struct({
   title: Schema.optional(TrimmedNonEmptyString),
   spec: Schema.optional(Schema.String),
   tags: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  priority: Schema.optional(CardPriority),
 });
 
 /** A status command names only the card: the decider derives where it goes. */
@@ -2805,6 +2812,7 @@ export const CardCreatedPayload = Schema.Struct({
   attemptGroupId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   sourceMessageId: Schema.optional(Schema.NullOr(MessageId)),
   proposalReasoning: Schema.optional(Schema.NullOr(Schema.String)),
+  priority: Schema.optional(CardPriority),
   projectId: ProjectId,
   channelId: Schema.NullOr(ChannelId),
   parentCardId: Schema.NullOr(CardId),
@@ -2826,6 +2834,7 @@ export const CardUpdatedPayload = Schema.Struct({
   spec: Schema.optional(Schema.String),
   specState: Schema.optional(CardSpecState),
   tags: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  priority: Schema.optional(CardPriority),
   updatedAt: IsoDateTime,
 });
 

@@ -81,12 +81,12 @@ export function linearDecision(
  * Merges one field three ways against the value of the last sync: the side that differs from it
  * changed it, and when both did, the later edit wins.
  */
-export function mergeLinearField(input: {
-  readonly base: string;
-  readonly linear: string;
-  readonly iskra: string;
+export function mergeLinearField<T>(input: {
+  readonly base: T;
+  readonly linear: T;
+  readonly iskra: T;
   readonly linearIsNewer: boolean;
-}): { readonly value: string; readonly pull: boolean; readonly push: boolean } {
+}): { readonly value: T; readonly pull: boolean; readonly push: boolean } {
   const linearChanged = input.linear !== input.base;
   const iskraChanged = input.iskra !== input.base;
   const value = linearChanged && (!iskraChanged || input.linearIsNewer) ? input.linear : input.iskra;
@@ -101,6 +101,7 @@ const linkOf = (issue: LinearClient.LinearIssue): CardLinearIssue => ({
   title: issue.title,
   description: issue.description,
   stateId: issue.stateId,
+  priority: issue.priority,
   commentsSyncedAt: issue.comments.at(-1)?.createdAt ?? null,
 });
 
@@ -108,6 +109,7 @@ const linksEqual = (left: CardLinearIssue, right: CardLinearIssue) =>
   left.title === right.title &&
   left.description === right.description &&
   left.stateId === right.stateId &&
+  left.priority === right.priority &&
   left.commentsSyncedAt === right.commentsSyncedAt;
 
 /**
@@ -184,7 +186,7 @@ export const make = Effect.gen(function* () {
     // A finished card is no longer edited; its last values stand in Linear.
     const finished = isFinishedCardStatus(card.status);
     const linearIsNewer = issue.updatedAt > card.updatedAt;
-    const merge = (base: string, linearValue: string, iskra: string) =>
+    const merge = <T>(base: T, linearValue: T, iskra: T) =>
       finished
         ? { value: iskra, pull: false, push: iskra !== linearValue }
         : mergeLinearField({ base, linear: linearValue, iskra, linearIsNewer });
@@ -195,6 +197,7 @@ export const make = Effect.gen(function* () {
         ? { value: card.title, pull: false, push: true }
         : titleMerge;
     const description = merge(link.description, issue.description, card.spec);
+    const priority = merge(link.priority, issue.priority, card.priority);
 
     const expected = linearStateFor(input.states, card.status);
     const linearMoved = issue.stateId !== link.stateId;
@@ -218,6 +221,7 @@ export const make = Effect.gen(function* () {
     const changes: LinearClient.LinearIssueChanges = {
       ...(title.push ? { title: title.value } : {}),
       ...(description.push ? { description: description.value } : {}),
+      ...(priority.push ? { priority: priority.value } : {}),
       ...(restoreStateId !== null ? { stateId: restoreStateId } : {}),
     };
     if (Object.keys(changes).length > 0) yield* linear.updateIssue(issue.id, changes);
@@ -227,13 +231,14 @@ export const make = Effect.gen(function* () {
         `Iskra sets this issue's status from its card, which is ${STATUS_LABEL[card.status]}, so it was moved back. From Linear, moving a triage issue to a to-do state approves the card and canceling the issue abandons it; everything else follows the work.`,
       );
     }
-    if (title.pull || description.pull) {
+    if (title.pull || description.pull || priority.pull) {
       yield* dispatch({
         type: "card.update",
         commandId: yield* freshCommandId("update"),
         cardId: card.id,
         ...(title.pull ? { title: title.value } : {}),
         ...(description.pull ? { spec: description.value } : {}),
+        ...(priority.pull ? { priority: priority.value } : {}),
       });
     }
 
@@ -276,6 +281,7 @@ export const make = Effect.gen(function* () {
       ...link,
       title: title.value,
       description: description.value,
+      priority: priority.value,
       stateId: restoreStateId ?? issue.stateId,
       commentsSyncedAt: issue.comments.at(-1)?.createdAt ?? link.commentsSyncedAt,
     };
@@ -295,8 +301,13 @@ export const make = Effect.gen(function* () {
     const settings = yield* serverSettings.getSettings;
     const readModel = yield* snapshots.getCommandReadModel();
     const teamByProject = new Map<ProjectId, string>();
+    const labelByProject = new Map<ProjectId, string>();
     for (const project of readModel.projects) {
-      const teamId = resolveProjectSettings(settings, project.id).settings.linearTeamId.trim();
+      const resolved = resolveProjectSettings(settings, project.id).settings;
+      const teamId = resolved.linearTeamId.trim();
+      if (resolved.linearLabel.trim().length > 0) {
+        labelByProject.set(project.id, resolved.linearLabel.trim());
+      }
       if (teamId.length > 0 && project.deletedAt === null) teamByProject.set(project.id, teamId);
     }
     const cards = readModel.cards ?? [];
@@ -318,20 +329,37 @@ export const make = Effect.gen(function* () {
 
     const projectByTeam = new Map(Array.from(teamByProject, ([projectId, teamId]) => [teamId, projectId]));
     const linkedIssueIds = new Set(linkedCards.map((card) => card.linearIssue!.id));
+    const intake = (issue: LinearClient.LinearIssue, projectId: ProjectId) =>
+      Effect.suspend(() => {
+        if (linkedIssueIds.has(issue.id) || issue.title.trim().length === 0) return Effect.void;
+        linkedIssueIds.add(issue.id);
+        return dispatch({
+          type: "card.linear.intake",
+          commandId: CommandId.make(`server:linear-intake:${issue.id}`),
+          cardId: CardId.make(`card-linear-${issue.id}`),
+          projectId,
+          title: issue.title.trim(),
+          issue: linkOf(issue),
+          // Delegating the issue to Iskra is a person's approval; a labeled issue waits in triage.
+          delegated: issue.delegateId === viewerId,
+          createdAt: nowIso,
+        }).pipe(Effect.catchCause(logSkipped("Linear intake skipped", { issue: issue.identifier })));
+      });
     for (const issue of yield* linear.delegatedIssues) {
       const projectId = projectByTeam.get(issue.teamId);
-      if (projectId === undefined || linkedIssueIds.has(issue.id) || issue.title.trim().length === 0)
-        continue;
-      yield* dispatch({
-        type: "card.linear.intake",
-        commandId: CommandId.make(`server:linear-intake:${issue.id}`),
-        cardId: CardId.make(`card-linear-${issue.id}`),
-        projectId,
-        title: issue.title.trim(),
-        issue: linkOf(issue),
-        delegated: true,
-        createdAt: nowIso,
-      }).pipe(Effect.catchCause(logSkipped("Linear intake skipped", { issue: issue.identifier })));
+      if (projectId !== undefined) yield* intake(issue, projectId);
+    }
+    for (const [projectId, label] of labelByProject) {
+      const teamId = teamByProject.get(projectId);
+      if (teamId === undefined) continue;
+      const labeled = yield* linear.labeledIssues(teamId, label).pipe(
+        Effect.catchCause((cause) =>
+          logSkipped("Linear label intake skipped", { projectId, label })(cause).pipe(
+            Effect.as<ReadonlyArray<LinearClient.LinearIssue>>([]),
+          ),
+        ),
+      );
+      for (const issue of labeled) yield* intake(issue, projectId);
     }
 
     for (const card of cards) {
@@ -350,6 +378,7 @@ export const make = Effect.gen(function* () {
           teamId,
           title: card.title,
           description: card.spec,
+          priority: card.priority,
           ...(state === undefined ? {} : { stateId: state.id }),
         });
         yield* dispatch({

@@ -74,6 +74,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   const mixedWorkspace = useScopedSettingsMixed(["defaultThreadEnvMode"]);
   const mixedBrowser = useScopedSettingsMixed(["enableAgentBrowserAccess"]);
   const mixedLinearTeam = useScopedSettingsMixed(["linearTeamId"]);
+  const mixedLinearLabel = useScopedSettingsMixed(["linearLabel"]);
   const mixedAutoPull = useScopedSettingsMixed(["defaultAutoPull"]);
   const mixedMergeMethod = useScopedSettingsMixed(["pullRequestMergeMethod"]);
   const modelSource = useScopedSettingSource(["defaultModelSelection"]);
@@ -475,6 +476,27 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
                 onBlur={(event) => {
                   const linearTeamId = event.currentTarget.value.trim();
                   if (linearTeamId !== settings.linearTeamId) updateSettings({ linearTeamId });
+                }}
+              />
+            }
+          />
+          <SettingsRow
+            serverScoped
+            settingKeys={["linearLabel"]}
+            mixed={mixedLinearLabel}
+            id={searchableSetting("linear-label").id}
+            title="Linear label"
+            description="Issues in the Linear team with this label become cards in triage. Issues delegated to Iskra always do. Leave it empty to bring in only delegated issues."
+            control={
+              <Input
+                key={mixedLinearLabel ? "mixed" : settings.linearLabel}
+                aria-label="Linear label"
+                className="w-48"
+                placeholder={mixedLinearLabel ? "Mixed" : "Label"}
+                defaultValue={mixedLinearLabel ? "" : settings.linearLabel}
+                onBlur={(event) => {
+                  const linearLabel = event.currentTarget.value.trim();
+                  if (linearLabel !== settings.linearLabel) updateSettings({ linearLabel });
                 }}
               />
             }

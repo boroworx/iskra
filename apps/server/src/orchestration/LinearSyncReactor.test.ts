@@ -7,6 +7,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  type CardPriority,
   type OrchestrationEvent,
 } from "@iskra/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -68,12 +69,23 @@ const later = () => {
   return `2026-02-01T00:${minutes}:${String(clock % 60).padStart(2, "0")}.000Z`;
 };
 const issues = new Map<string, LinearClient.LinearIssue>();
+const issueLabels = new Map<string, ReadonlyArray<string>>();
 const appComments: Array<{ readonly issueId: string; readonly body: string }> = [];
 let commentWaiter: Deferred.Deferred<string> | null = null;
 
 const inLinear = {
-  put: (issue: Omit<LinearClient.LinearIssue, "updatedAt" | "stateType" | "comments">) =>
-    issues.set(issue.id, { ...issue, stateType: typeOf(issue.stateId), updatedAt: later(), comments: [] }),
+  put: (
+    issue: Omit<LinearClient.LinearIssue, "updatedAt" | "stateType" | "comments" | "priority"> & {
+      readonly priority?: CardPriority;
+    },
+  ) =>
+    issues.set(issue.id, {
+      priority: 0,
+      ...issue,
+      stateType: typeOf(issue.stateId),
+      updatedAt: later(),
+      comments: [],
+    }),
   edit: (issueId: string, changes: LinearClient.LinearIssueChanges) => {
     const issue = issues.get(issueId)!;
     issues.set(issueId, {
@@ -103,6 +115,12 @@ const fakeLinear = Layer.succeed(LinearClient.LinearClient, {
   delegatedIssues: Effect.sync(() =>
     Array.from(issues.values()).filter((issue) => issue.delegateId === APP_USER),
   ),
+  labeledIssues: (teamId, label) =>
+    Effect.sync(() =>
+      Array.from(issues.values()).filter(
+        (issue) => issue.teamId === teamId && (issueLabels.get(issue.id) ?? []).includes(label),
+      ),
+    ),
   issuesByIds: (ids) => Effect.sync(() => ids.flatMap((id) => issues.get(id) ?? [])),
   createIssue: (input) =>
     Effect.sync(() => {
@@ -116,6 +134,7 @@ const fakeLinear = Layer.succeed(LinearClient.LinearClient, {
         title: input.title,
         description: input.description,
         stateId: input.stateId ?? "state-backlog",
+        priority: input.priority ?? 0,
         delegateId: null,
       });
       return issues.get(id)!;
@@ -141,7 +160,7 @@ const layer = LinearSyncReactor.layer.pipe(
   Layer.provide(RepositoryIdentityResolver.layer),
   Layer.provide(SqlitePersistenceMemory),
   Layer.provide(fakeLinear),
-  Layer.provide(ServerSettings.layerTest({ linearTeamId: TEAM })),
+  Layer.provide(ServerSettings.layerTest({ linearTeamId: TEAM, linearLabel: "iskra" })),
   Layer.provide(Layer.succeed(Crypto.Crypto, testCrypto)),
   Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "iskra-linear-sync-test-" })),
   Layer.provideMerge(NodeServices.layer),
@@ -424,6 +443,42 @@ it.layer(layer)("LinearSyncReactor", (it) => {
         requestId: "ask-owner:question",
         answers: { answer: "Per key." },
       });
+    }).pipe(Effect.scoped),
+  );
+  it.effect("brings in a labeled issue as a triage card, and syncs priority both ways", () =>
+    Effect.gen(function* () {
+      const world = yield* makeWorld("priority");
+      inLinear.put({
+        id: "issue-labeled",
+        identifier: "ENG-200",
+        url: "https://linear.app/acme/issue/ENG-200",
+        teamId: TEAM,
+        title: "Dark mode",
+        description: "People keep asking for it.",
+        stateId: "state-backlog",
+        delegateId: null,
+        priority: 3,
+      });
+      issueLabels.set("issue-labeled", ["iskra"]);
+      yield* world.reactor.syncNow;
+      expect(yield* world.cardOf(CardId.make("card-linear-issue-labeled"))).toMatchObject({
+        status: "triage",
+        priority: 3,
+        createdBy: { kind: "linear", id: "ENG-200" },
+      });
+
+      inLinear.edit(world.issueId, { priority: 1 });
+      yield* world.reactor.syncNow;
+      expect((yield* world.cardOf(world.cardId))?.priority).toBe(1);
+
+      yield* world.engine.dispatch({
+        type: "card.update",
+        commandId: world.commandId(),
+        cardId: world.cardId,
+        priority: 4,
+      });
+      yield* world.reactor.syncNow;
+      expect(issues.get(world.issueId)?.priority).toBe(4);
     }).pipe(Effect.scoped),
   );
 });

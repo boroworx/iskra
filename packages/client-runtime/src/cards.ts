@@ -5,6 +5,7 @@ import {
   type OrchestrationCard,
   type ProjectId,
   type RunSessionState,
+  type CardPriority,
 } from "@iskra/contracts";
 
 /** The board's columns, left to right. Landed and abandoned cards share Done. */
@@ -109,6 +110,16 @@ export type NeedsYouKind =
   | "checksExhausted"
   | "budgetReached"
   | "unpricedModel";
+
+/** Linear's priority names, most urgent first, then none. */
+export const CARD_PRIORITIES: ReadonlyArray<CardPriority> = [1, 2, 3, 4, 0];
+export const CARD_PRIORITY_LABEL: Record<CardPriority, string> = {
+  0: "No priority",
+  1: "Urgent",
+  2: "High",
+  3: "Medium",
+  4: "Low",
+};
 
 export interface NeedsYouItem {
   readonly key: string;

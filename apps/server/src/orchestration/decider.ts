@@ -2378,6 +2378,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             ? { specState: "draft" as const }
             : {}),
           ...(command.tags !== undefined ? { tags: command.tags } : {}),
+          ...(command.priority !== undefined ? { priority: command.priority } : {}),
           updatedAt: occurredAt,
         },
       };
@@ -2635,6 +2636,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             ownerHumanId: CHANNEL_HUMAN_AUTHOR_ID,
             baseBranch: null,
             createdBy: { kind: "linear", id: command.issue.identifier },
+            priority: command.issue.priority,
             createdAt: command.createdAt,
             updatedAt: command.createdAt,
           },

@@ -9,11 +9,13 @@ import {
   type StartCardAttemptsInput,
   type SnoozeCardInput,
   type UnsnoozeCardInput,
+  type UpdateCardInput,
   decideCard,
   setCardBudget,
   startCardAttempts,
   snoozeCard,
   unsnoozeCard,
+  updateCard,
 } from "../operations/commands.ts";
 import { createEnvironmentCommand, createEnvironmentRpcQueryAtomFamily } from "./runtime.ts";
 
@@ -23,6 +25,7 @@ export type {
   SnoozeCardInput,
   StartCardAttemptsInput,
   UnsnoozeCardInput,
+  UpdateCardInput,
 } from "../operations/commands.ts";
 
 /** A person's commands on cards: the board's decisions and Needs you snoozes. */
@@ -49,6 +52,10 @@ export function createCardEnvironmentAtoms<R, E>(
     snooze: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:card:snooze",
       execute: (input: SnoozeCardInput) => snoozeCard(input),
+    }),
+    update: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:card:update",
+      execute: (input: UpdateCardInput) => updateCard(input),
     }),
     unsnooze: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:card:unsnooze",
