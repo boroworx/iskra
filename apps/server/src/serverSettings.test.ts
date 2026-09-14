@@ -1248,6 +1248,33 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
+  it.effect("keeps the Linear app secret out of settings.json and away from clients", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+
+      const saved = yield* serverSettings.updateSettings({
+        linearClientId: "lin-app",
+        linearClientSecret: "lin-secret",
+      });
+      assert.equal(saved.linearClientSecret, "lin-secret");
+      assert.notInclude(yield* fileSystem.readFileString(serverConfig.settingsPath), "lin-secret");
+      const forClient = ServerSettingsModule.redactServerSettingsForClient(saved);
+      assert.notEqual(forClient.linearClientSecret, "lin-secret");
+      assert.isAbove(forClient.linearClientSecret.length, 0);
+
+      // A client sending the marker back keeps the secret; an empty value removes it.
+      const kept = yield* serverSettings.updateSettings({
+        linearClientId: "lin-app-2",
+        linearClientSecret: forClient.linearClientSecret,
+      });
+      assert.equal(kept.linearClientSecret, "lin-secret");
+      const removed = yield* serverSettings.updateSettings({ linearClientSecret: "" });
+      assert.equal(removed.linearClientSecret, "");
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("materializes provider secrets for terminal environment resolution", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsModule.ServerSettingsService;

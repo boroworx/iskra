@@ -24,6 +24,7 @@ import { PULL_REQUEST_MERGE_METHOD_LABELS } from "../pullRequest/pullRequestDeta
 import { TraitsPicker } from "../chat/TraitsPicker";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
+import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import type { ProjectSettingsCategory } from "./ProjectSettingsPanel";
@@ -501,6 +502,53 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
               />
             }
           />
+          {isProjectScope ? null : (
+            <SettingsRow
+              serverScoped
+              settingKeys={["linearClientId", "linearClientSecret"]}
+              id={searchableSetting("linear-app").id}
+              title="Linear app"
+              description="The client ID and secret of the Linear OAuth app Iskra signs in as, with client credentials turned on. The secret stays on this server."
+              control={
+                <div className="flex flex-col items-end gap-1.5">
+                  <Input
+                    key={settings.linearClientId}
+                    aria-label="Linear client ID"
+                    className="w-48"
+                    placeholder="Client ID"
+                    defaultValue={settings.linearClientId}
+                    onBlur={(event) => {
+                      const linearClientId = event.currentTarget.value.trim();
+                      if (linearClientId !== settings.linearClientId) {
+                        updateSettings({ linearClientId });
+                      }
+                    }}
+                  />
+                  <Input
+                    key={settings.linearClientSecret}
+                    type="password"
+                    aria-label="Linear client secret"
+                    className="w-48"
+                    placeholder={settings.linearClientSecret.length > 0 ? "Saved" : "Client secret"}
+                    defaultValue=""
+                    onBlur={(event) => {
+                      const linearClientSecret = event.currentTarget.value.trim();
+                      if (linearClientSecret.length > 0) updateSettings({ linearClientSecret });
+                    }}
+                  />
+                  {settings.linearClientSecret.length > 0 ? (
+                    <Button
+                      size="compact"
+                      variant="ghost-muted"
+                      onClick={() => updateSettings({ linearClientId: "", linearClientSecret: "" })}
+                    >
+                      Disconnect
+                    </Button>
+                  ) : null}
+                </div>
+              }
+            />
+          )}
         </>
       )}
     </SettingsSection>

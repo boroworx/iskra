@@ -297,7 +297,7 @@ export const make = Effect.gen(function* () {
   });
 
   const sweep = Effect.fn("LinearSyncReactor.sweep")(function* () {
-    if (!linear.configured) return;
+    if (!(yield* linear.configured)) return;
     const settings = yield* serverSettings.getSettings;
     const readModel = yield* snapshots.getCommandReadModel();
     const teamByProject = new Map<ProjectId, string>();
@@ -411,6 +411,7 @@ export const make = Effect.gen(function* () {
 
   /** A person's comment on a card, or a delegate's question, goes to the card's issue at once. */
   const push = Effect.fn("LinearSyncReactor.push")(function* (event: OrchestrationEvent) {
+    if (!(yield* linear.configured)) return;
     if (event.type === "card.message-posted" && event.payload.authorKind === "human") {
       const card = yield* snapshots.getCardShellById(event.payload.cardId);
       if (Option.isNone(card) || card.value.linearIssue === null) return;
@@ -455,7 +456,6 @@ export const make = Effect.gen(function* () {
 
   const start: LinearSyncReactor["Service"]["start"] = Effect.fn("LinearSyncReactor.start")(
     function* () {
-      if (!linear.configured) return;
       const events = yield* engine.subscribeDomainEvents;
       yield* forkParked(
         Stream.runForEach(events, (event) =>

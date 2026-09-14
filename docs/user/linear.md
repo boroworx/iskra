@@ -6,14 +6,12 @@ on your own machine works without a public URL.
 ## Set it up
 
 1. In Linear, create an OAuth application under Settings → API, and turn on client credentials.
-2. Start the Iskra server with the app's credentials:
-
-   ```bash
-   ISKRA_LINEAR_CLIENT_ID=... ISKRA_LINEAR_CLIENT_SECRET=... npx @iskra/cli
-   ```
-
-3. In Settings → Integrations, set **Linear team** to the team's ID. You can set it for all projects
-   or give each project its own.
+2. In Settings → Integrations, enter the app's **Linear client ID** and **Linear client secret**.
+   The secret stays on the server. On a server you start yourself, `ISKRA_LINEAR_CLIENT_ID` and
+   `ISKRA_LINEAR_CLIENT_SECRET` work too.
+3. Set **Linear team** to the team's ID, for all projects or for each project. To also bring in
+   issues that aren't delegated to Iskra, set **Linear label**: open issues in the team with that
+   label become cards waiting in triage.
 
 ## What syncs
 

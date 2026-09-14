@@ -10,6 +10,7 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstab
 import type { CardPriority } from "@iskra/contracts";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import * as ServerSettings from "../serverSettings.ts";
 
 const API_URL = "https://api.linear.app/graphql";
 const TOKEN_URL = "https://api.linear.app/oauth/token";
@@ -78,7 +79,7 @@ export class LinearClient extends Context.Service<
   LinearClient,
   {
     /** False until the app's client id and secret are set; sync does nothing until then. */
-    readonly configured: boolean;
+    readonly configured: Effect.Effect<boolean>;
     /** The app's own user, so the app's comments are not synced back as someone else's. */
     readonly viewerId: Effect.Effect<string, LinearApiError>;
     readonly teamStates: (
@@ -109,7 +110,11 @@ export class LinearClient extends Context.Service<
 >()("@iskra/cli/linear/LinearClient") {}
 
 const TokenResponse = Schema.Struct({ access_token: Schema.String, expires_in: Schema.Number });
-const StoredToken = Schema.Struct({ accessToken: Schema.String, expiresAt: Schema.Number });
+const StoredToken = Schema.Struct({
+  clientId: Schema.String,
+  accessToken: Schema.String,
+  expiresAt: Schema.Number,
+});
 const decodeStoredToken = Schema.decodeUnknownOption(Schema.fromJsonString(StoredToken));
 const encodeStoredToken = Schema.encodeSync(Schema.fromJsonString(StoredToken));
 
@@ -173,10 +178,20 @@ export const make = Effect.gen(function* () {
   const config = yield* LinearEnvConfig;
   const httpClient = yield* HttpClient.HttpClient;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
-  const credentials =
+  const serverSettings = yield* ServerSettings.ServerSettingsService;
+  const envCredentials =
     Option.isSome(config.clientId) && Option.isSome(config.clientSecret)
       ? { clientId: config.clientId.value, clientSecret: config.clientSecret.value }
       : null;
+  // Settings win over the environment, and are read at each sign-in so new credentials apply at once.
+  const credentials = serverSettings.getSettings.pipe(
+    Effect.map((settings) =>
+      settings.linearClientId.length > 0 && settings.linearClientSecret.length > 0
+        ? { clientId: settings.linearClientId, clientSecret: settings.linearClientSecret }
+        : envCredentials,
+    ),
+    Effect.orElseSucceed(() => envCredentials),
+  );
 
   const failed = (operation: string) => (cause: unknown) =>
     new LinearApiError({
@@ -185,8 +200,10 @@ export const make = Effect.gen(function* () {
     });
 
   let token: typeof StoredToken.Type | null = null;
+  let viewer: string | null = null;
   const accessToken = Effect.gen(function* () {
-    if (credentials === null) {
+    const current = yield* credentials;
+    if (current === null) {
       return yield* new LinearApiError({ operation: "sign-in", detail: "Linear is not set up." });
     }
     const now = yield* Clock.currentTimeMillis;
@@ -196,14 +213,19 @@ export const make = Effect.gen(function* () {
         ? Option.getOrNull(decodeStoredToken(new TextDecoder().decode(stored.value)))
         : null;
     }
+    // A token belongs to the app that signed in; different credentials sign in again.
+    if (token !== null && token.clientId !== current.clientId) {
+      token = null;
+      viewer = null;
+    }
     if (token !== null && token.expiresAt - now > TOKEN_REFRESH_EARLY_MS) return token.accessToken;
     const response = yield* httpClient
       .execute(
         HttpClientRequest.post(TOKEN_URL).pipe(
           HttpClientRequest.bodyUrlParams({
             grant_type: "client_credentials",
-            client_id: credentials.clientId,
-            client_secret: credentials.clientSecret,
+            client_id: current.clientId,
+            client_secret: current.clientSecret,
             scope: SCOPES,
           }),
         ),
@@ -213,7 +235,11 @@ export const make = Effect.gen(function* () {
         Effect.flatMap(HttpClientResponse.schemaBodyJson(TokenResponse)),
         Effect.mapError(failed("sign-in")),
       );
-    const next = { accessToken: response.access_token, expiresAt: now + response.expires_in * 1_000 };
+    const next = {
+      clientId: current.clientId,
+      accessToken: response.access_token,
+      expiresAt: now + response.expires_in * 1_000,
+    };
     token = next;
     yield* secrets
       .set(TOKEN_SECRET, new TextEncoder().encode(encodeStoredToken(next)))
@@ -262,7 +288,6 @@ export const make = Effect.gen(function* () {
       return response.data as S["Type"];
     });
 
-  let viewer: string | null = null;
   const viewerId = Effect.suspend(() =>
     viewer !== null
       ? Effect.succeed(viewer)
@@ -282,7 +307,7 @@ export const make = Effect.gen(function* () {
   const IssueList = Schema.Struct({ issues: Schema.Struct({ nodes: Schema.Array(IssueNode) }) });
 
   return {
-    configured: credentials !== null,
+    configured: Effect.map(credentials, (current) => current !== null),
     viewerId,
     teamStates: (teamId) =>
       graphql(

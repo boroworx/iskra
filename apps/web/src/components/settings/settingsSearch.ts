@@ -474,6 +474,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["allow disable enable open drive preview tools sessions project override"],
   },
   {
+    id: "linear-app",
+    title: "Linear app",
+    to: "/settings/integrations",
+    searchTerms: ["linear oauth client id secret credentials connect disconnect sync"],
+  },
+  {
     id: "linear-label",
     title: "Linear label",
     to: "/settings/integrations",

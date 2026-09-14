@@ -146,6 +146,8 @@ function providerEnvironmentSecretName(input: {
  */
 const USAGE_LIMIT_SOURCE_KEY_REDACTED = "\u2022\u2022\u2022\u2022\u2022\u2022";
 
+const LINEAR_CLIENT_SECRET_NAME = "linear-client-secret";
+
 function usageLimitSourceSecretName(sourceId: string): string {
   return `usage-limit-source-${Buffer.from(sourceId, "utf8").toString("base64url")}`;
 }
@@ -186,7 +188,14 @@ export function redactServerSettingsForClient(settings: ServerSettings): ServerS
       },
     ]),
   );
-  return { ...settings, providerInstances, usageLimitSources };
+  return {
+    ...settings,
+    providerInstances,
+    usageLimitSources,
+    // The Linear app secret is a bearer secret too.
+    linearClientSecret:
+      settings.linearClientSecret.length > 0 ? USAGE_LIMIT_SOURCE_KEY_REDACTED : "",
+  };
 }
 
 export class ServerSettingsService extends Context.Service<
@@ -709,10 +718,25 @@ const make = Effect.gen(function* () {
           managementKey: Option.isSome(secret) ? textDecoder.decode(secret.value) : "",
         };
       }
+      const linearClientSecret =
+        settings.linearClientSecret !== USAGE_LIMIT_SOURCE_KEY_REDACTED
+          ? settings.linearClientSecret
+          : Option.match(
+              yield* secretStore
+                .get(LINEAR_CLIENT_SECRET_NAME)
+                .pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new ServerSettingsError({ settingsPath, operation: "read-secret", cause }),
+                  ),
+                ),
+              { onNone: () => "", onSome: (secret) => textDecoder.decode(secret) },
+            );
       return {
         ...settings,
         providerInstances: providerInstances as ServerSettings["providerInstances"],
         usageLimitSources: usageLimitSources as ServerSettings["usageLimitSources"],
+        linearClientSecret,
       };
     });
 
@@ -881,10 +905,36 @@ const make = Effect.gen(function* () {
           );
       }
 
+      // The marker means the client left the secret as it was.
+      let linearClientSecret = next.linearClientSecret;
+      if (linearClientSecret !== USAGE_LIMIT_SOURCE_KEY_REDACTED) {
+        if (linearClientSecret.length === 0) {
+          yield* secretStore
+            .remove(LINEAR_CLIENT_SECRET_NAME)
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ServerSettingsError({ settingsPath, operation: "remove-secret", cause }),
+              ),
+            );
+        } else {
+          yield* secretStore
+            .set(LINEAR_CLIENT_SECRET_NAME, textEncoder.encode(linearClientSecret))
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ServerSettingsError({ settingsPath, operation: "write-secret", cause }),
+              ),
+            );
+          linearClientSecret = USAGE_LIMIT_SOURCE_KEY_REDACTED;
+        }
+      }
+
       return {
         ...next,
         providerInstances: providerInstances as ServerSettings["providerInstances"],
         usageLimitSources: usageLimitSources as ServerSettings["usageLimitSources"],
+        linearClientSecret,
       };
     });
 

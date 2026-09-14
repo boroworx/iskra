@@ -1,3 +1,4 @@
+import type { ServerSettings as ServerSettingsValue } from "@iskra/contracts";
 import { expect, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
@@ -6,6 +7,7 @@ import * as Option from "effect/Option";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as LinearClient from "./LinearClient.ts";
 
 const issueNode = {
@@ -36,6 +38,10 @@ const makeClient = (env: Record<string, string>) =>
   Effect.gen(function* () {
     const requests: Array<{ readonly url: string; readonly authorization: string | undefined }> = [];
     const stored: Array<string> = [];
+    let settingsCredentials = { linearClientId: "", linearClientSecret: "" };
+    const setCredentials = (linearClientId: string, linearClientSecret: string) => {
+      settingsCredentials = { linearClientId, linearClientSecret };
+    };
     const http = HttpClient.make((request) => {
       requests.push({ url: request.url, authorization: request.headers.authorization });
       const body = request.url.endsWith("/oauth/token")
@@ -57,10 +63,13 @@ const makeClient = (env: Record<string, string>) =>
             set: (_name, value) => Effect.sync(() => void stored.push(new TextDecoder().decode(value))),
           }),
           ConfigProvider.layer(ConfigProvider.fromEnv({ env })),
+          Layer.mock(ServerSettings.ServerSettingsService)({
+            getSettings: Effect.sync(() => settingsCredentials as unknown as ServerSettingsValue),
+          }),
         ),
       ),
     );
-    return { client, requests, stored };
+    return { client, requests, stored, setCredentials };
   });
 
 it.effect("signs in as the app once, keeps the token, and reads issues with it", () =>
@@ -69,7 +78,7 @@ it.effect("signs in as the app once, keeps the token, and reads issues with it",
       ISKRA_LINEAR_CLIENT_ID: "client",
       ISKRA_LINEAR_CLIENT_SECRET: "secret",
     });
-    expect(client.configured).toBe(true);
+    expect(yield* client.configured).toBe(true);
 
     const found = yield* client.issuesByIds(["issue-1"]);
     yield* client.issuesByIds(["issue-1"]);
@@ -118,9 +127,31 @@ it.effect("signs in as the app once, keeps the token, and reads issues with it",
 it.effect("stays unconfigured, and makes no request, without the app's credentials", () =>
   Effect.gen(function* () {
     const { client, requests } = yield* makeClient({});
-    expect(client.configured).toBe(false);
+    expect(yield* client.configured).toBe(false);
     const error = yield* client.viewerId.pipe(Effect.flip);
     expect(error.message).toContain("Linear is not set up");
     expect(requests).toEqual([]);
+  }),
+);
+
+it.effect("prefers credentials from settings, and signs in again when they change", () =>
+  Effect.gen(function* () {
+    const { client, requests, setCredentials } = yield* makeClient({
+      ISKRA_LINEAR_CLIENT_ID: "env-client",
+      ISKRA_LINEAR_CLIENT_SECRET: "env-secret",
+    });
+    setCredentials("settings-client", "settings-secret");
+    yield* client.issuesByIds(["issue-1"]);
+    yield* client.issuesByIds(["issue-1"]);
+    setCredentials("other-client", "other-secret");
+    yield* client.issuesByIds(["issue-1"]);
+
+    expect(requests.map((request) => request.url.endsWith("/oauth/token"))).toEqual([
+      true,
+      false,
+      false,
+      true,
+      false,
+    ]);
   }),
 );

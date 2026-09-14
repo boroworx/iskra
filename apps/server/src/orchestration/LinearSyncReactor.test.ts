@@ -109,7 +109,7 @@ const inLinear = {
 
 let createdIssues = 0;
 const fakeLinear = Layer.succeed(LinearClient.LinearClient, {
-  configured: true,
+  configured: Effect.succeed(true),
   viewerId: Effect.succeed(APP_USER),
   teamStates: () => Effect.succeed(STATES),
   delegatedIssues: Effect.sync(() =>

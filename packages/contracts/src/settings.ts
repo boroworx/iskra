@@ -1026,6 +1026,9 @@ export const ServerSettings = Schema.Struct({
   linearTeamId: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   // Issues in that team with this label also become cards, in triage; empty brings in only delegated ones.
   linearLabel: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  // The Linear OAuth app Iskra signs in as. The secret lives in server secrets; clients see a marker.
+  linearClientId: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  linearClientSecret: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   projectAgentBrowserAccessOverrides: Schema.Record(ProjectId, Schema.Boolean).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
@@ -1426,6 +1429,8 @@ export const ServerSettingsPatch = Schema.Struct({
   // Per-entry, unlike `providerInstances`: a client only ever adds or removes
   // one source, and sending the whole map races another edit that has not
   // echoed back yet. `null` removes; the server merges into its current map.
+  linearClientId: Schema.optionalKey(TrimmedString),
+  linearClientSecret: Schema.optionalKey(TrimmedString),
   usageLimitSources: Schema.optionalKey(
     Schema.Record(UsageLimitSourceId, Schema.NullOr(UsageLimitSourceConfig)),
   ),
