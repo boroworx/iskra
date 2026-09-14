@@ -70,6 +70,43 @@ export function projectScriptRuntimeEnv(
   return env;
 }
 
+/** "c" plus the last 6 of the card id's [a-z0-9] characters: safe in database names and key prefixes. */
+export function cardSlug(cardId: string): string {
+  return `c${cardId
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]/g, "")
+    .slice(-6)}`;
+}
+
+/** The env var a named card port is handed in: `publicApi` → `ISKRA_PORT_PUBLIC_API`. */
+export function cardPortEnvName(name: string): string {
+  return `ISKRA_PORT_${name.replaceAll(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase()}`;
+}
+
+/**
+ * What every script that runs for a card receives (setup, run, archive, checks, services): its
+ * id and slug, its port block (ISKRA_PORT is the older name for ISKRA_PORT_BASE) and each named
+ * port at its offset in the block.
+ */
+export function cardScriptEnv(input: {
+  cardId: string;
+  portBase: number;
+  portCount: number;
+  ports: Readonly<Record<string, number>>;
+}): Record<string, string> {
+  const env: Record<string, string> = {
+    ISKRA_CARD_ID: input.cardId,
+    ISKRA_CARD_SLUG: cardSlug(input.cardId),
+    ISKRA_PORT_BASE: String(input.portBase),
+    ISKRA_PORT: String(input.portBase),
+    ISKRA_PORT_COUNT: String(input.portCount),
+  };
+  for (const [name, offset] of Object.entries(input.ports)) {
+    env[cardPortEnvName(name)] = String(input.portBase + offset);
+  }
+  return env;
+}
+
 /** The script that prepares a new worktree: role `setup`, or the legacy `runOnWorktreeCreate` flag. */
 export function setupProjectScript(scripts: readonly ProjectScript[]): ProjectScript | null {
   return (
