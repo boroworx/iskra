@@ -75,6 +75,7 @@ const fakes = {
   webPort: null as number | null,
   previewHost: true,
   admitted: [] as Array<HostAdmission.HeavyJobKind>,
+  locked: [] as Array<string>,
 };
 
 const workspace = Layer.mock(CardWorkspace.CardWorkspace)({
@@ -104,6 +105,7 @@ const workspace = Layer.mock(CardWorkspace.CardWorkspace)({
       })),
     })),
   runScript: () => Effect.succeed({ terminalId: "terminal-dev" }),
+  withCardLock: (_cardId, effect) => Effect.andThen(Effect.sync(() => fakes.locked.push("card")), effect),
 });
 
 const admission = Layer.succeed(
@@ -319,6 +321,8 @@ it.layer(layer)("CardReviewReactor", (it) => {
       expect(yield* world.repo.git("status", "--porcelain")).toBe("");
       expect(evidence.payload.headSha).toBe(yield* world.repo.git("rev-parse", "HEAD"));
       expect(fakes.admitted).toContain("checks");
+      // Committing and rebasing ran under the card's workspace lock.
+      expect(fakes.locked).toContain("card");
     }),
   );
 

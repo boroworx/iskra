@@ -161,11 +161,10 @@ const make = Effect.gen(function* () {
     const base = yield* workspace.projectFile(cardId);
     yield* fetchBase({ worktreePath, baseBranch: base.baseBranch });
     const { baseRef, checks, file } = yield* workspace.projectFile(cardId);
-    const prepared = yield* commitAndRebase({
-      worktreePath,
-      baseRef,
-      message: `${card.title}: work in progress`,
-    });
+    const prepared = yield* workspace.withCardLock(
+      cardId,
+      commitAndRebase({ worktreePath, baseRef, message: `${card.title}: work in progress` }),
+    );
     if (prepared.kind === "conflict") {
       return yield* tellBuilder(
         cardId,

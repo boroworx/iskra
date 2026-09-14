@@ -456,6 +456,7 @@ export const makeOrchestrationIntegrationHarness = (
           projectFile: () => Effect.die("card workspaces are not used by the engine harness"),
           openCardChangedFiles: () =>
             Effect.die("card workspaces are not used by the engine harness"),
+          withCardLock: (_cardId, effect) => effect,
         }),
       ),
       Layer.provideMerge(

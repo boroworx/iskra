@@ -156,6 +156,11 @@ export class CardWorkspace extends Context.Service<
      * rebase. Cards touching the same exclusive path land one at a time.
      */
     readonly land: (cardId: CardId) => Effect.Effect<CardLandResult, CardWorkspaceError>;
+    /** Runs `effect` under the card's lock, so its ensure, land and teardown can't run meanwhile. */
+    readonly withCardLock: <A, E, R>(
+      cardId: CardId,
+      effect: Effect.Effect<A, E, R>,
+    ) => Effect.Effect<A, E, R>;
     readonly runScript: (input: {
       readonly cardId: CardId;
       readonly scriptId: string;
@@ -1302,6 +1307,7 @@ const make = Effect.gen(function* () {
     runChecks,
     changedFiles,
     land: (cardId) => withLock(`card:${cardId}`)(landUnlocked(cardId)),
+    withCardLock: (cardId, effect) => withLock(`card:${cardId}`)(effect),
     runScript,
     projectFile: (cardId) =>
       readCard(cardId).pipe(

@@ -256,9 +256,10 @@ export const fetchBase = Effect.fn("CardEvidence.fetchBase")(function* (input: {
 
 /**
  * Commits what the owner left uncommitted and rebases the card's branch onto `baseRef`. A conflict
- * aborts the rebase and names the conflicting files.
- * ponytail: runs outside CardWorkspace's per-card lock, relying on the owner having ended its turn
- * after asking; move into CardWorkspace if a live owner ever races it.
+ * aborts the rebase and names the conflicting files. Run it under CardWorkspace.withCardLock, so
+ * the card's ensure, land and teardown can't race it.
+ * ponytail: a builder still editing the worktree mid-rebase isn't locked out; the review request
+ * ends its turn first, which is all that keeps it away.
  */
 export const commitAndRebase = Effect.fn("CardEvidence.commitAndRebase")(function* (input: {
   readonly worktreePath: string;
