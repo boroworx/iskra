@@ -1,5 +1,6 @@
 import {
   AgentId,
+  CardId,
   ChannelId,
   MessageId,
   ProjectId,
@@ -156,5 +157,43 @@ describe("renderRunContext", () => {
       systemPrompt: "You are @frontend, an agent working in a direct message with the user.",
       firstMessage: "New message for you:\n[2026-01-01T00:00:05.000Z] user: message 5",
     });
+  });
+
+  it("renders the exact prompt text for a lead wake", () => {
+    const payload = buildRunContext({
+      agent: backend,
+      channel: channel({ wakeDepth: 1, topic: "API work" }),
+      agents: [backend, frontend],
+      messages: [message(4), trigger],
+      trigger,
+    });
+    const lead = {
+      members: [
+        { name: backend.name, roleTags: [] },
+        { name: frontend.name, roleTags: ["ui", "css"] },
+      ],
+      openCards: [{ id: CardId.make("card-1"), title: "Rate limiting", status: "ready" as const }],
+    };
+
+    expect(renderRunContext({ ...payload, lead })).toEqual({
+      systemPrompt: [
+        "You are @backend, the lead of #backend. You read the messages there that mention no one and turn requests for work into proposed cards, which people then triage.",
+        "You never reply in the channel, and you never assign, approve or wake agents: nothing you write as text is posted.",
+        "For each distinct piece of work the new message asks for, call propose_triage_card once with a short title, a plain-language spec, your reasoning, and the ids of open cards it likely duplicates. If the message asks for no work, do nothing.",
+        "You own the API.",
+        "## Channel topic\n\nAPI work",
+        "## Channel members\n\n- @backend\n- @frontend (ui, css)",
+      ].join("\n\n"),
+      firstMessage: [
+        "Recent messages in #backend:\n[2026-01-01T00:00:04.000Z] user: message 4",
+        "## Open cards\n\n- card-1 [ready] Rate limiting",
+        "New message for you:\n[2026-01-01T00:00:05.000Z] user: message 5",
+      ].join("\n\n"),
+    });
+    expect(
+      renderRunContext({ ...payload, history: [], lead: { members: [], openCards: [] } }).firstMessage,
+    ).toBe(
+      "## Open cards\n\nNo open cards.\n\nNew message for you:\n[2026-01-01T00:00:05.000Z] user: message 5",
+    );
   });
 });
