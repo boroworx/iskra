@@ -11,8 +11,6 @@ import * as Tool from "effect/unstable/ai/Tool";
 import * as Toolkit from "effect/unstable/ai/Toolkit";
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
-import * as CardWorkspace from "../../../orchestration/CardWorkspace.ts";
-import * as HostAdmission from "../../../orchestration/HostAdmission.ts";
 import * as OrchestrationEngine from "../../../orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ThreadPlanProgressService } from "../../../orchestration/ThreadPlanProgress.ts";
@@ -22,8 +20,6 @@ const dependencies = [
   OrchestrationEngine.OrchestrationEngineService,
   ProjectionSnapshotQuery.ProjectionSnapshotQuery,
   ThreadPlanProgressService,
-  HostAdmission.HostAdmission,
-  CardWorkspace.CardWorkspace,
 ];
 
 export class BoardSessionRequiredError extends Schema.TaggedError<BoardSessionRequiredError>()(

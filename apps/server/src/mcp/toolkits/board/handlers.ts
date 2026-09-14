@@ -89,8 +89,10 @@ const make = Effect.gen(function* () {
   const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const planProgress = yield* ThreadPlanProgressService;
   const crypto = yield* Crypto.Crypto;
-  const admission = yield* HostAdmission.HostAdmission;
-  const workspace = yield* CardWorkspace.CardWorkspace;
+  // Optional so the MCP routes still build where the card runtime isn't provided; run_checks then
+  // refuses instead.
+  const admissionOption = yield* Effect.serviceOption(HostAdmission.HostAdmission);
+  const workspaceOption = yield* Effect.serviceOption(CardWorkspace.CardWorkspace);
 
   const uuid = crypto.randomUUIDv4.pipe(Effect.orDie);
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -314,6 +316,13 @@ const make = Effect.gen(function* () {
     run_checks: (input) =>
       Effect.gen(function* () {
         const session = yield* requireOwnerSession;
+        if (Option.isNone(admissionOption) || Option.isNone(workspaceOption)) {
+          return yield* new BoardCommandRefusedError({
+            detail: "Checks can't run on this server: it has no card workspaces.",
+          });
+        }
+        const admission = admissionOption.value;
+        const workspace = workspaceOption.value;
         const card = yield* snapshots.getCardShellById(session.cardId).pipe(
           Effect.mapError(failed),
           Effect.flatMap(
