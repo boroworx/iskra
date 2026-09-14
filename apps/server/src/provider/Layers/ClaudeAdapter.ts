@@ -1494,7 +1494,11 @@ function claudeRunPermissions(
       ...(has("network") ? allowedDomains.map((domain) => `WebFetch(domain:${domain})`) : []),
     ],
     // Exact-command rules deny the bare forms up front; the PreToolUse hook catches the rest.
-    disallowedTools: shell ? heavyCommands.map((command) => `Bash(${command})`) : [],
+    // strictMcpConfig keeps account connectors from loading; this denies them should one load anyway.
+    disallowedTools: [
+      "mcp__claude_ai_*",
+      ...(shell ? heavyCommands.map((command) => `Bash(${command})`) : []),
+    ],
     heavyCommands: shell ? heavyCommands : undefined,
     sandbox: shell
       ? ({
@@ -4893,8 +4897,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         },
         settingSources,
         ...(input.run ? { allowedTools: runAllowedTools } : {}),
-        ...(runPermissions && runPermissions.disallowedTools.length > 0
-          ? { disallowedTools: runPermissions.disallowedTools }
+        // A run loads only the MCP servers passed here: no project, user or claude.ai account ones.
+        ...(runPermissions
+          ? { strictMcpConfig: true, disallowedTools: runPermissions.disallowedTools }
           : {}),
         ...(runPermissions?.sandbox ? { sandbox: runPermissions.sandbox } : {}),
         ...(heavyCommands

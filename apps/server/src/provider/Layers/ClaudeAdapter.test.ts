@@ -6766,7 +6766,8 @@ describe("ClaudeAdapterLive", () => {
           "Grep(//work/tree/**)",
         ]);
         assert.equal(options?.sandbox, undefined);
-        assert.equal(options?.disallowedTools, undefined);
+        assert.deepEqual(options?.disallowedTools, ["mcp__claude_ai_*"]);
+        assert.equal(options?.strictMcpConfig, true);
         assert.equal(options?.hooks, undefined);
         assert.deepEqual(options?.settingSources, []);
         assert.equal(options?.resume, undefined);
@@ -6939,10 +6940,10 @@ describe("ClaudeAdapterLive", () => {
         },
         filesystem: { denyRead: [baseDir], allowRead: ["/work/tree"] },
       });
-      assert.deepEqual(
-        options?.disallowedTools,
-        DEFAULT_HEAVY_COMMANDS.map((command) => `Bash(${command})`),
-      );
+      assert.deepEqual(options?.disallowedTools, [
+        "mcp__claude_ai_*",
+        ...DEFAULT_HEAVY_COMMANDS.map((command) => `Bash(${command})`),
+      ]);
       assert.equal(options?.hooks?.PreToolUse?.[0]?.matcher, "Bash");
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
@@ -7143,6 +7144,55 @@ describe("ClaudeAdapterLive", () => {
       Effect.provide(harness.layer),
     );
   });
+
+  it.effect(
+    "reports a run's denied MCP connector, outside write and unallowed fetch as tool.denied",
+    () => {
+      const harness = makeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        const session = yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+          cwd: "/work/tree",
+          run: { systemPrompt: "", capabilities: ["read", "write", "network"] },
+        });
+        const deniedFiber = yield* Stream.filter(
+          adapter.streamEvents,
+          (event) => event.type === "tool.denied",
+        ).pipe(Stream.take(3), Stream.runCollect, Effect.forkChild);
+        yield* adapter.sendTurn({ threadId: session.threadId, input: "go", attachments: [] });
+
+        const denials = [
+          ["mcp__claude_ai_Gmail__send_message", "tool-mcp-1"],
+          ["Write", "tool-write-1"],
+          ["WebFetch", "tool-fetch-1"],
+        ] as const;
+        for (const [toolName, toolUseId] of denials) {
+          harness.query.emit({
+            type: "system",
+            subtype: "permission_denied",
+            tool_name: toolName,
+            tool_use_id: toolUseId,
+            decision_reason_type: "mode",
+            decision_reason: "dontAsk",
+            uuid: `denied-${toolUseId}`,
+            session_id: "sdk-session-run",
+          } as unknown as SDKMessage);
+        }
+
+        const denied = Array.from(yield* Fiber.join(deniedFiber));
+        assert.deepEqual(
+          denied.map((event) => (event.type === "tool.denied" ? event.payload : undefined)),
+          denials.map(([toolName, toolUseId]) => ({ toolName, toolUseId, reason: "dontAsk" })),
+        );
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
 
   it.effect("never widens a run's permission mode when a turn changes interaction mode", () => {
     const harness = makeHarness();
