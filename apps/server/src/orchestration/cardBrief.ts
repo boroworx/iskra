@@ -14,7 +14,7 @@ import { renderNewMessage } from "./runContext.ts";
 /** Past this many characters a brief's diff is cut, so a large change cannot flood the first turn. */
 export const CARD_BRIEF_DIFF_LIMIT = 40_000;
 
-export interface CardBriefInput {
+interface CardBriefInput {
   readonly agent: OrchestrationAgent;
   readonly role: CardSessionRole;
   readonly card: OrchestrationCard;

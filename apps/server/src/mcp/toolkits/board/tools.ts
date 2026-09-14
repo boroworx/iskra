@@ -60,7 +60,7 @@ export const BoardToolError = Schema.Union([
   BoardToolFailedError,
 ]);
 
-export const PlanStepStatus = Schema.Literals(["pending", "inProgress", "completed"]);
+const PlanStepStatus = Schema.Literals(["pending", "inProgress", "completed"]);
 
 const ProposeCardTool = Tool.make("propose_card", {
   description:

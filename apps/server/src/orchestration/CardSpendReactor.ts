@@ -19,7 +19,7 @@ import { turnUsageTotals } from "./cardSpend.ts";
 import * as OrchestrationEngine from "./Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts";
 
-export type FinishedTurnEvent = Extract<
+type FinishedTurnEvent = Extract<
   ProviderRuntimeEvent,
   { readonly type: "turn.completed" | "turn.aborted" }
 >;
