@@ -22,6 +22,7 @@ import {
   UserInputAttachments,
   RuntimeMode,
   RunCapabilities,
+  ProjectOrchestration,
 } from "./orchestration.ts";
 import { ProviderInstanceId, ProviderDriverKind } from "./providerInstance.ts";
 
@@ -60,6 +61,10 @@ export type ProviderSession = typeof ProviderSession.Type;
 export const ProviderRunRestrictions = Schema.Struct({
   systemPrompt: Schema.String,
   capabilities: RunCapabilities,
+  // The project's policy for what the run's shell may reach; absent means no network.
+  egress: Schema.optional(ProjectOrchestration.fields.egress),
+  // Commands the run leaves to run_checks; absent or empty uses the server's defaults.
+  heavyCommands: Schema.optional(ProjectOrchestration.fields.heavyCommands),
 });
 export type ProviderRunRestrictions = typeof ProviderRunRestrictions.Type;
 
