@@ -506,6 +506,8 @@ const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const pathService = yield* Path.Path;
   const secretStore = yield* ServerSecretStore.ServerSecretStore;
+  const secretError = (operation: ServerSettingsError["operation"]) => (cause: unknown) =>
+    new ServerSettingsError({ settingsPath, operation, cause });
   const sql = yield* SqlClient.SqlClient;
   const writeSemaphore = yield* Semaphore.make(1);
   const cacheKey = "settings" as const;
@@ -724,12 +726,7 @@ const make = Effect.gen(function* () {
           : Option.match(
               yield* secretStore
                 .get(LINEAR_CLIENT_SECRET_NAME)
-                .pipe(
-                  Effect.mapError(
-                    (cause) =>
-                      new ServerSettingsError({ settingsPath, operation: "read-secret", cause }),
-                  ),
-                ),
+                .pipe(Effect.mapError(secretError("read-secret"))),
               { onNone: () => "", onSome: (secret) => textDecoder.decode(secret) },
             );
       return {
@@ -905,36 +902,23 @@ const make = Effect.gen(function* () {
           );
       }
 
-      // The marker means the client left the secret as it was.
-      let linearClientSecret = next.linearClientSecret;
-      if (linearClientSecret !== USAGE_LIMIT_SOURCE_KEY_REDACTED) {
-        if (linearClientSecret.length === 0) {
-          yield* secretStore
-            .remove(LINEAR_CLIENT_SECRET_NAME)
-            .pipe(
-              Effect.mapError(
-                (cause) =>
-                  new ServerSettingsError({ settingsPath, operation: "remove-secret", cause }),
-              ),
-            );
-        } else {
-          yield* secretStore
-            .set(LINEAR_CLIENT_SECRET_NAME, textEncoder.encode(linearClientSecret))
-            .pipe(
-              Effect.mapError(
-                (cause) =>
-                  new ServerSettingsError({ settingsPath, operation: "write-secret", cause }),
-              ),
-            );
-          linearClientSecret = USAGE_LIMIT_SOURCE_KEY_REDACTED;
-        }
+      // The marker means the client left the secret as it was; an empty one removes it.
+      const { linearClientSecret } = next;
+      if (linearClientSecret.length === 0) {
+        yield* secretStore
+          .remove(LINEAR_CLIENT_SECRET_NAME)
+          .pipe(Effect.mapError(secretError("remove-secret")));
+      } else if (linearClientSecret !== USAGE_LIMIT_SOURCE_KEY_REDACTED) {
+        yield* secretStore
+          .set(LINEAR_CLIENT_SECRET_NAME, textEncoder.encode(linearClientSecret))
+          .pipe(Effect.mapError(secretError("write-secret")));
       }
 
       return {
         ...next,
         providerInstances: providerInstances as ServerSettings["providerInstances"],
         usageLimitSources: usageLimitSources as ServerSettings["usageLimitSources"],
-        linearClientSecret,
+        linearClientSecret: linearClientSecret.length === 0 ? "" : USAGE_LIMIT_SOURCE_KEY_REDACTED,
       };
     });
 
