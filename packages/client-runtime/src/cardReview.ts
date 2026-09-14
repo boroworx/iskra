@@ -1,12 +1,14 @@
-import type {
-  AssetResource,
-  CardActivity,
-  CardCriterion,
-  CardEvidenceItem,
-  CardFixRounds,
-  CardScopeFlag,
-  ProjectOrchestration,
-  Reason,
+import {
+  ThreadId,
+  type AssetResource,
+  type CardActivity,
+  type CardCriterion,
+  type CardEvidenceItem,
+  type CardFixRounds,
+  type CardId,
+  type CardScopeFlag,
+  type ProjectOrchestration,
+  type Reason,
 } from "@iskra/contracts";
 
 import { NO_PREVIEW_HOST_TEXT } from "./cards.ts";
@@ -18,7 +20,7 @@ export interface EvidenceItemView {
   readonly state: EvidenceItemState;
   /** Why it couldn't be captured, in words a person reads; null when it was. */
   readonly unavailableText: string | null;
-  /** The screenshot, recording or full log behind the authenticated asset route, if any. */
+  /** The screenshot or recording behind the authenticated asset route, if it can be served. */
   readonly artifact: AssetResource | null;
 }
 
@@ -42,40 +44,49 @@ export function unavailableText(reason: Reason): string {
   return reason.code === "noPreviewHost" ? NO_PREVIEW_HOST_TEXT : reason.text;
 }
 
-const IMAGE_OR_VIDEO = /\.(png|jpe?g|gif|webp|mp4|webm|mov)$/i;
+/** What the asset route previews in place; check logs aren't among them, so they get no link. */
+const SERVABLE_MEDIA = /\.(png|jpe?g|gif|webp|mp4|webm|mov)$/i;
+const isAbsolutePath = (path: string) => path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path);
 
 /**
- * The asset resource for an evidence artifact. Evidence files are attachments: their file name
- * without its extension is the attachment id the asset route signs, so they load only through an
- * authenticated URL. Images and recordings open inline; logs download.
+ * The asset resource for an evidence artifact. The server stores screenshots and recordings at
+ * absolute paths under its attachments, which the asset route signs as media files; the thread
+ * names the card's evidence thread, though an absolute path doesn't need one to resolve.
  */
-export function evidenceArtifactResource(artifactPath: string | null): AssetResource | null {
-  const fileName = artifactPath?.split(/[\\/]/).at(-1) ?? "";
-  const dot = fileName.lastIndexOf(".");
-  const attachmentId = dot > 0 ? fileName.slice(0, dot) : fileName;
-  if (attachmentId.length === 0) return null;
+export function evidenceArtifactResource(
+  artifactPath: string | null,
+  cardId: CardId,
+): AssetResource | null {
+  if (
+    artifactPath === null ||
+    !isAbsolutePath(artifactPath) ||
+    !SERVABLE_MEDIA.test(artifactPath)
+  ) {
+    return null;
+  }
   return {
-    _tag: "attachment",
-    attachmentId,
-    fileName,
-    disposition: IMAGE_OR_VIDEO.test(fileName) ? "inline" : "attachment",
+    _tag: "media-file",
+    threadId: ThreadId.make(`card-evidence-${cardId}`),
+    path: artifactPath,
   };
 }
 
-export function evidenceItemView(item: CardEvidenceItem): EvidenceItemView {
-  const state: EvidenceItemState =
-    item.unavailable !== null
-      ? "unavailable"
-      : item.kind === "check"
-        ? item.exitCode === 0 && !item.timedOut
-          ? "passed"
-          : "failed"
-        : "captured";
+function evidenceItemState(item: CardEvidenceItem): EvidenceItemState {
+  return item.unavailable !== null
+    ? "unavailable"
+    : item.kind === "check"
+      ? item.exitCode === 0 && !item.timedOut
+        ? "passed"
+        : "failed"
+      : "captured";
+}
+
+export function evidenceItemView(item: CardEvidenceItem, cardId: CardId): EvidenceItemView {
   return {
     item,
-    state,
+    state: evidenceItemState(item),
     unavailableText: item.unavailable === null ? null : unavailableText(item.unavailable),
-    artifact: evidenceArtifactResource(item.artifactPath),
+    artifact: evidenceArtifactResource(item.artifactPath, cardId),
   };
 }
 
@@ -85,6 +96,7 @@ export function evidenceItemView(item: CardEvidenceItem): EvidenceItemView {
  * needs a person's check, whatever evidence sits under it; the diff is secondary to all of this.
  */
 export function reviewByCriterion(input: {
+  readonly cardId: CardId;
   readonly criteria: ReadonlyArray<CardCriterion>;
   readonly items: ReadonlyArray<CardEvidenceItem>;
 }): {
@@ -92,7 +104,7 @@ export function reviewByCriterion(input: {
   readonly general: ReadonlyArray<EvidenceItemView>;
 } {
   const known = new Set(input.criteria.map((criterion) => criterion.id));
-  const views = input.items.map(evidenceItemView);
+  const views = input.items.map((item) => evidenceItemView(item, input.cardId));
   const criteria = input.criteria.map((criterion): CriterionReview => {
     const items = views.filter((view) => view.item.criterionId === criterion.id);
     const state: CriterionState =
@@ -129,7 +141,7 @@ export function ciSummary(items: ReadonlyArray<CardEvidenceItem>): {
   const ci = items.filter((item) => item.source === "ci" && item.kind === "check");
   return {
     total: ci.length,
-    failed: ci.filter((item) => evidenceItemView(item).state !== "passed").map((item) => item.name),
+    failed: ci.filter((item) => evidenceItemState(item) !== "passed").map((item) => item.name),
   };
 }
 

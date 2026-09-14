@@ -65,8 +65,8 @@ export function CardReview(props: {
       ? props.evidence.items
       : NO_ITEMS;
   const review = useMemo(
-    () => reviewByCriterion({ criteria: card.acceptance.criteria, items }),
-    [card.acceptance.criteria, items],
+    () => reviewByCriterion({ cardId: card.id, criteria: card.acceptance.criteria, items }),
+    [card.id, card.acceptance.criteria, items],
   );
 
   if (summary === null) {

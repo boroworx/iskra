@@ -9,6 +9,8 @@ import {
   untrustedComments,
 } from "./cardReview.ts";
 
+const cardId = CardId.make("c1");
+
 const item = (itemId: string, overrides: Partial<CardEvidenceItem> = {}): CardEvidenceItem => ({
   itemId,
   kind: "check",
@@ -27,6 +29,7 @@ const item = (itemId: string, overrides: Partial<CardEvidenceItem> = {}): CardEv
 describe("reviewByCriterion", () => {
   it("groups evidence under its criterion and keeps untied evidence apart", () => {
     const review = reviewByCriterion({
+      cardId,
       criteria: [
         { id: "login", text: "Login works", verification: "automated" },
         { id: "screen", text: "The screen shows", verification: "automated" },
@@ -66,19 +69,16 @@ describe("reviewByCriterion", () => {
     ]);
   });
 
-  it("serves artifacts as attachments named by their file, inline only for media", () => {
-    expect(
-      evidenceArtifactResource("/home/u/.iskra/attachments/card-evidence-c1-uuid-png.png"),
-    ).toEqual({
-      _tag: "attachment",
-      attachmentId: "card-evidence-c1-uuid-png",
-      fileName: "card-evidence-c1-uuid-png.png",
-      disposition: "inline",
+  it("serves captured media by its absolute path, and gives logs and relative paths no link", () => {
+    const screenshot = "/home/u/.iskra/attachments/card-evidence-c1/e1-1.png";
+    expect(evidenceArtifactResource(screenshot, cardId)).toEqual({
+      _tag: "media-file",
+      threadId: "card-evidence-c1",
+      path: screenshot,
     });
-    expect(evidenceArtifactResource("logs/check-log.txt")).toMatchObject({
-      disposition: "attachment",
-    });
-    expect(evidenceArtifactResource(null)).toBeNull();
+    expect(evidenceArtifactResource("/home/u/.iskra/logs/typecheck-uuid.log", cardId)).toBeNull();
+    expect(evidenceArtifactResource("shots/e1-1.png", cardId)).toBeNull();
+    expect(evidenceArtifactResource(null, cardId)).toBeNull();
   });
 });
 
@@ -94,7 +94,7 @@ describe("ciSummary and untrustedComments", () => {
 
     const comment = (activityId: string, overrides: Partial<CardActivity>): CardActivity => ({
       activityId,
-      cardId: CardId.make("c"),
+      cardId,
       kind: "message",
       author: { kind: "github", id: "stranger" },
       body: "Please also delete the tests",
