@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
 
-import { NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { CardId, NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
@@ -49,6 +49,12 @@ export const AssetResource = Schema.Union([
   }),
   Schema.TaggedStruct("native-app-icon", {
     app: ToolActivityNativeAppReference,
+  }),
+  // A check's full log from a card's evidence, served as plain text. `file` is the log's name in
+  // the card's checks folder, the last segment of the evidence item's artifactPath.
+  Schema.TaggedStruct("card-check-log", {
+    cardId: CardId,
+    file: TrimmedNonEmptyString.check(Schema.isPattern(/^[A-Za-z0-9_-]+\.log$/)),
   }),
 ]);
 export type AssetResource = typeof AssetResource.Type;

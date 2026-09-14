@@ -108,7 +108,12 @@ export function assetResponseHeaders(
               ? options.mimeType
               : "application/octet-stream",
         }
-      : inlineMimeType !== undefined && isSafeInlineMediaMimeType(inlineMimeType)
+      : inlineMimeType?.toLowerCase() === "text/plain"
+        ? {
+            "Content-Type": "text/plain; charset=utf-8",
+            "Content-Security-Policy": "default-src 'none'; sandbox",
+          }
+        : inlineMimeType !== undefined && isSafeInlineMediaMimeType(inlineMimeType)
         ? { "Content-Type": inlineMimeType }
         : inlineMimeType !== undefined && isSafeInlineDocumentMimeType(inlineMimeType)
           ? {

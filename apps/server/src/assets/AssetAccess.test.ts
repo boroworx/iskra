@@ -2,7 +2,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeHttpPlatform from "@effect/platform-node/NodeHttpPlatform";
 import * as NodeFSP from "node:fs/promises";
-import { AssetPreviewTypeValidationError, ThreadId } from "@iskra/contracts";
+import { AssetPreviewTypeValidationError, CardId, ThreadId } from "@iskra/contracts";
 import { PROJECT_FAVICON_FALLBACK_MARKER } from "@iskra/shared/projectFavicon";
 import { describe, expect, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
@@ -80,6 +80,35 @@ describe("AssetAccess", () => {
         expect(yield* resolveAsset(token, `../${name}`)).toBeNull();
         expect(yield* resolveAsset(`${token}tampered`, name)).toBeNull();
       }
+    }).pipe(Effect.provide(testLayer)),
+  );
+
+  it.effect("serves a card's check log as plain text, and nothing beside it", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const checks = path.join(config.attachmentsDir, "card-evidence-card-1", "checks");
+      yield* fs.makeDirectory(checks, { recursive: true });
+      yield* fs.writeFileString(path.join(checks, "typecheck-1.log"), "error TS2322\n");
+      yield* fs.writeFileString(path.join(checks, "build-1.log"), "ok\n");
+
+      const result = yield* issueAssetUrl({
+        resource: { _tag: "card-check-log", cardId: CardId.make("card-1"), file: "typecheck-1.log" },
+      });
+      const suffix = result.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+      const separator = suffix.indexOf("/");
+      const token = suffix.slice(0, separator);
+      expect(yield* resolveAsset(token, suffix.slice(separator + 1))).toEqual({
+        kind: "file",
+        path: path.join(checks, "typecheck-1.log"),
+        mimeType: "text/plain",
+      });
+      expect(yield* resolveAsset(token, "build-1.log")).toBeNull();
+      const otherCard = yield* issueAssetUrl({
+        resource: { _tag: "card-check-log", cardId: CardId.make("card-2"), file: "typecheck-1.log" },
+      }).pipe(Effect.flip);
+      expect(otherCard._tag).toBe("AssetAttachmentNotFoundError");
     }).pipe(Effect.provide(testLayer)),
   );
 

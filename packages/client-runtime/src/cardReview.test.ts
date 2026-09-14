@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   ciSummary,
+  checkLogResource,
   evidenceArtifactResource,
   fixRoundsView,
   reviewByCriterion,
@@ -79,6 +80,13 @@ describe("reviewByCriterion", () => {
     expect(evidenceArtifactResource("/home/u/.iskra/logs/typecheck-uuid.log", cardId)).toBeNull();
     expect(evidenceArtifactResource("shots/e1-1.png", cardId)).toBeNull();
     expect(evidenceArtifactResource(null, cardId)).toBeNull();
+    expect(
+      checkLogResource("/home/u/.iskra/attachments/card-evidence-c1/checks/typecheck-uuid.log", cardId),
+    ).toEqual({ _tag: "card-check-log", cardId, file: "typecheck-uuid.log" });
+    expect(
+      checkLogResource("/home/u/.iskra/attachments/card-evidence-c2/checks/typecheck-uuid.log", cardId),
+    ).toBeNull();
+    expect(checkLogResource("/home/u/.iskra/logs/typecheck-uuid.log", cardId)).toBeNull();
   });
 });
 

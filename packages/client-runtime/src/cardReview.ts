@@ -22,6 +22,8 @@ export interface EvidenceItemView {
   readonly unavailableText: string | null;
   /** The screenshot or recording behind the authenticated asset route, if it can be served. */
   readonly artifact: AssetResource | null;
+  /** A check's full log, as plain text behind the same route; null for anything else. */
+  readonly log: AssetResource | null;
 }
 
 export type CriterionState = "passed" | "failed" | "unavailable" | "needsYourCheck" | "noEvidence";
@@ -44,7 +46,7 @@ export function unavailableText(reason: Reason): string {
   return reason.code === "noPreviewHost" ? NO_PREVIEW_HOST_TEXT : reason.text;
 }
 
-/** What the asset route previews in place; check logs aren't among them, so they get no link. */
+/** What the asset route previews in place; check logs go through `checkLogResource` instead. */
 const SERVABLE_MEDIA = /\.(png|jpe?g|gif|webp|mp4|webm|mov)$/i;
 const isAbsolutePath = (path: string) => path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path);
 
@@ -71,6 +73,17 @@ export function evidenceArtifactResource(
   };
 }
 
+/** Where CardWorkspace writes a card's check logs: `.../card-evidence-<cardId>/checks/<file>.log`. */
+const CHECK_LOG = /[\\/]card-evidence-([^\\/]+)[\\/]checks[\\/]([A-Za-z0-9_-]+\.log)$/;
+
+/** The asset resource for a check's full log, or null when the path isn't one of this card's logs. */
+export function checkLogResource(artifactPath: string | null, cardId: CardId): AssetResource | null {
+  const match = artifactPath === null ? null : CHECK_LOG.exec(artifactPath);
+  return match === null || match[1] !== cardId || match[2] === undefined
+    ? null
+    : { _tag: "card-check-log", cardId, file: match[2] };
+}
+
 function evidenceItemState(item: CardEvidenceItem): EvidenceItemState {
   return item.unavailable !== null
     ? "unavailable"
@@ -87,6 +100,7 @@ export function evidenceItemView(item: CardEvidenceItem, cardId: CardId): Eviden
     state: evidenceItemState(item),
     unavailableText: item.unavailable === null ? null : unavailableText(item.unavailable),
     artifact: evidenceArtifactResource(item.artifactPath, cardId),
+    log: item.kind === "check" ? checkLogResource(item.artifactPath, cardId) : null,
   };
 }
 

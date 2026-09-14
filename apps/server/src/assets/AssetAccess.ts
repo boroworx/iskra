@@ -135,6 +135,12 @@ const AssetClaimsSchema = Schema.Union([
     app: ToolActivityNativeAppReference,
     expiresAt: Schema.Number,
   }),
+  Schema.Struct({
+    version: Schema.Literal(1),
+    kind: Schema.Literal("card-check-log"),
+    filePath: Schema.String,
+    expiresAt: Schema.Number,
+  }),
 ]);
 type AssetClaims = typeof AssetClaimsSchema.Type;
 
@@ -543,6 +549,30 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
       fileName = input.resource.fileName ?? path.basename(attachmentPath);
       break;
     }
+    case "card-check-log": {
+      const config = yield* ServerConfig.ServerConfig;
+      // Only a log in a card's own checks folder, where CardWorkspace writes them.
+      const filePath = /^[A-Za-z0-9_-]+$/.test(input.resource.cardId)
+        ? path.join(
+            config.attachmentsDir,
+            `card-evidence-${input.resource.cardId}`,
+            "checks",
+            input.resource.file,
+          )
+        : null;
+      const info =
+        filePath === null
+          ? Option.none()
+          : yield* optionOnNotFound(fileSystem.stat(filePath)).pipe(
+              Effect.orElseSucceed(() => Option.none()),
+            );
+      if (filePath === null || Option.isNone(info) || info.value.type !== "File") {
+        return yield* new AssetAttachmentNotFoundError({ resource: input.resource });
+      }
+      claims = { version: 1, kind: "card-check-log", filePath, expiresAt };
+      fileName = input.resource.file;
+      break;
+    }
     case "project-favicon": {
       const workspaceRoot = yield* workspacePaths.normalizeWorkspaceRoot(input.resource.cwd).pipe(
         Effect.mapError(
@@ -761,6 +791,18 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
     const nativeAppIconResolver = yield* NativeAppIconResolver.NativeAppIconResolver;
     const iconPath = yield* nativeAppIconResolver.resolve(claims.app);
     return iconPath ? ({ kind: "file", path: iconPath } satisfies ResolvedAsset) : null;
+  }
+
+  if (claims.kind === "card-check-log") {
+    const logPath = yield* Path.Path;
+    if (decodeRelativePath(relativePath) !== logPath.basename(claims.filePath)) return null;
+    const fileSystem = yield* FileSystem.FileSystem;
+    const info = yield* optionOnNotFound(fileSystem.stat(claims.filePath)).pipe(
+      Effect.orElseSucceed(() => Option.none()),
+    );
+    return Option.isSome(info) && info.value.type === "File"
+      ? ({ kind: "file", path: claims.filePath, mimeType: "text/plain" } satisfies ResolvedAsset)
+      : null;
   }
 
   const decodedPath = decodeRelativePath(relativePath);
