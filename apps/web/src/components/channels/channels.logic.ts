@@ -17,7 +17,8 @@ export interface ChannelListEntry {
   readonly name: string;
 }
 
-export interface AgentListEntry {
+/** An agent in the sidebar or a member list, with its presence across all its sessions. */
+export interface AgentEntry {
   readonly id: AgentId;
   readonly name: string;
   readonly presence: AgentPresence;
@@ -27,12 +28,6 @@ export interface AgentListEntry {
 export interface DmTarget {
   readonly threadId: ThreadId;
   readonly label: string;
-}
-
-export interface ChannelMemberEntry {
-  readonly id: AgentId;
-  readonly name: string;
-  readonly presence: AgentPresence;
 }
 
 export interface ChannelMessageRow {
@@ -64,18 +59,25 @@ export function channelListEntries(
   return channels
     .filter((channel) => channel.projectId === projectId && channel.kind === "channel")
     .map((channel) => ({ id: channel.id, name: channel.name }))
-    .toSorted((left, right) => left.name.localeCompare(right.name));
+    .toSorted(byName);
 }
 
-/** A project's agents by name, with their presence across all their sessions. */
-export function agentListEntries(
+const byName = (left: { readonly name: string }, right: { readonly name: string }) =>
+  left.name.localeCompare(right.name);
+
+function agentEntries(
   agents: ReadonlyArray<OrchestrationAgentShell>,
-  projectId: ProjectId,
-): ReadonlyArray<AgentListEntry> {
+  keep: (agent: OrchestrationAgentShell) => boolean,
+): ReadonlyArray<AgentEntry> {
   return agents
-    .filter((agent) => agent.projectId === projectId)
+    .filter(keep)
     .map((agent) => ({ id: agent.id, name: agent.name, presence: agent.presence }))
-    .toSorted((left, right) => left.name.localeCompare(right.name));
+    .toSorted(byName);
+}
+
+/** A project's agents by name. */
+export function agentListEntries(agents: ReadonlyArray<OrchestrationAgentShell>, projectId: ProjectId) {
+  return agentEntries(agents, (agent) => agent.projectId === projectId);
 }
 
 /** Where a session works: the channel it talks in, or the card it builds or helps on. */
@@ -109,12 +111,9 @@ export function dmTargets(
 export function channelMemberEntries(
   channel: OrchestrationChannelShell,
   agents: ReadonlyArray<OrchestrationAgentShell>,
-): ReadonlyArray<ChannelMemberEntry> {
+) {
   const memberIds = new Set<AgentId>(channel.memberAgentIds);
-  return agents
-    .filter((agent) => memberIds.has(agent.id))
-    .map((agent) => ({ id: agent.id, name: agent.name, presence: agent.presence }))
-    .toSorted((left, right) => left.name.localeCompare(right.name));
+  return agentEntries(agents, (agent) => memberIds.has(agent.id));
 }
 
 /** Messages as the channel view shows them: named authors, one header per run of messages. */

@@ -31,7 +31,7 @@ import {
   deliveryNotes,
   presenceDotClassName,
   presenceLabel,
-  type ChannelMemberEntry,
+  type AgentEntry,
   type ChannelMessageRow,
 } from "./channels.logic";
 import { RunBlock } from "./RunBlock";
@@ -400,7 +400,7 @@ function noop() {}
 const NO_LEAD = "none";
 
 const ChannelMemberList = memo(function ChannelMemberList(props: {
-  readonly members: ReadonlyArray<ChannelMemberEntry>;
+  readonly members: ReadonlyArray<AgentEntry>;
   readonly channel: OrchestrationChannelShell;
   readonly agents: ReadonlyArray<OrchestrationAgentShell>;
   readonly environmentId: EnvironmentId;
@@ -468,7 +468,7 @@ const ChannelMemberList = memo(function ChannelMemberList(props: {
 
 /** Static presence dot and label: no continuously repainting animation. */
 export function PresenceBadge(props: {
-  readonly presence: ChannelMemberEntry["presence"];
+  readonly presence: AgentEntry["presence"];
   readonly className?: string;
 }) {
   return (

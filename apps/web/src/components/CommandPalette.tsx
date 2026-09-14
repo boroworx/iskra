@@ -120,6 +120,7 @@ import {
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { buildThreadRouteParams, resolveThreadRouteTarget } from "../threadRoutes";
 import { useAvailableSettingsSearchItems } from "./settings/useAvailableSettingsSearchItems";
+import { channelListEntries } from "./channels/channels.logic";
 import {
   applyWslEnvironmentConfiguration,
   parseWslUncPath,
@@ -1042,14 +1043,10 @@ function OpenCommandPaletteDialog(props: {
   // A project opens on its first channel; without one it lands on the shell home.
   const openProjectFromSearch = useCallback(
     async (project: (typeof projects)[number]) => {
-      const channel = primaryChannels
-        .filter(
-          (candidate) =>
-            project.environmentId === primaryEnvironmentId &&
-            candidate.projectId === project.id &&
-            candidate.kind === "channel",
-        )
-        .toSorted((left, right) => left.name.localeCompare(right.name))[0];
+      const channel =
+        project.environmentId === primaryEnvironmentId
+          ? channelListEntries(primaryChannels, project.id)[0]
+          : undefined;
       if (channel === undefined) {
         await navigate({ to: "/" });
         return;
