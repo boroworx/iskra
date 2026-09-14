@@ -68,6 +68,7 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "agent.update":
     case "agent.archive":
     case "agent.unarchive":
+    case "agent.dm.post":
       return {
         aggregateKind: "agent",
         aggregateId: command.agentId,

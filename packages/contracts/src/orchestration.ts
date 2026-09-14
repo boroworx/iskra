@@ -2192,6 +2192,19 @@ const AgentSessionMessageCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+/**
+ * A person's direct message to an agent. It posts in the agent's DM channel,
+ * opening one on the first message, and wakes the agent there.
+ */
+const AgentDmPostCommand = Schema.Struct({
+  type: Schema.Literal("agent.dm.post"),
+  commandId: CommandId,
+  agentId: AgentId,
+  messageId: MessageId,
+  body: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
 // Server-only: the card session reactor records sessions, replies and deliveries.
 const CardSessionRecordCommand = Schema.Struct({
   type: Schema.Literal("card.session.record"),
@@ -2592,6 +2605,7 @@ const IskraClientCommands = [
   AgentArchiveCommand,
   AgentUnarchiveCommand,
   AgentSessionMessageCommand,
+  AgentDmPostCommand,
   CardCreateCommand,
   CardUpdateCommand,
   CardApproveCommand,

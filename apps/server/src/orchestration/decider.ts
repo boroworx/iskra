@@ -1,6 +1,7 @@
 import {
   CHANNEL_HUMAN_AUTHOR_ID,
   CHANNEL_SYSTEM_AUTHOR_ID,
+  ChannelId,
   DEFAULT_CHANNEL_WAKE_DEPTH,
   EventId,
   MAX_SCRIPT_ID_LENGTH,
@@ -3262,6 +3263,51 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           threadId: command.threadId,
           updatedAt: command.updatedAt,
         },
+      });
+    }
+
+    // A direct message goes to the agent's DM channel, opened on the first one.
+    case "agent.dm.post": {
+      const agent = yield* requireAgent({ readModel, command, agentId: command.agentId });
+      if (agent.archivedAt !== null) {
+        return yield* refuse(command, `@${agent.name} is archived; unarchive it to message it.`);
+      }
+      const dm = (readModel.channels ?? []).find(
+        (channel) =>
+          channel.kind === "dm" &&
+          channel.archivedAt === null &&
+          channel.memberAgentIds.includes(agent.id),
+      );
+      const post = {
+        type: "channel.message.post" as const,
+        commandId: command.commandId,
+        messageId: command.messageId,
+        body: command.body,
+        createdAt: command.createdAt,
+      };
+      if (dm !== undefined) {
+        return yield* decideOrchestrationCommand({
+          command: { ...post, channelId: dm.id },
+          readModel,
+        });
+      }
+      // The id derives from the first message, so a retried first message opens one DM.
+      const channelId = ChannelId.make(`dm:${command.messageId}`);
+      return yield* decideCommandSequence({
+        commands: [
+          {
+            type: "channel.create",
+            commandId: command.commandId,
+            channelId,
+            projectId: agent.projectId,
+            kind: "dm",
+            name: `dm-${agent.name}`,
+            memberAgentIds: [agent.id],
+            createdAt: command.createdAt,
+          },
+          { ...post, channelId },
+        ],
+        readModel,
       });
     }
 

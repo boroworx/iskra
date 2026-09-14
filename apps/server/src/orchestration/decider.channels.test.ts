@@ -362,4 +362,54 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
         expect(dm.message).toContain("Only a channel can have a lead");
       }),
   );
+
+  it.effect("opens an agent's DM on the first direct message and posts later ones there", () =>
+    Effect.gen(function* () {
+      const dmPost = (agentId: AgentId, messageId: string): OrchestrationCommand => ({
+        type: "agent.dm.post",
+        commandId: nextCommandId(),
+        agentId,
+        messageId: MessageId.make(messageId),
+        body: "hello",
+        createdAt: now,
+      });
+
+      const first = yield* decide(yield* applyCommands(setup), dmPost(backend, "dm-first"));
+      expect(first.map((event) => event.type)).toEqual([
+        "channel.created",
+        "channel.message-posted",
+        "channel.agent-wake-requested",
+      ]);
+      expect(first[0]).toMatchObject({
+        payload: {
+          channelId: "dm:dm-first",
+          kind: "dm",
+          name: "dm-backend",
+          topic: "",
+          pinnedSpec: "",
+          wakeDepth: 30,
+          memberAgentIds: [backend],
+          leadAgentId: null,
+        },
+      });
+
+      const later = yield* decide(
+        yield* applyCommands([...setup, dmPost(backend, "dm-first")]),
+        dmPost(backend, "dm-second"),
+      );
+      expect(later).toMatchObject([
+        { type: "channel.message-posted", payload: { channelId: "dm:dm-first" } },
+        { type: "channel.agent-wake-requested", payload: { agentId: backend } },
+      ]);
+
+      const archived = yield* Effect.flip(
+        applyCommands([
+          ...setup,
+          { type: "agent.archive", commandId: nextCommandId(), agentId: backend },
+          dmPost(backend, "dm-archived"),
+        ]),
+      );
+      expect(archived.message).toContain("is archived; unarchive it to message it.");
+    }),
+  );
 });
