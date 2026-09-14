@@ -1,4 +1,5 @@
 import { McpCapabilityUnavailableError, TrimmedNonEmptyString } from "@iskra/contracts";
+import * as Context from "effect/Context";
 import * as Schema from "effect/Schema";
 import * as Tool from "effect/unstable/ai/Tool";
 import * as Toolkit from "effect/unstable/ai/Toolkit";
@@ -62,6 +63,13 @@ export const BoardToolError = Schema.Union([
 
 const PlanStepStatus = Schema.Literals(["pending", "inProgress", "completed"]);
 
+/** Board tools only record on Iskra's board: they destroy nothing and reach nothing outside it. */
+const boardToolAnnotations = Context.make(Tool.Readonly, false).pipe(
+  Context.add(Tool.Destructive, false),
+  Context.add(Tool.Idempotent, false),
+  Context.add(Tool.OpenWorld, false),
+);
+
 const ProposeCardTool = Tool.make("propose_card", {
   description:
     "Propose a new card for work you found that is outside this card. It enters triage, where a person approves or drops it; it is never assigned or started by proposing it.",
@@ -82,10 +90,7 @@ const ProposeCardTool = Tool.make("propose_card", {
   dependencies,
 })
   .annotate(Tool.Title, "Propose a card")
-  .annotate(Tool.Readonly, false)
-  .annotate(Tool.Destructive, false)
-  .annotate(Tool.Idempotent, false)
-  .annotate(Tool.OpenWorld, false);
+  .annotateMerge(boardToolAnnotations);
 
 const RecordDecisionTool = Tool.make("record_decision", {
   description:
@@ -98,10 +103,7 @@ const RecordDecisionTool = Tool.make("record_decision", {
   dependencies,
 })
   .annotate(Tool.Title, "Record a decision")
-  .annotate(Tool.Readonly, false)
-  .annotate(Tool.Destructive, false)
-  .annotate(Tool.Idempotent, false)
-  .annotate(Tool.OpenWorld, false);
+  .annotateMerge(boardToolAnnotations);
 
 const UpdatePlanTool = Tool.make("update_plan", {
   description:
@@ -116,10 +118,8 @@ const UpdatePlanTool = Tool.make("update_plan", {
   dependencies,
 })
   .annotate(Tool.Title, "Update the plan")
-  .annotate(Tool.Readonly, false)
-  .annotate(Tool.Destructive, false)
-  .annotate(Tool.Idempotent, true)
-  .annotate(Tool.OpenWorld, false);
+  .annotateMerge(boardToolAnnotations)
+  .annotate(Tool.Idempotent, true);
 
 const RequestReviewTool = Tool.make("request_review", {
   description:
@@ -129,10 +129,7 @@ const RequestReviewTool = Tool.make("request_review", {
   dependencies,
 })
   .annotate(Tool.Title, "Request review")
-  .annotate(Tool.Readonly, false)
-  .annotate(Tool.Destructive, false)
-  .annotate(Tool.Idempotent, false)
-  .annotate(Tool.OpenWorld, false);
+  .annotateMerge(boardToolAnnotations);
 
 const AskOwnerTool = Tool.make("ask_owner", {
   description:
@@ -150,10 +147,7 @@ const AskOwnerTool = Tool.make("ask_owner", {
   dependencies,
 })
   .annotate(Tool.Title, "Ask the owner")
-  .annotate(Tool.Readonly, false)
-  .annotate(Tool.Destructive, false)
-  .annotate(Tool.Idempotent, false)
-  .annotate(Tool.OpenWorld, false);
+  .annotateMerge(boardToolAnnotations);
 
 const ProposeTriageCardTool = Tool.make("propose_triage_card", {
   description:
@@ -176,10 +170,7 @@ const ProposeTriageCardTool = Tool.make("propose_triage_card", {
   dependencies,
 })
   .annotate(Tool.Title, "Propose a triage card")
-  .annotate(Tool.Readonly, false)
-  .annotate(Tool.Destructive, false)
-  .annotate(Tool.Idempotent, false)
-  .annotate(Tool.OpenWorld, false);
+  .annotateMerge(boardToolAnnotations);
 
 /** Tools create commands only: none of them approves, assigns or lands a card. */
 export const BoardToolkit = Toolkit.make(
