@@ -11,7 +11,6 @@ import {
   GetProjectionChannelInput,
   GetProjectionChannelMessageInput,
   ListOpenProjectionChannelDeliveriesInput,
-  ListProjectionChannelMessagesInput,
   ProjectionChannel,
   ProjectionChannelDbRow,
   ProjectionChannelDelivery,
@@ -185,28 +184,6 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
       `,
   });
 
-  const listMessageRows = SqlSchema.findAll({
-    Request: ListProjectionChannelMessagesInput,
-    Result: ProjectionChannelMessage,
-    execute: ({ channelId, beforeSequence, limit }) =>
-      sql`
-        SELECT
-          message_id AS "messageId",
-          channel_id AS "channelId",
-          sequence,
-          author_kind AS "authorKind",
-          author_id AS "authorId",
-          body,
-          created_at AS "createdAt",
-          run_thread_id AS "runThreadId"
-        FROM projection_channel_messages
-        WHERE channel_id = ${channelId}
-          AND ${beforeSequence === undefined ? sql`1 = 1` : sql`sequence < ${beforeSequence}`}
-        ORDER BY sequence DESC
-        LIMIT ${limit}
-      `,
-  });
-
   const listWakeHistoryRows = SqlSchema.findAll({
     Request: GetProjectionChannelInput,
     Result: ProjectionChannelMessage,
@@ -338,12 +315,6 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
       Effect.mapError(toPersistenceSqlError("ProjectionChannelRepository.endRun:query")),
     );
 
-  const listMessages: ProjectionChannelRepositoryShape["listMessages"] = (input) =>
-    listMessageRows(input).pipe(
-      Effect.map((rows) => rows.toReversed()),
-      Effect.mapError(toPersistenceSqlError("ProjectionChannelRepository.listMessages:query")),
-    );
-
   const listWakeHistory: ProjectionChannelRepositoryShape["listWakeHistory"] = (input) =>
     listWakeHistoryRows(input).pipe(
       Effect.map((rows) => rows.toReversed()),
@@ -357,7 +328,6 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
     getMessageById,
     insertRun,
     endRun,
-    listMessages,
     listWakeHistory,
     upsertDelivery,
     updateDeliveries,

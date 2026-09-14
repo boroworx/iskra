@@ -7,6 +7,7 @@
 import {
   AgentId,
   ChannelDeliveryStatus,
+  ChannelDeliveryUpdatedPayload,
   ChannelId,
   ChannelKind,
   ChannelMessageAuthorKind,
@@ -16,7 +17,6 @@ import {
   type OrchestrationChannelMessage,
   OrchestrationChannelShell,
   OrchestrationAgentRun,
-  OrchestrationLiveRun,
   OrchestrationRun,
   ProjectId,
   RenderedRunContext,
@@ -111,9 +111,6 @@ export const GetProjectionChannelMessageInput = Schema.Struct({
 });
 export type GetProjectionChannelMessageInput = typeof GetProjectionChannelMessageInput.Type;
 
-/** A live run row as selected; it has no JSON columns. */
-export const ProjectionLiveRunDbRow = OrchestrationLiveRun;
-
 export const EndProjectionRunInput = Schema.Struct({
   threadId: ThreadId,
   endedAt: IsoDateTime,
@@ -130,17 +127,6 @@ export const ProjectionChannelDelivery = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 export type ProjectionChannelDelivery = typeof ProjectionChannelDelivery.Type;
-
-export const UpdateProjectionChannelDeliveriesInput = Schema.Struct({
-  messageIds: Schema.Array(MessageId),
-  agentId: AgentId,
-  channelId: ChannelId,
-  runThreadId: Schema.NullOr(ThreadId),
-  status: ChannelDeliveryStatus,
-  updatedAt: IsoDateTime,
-});
-export type UpdateProjectionChannelDeliveriesInput =
-  typeof UpdateProjectionChannelDeliveriesInput.Type;
 
 export const ListOpenProjectionChannelDeliveriesInput = Schema.Struct({
   agentId: AgentId,
@@ -162,13 +148,6 @@ export const GetProjectionChannelInput = Schema.Struct({
 });
 export type GetProjectionChannelInput = typeof GetProjectionChannelInput.Type;
 
-export const ListProjectionChannelMessagesInput = Schema.Struct({
-  channelId: ChannelId,
-  beforeSequence: Schema.optional(NonNegativeInt),
-  limit: NonNegativeInt,
-});
-export type ListProjectionChannelMessagesInput = typeof ListProjectionChannelMessagesInput.Type;
-
 export interface ProjectionChannelRepositoryShape {
   /** Insert or replace a projected channel row by `channelId`. */
   readonly upsertChannel: (
@@ -184,11 +163,6 @@ export interface ProjectionChannelRepositoryShape {
   readonly appendMessage: (
     row: ProjectionChannelMessage,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
-
-  /** The newest `limit` messages before `beforeSequence` (or the end), oldest first. */
-  readonly listMessages: (
-    input: ListProjectionChannelMessagesInput,
-  ) => Effect.Effect<ReadonlyArray<ProjectionChannelMessage>, ProjectionRepositoryError>;
 
   /** Read one channel message by id. */
   readonly getMessageById: (
@@ -208,7 +182,7 @@ export interface ProjectionChannelRepositoryShape {
 
   /** Give an agent's deliveries of these messages a new status and run. */
   readonly updateDeliveries: (
-    input: UpdateProjectionChannelDeliveriesInput,
+    input: typeof ChannelDeliveryUpdatedPayload.Type,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
 
   /** An agent's pending and sent deliveries in a channel, oldest message first. */

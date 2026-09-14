@@ -2,6 +2,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import { CardDeliveryUpdatedPayload } from "@iskra/contracts";
 
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
@@ -13,7 +14,6 @@ import {
   ProjectionCardMessage,
   ProjectionCardRepository,
   ProjectionCardSpend,
-  UpdateProjectionCardDeliveriesInput,
   type ProjectionCardRepositoryShape,
 } from "../Services/ProjectionCards.ts";
 
@@ -275,7 +275,7 @@ const makeProjectionCardRepository = Effect.gen(function* () {
   });
 
   const updateDeliveryRows = SqlSchema.void({
-    Request: UpdateProjectionCardDeliveriesInput,
+    Request: CardDeliveryUpdatedPayload,
     execute: ({ messageIds, status, threadId }) =>
       sql`
         UPDATE projection_card_messages

@@ -9,6 +9,7 @@
 import {
   AgentId,
   CardAuthor,
+  CardDeliveryUpdatedPayload,
   CardId,
   CardRelation,
   CardSpecState,
@@ -118,13 +119,6 @@ export const ProjectionCardMessage = Schema.Struct({
 });
 export type ProjectionCardMessage = typeof ProjectionCardMessage.Type;
 
-export const UpdateProjectionCardDeliveriesInput = Schema.Struct({
-  messageIds: Schema.Array(MessageId),
-  status: ChannelDeliveryStatus,
-  threadId: Schema.NullOr(ThreadId),
-});
-export type UpdateProjectionCardDeliveriesInput = typeof UpdateProjectionCardDeliveriesInput.Type;
-
 /** One priced turn of a card session, so spend sums by card and by agent. */
 export const ProjectionCardSpend = Schema.Struct({
   spendId: Schema.String,
@@ -173,7 +167,7 @@ export interface ProjectionCardRepositoryShape {
 
   /** Give these owner messages a new delivery status and session. */
   readonly updateDeliveries: (
-    input: UpdateProjectionCardDeliveriesInput,
+    input: typeof CardDeliveryUpdatedPayload.Type,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
 
   /** A card's owner messages still pending or sent, oldest first. */

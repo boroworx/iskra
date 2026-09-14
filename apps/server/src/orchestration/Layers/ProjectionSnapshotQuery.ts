@@ -37,6 +37,7 @@ import {
   OrchestrationSessionStatus,
   TrimmedNonEmptyString,
   runSessionState,
+  OrchestrationLiveRun,
   type OrchestrationCardShell,
 } from "@iskra/contracts";
 import { legacyLinkedPullRequestOf } from "@iskra/shared/threadPullRequests";
@@ -69,7 +70,6 @@ import {
   ProjectionChannelDelivery,
   ProjectionChannelMessage,
   ProjectionChannelShellDbRow,
-  ProjectionLiveRunDbRow,
   ProjectionRunDbRow,
   toOrchestrationChannelMessage,
 } from "../../persistence/Services/ProjectionChannels.ts";
@@ -802,7 +802,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
 
   const listLiveRunRows = SqlSchema.findAll({
     Request: Schema.Void,
-    Result: ProjectionLiveRunDbRow,
+    Result: OrchestrationLiveRun,
     execute: () =>
       sql`
         SELECT

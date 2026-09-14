@@ -114,6 +114,7 @@ async function createOrchestrationSystem(
   const snapshotQuery = await runtime.runPromise(Effect.service(ProjectionSnapshotQuery));
   return {
     engine,
+    snapshotQuery,
     readModel: () => runtime.runPromise(snapshotQuery.getSnapshot()),
     commandReadModel: () => runtime.runPromise(snapshotQuery.getCommandReadModel()),
     shellSnapshot: () => runtime.runPromise(snapshotQuery.getShellSnapshot()),
@@ -1034,7 +1035,7 @@ describe("OrchestrationEngine", () => {
     }
   });
 
-  it("pages channel messages and hands agents only the newest wake-depth of them", async () => {
+  it("lists the newest channel messages and hands agents only the newest wake-depth of them", async () => {
     const system = await createOrchestrationSystem();
     const projectId = asProjectId("channels-project");
     const channelId = ChannelId.make("channel-general");
@@ -1078,12 +1079,8 @@ describe("OrchestrationEngine", () => {
       }
       const channels = await system.channelRepository();
 
-      const newest = await system.run(channels.listMessages({ channelId, limit: 2 }));
+      const newest = await system.run(system.snapshotQuery.listChannelMessages(channelId, 2));
       expect(bodies(newest)).toEqual(["message 4", "message 5"]);
-      const older = await system.run(
-        channels.listMessages({ channelId, beforeSequence: newest[0]?.sequence ?? 0, limit: 2 }),
-      );
-      expect(bodies(older)).toEqual(["message 2", "message 3"]);
 
       expect(bodies(await system.run(channels.listWakeHistory({ channelId })))).toEqual([
         "message 3",
