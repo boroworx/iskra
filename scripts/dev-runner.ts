@@ -388,6 +388,7 @@ export function createDevRunnerEnv({
       delete output.ISKRA_MODE;
       delete output.ISKRA_NO_BROWSER;
       delete output.ISKRA_HOST;
+      delete output.ISKRA_DEV_AUTH_TOKEN;
     }
 
     if (!isDesktopMode && host !== undefined) {

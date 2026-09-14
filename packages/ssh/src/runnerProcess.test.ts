@@ -23,7 +23,7 @@ const decodeStarted = Schema.decodeUnknownSync(Schema.fromJsonString(Started));
 describe.skipIf(HostProcessPlatform.defaultValue() === "win32")(
   "remote runner process ownership",
   () => {
-    it.live("keeps the server PID and graceful shutdown through the node script runner", () =>
+    it.live("keeps the server PID and graceful shutdown through the node-script runner", () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
@@ -66,9 +66,7 @@ server.listen(Number(process.env.ISKRA_TEST_PORT ?? 0), "127.0.0.1", () => {
                 },
                 detached: false,
                 stdin: Stream.make(
-                  new TextEncoder().encode(
-                    buildRemoteIskraRunnerScript({ nodeScriptPath: cliPath }),
-                  ),
+                  new TextEncoder().encode(buildRemoteIskraRunnerScript({ nodeScriptPath: cliPath })),
                 ),
               }),
             );
@@ -101,7 +99,7 @@ server.listen(Number(process.env.ISKRA_TEST_PORT ?? 0), "127.0.0.1", () => {
                 ),
               ),
             );
-            // A failed PID assertion must still close the owned fixture server, including an npm child.
+            // A failed PID assertion must still close the owned fixture server.
             yield* Effect.addFinalizer(() =>
               Effect.gen(function* () {
                 if (yield* child.isRunning) {
@@ -253,50 +251,3 @@ server.listen(0, "127.0.0.1", () => {
     );
   },
 );
-
-describe.skipIf(HostProcessPlatform.defaultValue() === "win32")("remote runner npm refusal", () => {
-  it.live("refuses without running npm, npx, or a iskra already on PATH", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-      const fixture = yield* fs.makeTempDirectoryScoped({ prefix: "iskra-runner-refusal-" });
-      const bin = path.join(fixture, "bin");
-      const callsPath = path.join(fixture, "calls.txt");
-      yield* fs.makeDirectory(bin);
-      yield* fs.symlink(process.execPath, path.join(bin, "node"));
-      yield* fs.writeFileString(callsPath, "");
-      for (const executable of ["npx", "npm", "iskra"]) {
-        yield* fs.writeFileString(
-          path.join(bin, executable),
-          `#!/usr/bin/env node
-require("node:fs").appendFileSync(process.env.ISKRA_TEST_CALLS, "${executable}\\n");
-`,
-        );
-        yield* fs.chmod(path.join(bin, executable), 0o700);
-      }
-
-      const child = yield* spawner.spawn(
-        ChildProcess.make("/bin/sh", ["-s", "--", "serve"], {
-          cwd: fixture,
-          extendEnv: false,
-          env: { PATH: bin, ISKRA_TEST_CALLS: callsPath },
-          stdin: Stream.make(new TextEncoder().encode(buildRemoteIskraRunnerScript())),
-        }),
-      );
-      const { stdout, stderr, exitCode } = yield* Effect.all(
-        {
-          stdout: child.stdout.pipe(Stream.decodeText(), Stream.mkString),
-          stderr: child.stderr.pipe(Stream.decodeText(), Stream.mkString),
-          exitCode: child.exitCode,
-        },
-        { concurrency: "unbounded" },
-      );
-
-      assert.equal(exitCode, 1);
-      assert.equal(stdout, "");
-      assert.include(stderr, "Iskra is not published to npm yet");
-      assert.equal(yield* fs.readFileString(callsPath), "");
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
-  );
-});

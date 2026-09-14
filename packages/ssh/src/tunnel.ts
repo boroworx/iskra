@@ -3,6 +3,7 @@ import {
   describeReadinessCause,
   waitForHttpReady as waitForHttpReadyShared,
 } from "@iskra/shared/httpReadiness";
+import { cliReleaseDownloadBaseUrl } from "@iskra/shared/cliRelease";
 import * as NetService from "@iskra/shared/Net";
 import { extractJsonObject, fromLenientJson } from "@iskra/shared/schemaJson";
 import { satisfiesSemverRange } from "@iskra/shared/semver";
@@ -53,11 +54,32 @@ const SSH_READY_PROBE_TIMEOUT_MS = 1_000;
 const TUNNEL_SHUTDOWN_TIMEOUT_MS = 2_000;
 const REMOTE_READY_TIMEOUT_MS = 60_000;
 const REMOTE_LAUNCH_TIMEOUT_MS = 90_000;
+// A cold archive launch also downloads and unpacks a ~70 MB release archive
+// and may wait on another installer's lock. The budgets nest: the checksum
+// file is tiny and the archive download is bounded; a waiter outlasts both
+// downloads plus extraction so it can reuse the result; and the SSH command
+// outlasts an install (own or waited-for) plus readiness, with slack for
+// verification and extraction, which have no timeout of their own.
+const REMOTE_ARCHIVE_CHECKSUMS_SECONDS = 30;
+const REMOTE_ARCHIVE_DOWNLOAD_SECONDS = 240;
+const REMOTE_ARCHIVE_LOCK_WAIT_SECONDS = 360;
+const REMOTE_ARCHIVE_LAUNCH_TIMEOUT_MS = 900_000;
 const REMOTE_REUSE_READY_TIMEOUT_MS = 2_000;
 
 export interface RemoteIskraRunnerOptions {
+  /**
+   * Dev mode: run `node <path>` on the remote instead of a release archive.
+   * The only mode that needs Node on the remote.
+   */
   readonly nodeScriptPath?: string | null;
   readonly nodeEngineRange?: string | null;
+  /**
+   * Exact version whose self-contained release archive the remote installs
+   * and runs. Required unless `nodeScriptPath` is set; the remote then needs
+   * neither Node nor npm.
+   */
+  readonly archiveVersion?: string | null;
+  readonly releaseBaseUrl?: string | null;
 }
 
 export interface SshEnvironmentManagerOptions {
@@ -102,11 +124,18 @@ function sshTargetLogFields(target: DesktopSshEnvironmentTarget) {
   };
 }
 
+function isNodeScriptRunner(runner: RemoteIskraRunnerOptions | undefined): boolean {
+  return Boolean(runner?.nodeScriptPath?.trim());
+}
+
 function sshRunnerLogFields(runner: RemoteIskraRunnerOptions | undefined) {
   if (runner?.nodeScriptPath?.trim()) {
     return { runner: "node-script", nodeScriptPath: runner.nodeScriptPath.trim() };
   }
-  return { runner: "default" };
+  if (runner?.archiveVersion?.trim()) {
+    return { runner: "archive", archiveVersion: runner.archiveVersion.trim() };
+  }
+  return { runner: "archive" };
 }
 
 interface SshAuthOperationInput<T> {
@@ -397,19 +426,116 @@ ensure_remote_node_path() {
 const REMOTE_RUNNER_SCRIPT = `#!/bin/sh
 set -eu
 @@ISKRA_NODE_ENV_SCRIPT@@
-ensure_remote_node_path || true
 ISKRA_NODE_SCRIPT_PATH=@@ISKRA_NODE_SCRIPT_PATH@@
 if [ -n "$ISKRA_NODE_SCRIPT_PATH" ]; then
+  # Dev mode: a source checkout on the remote. This is the only path that
+  # needs Node, so Node discovery runs here and nowhere else.
+  ensure_remote_node_path || true
   if ! command -v node >/dev/null 2>&1; then
     printf 'Remote host is missing node on PATH. Install Node or configure a supported version manager for non-interactive shells.\\n' >&2
     exit 1
   fi
   exec node "$ISKRA_NODE_SCRIPT_PATH" "$@"
 fi
-# Iskra is not published to npm. The t3 package there (and any t3 already on
-# PATH) is Iskra, so refuse instead of installing or running it.
-printf 'Iskra is not published to npm yet, so it cannot be installed on the remote host automatically. Start an Iskra server on that host yourself and connect to it as a remote environment instead.\\n' >&2
-exit 1
+ISKRA_ARCHIVE_VERSION=@@ISKRA_ARCHIVE_VERSION@@
+if [ -z "$ISKRA_ARCHIVE_VERSION" ]; then
+  printf 'No iskra release version was provided for the remote runtime.\\n' >&2
+  exit 1
+fi
+# Self-contained release archive: no Node, npm, or compiler on the remote.
+# Unpacked into the pinned-runtime layout so \`iskra service install\` reuses it.
+ISKRA_RELEASE_BASE_URL=@@ISKRA_RELEASE_BASE_URL@@
+ISKRA_RUNTIME_DIR="$HOME/.iskra/runtime/versions/$ISKRA_ARCHIVE_VERSION"
+t3_runtime_ready() {
+  [ -x "$ISKRA_RUNTIME_DIR/iskra" ] && [ "$(cat "$ISKRA_RUNTIME_DIR/.install-complete" 2>/dev/null)" = "$ISKRA_ARCHIVE_VERSION" ]
+}
+if ! t3_runtime_ready; then
+  mkdir -p "$HOME/.iskra/runtime/versions"
+  # Concurrent launches (two clients, a retry racing a slow first run) must
+  # not both install: mkdir is the atomic lock and the ready check repeats
+  # under it.
+  ISKRA_LOCK="$HOME/.iskra/runtime/versions/.$ISKRA_ARCHIVE_VERSION.install.lock"
+  # mkdir is the only portable atomic exclusive create (mv would silently
+  # nest a candidate inside an existing lock). The owner publishes its pid
+  # right after, so a lock with a live owner is never reclaimed however
+  # slow its download is, and a lock whose owner is dead is reclaimed at
+  # once. A lock with no pid at all is a crash between mkdir and the pid
+  # write; it is reclaimed after a short grace so a live owner has time to
+  # publish.
+  ISKRA_LOCK_WAITED=0
+  ISKRA_LOCK_UNOWNED=0
+  while ! mkdir "$ISKRA_LOCK" 2>/dev/null; do
+    ISKRA_LOCK_OWNER="$(cat "$ISKRA_LOCK/pid" 2>/dev/null || true)"
+    if [ -n "$ISKRA_LOCK_OWNER" ]; then
+      ISKRA_LOCK_UNOWNED=0
+      if ! kill -0 "$ISKRA_LOCK_OWNER" 2>/dev/null; then
+        rm -rf "$ISKRA_LOCK"
+        continue
+      fi
+    else
+      ISKRA_LOCK_UNOWNED=$((ISKRA_LOCK_UNOWNED + 1))
+      if [ "$ISKRA_LOCK_UNOWNED" -ge 5 ]; then
+        rm -rf "$ISKRA_LOCK"
+        continue
+      fi
+    fi
+    if [ "$ISKRA_LOCK_WAITED" -ge @@ISKRA_ARCHIVE_LOCK_WAIT_SECONDS@@ ]; then
+      printf 'Another iskra %s installation has held %s for too long.\\n' "$ISKRA_ARCHIVE_VERSION" "$ISKRA_LOCK" >&2
+      exit 1
+    fi
+    sleep 1
+    ISKRA_LOCK_WAITED=$((ISKRA_LOCK_WAITED + 1))
+  done
+  printf '%s\\n' "$$" > "$ISKRA_LOCK/pid.tmp" && mv "$ISKRA_LOCK/pid.tmp" "$ISKRA_LOCK/pid"
+  trap 'rm -rf "$ISKRA_LOCK"' EXIT
+fi
+if ! t3_runtime_ready; then
+  case "$(uname -s)" in
+    Darwin) ISKRA_PLATFORM="darwin" ;;
+    Linux) ISKRA_PLATFORM="linux" ;;
+    *) printf 'Remote host %s has no iskra release archive.\\n' "$(uname -s)" >&2; exit 1 ;;
+  esac
+  case "$(uname -m)" in
+    arm64 | aarch64) ISKRA_ARCH="arm64" ;;
+    x86_64 | amd64) ISKRA_ARCH="x64" ;;
+    *) printf 'Remote host %s has no iskra release archive.\\n' "$(uname -m)" >&2; exit 1 ;;
+  esac
+  ISKRA_ARCHIVE="iskra-$ISKRA_ARCHIVE_VERSION-$ISKRA_PLATFORM-$ISKRA_ARCH.tar.gz"
+  ISKRA_STAGING="$(mktemp -d "$HOME/.iskra/runtime/versions/.staging-XXXXXX")"
+  trap 'rm -rf "$ISKRA_STAGING" "$ISKRA_LOCK"' EXIT
+  t3_fetch() {
+    if command -v curl >/dev/null 2>&1; then curl -fsSL --connect-timeout 30 --max-time "$3" "$1" -o "$2"
+    elif command -v wget >/dev/null 2>&1; then wget -q --timeout=30 --tries=1 "$1" -O "$2"
+    else printf 'Remote host needs curl or wget to download %s.\\n' "$ISKRA_ARCHIVE" >&2; exit 1
+    fi
+  }
+  t3_fetch "$ISKRA_RELEASE_BASE_URL/v$ISKRA_ARCHIVE_VERSION/SHA256SUMS" "$ISKRA_STAGING/SHA256SUMS" @@ISKRA_ARCHIVE_CHECKSUMS_SECONDS@@
+  t3_fetch "$ISKRA_RELEASE_BASE_URL/v$ISKRA_ARCHIVE_VERSION/$ISKRA_ARCHIVE" "$ISKRA_STAGING/$ISKRA_ARCHIVE" @@ISKRA_ARCHIVE_DOWNLOAD_SECONDS@@
+  ISKRA_EXPECTED="$(grep " \\*\\{0,1\\}$ISKRA_ARCHIVE$" "$ISKRA_STAGING/SHA256SUMS" | cut -d' ' -f1)"
+  if command -v sha256sum >/dev/null 2>&1; then
+    ISKRA_ACTUAL="$(sha256sum "$ISKRA_STAGING/$ISKRA_ARCHIVE" | cut -d' ' -f1)"
+  else
+    ISKRA_ACTUAL="$(shasum -a 256 "$ISKRA_STAGING/$ISKRA_ARCHIVE" | cut -d' ' -f1)"
+  fi
+  if [ -z "$ISKRA_EXPECTED" ] || [ "$ISKRA_ACTUAL" != "$ISKRA_EXPECTED" ]; then
+    printf 'Checksum mismatch for %s.\\n' "$ISKRA_ARCHIVE" >&2; exit 1
+  fi
+  tar -xzf "$ISKRA_STAGING/$ISKRA_ARCHIVE" -C "$ISKRA_STAGING" --strip-components=1
+  rm -f "$ISKRA_STAGING/$ISKRA_ARCHIVE" "$ISKRA_STAGING/SHA256SUMS"
+  # Prove the binary runs here (libc, arch) before marking it ready, or every
+  # later launch would exec a broken install instead of retrying.
+  if ! "$ISKRA_STAGING/iskra" --version >/dev/null 2>&1; then
+    printf 'The iskra %s executable does not run on this host.\\n' "$ISKRA_ARCHIVE_VERSION" >&2; exit 1
+  fi
+  printf '%s\\n' "$ISKRA_ARCHIVE_VERSION" > "$ISKRA_STAGING/.install-complete"
+  rm -rf "$ISKRA_RUNTIME_DIR"
+  mv "$ISKRA_STAGING" "$ISKRA_RUNTIME_DIR"
+fi
+if [ -n "\${ISKRA_LOCK:-}" ]; then
+  rm -rf "$ISKRA_LOCK"
+  trap - EXIT
+fi
+exec "$ISKRA_RUNTIME_DIR/iskra" "$@"
 `;
 
 const REMOTE_LAUNCH_SCRIPT = `set -eu
@@ -438,16 +564,30 @@ if [ ! -f "$RUNNER_FILE" ] || ! cmp -s "$RUNNER_NEXT" "$RUNNER_FILE"; then
 fi
 mv "$RUNNER_NEXT" "$RUNNER_FILE"
 chmod 700 "$RUNNER_FILE"
-if ! ensure_remote_node_path; then
+ISKRA_ARCHIVE_MODE=@@ISKRA_ARCHIVE_MODE@@
+if [ "$ISKRA_ARCHIVE_MODE" = "1" ]; then
+  # The archive ships the helpers below inside the executable; the remote
+  # needs no Node at all. Resolving the runner once here also downloads the
+  # archive before the port and readiness probes rely on it.
+  "$RUNNER_FILE" --version >/dev/null
+elif ! ensure_remote_node_path; then
   printf 'Remote host is missing node on PATH. Install Node or configure a supported version manager for non-interactive shells.\\n' >&2
   exit 1
 fi
 pick_port() {
+  if [ "$ISKRA_ARCHIVE_MODE" = "1" ]; then
+    "$RUNNER_FILE" __ssh-helper pick-port "$PORT_FILE" "@@ISKRA_DEFAULT_REMOTE_PORT@@" "@@ISKRA_REMOTE_PORT_SCAN_WINDOW@@"
+    return
+  fi
   node - "$PORT_FILE" "@@ISKRA_DEFAULT_REMOTE_PORT@@" "@@ISKRA_REMOTE_PORT_SCAN_WINDOW@@" <<'NODE'
 @@ISKRA_PICK_PORT_SCRIPT@@
 NODE
 }
 wait_ready() {
+  if [ "$ISKRA_ARCHIVE_MODE" = "1" ]; then
+    "$RUNNER_FILE" __ssh-helper wait-ready "$REMOTE_PORT" "$1" "@@ISKRA_READY_PROBE_TIMEOUT_MS@@"
+    return
+  fi
   node - "$REMOTE_PORT" "$1" "@@ISKRA_READY_PROBE_TIMEOUT_MS@@" <<'NODE'
 @@ISKRA_WAIT_READY_SCRIPT@@
 NODE
@@ -461,6 +601,10 @@ wait_for_pid_exit() {
   done
 }
 resolve_default_runtime_port() {
+  if [ "$ISKRA_ARCHIVE_MODE" = "1" ]; then
+    "$RUNNER_FILE" __ssh-helper runtime-port "$DEFAULT_RUNTIME_FILE"
+    return
+  fi
   node - "$DEFAULT_RUNTIME_FILE" <<'NODE'
 const fs = require("node:fs");
 const runtimePath = process.argv[2] ?? "";
@@ -547,7 +691,11 @@ fi
 if [ -z "$REMOTE_PORT" ]; then
   REMOTE_PORT="$(pick_port)" || true
   if [ -z "$REMOTE_PORT" ]; then
-    printf 'Failed to find an available port on the remote host. Ensure node is available on PATH.\\n' >&2
+    if [ "$ISKRA_ARCHIVE_MODE" = "1" ]; then
+      printf 'Failed to find an available port on the remote host.\\n' >&2
+    else
+      printf 'Failed to find an available port on the remote host. Ensure node is available on PATH.\\n' >&2
+    fi
     exit 1
   fi
   nohup env ISKRA_NO_BROWSER=1 "$RUNNER_FILE" serve --host 127.0.0.1 --port "$REMOTE_PORT" --base-dir "$DEFAULT_SERVER_HOME" >>"$LOG_FILE" 2>&1 < /dev/null &
@@ -615,11 +763,52 @@ if [ -f "$LOG_FILE" ]; then
 fi
 `;
 
+export class SshInvalidArchiveVersionError extends Schema.TaggedError<SshInvalidArchiveVersionError>()(
+  "SshInvalidArchiveVersionError",
+  { archiveVersion: Schema.String },
+) {
+  override get message(): string {
+    return `'${this.archiveVersion}' is not an exact iskra version and cannot name a runtime directory.`;
+  }
+}
+
+// The version becomes a directory name the runner removes and recreates, so
+// it must be one exact SemVer segment: no separators, no `..`, no shell
+// metacharacters beyond what SemVer allows.
+const EXACT_ARCHIVE_VERSION =
+  /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u;
+
+export class SshMissingRunnerError extends Schema.TaggedError<SshMissingRunnerError>()(
+  "SshMissingRunnerError",
+  {},
+) {
+  override get message(): string {
+    return "A remote iskra runner needs an archive version or a node script path.";
+  }
+}
+
 export function buildRemoteIskraRunnerScript(input?: RemoteIskraRunnerOptions): string {
   const nodeScriptPath = input?.nodeScriptPath?.trim() || "";
+  const archiveVersion = input?.archiveVersion?.trim() || "";
+  if (nodeScriptPath === "" && archiveVersion === "") {
+    throw new SshMissingRunnerError();
+  }
+  if (archiveVersion !== "" && !EXACT_ARCHIVE_VERSION.test(archiveVersion)) {
+    throw new SshInvalidArchiveVersionError({ archiveVersion });
+  }
+  // Strip the `/v<version>` the helper appends: the script builds URLs itself.
+  const releaseBaseUrl = cliReleaseDownloadBaseUrl("", input?.releaseBaseUrl ?? undefined).replace(
+    /\/v$/u,
+    "",
+  );
   return stripTrailingNewlines(
     applyScriptPlaceholders(REMOTE_RUNNER_SCRIPT, {
       ISKRA_NODE_SCRIPT_PATH: shellSingleQuote(nodeScriptPath),
+      ISKRA_ARCHIVE_VERSION: shellSingleQuote(archiveVersion),
+      ISKRA_RELEASE_BASE_URL: shellSingleQuote(releaseBaseUrl),
+      ISKRA_ARCHIVE_LOCK_WAIT_SECONDS: String(REMOTE_ARCHIVE_LOCK_WAIT_SECONDS),
+      ISKRA_ARCHIVE_DOWNLOAD_SECONDS: String(REMOTE_ARCHIVE_DOWNLOAD_SECONDS),
+      ISKRA_ARCHIVE_CHECKSUMS_SECONDS: String(REMOTE_ARCHIVE_CHECKSUMS_SECONDS),
       ISKRA_NODE_ENV_SCRIPT: buildRemoteNodeEnvScript(input),
     }),
   );
@@ -636,6 +825,7 @@ export function buildRemoteNodeEnvScript(input?: RemoteIskraRunnerOptions): stri
 
 export function buildRemoteLaunchScript(input?: RemoteIskraRunnerOptions): string {
   return applyScriptPlaceholders(REMOTE_LAUNCH_SCRIPT, {
+    ISKRA_ARCHIVE_MODE: isNodeScriptRunner(input) ? "0" : "1",
     ISKRA_NODE_ENV_SCRIPT: buildRemoteNodeEnvScript(input),
     ISKRA_RUNNER_SCRIPT: stripTrailingNewlines(buildRemoteIskraRunnerScript(input)),
     ISKRA_PICK_PORT_SCRIPT: stripTrailingNewlines(REMOTE_PICK_PORT_SCRIPT),
@@ -688,7 +878,9 @@ export const launchOrReuseRemoteServer = Effect.fn("ssh/tunnel.launchOrReuseRemo
     const result = yield* runSshCommand(target, {
       remoteCommandArgs: ["sh", "-l", "-s", "--", remoteStateKey(target)],
       stdin: buildRemoteLaunchScript(runner),
-      timeoutMs: REMOTE_LAUNCH_TIMEOUT_MS,
+      timeoutMs: isNodeScriptRunner(runner)
+        ? REMOTE_LAUNCH_TIMEOUT_MS
+        : REMOTE_ARCHIVE_LAUNCH_TIMEOUT_MS,
       ...(input?.authSecret === undefined ? {} : { authSecret: input.authSecret }),
       ...(input?.batchMode === undefined ? {} : { batchMode: input.batchMode }),
       ...(input?.interactiveAuth === undefined ? {} : { interactiveAuth: input.interactiveAuth }),
@@ -746,6 +938,9 @@ export const issueRemotePairingToken = Effect.fn("ssh/tunnel.issueRemotePairingT
   const result = yield* runSshCommand(target, {
     remoteCommandArgs: ["sh", "-s"],
     stdin: buildRemotePairingScript(target, runner),
+    // Pairing may be the first command on a cold remote, so it can install
+    // the archive on the way.
+    ...(isNodeScriptRunner(runner) ? {} : { timeoutMs: REMOTE_ARCHIVE_LAUNCH_TIMEOUT_MS }),
     ...(input?.authSecret === undefined ? {} : { authSecret: input.authSecret }),
     ...(input?.batchMode === undefined ? {} : { batchMode: input.batchMode }),
     ...(input?.interactiveAuth === undefined ? {} : { interactiveAuth: input.interactiveAuth }),
