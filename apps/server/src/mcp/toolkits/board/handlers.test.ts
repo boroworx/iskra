@@ -301,12 +301,22 @@ describe("board toolkit handlers", () => {
   it.effect("records a review request and a checkpoint as intent, never as a status move", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness();
+      yield* harness.call("request_review", reviewInput);
       yield* harness.call("request_checkpoint", { whatToTry: "Open /limits", question: "Right shape?" });
       yield* harness.call("propose_criteria_change", {
         criteria: [{ text: "Limits are per account." }],
         reason: "Keys are shared across an account.",
       });
-      expect(yield* Ref.get(harness.commands)).toMatchObject([
+      const commands = yield* Ref.get(harness.commands);
+      expect(commands.map((command) => command.type)).not.toContain("card.review.request");
+      expect(commands).toMatchObject([
+        {
+          type: "card.activity.record",
+          kind: "message",
+          deliverTo: null,
+          reason: { code: "reviewRequested" },
+          body: "Adds a token bucket per key.\n\nRisks (claimed): side effects low, performance medium, compatibility low.",
+        },
         {
           type: "card.checkpoint.request",
           cardId: CARD_ID,

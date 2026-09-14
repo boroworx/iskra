@@ -15,7 +15,10 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 
-import { renderReviewRequest } from "../../../orchestration/CardEvidence.ts";
+import {
+  REVIEW_REQUESTED_CODE,
+  renderReviewRequest,
+} from "../../../orchestration/CardEvidence.ts";
 import * as OrchestrationEngine from "../../../orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ThreadPlanProgressService } from "../../../orchestration/ThreadPlanProgress.ts";
@@ -56,8 +59,6 @@ export const elicitationOf = (
     allowText: true,
   };
 };
-
-export const REVIEW_REQUESTED_CODE = "reviewRequested";
 
 const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngine.OrchestrationEngineService;
@@ -275,16 +276,12 @@ const make = Effect.gen(function* () {
     request_review: (input) =>
       Effect.gen(function* () {
         const session = yield* requireOwnerSession;
+        // Intent only: the review gate runs the checks and moves the card if they pass.
         yield* recordActivity(session, "review-request", {
           activityId: `review-request-${yield* uuid}`,
           kind: "message",
           body: renderReviewRequest(input.summary, input.risks),
           reason: { code: REVIEW_REQUESTED_CODE, text: "Asked for review." },
-        });
-        yield* dispatch({
-          type: "card.review.request",
-          commandId: yield* commandId("review", session.threadId),
-          cardId: session.cardId,
         });
         return {};
       }),

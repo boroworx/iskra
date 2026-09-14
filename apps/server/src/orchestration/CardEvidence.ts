@@ -11,16 +11,21 @@ import {
   type ProjectScript,
   type Reason,
 } from "@iskra/contracts";
+import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as Predicate from "effect/Predicate";
 import * as Schedule from "effect/Schedule";
 
 import { toSafeThreadAttachmentSegment } from "../attachmentStore.ts";
 import { ServerConfig } from "../config.ts";
 import * as PreviewAutomationBroker from "../mcp/PreviewAutomationBroker.ts";
 import { ProcessRunner } from "../processRunner.ts";
+
+/** The reason code a builder's review request is recorded with; the review gate starts on it. */
+export const REVIEW_REQUESTED_CODE = "reviewRequested";
 
 const RISK_LINE =
   /\n\nRisks \(claimed\): side effects (low|medium|high), performance (low|medium|high), compatibility (low|medium|high)\.(?:\n([\s\S]*))?$/;
@@ -229,8 +234,57 @@ export const inspectChanges = Effect.fn("CardEvidence.inspectChanges")(function*
   return { files, manifests, headSha };
 });
 
+const gitIn = (worktreePath: string, args: ReadonlyArray<string>, timeout = "2 minutes") =>
+  Effect.flatMap(ProcessRunner, (runner) =>
+    runner.run({ command: "git", args: ["-C", worktreePath, ...args], timeout }),
+  );
+
+/** Fetches the card's base from origin; a repository without one lands locally and skips it. */
+export const fetchBase = Effect.fn("CardEvidence.fetchBase")(function* (input: {
+  readonly worktreePath: string;
+  readonly baseBranch: string;
+}) {
+  yield* gitIn(input.worktreePath, ["fetch", "--quiet", "origin", input.baseBranch]).pipe(
+    Effect.ignore,
+  );
+});
+
+/**
+ * Commits what the owner left uncommitted and rebases the card's branch onto `baseRef`. A conflict
+ * aborts the rebase and names the conflicting files.
+ * ponytail: runs outside CardWorkspace's per-card lock, relying on the owner having ended its turn
+ * after asking; move into CardWorkspace if a live owner ever races it.
+ */
+export const commitAndRebase = Effect.fn("CardEvidence.commitAndRebase")(function* (input: {
+  readonly worktreePath: string;
+  readonly baseRef: string;
+  readonly message: string;
+}) {
+  yield* gitIn(input.worktreePath, ["add", "-A"]);
+  const staged = yield* gitIn(input.worktreePath, ["diff", "--cached", "--quiet"]);
+  if (staged.code !== 0) {
+    yield* gitIn(input.worktreePath, ["commit", "--quiet", "--no-verify", "-m", input.message]);
+  }
+  const rebased = yield* gitIn(input.worktreePath, ["rebase", "--quiet", input.baseRef], "5 minutes");
+  if (rebased.code === 0) return { kind: "rebased" as const };
+  const conflicts = yield* gitIn(input.worktreePath, ["diff", "--name-only", "--diff-filter=U"]);
+  yield* gitIn(input.worktreePath, ["rebase", "--abort"]);
+  return {
+    kind: "conflict" as const,
+    files: conflicts.stdout.split("\n").filter((line) => line.trim().length > 0),
+  };
+});
+
 // ---------------------------------------------------------------------------------------------
 // UI evidence
+
+/** What capturing UI evidence and inspecting a worktree need from the server. */
+export type CaptureServices =
+  | PreviewAutomationBroker.PreviewAutomationBroker
+  | ServerConfig
+  | FileSystem.FileSystem
+  | Path.Path
+  | ProcessRunner;
 
 /** Changed files that call for a screenshot of the running app. */
 const UI_FILE = /\.(tsx|jsx|vue|svelte|css|scss|html)$/;
@@ -329,7 +383,8 @@ export const captureUiEvidence = Effect.fn("CardEvidence.captureUiEvidence")(fun
         .pipe(
           Effect.retry({
             while: (error) => error._tag !== "PreviewAutomationNoAvailableHostError",
-            schedule: Schedule.spaced("3 seconds").pipe(Schedule.both(Schedule.recurs(15))),
+            schedule: Schedule.spaced("3 seconds"),
+            times: 15,
           }),
         );
       const snapshot = yield* broker.invoke<PreviewAutomationSnapshot>({
@@ -344,15 +399,22 @@ export const captureUiEvidence = Effect.fn("CardEvidence.captureUiEvidence")(fun
       return file;
     }).pipe(
       Effect.map((file) => ({ ok: true as const, file })),
-      Effect.catch((error) =>
-        Effect.succeed({
+      // Anything but an interrupt becomes an unavailable item: a capture never fails a review.
+      Effect.catchCause((cause) => {
+        if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause);
+        const error = Cause.squash(cause);
+        const noHost =
+          Predicate.isTagged(error, "PreviewAutomationNoAvailableHostError");
+        return Effect.succeed({
           ok: false as const,
-          reason:
-            "_tag" in error && error._tag === "PreviewAutomationNoAvailableHostError"
-              ? NO_PREVIEW_HOST
-              : { code: "previewFailed", text: `The preview couldn't be captured: ${error.message}` },
-        }),
-      ),
+          reason: noHost
+            ? NO_PREVIEW_HOST
+            : {
+                code: "previewFailed",
+                text: `The preview couldn't be captured: ${error instanceof Error ? error.message : String(error)}`,
+              },
+        });
+      }),
     );
     if (!captured.ok) {
       items.push(unavailableItem(name, captured.reason));

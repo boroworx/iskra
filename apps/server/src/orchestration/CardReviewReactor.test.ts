@@ -3,306 +3,445 @@ import {
   CardId,
   CommandId,
   DEFAULT_PROJECT_ORCHESTRATION,
+  EnvironmentId,
+  PreviewAutomationNoAvailableHostError,
   ProjectId,
   ProviderInstanceId,
   type ProjectScript,
 } from "@iskra/contracts";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
+import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Stream from "effect/Stream";
 
+import { ServerConfig } from "../config.ts";
+import { ServerEnvironment } from "../environment/ServerEnvironment.ts";
+import * as PreviewAutomationBroker from "../mcp/PreviewAutomationBroker.ts";
+import { OrchestrationCommandReceiptRepositoryLive } from "../persistence/Layers/OrchestrationCommandReceipts.ts";
+import { OrchestrationEventStoreLive } from "../persistence/Layers/OrchestrationEventStore.ts";
+import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as ProcessRunner from "../processRunner.ts";
+import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as CardReviewReactor from "./CardReviewReactor.ts";
 import * as CardWorkspace from "./CardWorkspace.ts";
-import { cardWorkspaceTestLayer, makeGitRepo, nextEventOn, now } from "./reactor.testkit.ts";
+import * as HostAdmission from "./HostAdmission.ts";
+import { OrchestrationEngineLive } from "./Layers/OrchestrationEngine.ts";
+import { OrchestrationProjectionPipelineLive } from "./Layers/ProjectionPipeline.ts";
+import { OrchestrationProjectionSnapshotQueryLive } from "./Layers/ProjectionSnapshotQuery.ts";
+import type { ProjectCheck } from "./ProjectFile.ts";
+import { makeGitRepo, nextEventOn, now } from "./reactor.testkit.ts";
 import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
+import * as ThreadBackgroundLiveness from "./ThreadBackgroundLiveness.ts";
+import * as ThreadPlanProgress from "./ThreadPlanProgress.ts";
+
+// Different bytes on every call, so each generated event id is new.
+let randomCalls = 0;
+const testCrypto = Crypto.make({
+  randomBytes: (size) => {
+    randomCalls += 1;
+    const bytes = new Uint8Array(size);
+    new DataView(bytes.buffer).setUint32(0, randomCalls);
+    return bytes;
+  },
+  digest: (_algorithm, data) => Effect.succeed(data),
+});
+
+const check = (id: string): ProjectCheck => ({
+  id,
+  name: id,
+  command: `pnpm ${id}`,
+  timeoutMinutes: 10,
+  source: "local",
+  ciName: null,
+  targetedCommand: null,
+  heavy: true,
+});
+
+const runScript: ProjectScript = {
+  id: "dev",
+  name: "dev",
+  command: "pnpm dev",
+  icon: "play",
+  runOnWorktreeCreate: false,
+  role: "run",
+};
+
+/** What the fakes answer, set by each test before it asks for review. */
+const fakes = {
+  checks: [check("test")] as ReadonlyArray<ProjectCheck>,
+  passes: true,
+  webPort: null as number | null,
+  previewHost: true,
+  admitted: [] as Array<HostAdmission.HeavyJobKind>,
+};
+
+const workspace = Layer.mock(CardWorkspace.CardWorkspace)({
+  start: () => Effect.void,
+  projectFile: () =>
+    Effect.sync(() => ({
+      baseBranch: "base",
+      baseRef: "base",
+      file:
+        fakes.webPort === null
+          ? null
+          : ({ ports: { web: fakes.webPort } } as unknown as CardWorkspace.CardProjectFile["file"]),
+      checks: fakes.checks,
+    })),
+  runChecks: (input) =>
+    Effect.sync(() => ({
+      passed: fakes.passes,
+      summary: fakes.passes ? "test passed." : "test failed.",
+      results: (input.checks ?? []).map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        exitCode: fakes.passes ? 0 : 1,
+        timedOut: false,
+        durationMs: 5,
+        logTail: fakes.passes ? "ok" : "FAIL limits.test.ts",
+        logArtifactPath: null,
+      })),
+    })),
+  runScript: () => Effect.succeed({ terminalId: "terminal-dev" }),
+});
+
+const admission = Layer.succeed(
+  HostAdmission.HostAdmission,
+  HostAdmission.HostAdmission.of({
+    run: (job, effect) => Effect.andThen(Effect.sync(() => fakes.admitted.push(job.kind)), effect),
+    snapshot: Effect.succeed({ running: [], waiting: [], memoryPressureSince: null }),
+    cancelLowestPriority: Effect.succeed(null),
+  }),
+);
+
+const broker = Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({
+  invoke: <A>(request: PreviewAutomationBroker.PreviewAutomationInvokeInput) =>
+    fakes.previewHost
+      ? Effect.succeed(
+          (request.operation === "snapshot"
+            ? {
+                screenshot: {
+                  mimeType: "image/png",
+                  data: Buffer.from("png").toString("base64"),
+                  width: 1,
+                  height: 1,
+                },
+              }
+            : {}) as A,
+        )
+      : Effect.fail(
+          new PreviewAutomationNoAvailableHostError({
+            operation: request.operation,
+            environmentId: request.scope.environmentId,
+            threadId: request.scope.threadId,
+            providerSessionId: request.scope.providerSessionId,
+            providerInstanceId: request.scope.providerInstanceId,
+          }),
+        ),
+});
+
+const environment = Layer.mock(ServerEnvironment)({
+  getEnvironmentId: Effect.succeed(EnvironmentId.make("environment-review")),
+});
 
 const layer = CardReviewReactor.layer.pipe(
-  Layer.provideMerge(cardWorkspaceTestLayer("iskra-card-review-test-")),
+  Layer.provide(Layer.mergeAll(workspace, admission, broker, environment)),
+  Layer.provideMerge(OrchestrationEngineLive.pipe(Layer.provide(OrchestrationProjectionPipelineLive))),
+  Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
+  Layer.provide(ThreadBackgroundLiveness.layer),
+  Layer.provide(ThreadPlanProgress.layer),
+  Layer.provide(OrchestrationEventStoreLive),
+  Layer.provide(OrchestrationCommandReceiptRepositoryLive),
+  Layer.provide(RepositoryIdentityResolver.layer),
+  Layer.provide(SqlitePersistenceMemory),
+  Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "iskra-card-review-test-" })),
+  Layer.provideMerge(ProcessRunner.layer),
+  Layer.provide(Layer.succeed(Crypto.Crypto, testCrypto)),
+  Layer.provideMerge(NodeServices.layer),
 );
 
 /**
- * A committed repository as a project with the given check scripts, the review
- * reactor and workspace teardown running, and cards taken to work in their own
- * worktrees. `nextEvent` consumes one tap, so await events in the order they happen.
+ * A card at work whose worktree is a real repository on `main`, based on a `base` branch, with the
+ * review reactor running. `requestReview` records the intent exactly as the board tool does.
  */
 const makeWorld = Effect.fn("makeWorld")(function* (
   name: string,
-  checks: ReadonlyArray<ProjectScript>,
+  options: { readonly ciFixRounds?: number; readonly checksWaived?: boolean } = {},
 ) {
   const engine = yield* OrchestrationEngineService;
   const snapshotQuery = yield* ProjectionSnapshotQuery;
-  const workspace = yield* CardWorkspace.CardWorkspace;
-  yield* workspace.start();
   const reactor = yield* CardReviewReactor.CardReviewReactor;
   yield* reactor.start();
   const events = yield* engine.subscribeDomainEvents;
-  // A second tap, so waiting for teardown cannot consume events the test awaits.
-  const teardownEvents = yield* engine.subscribeDomainEvents;
-  const { fileSystem, path, root, gitIn } = yield* makeGitRepo(`iskra-review-repo-${name}-`);
+  const nextEvent = nextEventOn(events);
+  const repo = yield* makeGitRepo(`iskra-review-${name}-`);
+  yield* repo.git("branch", "base");
 
   const projectId = ProjectId.make(`project-${name}`);
   const agentId = AgentId.make(`agent-${name}`);
+  const cardId = CardId.make(`card-${name}`);
+  let commands = 0;
+  const commandId = () => CommandId.make(`cmd-${name}-${(commands += 1)}`);
   yield* engine.dispatch({
     type: "project.create",
-    commandId: CommandId.make(`cmd-project-${name}`),
+    commandId: commandId(),
     projectId,
     title: name,
-    workspaceRoot: root,
+    workspaceRoot: repo.root,
     createdAt: now,
   });
   yield* engine.dispatch({
     type: "project.orchestration.set",
-    commandId: CommandId.make(`cmd-guard-${name}`),
+    commandId: commandId(),
     projectId,
     orchestration: {
       ...DEFAULT_PROJECT_ORCHESTRATION,
+      ciFixRounds: options.ciFixRounds ?? 2,
+      checksWaived: options.checksWaived ?? false,
       sideEffectGuard: { acknowledgedAt: now, killSwitchEnv: null },
     },
   });
   yield* engine.dispatch({
     type: "project.meta.update",
-    commandId: CommandId.make(`cmd-scripts-${name}`),
+    commandId: commandId(),
     projectId,
-    scripts: [...checks],
+    scripts: [runScript],
   });
   yield* engine.dispatch({
     type: "agent.create",
-    commandId: CommandId.make(`cmd-agent-${name}`),
+    commandId: commandId(),
     agentId,
     projectId,
     name,
     roleTags: [],
     rolePrompt: "",
-    modelSelection: {
-      instanceId: ProviderInstanceId.make("claudeAgent"),
-      model: "claude-haiku-4-5",
-    },
+    modelSelection: { instanceId: ProviderInstanceId.make("claudeAgent"), model: "claude-haiku-4-5" },
     capabilities: ["read", "write"],
     createdAt: now,
   });
+  yield* engine.dispatch({
+    type: "card.create",
+    commandId: commandId(),
+    cardId,
+    projectId,
+    title: `Card ${name}`,
+    spec: "",
+    tags: [],
+    criteria: [{ id: "works", text: "It works.", verification: "automated" }],
+    createdAt: now,
+  });
+  yield* engine.dispatch({ type: "card.approve", commandId: commandId(), cardId });
+  yield* engine.dispatch({ type: "card.spec.skip", commandId: commandId(), cardId });
+  yield* engine.dispatch({ type: "card.assign", commandId: commandId(), cardId, agentId });
+  yield* engine.dispatch({
+    type: "card.workspace.set",
+    commandId: commandId(),
+    cardId,
+    branch: "main",
+    worktreePath: repo.root,
+    portBase: 42000,
+  });
+  yield* engine.dispatch({ type: "card.work.start", commandId: commandId(), cardId });
 
-  /** A card at work in its own worktree, as if its agent had started. */
-  const cardAtWork = Effect.fn("cardAtWork")(function* (id: string) {
-    const cardId = CardId.make(`card-${name}-${id}`);
-    const on = (type: "card.approve" | "card.spec.skip" | "card.work.start") =>
-      engine.dispatch({ type, commandId: CommandId.make(`cmd-${type}-${cardId}`), cardId });
-    yield* engine.dispatch({
-      type: "card.create",
-      commandId: CommandId.make(`cmd-card-${cardId}`),
+  const write = (file: string, text: string) =>
+    repo.fileSystem.writeFileString(repo.path.join(repo.root, file), text);
+  const requestReview = () =>
+    engine.dispatch({
+      type: "card.activity.record",
+      commandId: commandId(),
+      activityId: `review-request-${commands}`,
       cardId,
-      projectId,
-      title: `Card ${id}`,
-      spec: "",
-      tags: [],
-      criteria: [{ id: "works", text: "It works.", verification: "automated" }],
+      kind: "message",
+      author: { kind: "agent", id: agentId },
+      body: "Done.\n\nRisks (claimed): side effects low, performance low, compatibility low.",
+      runThreadId: null,
+      deliverTo: null,
+      elicitation: null,
+      answers: null,
+      status: null,
+      evidenceId: null,
+      reason: { code: "reviewRequested", text: "Asked for review." },
       createdAt: now,
     });
-    yield* on("card.approve");
-    yield* on("card.spec.skip");
-    yield* engine.dispatch({
-      type: "card.assign",
-      commandId: CommandId.make(`cmd-assign-${cardId}`),
-      cardId,
-      agentId,
-    });
-    yield* on("card.work.start");
-    const info = yield* workspace.ensure(cardId);
-    let reviews = 0;
-    return {
-      cardId,
-      write: (file: string, text: string) =>
-        fileSystem.writeFileString(path.join(info.worktreePath, file), text),
-      requestReview: () => {
-        reviews += 1;
-        return engine.dispatch({
-          type: "card.review.request",
-          commandId: CommandId.make(`cmd-review-${cardId}-${reviews}`),
-          cardId,
-        });
-      },
-      approveMerge: () =>
-        engine.dispatch({
-          type: "card.merge.approve",
-          commandId: CommandId.make(`cmd-merge-${cardId}`),
-          cardId,
-        }),
-    };
-  });
-
-  const nextEvent = nextEventOn(events);
-
-  /** Waits until landed cards' worktrees are removed, so the repository can be cleaned up. */
-  const workspacesCleared = (cardIds: ReadonlyArray<CardId>) =>
-    teardownEvents.pipe(
-      Stream.filter(
-        (event) => event.type === "card.workspace-cleared" && cardIds.includes(event.payload.cardId),
-      ),
-      Stream.take(cardIds.length),
-      Stream.runDrain,
-    );
-
-  const cardOf = (cardId: CardId) =>
+  const cardOf = () =>
     snapshotQuery
       .getCommandReadModel()
-      .pipe(Effect.map((model) => (model.cards ?? []).find((card) => card.id === cardId)));
-
-  const returnedToWork = (cardId: CardId) =>
+      .pipe(Effect.map((model) => (model.cards ?? []).find((card) => card.id === cardId)!));
+  const evidenceRecorded = () =>
+    nextEvent("card.evidence-recorded", (event) => event.payload.cardId === cardId);
+  const enteredReview = () =>
     nextEvent(
       "card.status-changed",
-      (event) => event.payload.cardId === cardId && event.payload.move === "returnToWork",
+      (event) => event.payload.cardId === cardId && event.payload.to === "inReview",
     );
-
-  return { root, gitIn, reactor, cardAtWork, nextEvent, workspacesCleared, cardOf, returnedToWork };
+  const feedback = () =>
+    nextEvent(
+      "card.activity-recorded",
+      (event) => event.payload.cardId === cardId && event.payload.deliverTo === "builder",
+    );
+  return {
+    engine,
+    reactor,
+    repo,
+    cardId,
+    commandId,
+    write,
+    requestReview,
+    cardOf,
+    evidenceRecorded,
+    enteredReview,
+    feedback,
+    nextEvent,
+  };
 });
 
-const checkScript = (command: string): ProjectScript => ({
-  id: "test",
-  name: "test",
-  command,
-  icon: "test",
-  runOnWorktreeCreate: false,
-  role: "check",
-});
+const setFakes = (next: Partial<typeof fakes>) => Effect.sync(() => Object.assign(fakes, next));
 
 it.layer(layer)("CardReviewReactor", (it) => {
-  it.effect("sends failing checks back to the agent until they pass, with no person involved", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const world = yield* makeWorld("autofix", [checkScript("test -f fixed.txt")]);
-        const card = yield* world.cardAtWork("limits");
+  it.effect("commits leftovers, records passing evidence with the owner's claims, and enters review", () =>
+    Effect.gen(function* () {
+      yield* setFakes({ checks: [check("test")], passes: true, webPort: null, admitted: [] });
+      const world = yield* makeWorld("pass");
+      yield* world.write("limits.ts", "export const LIMIT = 100;\n");
+      yield* world.requestReview();
 
-        yield* card.requestReview();
-        const note = yield* world.nextEvent(
-          "card.message-posted",
-          (event) => event.payload.cardId === card.cardId && event.payload.forOwner,
-        );
-        expect(note.payload.body).toContain("The project's checks failed (attempt 1 of 3)");
-        const returned = yield* world.returnedToWork(card.cardId);
-        expect(returned.payload.reason).toBe("The project's checks failed.");
-
-        // The agent fixes it and asks again.
-        yield* card.write("fixed.txt", "done\n");
-        yield* card.requestReview();
-        const passed = yield* world.nextEvent(
-          "card.checks-updated",
-          (event) =>
-            event.payload.cardId === card.cardId && event.payload.checks.state === "passed",
-        );
-        expect(passed.payload.checks).toMatchObject({ failedRuns: 0, summary: "test passed." });
-        expect((yield* world.cardOf(card.cardId))?.status).toBe("inReview");
-      }),
-    ),
+      const evidence = yield* world.evidenceRecorded();
+      expect(evidence.payload).toMatchObject({
+        purpose: "review",
+        passed: true,
+        flags: [],
+        risks: { sideEffect: "low", performance: "low", compatibility: "low", notes: "" },
+        items: [{ kind: "check", name: "test", exitCode: 0 }],
+      });
+      expect((yield* world.enteredReview()).payload.from).toBe("inProgress");
+      // The leftover was committed, and the evidence names that commit.
+      expect(yield* world.repo.git("status", "--porcelain")).toBe("");
+      expect(evidence.payload.headSha).toBe(yield* world.repo.git("rev-parse", "HEAD"));
+      expect(fakes.admitted).toContain("checks");
+    }),
   );
 
-  it.effect("stops sending checks back after the third failure in a row and waits for a person", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const world = yield* makeWorld("exhausted", [checkScript("exit 1")]);
-        const card = yield* world.cardAtWork("flaky");
+  it.effect("sends failing checks back as a fix round, then pauses once the rounds are used", () =>
+    Effect.gen(function* () {
+      yield* setFakes({ checks: [check("test")], passes: false, webPort: null });
+      const world = yield* makeWorld("rounds", { ciFixRounds: 1 });
+      yield* world.write("a.ts", "export const a = 1;\n");
 
-        for (const attempt of [1, 2]) {
-          yield* card.requestReview();
-          yield* world.returnedToWork(card.cardId);
-          expect((yield* world.cardOf(card.cardId))?.checks?.failedRuns).toBe(attempt);
-        }
-        yield* card.requestReview();
-        yield* world.nextEvent(
-          "card.checks-updated",
-          (event) => event.payload.cardId === card.cardId && event.payload.checks.failedRuns === 3,
-        );
-        yield* world.reactor.drain;
+      yield* world.requestReview();
+      const note = yield* world.feedback();
+      expect(note.payload.body).toContain("(fix round 1 of 1)");
+      expect(note.payload.body).toContain("FAIL limits.test.ts");
+      expect(note.payload.reason).toMatchObject({ code: "checksFailed" });
+      yield* world.reactor.drain;
+      expect(yield* world.cardOf()).toMatchObject({ status: "inProgress", fixRounds: { ci: 1 } });
 
-        const exhausted = yield* world.cardOf(card.cardId);
-        expect(exhausted?.status).toBe("inReview");
-        expect(exhausted?.checks).toMatchObject({ state: "failed", failedRuns: 3 });
-      }),
-    ),
+      yield* world.requestReview();
+      const paused = yield* world.nextEvent(
+        "card.paused",
+        (event) => event.payload.cardId === world.cardId,
+      );
+      expect(paused.payload.reason.code).toBe("fixRoundsExhausted");
+      expect((yield* world.cardOf()).status).toBe("inProgress");
+    }),
   );
 
-  it.effect("lands two approved cards one after the other", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const world = yield* makeWorld("queue", []);
-        const api = yield* world.cardAtWork("api");
-        const web = yield* world.cardAtWork("web");
-        yield* api.write("api.txt", "api\n");
-        yield* web.write("web.txt", "web\n");
-        yield* api.requestReview();
-        yield* web.requestReview();
-        yield* world.nextEvent(
-          "card.checks-updated",
-          (event) => event.payload.cardId === web.cardId && event.payload.checks.state === "passed",
-        );
+  it.effect("enters review with a skipped test flagged, so the merge waits for a person", () =>
+    Effect.gen(function* () {
+      yield* setFakes({ checks: [check("test")], passes: true, webPort: null });
+      const world = yield* makeWorld("flags");
+      yield* world.write("limits.test.ts", 'it.skip("limits", () => {});\n');
+      yield* world.requestReview();
 
-        yield* api.approveMerge();
-        yield* web.approveMerge();
-        const first = yield* world.nextEvent(
-          "card.status-changed",
-          (event) => event.payload.to === "landed",
-        );
-        const second = yield* world.nextEvent(
-          "card.status-changed",
-          (event) => event.payload.to === "landed",
-        );
-
-        expect([first.payload.cardId, second.payload.cardId]).toEqual([api.cardId, web.cardId]);
-        expect(yield* world.gitIn(world.root, "show", "main:api.txt")).toBe("api");
-        expect(yield* world.gitIn(world.root, "show", "main:web.txt")).toBe("web");
-        // The checkout on main moved with it.
-        expect(yield* world.gitIn(world.root, "status", "--porcelain")).toBe("");
-        yield* world.workspacesCleared([api.cardId, web.cardId]);
-      }),
-    ),
+      const evidence = yield* world.evidenceRecorded();
+      expect(evidence.payload.flags).toMatchObject([
+        { kind: "skippedTest", path: "limits.test.ts", hard: true },
+      ]);
+      yield* world.enteredReview();
+      const refused = yield* world.engine
+        .dispatch({ type: "card.merge.approve", commandId: world.commandId(), cardId: world.cardId })
+        .pipe(Effect.flip);
+      expect(refused).toMatchObject({
+        detail: expect.stringContaining("Acknowledge the flagged changes"),
+      });
+    }),
   );
 
-  it.effect("returns a conflicting card to work with the conflict, and flags an overlap", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const world = yield* makeWorld("conflict", []);
-        const first = yield* world.cardAtWork("first");
-        const second = yield* world.cardAtWork("second");
-        const third = yield* world.cardAtWork("third");
-        yield* first.write("README.md", "hello from first\n");
-        yield* second.write("README.md", "hello from second\n");
-        yield* third.write("README.md", "hello from third\n");
-        yield* first.requestReview();
-        yield* second.requestReview();
-        yield* world.nextEvent(
-          "card.checks-updated",
-          (event) =>
-            event.payload.cardId === second.cardId && event.payload.checks.state === "passed",
-        );
+  it.effect("screenshots changed UI through a desktop host, and records it unavailable without one", () =>
+    Effect.gen(function* () {
+      yield* setFakes({ checks: [check("test")], passes: true, webPort: 3, previewHost: true });
+      const world = yield* makeWorld("preview");
+      yield* world.write("Page.tsx", "export const Page = () => null;\n");
+      yield* world.requestReview();
+      const captured = yield* world.evidenceRecorded();
+      expect(captured.payload.items[1]).toMatchObject({
+        kind: "screenshot",
+        source: "preview",
+        unavailable: null,
+        artifactPath: expect.stringContaining("card-evidence-card-preview"),
+      });
 
-        yield* first.approveMerge();
-        yield* world.nextEvent(
-          "card.status-changed",
-          (event) => event.payload.cardId === first.cardId && event.payload.to === "landed",
-        );
-        // Still at work on the same file: flagged, and told to rebase.
-        const overlap = yield* world.nextEvent(
-          "card.relation-added",
-          (event) => event.payload.cardId === third.cardId && event.payload.kind === "overlaps",
-        );
-        expect(overlap.payload.otherCardId).toBe(first.cardId);
-        const rebaseNote = yield* world.nextEvent(
-          "card.message-posted",
-          (event) => event.payload.cardId === third.cardId,
-        );
-        expect(rebaseNote.payload.body).toContain("README.md");
+      yield* setFakes({ previewHost: false });
+      const other = yield* makeWorld("nohost");
+      yield* other.write("Page.tsx", "export const Page = () => 1;\n");
+      yield* other.requestReview();
+      const missing = yield* other.evidenceRecorded();
+      expect(missing.payload.items[1]).toMatchObject({
+        kind: "screenshot",
+        unavailable: { code: "noPreviewHost" },
+      });
+      // Missing UI evidence flags the card; it doesn't keep it out of review.
+      yield* other.enteredReview();
+      yield* setFakes({ previewHost: true });
+    }),
+  );
 
-        yield* second.approveMerge();
-        const conflictNote = yield* world.nextEvent(
-          "card.message-posted",
-          (event) => event.payload.cardId === second.cardId && event.payload.forOwner,
-        );
-        expect(conflictNote.payload.body).toContain("conflicts in README.md");
-        const returned = yield* world.returnedToWork(second.cardId);
-        expect(returned.payload.reason).toBe("Rebasing onto main conflicts.");
-        expect(yield* world.gitIn(world.root, "show", "main:README.md")).toBe("hello from first");
-        yield* world.workspacesCleared([first.cardId]);
-      }),
-    ),
+  it.effect("keeps a card without checks out of review and asks a person, unless checks are waived", () =>
+    Effect.gen(function* () {
+      yield* setFakes({ checks: [], passes: true, webPort: null });
+      const world = yield* makeWorld("nochecks");
+      yield* world.write("a.ts", "export const a = 2;\n");
+      yield* world.requestReview();
+      const note = yield* world.feedback();
+      expect(note.payload.body).toContain("This project has no checks.");
+      const needsYou = yield* world.nextEvent(
+        "card.activity-recorded",
+        (event) => event.payload.cardId === world.cardId && event.payload.kind === "error",
+      );
+      expect(needsYou.payload.reason).toMatchObject({ code: "checksMissing" });
+      expect((yield* world.cardOf()).status).toBe("inProgress");
+
+      const waived = yield* makeWorld("waived", { checksWaived: true });
+      yield* waived.write("a.ts", "export const a = 3;\n");
+      yield* waived.requestReview();
+      yield* waived.enteredReview();
+    }),
+  );
+
+  it.effect("records a checkpoint's evidence without moving the card", () =>
+    Effect.gen(function* () {
+      yield* setFakes({ checks: [check("test")], passes: true, webPort: null });
+      const world = yield* makeWorld("checkpoint");
+      yield* world.write("a.ts", "export const a = 4;\n");
+      yield* world.engine.dispatch({
+        type: "card.checkpoint.request",
+        commandId: world.commandId(),
+        cardId: world.cardId,
+        checkpoint: {
+          checkpointId: "checkpoint-1",
+          whatToTry: "Open the page.",
+          question: null,
+          evidenceId: null,
+          requestedAt: now,
+        },
+      });
+      const evidence = yield* world.evidenceRecorded();
+      expect(evidence.payload).toMatchObject({ purpose: "checkpoint", passed: true });
+      yield* world.reactor.drain;
+      expect(yield* world.cardOf()).toMatchObject({
+        status: "inProgress",
+        checkpoint: { checkpointId: "checkpoint-1" },
+      });
+    }),
   );
 });
