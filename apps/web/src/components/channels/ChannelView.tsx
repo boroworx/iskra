@@ -5,6 +5,7 @@ import {
   type ChannelId,
   type EnvironmentId,
   type OrchestrationAgentShell,
+  type OrchestrationCardShell,
   type OrchestrationChannelMessage,
   type OrchestrationChannelShell,
 } from "@iskra/contracts";
@@ -14,7 +15,12 @@ import { memo, useEffect, useId, useMemo, useRef, useState } from "react";
 import { collapseExpandedComposerCursor, replaceTextRange } from "~/composer-logic";
 import { cn, randomUUID } from "~/lib/utils";
 import { channelEnvironment } from "~/state/channels";
-import { useEnvironmentAgents, useEnvironmentChannels, useProjects } from "~/state/entities";
+import {
+  useEnvironmentAgents,
+  useEnvironmentCards,
+  useEnvironmentChannels,
+  useProjects,
+} from "~/state/entities";
 import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
 import ChatMarkdown from "../ChatMarkdown";
@@ -35,9 +41,11 @@ import {
   mentionQueryAt,
   presenceDotClassName,
   presenceLabel,
+  proposalAnchors,
   type AgentEntry,
   type ChannelMessageRow,
 } from "./channels.logic";
+import { CardProposal } from "./CardProposal";
 import { ChannelSettingsDialog } from "./ChannelSettingsDialog";
 import { RunBlock } from "./RunBlock";
 
@@ -48,6 +56,7 @@ export function ChannelView(props: {
 }) {
   const channels = useEnvironmentChannels(props.environmentId);
   const agents = useEnvironmentAgents(props.environmentId);
+  const cards = useEnvironmentCards(props.environmentId);
   const projects = useProjects();
   const channel = channels.find((entry) => entry.id === props.channelId) ?? null;
   const project =
@@ -71,6 +80,11 @@ export function ChannelView(props: {
   const projectAgents = useMemo(
     () => (projectId === null ? [] : agentListEntries(agents, projectId)),
     [agents, projectId],
+  );
+  // The lead's proposals show under their messages, derived from the card shells already held.
+  const proposals = useMemo(
+    () => ({ channelId: props.channelId, cards, agents: projectAgents }),
+    [props.channelId, cards, projectAgents],
   );
   const title = channel?.name ?? "";
   const postMessage = useAtomCommand(channelEnvironment.postMessage);
@@ -154,6 +168,7 @@ export function ChannelView(props: {
                 channels={channels}
                 cwd={project?.workspaceRoot}
                 environmentId={props.environmentId}
+                proposals={proposals}
               />
               <MessageComposer
                 key={props.channelId}
@@ -189,6 +204,8 @@ export function ChannelView(props: {
 }
 
 const EMPTY_MESSAGES: ReadonlyArray<OrchestrationChannelMessage> = [];
+const NO_ANCHORS: ReadonlyMap<string, ReadonlyArray<OrchestrationCardShell>> = new Map();
+const NO_AGENTS: ReadonlyArray<AgentEntry> = [];
 
 interface TimelineSource {
   readonly messages: ReadonlyArray<OrchestrationChannelMessage>;
@@ -199,6 +216,14 @@ interface TimelineSource {
   readonly environmentId: EnvironmentId;
   /** Agent id to the `#channel` it is busy in, for queued DM deliveries. */
   readonly busyChannels?: ReadonlyMap<string, string> | undefined;
+  /** A channel's cards and its project's agents, to show the lead's proposals under their messages. */
+  readonly proposals?:
+    | {
+        readonly channelId: ChannelId;
+        readonly cards: ReadonlyArray<OrchestrationCardShell>;
+        readonly agents: ReadonlyArray<AgentEntry>;
+      }
+    | undefined;
 }
 
 /** A scroll container's ref that jumps to the bottom whenever the newest item changes. */
@@ -224,6 +249,14 @@ export const Timeline = memo(function Timeline(props: TimelineSource) {
     () => channelMessageRows(props.messages, props.agents),
     [props.messages, props.agents],
   );
+  const { proposals } = props;
+  const anchors = useMemo(
+    () =>
+      proposals === undefined
+        ? NO_ANCHORS
+        : proposalAnchors(props.messages, proposals.cards, proposals.channelId),
+    [props.messages, proposals],
+  );
   // Keep the newest message in view as messages arrive.
   const scrollRef = useStickToNewest(rows.at(-1)?.message.id);
 
@@ -240,6 +273,8 @@ export const Timeline = memo(function Timeline(props: TimelineSource) {
             cwd={props.cwd}
             environmentId={props.environmentId}
             busyChannels={props.busyChannels}
+            proposals={anchors.get(row.message.id)}
+            proposalAgents={proposals?.agents ?? NO_AGENTS}
           />
         ))}
       </ol>
@@ -254,6 +289,8 @@ function MessageRow(props: {
   readonly cwd: string | undefined;
   readonly environmentId: EnvironmentId;
   readonly busyChannels: ReadonlyMap<string, string> | undefined;
+  readonly proposals: ReadonlyArray<OrchestrationCardShell> | undefined;
+  readonly proposalAgents: ReadonlyArray<AgentEntry>;
 }) {
   const { message, authorName, showHeader } = props.row;
   const notes =
@@ -312,6 +349,14 @@ function MessageRow(props: {
           ))}
         </p>
       ) : null}
+      {props.proposals?.map((card) => (
+        <CardProposal
+          key={card.id}
+          card={card}
+          agents={props.proposalAgents}
+          environmentId={props.environmentId}
+        />
+      ))}
     </li>
   );
 }
@@ -596,7 +641,8 @@ const ChannelMemberList = memo(function ChannelMemberList(props: {
           </SelectPopup>
         </Select>
         <p className="mt-1.5 text-xs text-muted-foreground">
-          The lead reads unaddressed messages and turns them into cards.
+          The lead reads messages that mention no one, asks what is unclear, and proposes cards you
+          start from the channel.
         </p>
       </div>
       <h2 className="px-2 text-xs font-medium text-muted-foreground">

@@ -4,6 +4,7 @@ import type {
   ChannelId,
   OrchestrationAgentRun,
   OrchestrationAgentShell,
+  OrchestrationCard,
   OrchestrationChannelMessage,
   OrchestrationChannelShell,
   OrchestrationMessage,
@@ -330,5 +331,74 @@ export function presenceLabel(presence: AgentPresence): string {
       return "Waiting on you";
     case "idle":
       return "Idle";
+  }
+}
+
+type ProposalCard = Pick<
+  OrchestrationCard,
+  "id" | "channelId" | "sourceMessageId" | "createdBy" | "createdAt"
+>;
+
+/**
+ * Where each lead proposal shows in a channel's timeline, by message id: under the lead's first
+ * message posted at or after the card (its reply), or under the message the card came from until
+ * that reply arrives. Cards whose source message isn't loaded are left out.
+ */
+export function proposalAnchors<C extends ProposalCard>(
+  messages: ReadonlyArray<OrchestrationChannelMessage>,
+  cards: ReadonlyArray<C>,
+  channelId: ChannelId,
+): ReadonlyMap<string, ReadonlyArray<C>> {
+  const indexById = new Map<string, number>(messages.map((message, index) => [message.id, index]));
+  const anchors = new Map<string, C[]>();
+  for (const card of cards) {
+    const sourceId = card.sourceMessageId;
+    const sourceIndex = sourceId === null ? undefined : indexById.get(sourceId);
+    if (
+      sourceId === null ||
+      sourceIndex === undefined ||
+      card.channelId !== channelId ||
+      card.createdBy.kind !== "lead"
+    ) {
+      continue;
+    }
+    const reply = messages
+      .slice(sourceIndex + 1)
+      .find(
+        (message) =>
+          message.authorKind === "agent" &&
+          message.authorId === card.createdBy.id &&
+          message.createdAt >= card.createdAt,
+      );
+    const anchorId = reply?.id ?? sourceId;
+    anchors.set(anchorId, [...(anchors.get(anchorId) ?? []), card]);
+  }
+  return anchors;
+}
+
+/**
+ * Where a proposal stands once it has an owner, or null while it waits for a person to approve and
+ * start it: in triage, or ready with no owner.
+ */
+export function cardProposalStatus(
+  card: Pick<OrchestrationCard, "status" | "delegateAgentId">,
+  agents: ReadonlyArray<Pick<AgentEntry, "id" | "name">>,
+): string | null {
+  const owner = `@${agents.find((agent) => agent.id === card.delegateAgentId)?.name ?? card.delegateAgentId}`;
+  switch (card.status) {
+    case "triage":
+      return null;
+    case "ready":
+      return card.delegateAgentId === null ? null : `Starting · ${owner}`;
+    case "inProgress":
+      return `In progress · ${owner}`;
+    case "inReview":
+      return "Ready for review";
+    case "landing":
+      return "Landing";
+    case "landed":
+      return "Landed";
+    case "abandoned":
+      return "Dropped";
   }
 }

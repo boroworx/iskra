@@ -11,6 +11,7 @@ import {
 import type {
   OrchestrationAgentRun,
   OrchestrationAgentShell,
+  OrchestrationCard,
   OrchestrationChannelMessage,
   OrchestrationChannelShell,
   OrchestrationMessage,
@@ -21,6 +22,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   agentListEntries,
   busyChannelName,
+  cardProposalStatus,
   channelListEntries,
   channelMemberEntries,
   channelMessageRows,
@@ -28,6 +30,7 @@ import {
   dmTargets,
   mentionCandidates,
   mentionQueryAt,
+  proposalAnchors,
   runOutputItems,
   presenceDotClassName,
   presenceLabel,
@@ -78,6 +81,57 @@ const message = (
   authorId,
   body: id,
   createdAt,
+});
+
+const proposal = (
+  overrides: Partial<Pick<OrchestrationCard, "channelId" | "sourceMessageId" | "createdBy">> = {},
+): Pick<OrchestrationCard, "id" | "channelId" | "sourceMessageId" | "createdBy" | "createdAt"> => ({
+  id: CardId.make("card-page"),
+  channelId: ChannelId.make("general"),
+  sourceMessageId: MessageId.make("ask"),
+  createdBy: { kind: "lead", id: "agent-lead" },
+  createdAt: "2026-01-01T10:01:00.000Z",
+  ...overrides,
+});
+
+describe("proposalAnchors", () => {
+  const general = ChannelId.make("general");
+  const ask = message("ask", "human", "human", "2026-01-01T10:00:00.000Z");
+  const earlier = message("earlier", "agent", "agent-lead", "2026-01-01T10:00:30.000Z");
+  const reply = message("reply", "agent", "agent-lead", "2026-01-01T10:01:05.000Z");
+
+  it("puts a lead's proposal under its reply, or under its message until the reply arrives", () => {
+    const card = proposal();
+    expect(proposalAnchors([ask], [card], general)).toEqual(new Map([["ask", [card]]]));
+    expect(proposalAnchors([ask, earlier, reply], [card], general)).toEqual(
+      new Map([["reply", [card]]]),
+    );
+  });
+
+  it("leaves out other channels' cards, cards no lead proposed, and cards whose message isn't loaded", () => {
+    const cards = [
+      proposal({ channelId: ChannelId.make("other") }),
+      proposal({ createdBy: { kind: "human", id: "human" } }),
+      proposal({ sourceMessageId: MessageId.make("gone") }),
+    ];
+    expect(proposalAnchors([ask, reply], cards, general).size).toBe(0);
+  });
+});
+
+describe("cardProposalStatus", () => {
+  it("waits for a person until the card has an owner, then follows the card", () => {
+    const agents = [{ id: AgentId.make("agent-frontend"), name: "frontend" }];
+    const owned = { delegateAgentId: AgentId.make("agent-frontend") };
+    expect(cardProposalStatus({ status: "triage", delegateAgentId: null }, agents)).toBeNull();
+    expect(cardProposalStatus({ status: "ready", delegateAgentId: null }, agents)).toBeNull();
+    expect(cardProposalStatus({ ...owned, status: "ready" }, agents)).toBe("Starting · @frontend");
+    expect(cardProposalStatus({ ...owned, status: "inProgress" }, agents)).toBe(
+      "In progress · @frontend",
+    );
+    expect(cardProposalStatus({ ...owned, status: "inReview" }, agents)).toBe("Ready for review");
+    expect(cardProposalStatus({ ...owned, status: "landed" }, agents)).toBe("Landed");
+    expect(cardProposalStatus({ ...owned, status: "abandoned" }, agents)).toBe("Dropped");
+  });
 });
 
 describe("channelListEntries", () => {
