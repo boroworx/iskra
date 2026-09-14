@@ -1260,6 +1260,11 @@ export const CardBriefPayload = Schema.Struct({
   diffTruncated: Schema.Boolean,
   // What a helper was asked; null for an owner session.
   question: Schema.NullOr(Schema.String),
+  // The card's worklog in the order it is handed over. Briefs from before the worklog render from
+  // the fields above instead.
+  sections: Schema.optional(
+    Schema.Array(Schema.Struct({ title: TrimmedNonEmptyString, body: Schema.String })),
+  ),
 });
 export type CardBriefPayload = typeof CardBriefPayload.Type;
 
