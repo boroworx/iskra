@@ -399,7 +399,16 @@ function SidebarListGroup(props: {
       </SidebarGroupAction>
       <SidebarMenu>
         {props.isEmpty ? (
-          <p className="px-2 py-1 text-xs text-sidebar-muted-foreground">None yet</p>
+          <p className="px-2 py-1 text-xs text-sidebar-muted-foreground">
+            None yet.{" "}
+            <button
+              type="button"
+              onClick={props.onAdd}
+              className="rounded-sm font-medium text-sidebar-foreground underline-offset-2 outline-hidden ring-ring hover:underline focus-visible:ring-2"
+            >
+              {props.addLabel}
+            </button>
+          </p>
         ) : null}
         {props.children}
       </SidebarMenu>

@@ -1,9 +1,13 @@
+import type { EnvironmentProject } from "@iskra/client-runtime/state/models";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { LinkIcon, PlusIcon } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
 import { isElectron } from "../env";
+import { agentListEntries } from "../components/channels/channels.logic";
+import { CreateAgentDialog } from "../components/channels/CreateAgentDialog";
+import { CreateChannelDialog } from "../components/channels/CreateChannelDialog";
 import { NoProjectsHero } from "../components/NoProjectsHero";
 import { sortScopedProjectsForSidebar } from "../components/Sidebar.logic";
 import { Button } from "../components/ui/button";
@@ -12,6 +16,7 @@ import { SidebarInset } from "../components/ui/sidebar";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import {
   useAllEnvironmentShellsBootstrapped,
+  useEnvironmentAgents,
   useEnvironmentChannels,
   useProjects,
   useThreadShells,
@@ -78,22 +83,63 @@ function IndexChannelLanding() {
   if (!bootstrapped || landingChannelId !== null) {
     return null;
   }
-  if (sortedProjects.length === 0) {
+  const setupProject =
+    sortedProjects.find((project) => project.environmentId === primaryEnvironmentId) ??
+    sortedProjects[0];
+  if (setupProject === undefined) {
     // First-run routing to the welcome wizard happens in FirstRunGate at the
     // root, before this route ever renders.
     return <NoProjectsHero />;
   }
+  return <NoChannelsLanding project={setupProject} />;
+}
+
+/** A project with no channel yet: how work moves through Iskra, and the two things to create first. */
+function NoChannelsLanding(props: { readonly project: EnvironmentProject }) {
+  const { environmentId, id: projectId } = props.project;
+  const agents = useEnvironmentAgents(environmentId);
+  const memberAgentIds = useMemo(
+    () => agentListEntries(agents, projectId).map((agent) => agent.id),
+    [agents, projectId],
+  );
+  const [openDialog, setOpenDialog] = useState<"channel" | "agent" | null>(null);
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <Empty className="flex-1">
         <EmptyHeader className="max-w-md">
           <EmptyTitle className="text-foreground text-xl">No channels yet</EmptyTitle>
           <EmptyDescription className="mt-2 text-sm text-muted-foreground/78">
-            Add an agent and a channel from the sidebar, then mention the agent in the channel to
-            put it to work.
+            How work moves in {props.project.title}:
           </EmptyDescription>
+          <ol className="mt-3 list-decimal space-y-1 pl-5 text-left text-sm text-muted-foreground">
+            <li>You talk in a channel, and its lead turns requests into cards.</li>
+            <li>Each card gets an owner agent that works on it in its own session.</li>
+            <li>You review the work, then land it.</li>
+          </ol>
+          <div className="mt-6 flex justify-center gap-2">
+            <Button size="sm" variant="outline" onClick={() => setOpenDialog("agent")}>
+              <PlusIcon className="size-4" />
+              New agent
+            </Button>
+            <Button size="sm" onClick={() => setOpenDialog("channel")}>
+              <PlusIcon className="size-4" />
+              New channel
+            </Button>
+          </div>
         </EmptyHeader>
       </Empty>
+      <CreateAgentDialog
+        open={openDialog === "agent"}
+        onOpenChange={(open) => setOpenDialog(open ? "agent" : null)}
+        project={props.project}
+      />
+      <CreateChannelDialog
+        open={openDialog === "channel"}
+        onOpenChange={(open) => setOpenDialog(open ? "channel" : null)}
+        environmentId={environmentId}
+        projectId={projectId}
+        memberAgentIds={memberAgentIds}
+      />
     </SidebarInset>
   );
 }
