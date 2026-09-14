@@ -15,7 +15,6 @@ import type {
   OrchestrationChannelShell,
   OrchestrationMessage,
   OrchestrationThreadActivity,
-  OrchestrationThreadShell,
 } from "@iskra/contracts";
 import { describe, expect, it } from "vite-plus/test";
 

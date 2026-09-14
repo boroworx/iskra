@@ -27,14 +27,6 @@ import {
   createEnvironmentSubscriptionAtomFamily,
 } from "./runtime.ts";
 
-export type {
-  CreateAgentInput,
-  CreateChannelInput,
-  PostChannelMessageInput,
-  SendAgentSessionMessageInput,
-  UpdateChannelInput,
-} from "../operations/commands.ts";
-
 /**
  * A channel's messages after one stream item. A snapshot replaces them, so a
  * resubscription starts clean; a message already held is not added twice; a

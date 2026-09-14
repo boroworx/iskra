@@ -26,7 +26,7 @@ export function boardColumnOf(status: CardStatus): BoardColumn {
 }
 
 /** The human decision a drag stands for; everything else moves on its own. */
-export type CardDecisionCommand =
+type CardDecisionCommand =
   | "card.approve"
   | "card.unapprove"
   | "card.merge.approve"
@@ -34,7 +34,7 @@ export type CardDecisionCommand =
   | "card.abandon"
   | "card.reopen";
 
-export type CardDropDecision =
+type CardDropDecision =
   | { readonly kind: "none" }
   | { readonly kind: "command"; readonly type: CardDecisionCommand }
   | { readonly kind: "refuse"; readonly reason: string };
@@ -94,7 +94,7 @@ export function isCardSnoozed(card: SnoozeFacts, now: number): boolean {
 }
 
 /** A card session's standing, as the Needs you list reads it. */
-export interface CardSessionSummary {
+interface CardSessionSummary {
   readonly cardId: CardId;
   readonly state: RunSessionState;
   /** When the session reached this state. */
@@ -121,7 +121,7 @@ export const CARD_PRIORITY_LABEL: Record<CardPriority, string> = {
   4: "Low",
 };
 
-export interface NeedsYouItem {
+interface NeedsYouItem {
   readonly key: string;
   readonly kind: NeedsYouKind;
   readonly cardId: CardId;

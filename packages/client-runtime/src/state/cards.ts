@@ -19,15 +19,6 @@ import {
 } from "../operations/commands.ts";
 import { createEnvironmentCommand, createEnvironmentRpcQueryAtomFamily } from "./runtime.ts";
 
-export type {
-  CardDecisionInput,
-  SetCardBudgetInput,
-  SnoozeCardInput,
-  StartCardAttemptsInput,
-  UnsnoozeCardInput,
-  UpdateCardInput,
-} from "../operations/commands.ts";
-
 /** A person's commands on cards: the board's decisions and Needs you snoozes. */
 export function createCardEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | Crypto.Crypto | R, E>,
