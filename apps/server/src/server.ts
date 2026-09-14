@@ -93,6 +93,7 @@ import * as CardSpendReactor from "./orchestration/CardSpendReactor.ts";
 import * as LinearSyncReactor from "./orchestration/LinearSyncReactor.ts";
 import * as LinearClient from "./linear/LinearClient.ts";
 import * as CardSessionReactor from "./orchestration/CardSessionReactor.ts";
+import * as HostAdmission from "./orchestration/HostAdmission.ts";
 import * as CardWorkspace from "./orchestration/CardWorkspace.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
@@ -270,6 +271,7 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(
     CardWorkspace.layer.pipe(Layer.provide(ProcessRunner.layer), Layer.provide(NetService.layer)),
   ),
+  Layer.provideMerge(HostAdmission.layer),
   Layer.provideMerge(AgentAwarenessRelay.layer.pipe(Layer.provide(ServerSecretStore.layer))),
   Layer.provideMerge(RuntimeReceiptBusLive),
 );
