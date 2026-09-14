@@ -9,10 +9,6 @@ import {
   type BoardColumn,
 } from "@iskra/client-runtime/cards";
 import {
-  isAtomCommandInterrupted,
-  squashAtomCommandFailure,
-} from "@iskra/client-runtime/state/runtime";
-import {
   CARD_AUTOFIX_ATTEMPTS,
   type CardPriority,
   type EnvironmentId,
@@ -40,6 +36,7 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { SidebarInset } from "../ui/sidebar";
 import { toastManager } from "../ui/toast";
+import { toastCommandFailure } from "../toastCommandFailure";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 
 const SESSION_BADGE: Partial<Record<RunSessionState, string>> = {
@@ -106,14 +103,7 @@ export function BoardView(props: {
       environmentId: props.environmentId,
       input: { type: decision.type, cardId: card.id },
     });
-    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-      const error = squashAtomCommandFailure(result);
-      toastManager.add({
-        type: "error",
-        title: "The card stays where it was",
-        description: error instanceof Error ? error.message : "The decision was refused.",
-      });
-    }
+    toastCommandFailure(result, "The card stays where it was", "The decision was refused.");
   };
 
   return (

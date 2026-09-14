@@ -1,4 +1,3 @@
-import { isAtomCommandInterrupted, squashAtomCommandFailure } from "@iskra/client-runtime/state/runtime";
 import {
   CARD_ATTEMPTS_MAX,
   CARD_ATTEMPTS_MIN,
@@ -17,7 +16,7 @@ import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
-import { toastManager } from "../ui/toast";
+import { toastCommandFailure } from "../toastCommandFailure";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 
 /**
@@ -125,14 +124,7 @@ function StartAttempts(props: {
             },
           });
           setStarting(false);
-          if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-            const error = squashAtomCommandFailure(result);
-            toastManager.add({
-              type: "error",
-              title: "The attempts did not start",
-              description: error instanceof Error ? error.message : "The request was refused.",
-            });
-          }
+          toastCommandFailure(result, "The attempts did not start", "The request was refused.");
         }}
       >
         Start {chosen.length > 0 ? chosen.length : ""} attempts
@@ -184,14 +176,7 @@ function AttemptColumn(props: {
               environmentId: props.environmentId,
               input: { type: "card.attempt.promote", cardId: attempt.id },
             });
-            if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-              const error = squashAtomCommandFailure(result);
-              toastManager.add({
-                type: "error",
-                title: "The attempt was not promoted",
-                description: error instanceof Error ? error.message : "The request was refused.",
-              });
-            }
+            toastCommandFailure(result, "The attempt was not promoted", "The request was refused.");
           }}
         >
           Promote

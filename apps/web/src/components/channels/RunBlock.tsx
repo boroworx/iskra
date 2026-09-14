@@ -1,10 +1,6 @@
 import { scopeThreadRef } from "@iskra/client-runtime/environment";
 import { derivePendingRequests, type PendingUserInput } from "@iskra/client-runtime/pending-requests";
 import {
-  isAtomCommandInterrupted,
-  squashAtomCommandFailure,
-} from "@iskra/client-runtime/state/runtime";
-import {
   runSessionState,
   type EnvironmentId,
   type OrchestrationAgentRun,
@@ -21,7 +17,7 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import ChatMarkdown from "../ChatMarkdown";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
-import { toastManager } from "../ui/toast";
+import { toastCommandFailure } from "../toastCommandFailure";
 import {
   Dialog,
   DialogDescription,
@@ -153,14 +149,7 @@ function RunQuestion(props: {
       input: { threadId: props.threadId, requestId: props.request.requestId, answers },
     });
     setSending(false);
-    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-      const error = squashAtomCommandFailure(result);
-      toastManager.add({
-        type: "error",
-        title: "The answer was not sent",
-        description: error instanceof Error ? error.message : "Try again.",
-      });
-    }
+    toastCommandFailure(result, "The answer was not sent", "Try again.");
   };
 
   return (
