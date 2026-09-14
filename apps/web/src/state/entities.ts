@@ -8,14 +8,7 @@ import {
   type EnvironmentThreadStatus,
   mergeEnvironmentThread,
 } from "@iskra/client-runtime/state/threads";
-import type {
-  OrchestrationAgentShell,
-  OrchestrationChannelShell,
-  ScopedProjectRef,
-  ScopedThreadRef,
-  ServerConfig,
-  OrchestrationCardShell,
-} from "@iskra/contracts";
+import type { ScopedProjectRef, ScopedThreadRef, ServerConfig } from "@iskra/contracts";
 import type { EnvironmentId } from "@iskra/contracts";
 import { Atom } from "effect/unstable/reactivity";
 import { useMemo } from "react";
@@ -45,15 +38,7 @@ const EMPTY_THREAD_DETAIL_ATOM = Atom.make<EnvironmentThread | null>(null).pipe(
 const EMPTY_THREAD_STATUS_ATOM = Atom.make<EnvironmentThreadStatus>("empty").pipe(
   Atom.withLabel("web-thread-status:empty"),
 );
-const EMPTY_AGENTS_ATOM = Atom.make<ReadonlyArray<OrchestrationAgentShell>>([]).pipe(
-  Atom.withLabel("web-agents:empty"),
-);
-const EMPTY_CHANNELS_ATOM = Atom.make<ReadonlyArray<OrchestrationChannelShell>>([]).pipe(
-  Atom.withLabel("web-channels:empty"),
-);
-const EMPTY_CARDS_ATOM = Atom.make<ReadonlyArray<OrchestrationCardShell>>([]).pipe(
-  Atom.withLabel("web-cards:empty"),
-);
+const EMPTY_LIST_ATOM = Atom.make<ReadonlyArray<never>>([]).pipe(Atom.withLabel("web-list:empty"));
 
 const activeEnvironmentIdAtom = Atom.make<EnvironmentId | null>(null).pipe(
   Atom.keepAlive,
@@ -86,37 +71,26 @@ export function useProjects(): ReadonlyArray<EnvironmentProject> {
   return useAtomValue(environmentProjects.projectsAtom);
 }
 
-/** An environment's active agents, with presence; empty when it has none or cannot send them. */
-export function useEnvironmentAgents(
+function useEnvironmentList<A>(
   environmentId: EnvironmentId | null,
-): ReadonlyArray<OrchestrationAgentShell> {
-  return useAtomValue(
-    environmentId === null
-      ? EMPTY_AGENTS_ATOM
-      : environmentAgentChannels.environmentAgentsAtom(environmentId),
-  );
+  family: (environmentId: EnvironmentId) => Atom.Atom<ReadonlyArray<A>>,
+): ReadonlyArray<A> {
+  return useAtomValue(environmentId === null ? EMPTY_LIST_ATOM : family(environmentId));
+}
+
+/** An environment's active agents, with presence; empty when it has none or cannot send them. */
+export function useEnvironmentAgents(environmentId: EnvironmentId | null) {
+  return useEnvironmentList(environmentId, environmentAgentChannels.environmentAgentsAtom);
 }
 
 /** An environment's active channels; empty when it has none or cannot send them. */
-export function useEnvironmentChannels(
-  environmentId: EnvironmentId | null,
-): ReadonlyArray<OrchestrationChannelShell> {
-  return useAtomValue(
-    environmentId === null
-      ? EMPTY_CHANNELS_ATOM
-      : environmentAgentChannels.environmentChannelsAtom(environmentId),
-  );
+export function useEnvironmentChannels(environmentId: EnvironmentId | null) {
+  return useEnvironmentList(environmentId, environmentAgentChannels.environmentChannelsAtom);
 }
 
 /** An environment's cards with their owner sessions; empty when it has none or cannot send them. */
-export function useEnvironmentCards(
-  environmentId: EnvironmentId | null,
-): ReadonlyArray<OrchestrationCardShell> {
-  return useAtomValue(
-    environmentId === null
-      ? EMPTY_CARDS_ATOM
-      : environmentAgentChannels.environmentCardsAtom(environmentId),
-  );
+export function useEnvironmentCards(environmentId: EnvironmentId | null) {
+  return useEnvironmentList(environmentId, environmentAgentChannels.environmentCardsAtom);
 }
 
 export function useServerConfigs(): ReadonlyMap<EnvironmentId, ServerConfig> {
