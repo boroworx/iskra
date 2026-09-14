@@ -90,6 +90,7 @@ import * as VcsProcess from "../src/vcs/VcsProcess.ts";
 import * as AgentAwarenessRelay from "../src/relay/AgentAwarenessRelay.ts";
 import * as RunReactor from "../src/orchestration/RunReactor.ts";
 import * as AgentDefinitionSync from "../src/orchestration/AgentDefinitionSync.ts";
+import * as CardLandingReactor from "../src/orchestration/CardLandingReactor.ts";
 import * as CardReviewReactor from "../src/orchestration/CardReviewReactor.ts";
 import * as CardSpendReactor from "../src/orchestration/CardSpendReactor.ts";
 import * as LinearSyncReactor from "../src/orchestration/LinearSyncReactor.ts";
@@ -472,6 +473,13 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(
         Layer.succeed(CardWatchdog.CardWatchdog, {
           start: () => Effect.void,
+          drain: Effect.void,
+        }),
+      ),
+      Layer.provideMerge(
+        Layer.succeed(CardLandingReactor.CardLandingReactor, {
+          start: () => Effect.void,
+          pollNow: Effect.void,
           drain: Effect.void,
         }),
       ),

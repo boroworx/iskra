@@ -14,6 +14,7 @@ import * as PullRequestSyncReactor from "../PullRequestSyncReactor.ts";
 import * as ThreadPullRequestReactor from "../ThreadPullRequestReactor.ts";
 import * as RunReactor from "../RunReactor.ts";
 import * as AgentDefinitionSync from "../AgentDefinitionSync.ts";
+import * as CardLandingReactor from "../CardLandingReactor.ts";
 import * as CardReviewReactor from "../CardReviewReactor.ts";
 import * as CardSpendReactor from "../CardSpendReactor.ts";
 import * as LinearSyncReactor from "../LinearSyncReactor.ts";
@@ -37,6 +38,7 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
   const cardWorkspace = yield* CardWorkspace.CardWorkspace;
   const cardSessionReactor = yield* CardSessionReactor.CardSessionReactor;
   const cardReviewReactor = yield* CardReviewReactor.CardReviewReactor;
+  const cardLandingReactor = yield* CardLandingReactor.CardLandingReactor;
   const cardSpendReactor = yield* CardSpendReactor.CardSpendReactor;
   const linearSyncReactor = yield* LinearSyncReactor.LinearSyncReactor;
   const cardScheduler = yield* CardScheduler.CardScheduler;
@@ -56,6 +58,7 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
     yield* cardWorkspace.start();
     yield* cardSessionReactor.start();
     yield* cardReviewReactor.start();
+    yield* cardLandingReactor.start();
     yield* cardSpendReactor.start();
     yield* linearSyncReactor.start();
     yield* cardScheduler.start();

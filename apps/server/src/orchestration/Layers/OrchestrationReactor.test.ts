@@ -14,6 +14,7 @@ import * as PullRequestSyncReactor from "../PullRequestSyncReactor.ts";
 import * as ThreadPullRequestReactor from "../ThreadPullRequestReactor.ts";
 import * as RunReactor from "../RunReactor.ts";
 import * as AgentDefinitionSync from "../AgentDefinitionSync.ts";
+import * as CardLandingReactor from "../CardLandingReactor.ts";
 import * as CardReviewReactor from "../CardReviewReactor.ts";
 import * as CardSpendReactor from "../CardSpendReactor.ts";
 import * as LinearSyncReactor from "../LinearSyncReactor.ts";
@@ -188,6 +189,16 @@ describe("OrchestrationReactor", () => {
           }),
         ),
         Layer.provideMerge(
+          Layer.succeed(CardLandingReactor.CardLandingReactor, {
+            start: () => {
+              started.push("card-landing-reactor");
+              return Effect.void;
+            },
+            pollNow: Effect.void,
+            drain: Effect.void,
+          }),
+        ),
+        Layer.provideMerge(
           Layer.succeed(CardSpendReactor.CardSpendReactor, {
             start: () => {
               started.push("card-spend-reactor");
@@ -227,6 +238,7 @@ describe("OrchestrationReactor", () => {
       "card-workspace",
       "card-session-reactor",
       "card-review-reactor",
+      "card-landing-reactor",
       "card-spend-reactor",
       "linear-sync-reactor",
       "card-scheduler",

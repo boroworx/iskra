@@ -88,6 +88,7 @@ import * as PullRequestSyncReactor from "./orchestration/PullRequestSyncReactor.
 import * as ThreadPullRequestReactor from "./orchestration/ThreadPullRequestReactor.ts";
 import * as RunReactor from "./orchestration/RunReactor.ts";
 import * as AgentDefinitionSync from "./orchestration/AgentDefinitionSync.ts";
+import * as CardLandingReactor from "./orchestration/CardLandingReactor.ts";
 import * as CardReviewReactor from "./orchestration/CardReviewReactor.ts";
 import * as CardSpendReactor from "./orchestration/CardSpendReactor.ts";
 import * as LinearSyncReactor from "./orchestration/LinearSyncReactor.ts";
@@ -265,7 +266,7 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(CardSessionReactor.layer),
   Layer.provideMerge(CardScheduler.layer),
   Layer.provideMerge(CardWatchdog.layer),
-  Layer.provideMerge(CardReviewReactor.layer),
+  Layer.provideMerge(Layer.mergeAll(CardReviewReactor.layer, CardLandingReactor.layer)),
   Layer.provideMerge(CardSpendReactor.layer),
   Layer.provideMerge(
     LinearSyncReactor.layer.pipe(
@@ -515,6 +516,8 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(VcsLayerLive),
   Layer.provideMerge(ProviderRuntimeLayerLive),
   Layer.provideMerge(Layer.mergeAll(TerminalLayerLive, PreviewLayerLive, DeviceLayerLive)),
+  // One broker for the MCP routes desktop hosts connect to and for the review gate's captures.
+  Layer.provideMerge(PreviewAutomationBroker.layer),
   Layer.provideMerge(PersistenceLayerLive),
   // Both read a user-owned file out of the state directory and stream changes
   // to clients; neither depends on the other.
@@ -606,6 +609,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   // Both transports consume the same service instance, so caches single-flight across clients
   // and mutations observed on WebSocket invalidate patches subsequently read over HTTP.
   Layer.provide(PullRequestServiceLive),
+  // The same memoized layer the runtime provides to the review gate, so hosts and captures share it.
   Layer.provide(PreviewAutomationBroker.layer),
   Layer.provide(ServerSelfUpdate.layer.pipe(Layer.provide(DesktopAppUpdateLayerLive))),
   Layer.provide(commandReadinessLayer),
