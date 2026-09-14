@@ -35,6 +35,7 @@ import { forkParked } from "../serverActivation.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import { isFinishedCardStatus } from "./cardRules.ts";
+import type { ProjectCheck } from "./ProjectFile.ts";
 import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
 
@@ -51,6 +52,41 @@ export class CardWorkspaceError extends Schema.TaggedError<CardWorkspaceError>()
 export interface CardChecksResult {
   readonly passed: boolean;
   readonly summary: string;
+}
+
+/**
+ * A server-run checks request. "full" runs each check's command; "targeted" runs its
+ * targetedCommand with `{filter}` replaced (checks without one run their full command). `checks`
+ * defaults to the card's project file checks; source "ci" checks are skipped here. Heavy: call it
+ * inside HostAdmission.run.
+ */
+export interface RunChecksInput {
+  readonly cardId: CardId;
+  readonly scope: "targeted" | "full";
+  readonly filter?: string | undefined;
+  readonly checks?: ReadonlyArray<ProjectCheck> | undefined;
+}
+
+/** One check's outcome. `logTail` (≤2k, secrets scrubbed) is the only part agents see. */
+export interface CardCheckResult {
+  readonly id: string;
+  readonly name: string;
+  readonly exitCode: number | null;
+  readonly timedOut: boolean;
+  readonly durationMs: number;
+  readonly logTail: string;
+  // Absolute path of the full log (≤1MB) under the card's attachments; null if it wasn't saved.
+  readonly logArtifactPath: string | null;
+}
+
+/**
+ * Checks run in order and stop at the first failure, so `results` may be shorter than the
+ * request. `passed` is false when nothing ran: whether no checks may pass is the caller's policy.
+ */
+export interface CardChecksRun {
+  readonly passed: boolean;
+  readonly summary: string;
+  readonly results: ReadonlyArray<CardCheckResult>;
 }
 
 /** Where landing a card ended: merged into its base, or stopped with why. */
