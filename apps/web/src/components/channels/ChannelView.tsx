@@ -47,6 +47,7 @@ import {
   type AgentEntry,
   type ChannelMessageRow,
 } from "./channels.logic";
+import { ChannelQuestion } from "../cards/CardContract";
 import { CardProposal } from "./CardProposal";
 import { ChannelSettingsDialog } from "./ChannelSettingsDialog";
 import { RunBlock } from "./RunBlock";
@@ -260,7 +261,10 @@ export const Timeline = memo(function Timeline(props: TimelineSource) {
     [props.messages, proposals],
   );
   const cardById = useMemo(
-    () => new Map<string, OrchestrationCardShell>((proposals?.cards ?? []).map((card) => [card.id, card])),
+    () =>
+      new Map<string, OrchestrationCardShell>(
+        (proposals?.cards ?? []).map((card) => [card.id, card]),
+      ),
     [proposals],
   );
   // Keep the newest message in view as messages arrive.
@@ -302,9 +306,7 @@ function MessageRow(props: {
 }) {
   const { message, authorName, showHeader } = props.row;
   const notes =
-    message.authorKind === "human"
-      ? deliveryNotes(message, props.agents, props.busyChannels)
-      : [];
+    message.authorKind === "human" ? deliveryNotes(message, props.agents, props.busyChannels) : [];
   return (
     <li className={cn("flex min-w-0 flex-col", showHeader ? "mt-4 first:mt-0" : "mt-1")}>
       {showHeader ? (
@@ -325,6 +327,12 @@ function MessageRow(props: {
       {message.authorKind === "agent" ? (
         <>
           <ChatMarkdown text={message.body} cwd={props.cwd} environmentId={props.environmentId} />
+          {message.elicitation !== undefined ? (
+            <ChannelQuestion
+              message={{ ...message, elicitation: message.elicitation }}
+              environmentId={props.environmentId}
+            />
+          ) : null}
           {message.runThreadId !== undefined ? (
             <RunWork
               agentId={AgentId.make(message.authorId)}

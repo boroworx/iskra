@@ -26,7 +26,9 @@ import { randomUUID } from "~/lib/utils";
 import { cardEnvironment } from "~/state/cards";
 import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { ApproveAndStart } from "../channels/CardProposal";
 import { CardActivityTimeline } from "./CardActivityTimeline";
+import { CardCriteria, CardPreviewPanel, CardQuestions } from "./CardContract";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -199,6 +201,11 @@ function CardSheetBody(props: {
               ))}
             </div>
           )}
+          {card.status === "triage" ? (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <ApproveAndStart card={card} agents={props.agents} environmentId={environmentId} />
+            </div>
+          ) : null}
           {card.status === "triage" && card.proposalReasoning !== null ? (
             <p className="text-xs text-muted-foreground">{card.proposalReasoning}</p>
           ) : null}
@@ -279,6 +286,27 @@ function CardSheetBody(props: {
             </div>
           ) : null}
         </Section>
+
+        {open ? (
+          <CardQuestionsSection card={card} activities={activities} environmentId={environmentId} />
+        ) : null}
+
+        <Section label="Acceptance criteria">
+          <CardCriteria card={card} environmentId={environmentId} />
+        </Section>
+
+        {card.status === "triage" || card.status === "ready" ? (
+          <Section label="Before it starts">
+            <CardPreviewPanel
+              estimate={card.estimate}
+              agent={
+                props.agents.find(
+                  (agent) => agent.id === (card.delegateAgentId ?? card.suggestedAgentId),
+                ) ?? null
+              }
+            />
+          </Section>
+        ) : null}
 
         {open ? (
           <Section label="Agent">
@@ -571,6 +599,16 @@ function CardSheetBody(props: {
 }
 
 const NO_ACTIVITIES: ReadonlyArray<CardActivity> = [];
+
+/** The agent's open questions, titled only when there are some. */
+function CardQuestionsSection(props: Parameters<typeof CardQuestions>[0]) {
+  const hasQuestion = props.activities.some((activity) => activity.kind === "elicitation");
+  return hasQuestion ? (
+    <Section label="Questions for you">
+      <CardQuestions {...props} />
+    </Section>
+  ) : null;
+}
 
 function Section(props: { readonly label: string; readonly children: ReactNode }) {
   return (

@@ -15,6 +15,7 @@ import { useEnvironmentAgents, useEnvironmentCards, useProjects } from "~/state/
 import { usePrimaryEnvironmentId } from "~/state/environments";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { ApproveAndStart } from "../channels/CardProposal";
+import { SubscribedCardQuestions } from "./CardContract";
 import { agentListEntries, type AgentEntry } from "../channels/channels.logic";
 import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
@@ -102,90 +103,97 @@ export function NeedsYouView() {
             <p className="text-sm text-muted-foreground">Nothing is waiting on you.</p>
           ) : (
             <ol className="flex flex-col divide-y divide-border">
-              {items.map((item) => (
-                <li
-                  key={item.key}
-                  className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 py-2.5"
-                >
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <CardLink
-                      environmentId={environmentId}
-                      projectId={item.projectId}
-                      cardId={item.cardId}
-                    >
-                      {item.title}
-                    </CardLink>
-                    <span className="truncate text-xs text-muted-foreground">
-                      {NEEDS_YOU_LABEL[item.kind]} · {projectTitle(item.projectId)}
+              {items.map((item) => {
+                const itemCard = cardById.get(item.cardId);
+                return (
+                  <li
+                    key={item.key}
+                    className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 py-2.5"
+                  >
+                    <div className="flex min-w-0 flex-1 flex-col">
+                      <CardLink
+                        environmentId={environmentId}
+                        projectId={item.projectId}
+                        cardId={item.cardId}
+                      >
+                        {item.title}
+                      </CardLink>
+                      <span className="truncate text-xs text-muted-foreground">
+                        {NEEDS_YOU_LABEL[item.kind]} · {projectTitle(item.projectId)}
+                      </span>
+                      {item.kind === "triage" && proposalReasoningOf(item.cardId) !== null ? (
+                        <p className="line-clamp-2 text-xs text-muted-foreground">
+                          {proposalReasoningOf(item.cardId)}
+                        </p>
+                      ) : null}
+                      {item.kind === "awaitingInput" &&
+                      environmentId !== null &&
+                      itemCard !== undefined ? (
+                        <div className="mt-1.5">
+                          <SubscribedCardQuestions card={itemCard} environmentId={environmentId} />
+                        </div>
+                      ) : null}
+                    </div>
+                    <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                      waiting {waitingLabel(item.since, now)}
                     </span>
-                    {item.kind === "triage" && proposalReasoningOf(item.cardId) !== null ? (
-                      <p className="line-clamp-2 text-xs text-muted-foreground">
-                        {proposalReasoningOf(item.cardId)}
-                      </p>
+                    {item.kind === "triage" ? (
+                      <div className="flex shrink-0 flex-wrap items-center gap-1">
+                        {environmentId === null || itemCard === undefined ? null : (
+                          <ApproveAndStart
+                            card={itemCard}
+                            agents={agentsByProject.get(item.projectId) ?? NO_AGENTS}
+                            environmentId={environmentId}
+                          />
+                        )}
+                        {actionButton("Drop", () =>
+                          decideOn(item.cardId, "card.abandon", "The card was not dropped"),
+                        )}
+                      </div>
+                    ) : item.kind === "spec" ? (
+                      <div className="flex shrink-0 gap-1">
+                        {actionButton("Approve spec", () =>
+                          decideOn(item.cardId, "card.spec.approve", "The spec was not approved"),
+                        )}
+                        {actionButton("Skip spec", () =>
+                          decideOn(item.cardId, "card.spec.skip", "The spec was not skipped"),
+                        )}
+                      </div>
+                    ) : item.kind === "budgetReached" ? (
+                      actionButton(`Raise the cap by $${DEFAULT_CARD_BUDGET_USD}`, () => {
+                        const capUsd =
+                          (cardById.get(item.cardId)?.budgetCapUsd ?? 0) + DEFAULT_CARD_BUDGET_USD;
+                        if (environmentId !== null) {
+                          void setBudget({
+                            environmentId,
+                            input: { cardId: item.cardId, capUsd },
+                          }).then(refused("The cap was not raised"));
+                        }
+                      })
+                    ) : item.kind === "unpricedModel" ? (
+                      // Refusing is the standing state here; the card sheet takes an acceptance back.
+                      actionButton("Run uncapped", () =>
+                        decideOn(
+                          item.cardId,
+                          "card.unpriced.accept",
+                          "The card was not allowed to run uncapped",
+                        ),
+                      )
                     ) : null}
-                  </div>
-                  <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                    waiting {waitingLabel(item.since, now)}
-                  </span>
-                  {item.kind === "triage" ? (
-                    <div className="flex shrink-0 flex-wrap items-center gap-1">
-                      {environmentId === null ? null : (
-                        <ApproveAndStart
-                          card={{
-                            id: item.cardId,
-                            suggestedAgentId: cardById.get(item.cardId)?.suggestedAgentId ?? null,
-                          }}
-                          agents={agentsByProject.get(item.projectId) ?? NO_AGENTS}
-                          environmentId={environmentId}
-                        />
-                      )}
-                      {actionButton("Drop", () =>
-                        decideOn(item.cardId, "card.abandon", "The card was not dropped"),
-                      )}
-                    </div>
-                  ) : item.kind === "spec" ? (
-                    <div className="flex shrink-0 gap-1">
-                      {actionButton("Approve spec", () =>
-                        decideOn(item.cardId, "card.spec.approve", "The spec was not approved"),
-                      )}
-                      {actionButton("Skip spec", () =>
-                        decideOn(item.cardId, "card.spec.skip", "The spec was not skipped"),
-                      )}
-                    </div>
-                  ) : item.kind === "budgetReached" ? (
-                    actionButton(`Raise the cap by $${DEFAULT_CARD_BUDGET_USD}`, () => {
-                      const capUsd =
-                        (cardById.get(item.cardId)?.budgetCapUsd ?? 0) + DEFAULT_CARD_BUDGET_USD;
-                      if (environmentId !== null) {
-                        void setBudget({
-                          environmentId,
-                          input: { cardId: item.cardId, capUsd },
-                        }).then(refused("The cap was not raised"));
-                      }
-                    })
-                  ) : item.kind === "unpricedModel" ? (
-                    // Refusing is the standing state here; the card sheet takes an acceptance back.
-                    actionButton("Run uncapped", () =>
-                      decideOn(
-                        item.cardId,
-                        "card.unpriced.accept",
-                        "The card was not allowed to run uncapped",
-                      ),
-                    )
-                  ) : null}
-                  {item.snoozable ? (
-                    <div className="flex shrink-0 gap-1">
-                      {actionButton("1 hour", () =>
-                        snoozeCard(item.cardId, new Date(now + HOUR_MS).toISOString()),
-                      )}
-                      {actionButton("Tomorrow", () =>
-                        snoozeCard(item.cardId, new Date(now + 24 * HOUR_MS).toISOString()),
-                      )}
-                      {actionButton("Until it changes", () => snoozeCard(item.cardId, null))}
-                    </div>
-                  ) : null}
-                </li>
-              ))}
+                    {item.snoozable ? (
+                      <div className="flex shrink-0 gap-1">
+                        {actionButton("1 hour", () =>
+                          snoozeCard(item.cardId, new Date(now + HOUR_MS).toISOString()),
+                        )}
+                        {actionButton("Tomorrow", () =>
+                          snoozeCard(item.cardId, new Date(now + 24 * HOUR_MS).toISOString()),
+                        )}
+                        {actionButton("Until it changes", () => snoozeCard(item.cardId, null))}
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })}
             </ol>
           )}
           {snoozed.length > 0 ? (

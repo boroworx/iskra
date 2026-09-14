@@ -484,6 +484,21 @@ describe("elicitationAnswer", () => {
       },
     ]);
     expect(open.map((entry) => entry.activityId)).toEqual(["q2"]);
+
+    // A person's later message answers every question asked before it, as on the card before options.
+    const replied = openCardElicitations([
+      { ...base, activityId: "q1", kind: "elicitation", elicitation, answers: null },
+      {
+        ...base,
+        activityId: "m1",
+        kind: "message",
+        author: { kind: "human", id: "human" },
+        elicitation: null,
+        answers: null,
+      },
+      { ...base, activityId: "q2", kind: "elicitation", elicitation, answers: null },
+    ]);
+    expect(replied.map((entry) => entry.activityId)).toEqual(["q2"]);
   });
 });
 
