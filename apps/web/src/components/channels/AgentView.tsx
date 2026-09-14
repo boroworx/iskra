@@ -1,13 +1,14 @@
 import { cardOwnerSessions, needsYouItems } from "@iskra/client-runtime/cards";
+import type { EnvironmentProject } from "@iskra/client-runtime/state/models";
 import {
   MessageId,
   type AgentId,
   type EnvironmentId,
   type OrchestrationAgentShell,
   type OrchestrationCardShell,
+  type OrchestrationChannelMessage,
   type ThreadId,
 } from "@iskra/contracts";
-import type { EnvironmentProject } from "@iskra/client-runtime/state/models";
 import { AtSignIcon, SettingsIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -29,15 +30,17 @@ import {
   useAgentDefinitions,
   useSaveAgentDefinition,
 } from "./AgentSettingsDialog";
-import { MessageComposer, PresenceBadge, useStickToNewest } from "./ChannelView";
-import { dmTargets } from "./channels.logic";
+import { MessageComposer, PresenceBadge, Timeline, useStickToNewest } from "./ChannelView";
+import { agentDmChannel, busyChannelName, dmTargets } from "./channels.logic";
 import { RunBlock } from "./RunBlock";
 
+const EMPTY_MESSAGES: ReadonlyArray<OrchestrationChannelMessage> = [];
+
 /**
- * An agent's DM: a window onto its sessions, each labelled by the channel it
- * talks in or the card it works on, with its work and the context it started
- * from. The composer writes into one of the agent's live sessions, under that
- * session's delivery rules, and never starts one.
+ * An agent's page. Messages is its DM, a private read-only conversation opened by
+ * the first direct message; Sessions lists every session it has run, labelled by
+ * the channel it talks in or the card it works on. The composer writes into the
+ * DM, or into one of the agent's live sessions under that session's delivery rules.
  */
 export function AgentView(props: {
   readonly environmentId: EnvironmentId;
@@ -60,8 +63,23 @@ export function AgentView(props: {
       input: { agentId: props.agentId },
     }),
   );
+  // The DM channel arrives through the shell once the first direct message opens it.
+  const dmChannel = useMemo(
+    () => agentDmChannel(channels, props.agentId),
+    [channels, props.agentId],
+  );
+  const dmMessages = useEnvironmentQuery(
+    dmChannel === null
+      ? null
+      : channelEnvironment.messages({
+          environmentId: props.environmentId,
+          input: { channelId: dmChannel.id },
+        }),
+  );
   const sendToSession = useAtomCommand(channelEnvironment.sessionMessage);
+  const postDm = useAtomCommand(channelEnvironment.dmPost);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [view, setView] = useState<"messages" | "sessions">("messages");
 
   // Sessions start and end as the agent's presence changes: refetch the list then.
   const refreshRuns = runs.refresh;
@@ -76,30 +94,53 @@ export function AgentView(props: {
 
   const sessions = useMemo(() => (runs.data?.runs ?? []).toReversed(), [runs.data]);
   const targets = useMemo(() => dmTargets(runs.data?.runs ?? [], channels), [runs.data, channels]);
+  // A queued DM waits for the agent's live run in another channel to end.
+  const busyChannels = useMemo(() => {
+    const name = busyChannelName(runs.data?.runs ?? [], channels);
+    return name === null ? undefined : new Map([[props.agentId as string, name]]);
+  }, [runs.data, channels, props.agentId]);
   const [chosenThreadId, setChosenThreadId] = useState<ThreadId | null>(null);
-  const target = targets.find((entry) => entry.threadId === chosenThreadId) ?? targets[0] ?? null;
+  const target = targets.find((entry) => entry.threadId === chosenThreadId) ?? targets[0];
 
-  const scrollRef = useStickToNewest(sessions.at(-1)?.threadId);
+  const scrollRef = useStickToNewest(view === "sessions" ? sessions.at(-1)?.threadId : undefined);
+  const messages = dmMessages.data ?? EMPTY_MESSAGES;
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <WorkspacePageHeader className="border-b border-border">
           {agent === null ? null : (
-            <div className="flex min-w-0 items-center gap-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
               <AtSignIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
               <h1 className="truncate text-sm font-semibold">{agent.name}</h1>
               <PresenceBadge presence={agent.presence} />
               <AgentStats agent={agent} cards={cards} />
-              <Button
-                className="ml-auto"
-                size="icon-sm"
-                variant="ghost-muted"
-                aria-label={`@${agent.name} settings`}
-                onClick={() => setSettingsOpen(true)}
-              >
-                <SettingsIcon />
-              </Button>
+              <div className="ml-auto flex shrink-0 items-center gap-1">
+                <Button
+                  size="sm"
+                  variant={view === "messages" ? "secondary" : "ghost-muted"}
+                  aria-pressed={view === "messages"}
+                  onClick={() => setView("messages")}
+                >
+                  Messages
+                </Button>
+                <Button
+                  size="sm"
+                  variant={view === "sessions" ? "secondary" : "ghost-muted"}
+                  aria-pressed={view === "sessions"}
+                  onClick={() => setView("sessions")}
+                >
+                  Sessions
+                </Button>
+                <Button
+                  size="icon-sm"
+                  variant="ghost-muted"
+                  aria-label={`@${agent.name} settings`}
+                  onClick={() => setSettingsOpen(true)}
+                >
+                  <SettingsIcon />
+                </Button>
+              </div>
               <AgentSettingsDialog
                 open={settingsOpen}
                 onOpenChange={setSettingsOpen}
@@ -123,38 +164,64 @@ export function AgentView(props: {
           ) : null
         ) : (
           <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-            <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-              {runs.error !== null ? (
-                <p className="text-sm text-destructive">{runs.error}</p>
-              ) : null}
-              {runs.data !== null && sessions.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  @{agent.name} has no sessions yet. Mention it in a channel or assign it a card.
-                </p>
-              ) : null}
-              <ol className="flex flex-col gap-5">
-                {sessions.map((run) => (
-                  <li key={run.threadId} className="min-w-0">
-                    <RunBlock
-                      run={run}
-                      channels={channels}
-                      cwd={project?.workspaceRoot}
-                      environmentId={props.environmentId}
-                    />
-                  </li>
-                ))}
-              </ol>
-            </div>
+            {view === "messages" ? (
+              dmChannel !== null && (messages.length > 0 || dmMessages.error !== null) ? (
+                <Timeline
+                  messages={messages}
+                  error={dmMessages.error}
+                  agents={agents}
+                  channels={channels}
+                  cwd={project?.workspaceRoot}
+                  environmentId={props.environmentId}
+                  busyChannels={busyChannels}
+                />
+              ) : (
+                <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+                  <p className="text-sm text-muted-foreground">
+                    Message @{agent.name}. It can read the project but not change it; changes need
+                    a card.
+                  </p>
+                </div>
+              )
+            ) : (
+              <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+                {runs.error !== null ? (
+                  <p className="text-sm text-destructive">{runs.error}</p>
+                ) : null}
+                {runs.data !== null && sessions.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    @{agent.name} has no sessions yet. Message it, mention it in a channel or assign
+                    it a card.
+                  </p>
+                ) : null}
+                <ol className="flex flex-col gap-5">
+                  {sessions.map((run) => (
+                    <li key={run.threadId} className="min-w-0">
+                      <RunBlock
+                        run={run}
+                        channels={channels}
+                        cwd={project?.workspaceRoot}
+                        environmentId={props.environmentId}
+                      />
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
             {targets.length > 1 ? (
               <label className="flex shrink-0 items-center gap-2 px-5 pb-2 text-xs text-muted-foreground">
                 Write to
                 <select
                   className="min-w-0 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
                   value={target?.threadId ?? ""}
-                  onChange={(event) => setChosenThreadId(event.target.value as ThreadId)}
+                  onChange={(event) =>
+                    setChosenThreadId(
+                      event.target.value === "" ? null : (event.target.value as ThreadId),
+                    )
+                  }
                 >
                   {targets.map((entry) => (
-                    <option key={entry.threadId} value={entry.threadId}>
+                    <option key={entry.threadId ?? ""} value={entry.threadId ?? ""}>
                       {entry.label}
                     </option>
                   ))}
@@ -163,23 +230,26 @@ export function AgentView(props: {
             ) : null}
             <MessageComposer
               key={props.agentId}
-              disabled={target === null}
               placeholder={
-                target === null
-                  ? `@${agent.name} has no live session to write into`
+                target === undefined || target.threadId === null
+                  ? `Message @${agent.name}`
                   : `Message @${agent.name} in ${target.label}`
               }
               onSend={async (body) => {
-                if (target === null) {
-                  return false;
+                const messageId = MessageId.make(randomUUID());
+                if (target === undefined || target.threadId === null) {
+                  const result = await postDm({
+                    environmentId: props.environmentId,
+                    input: { agentId: props.agentId, messageId, body },
+                  });
+                  if (result._tag === "Success") {
+                    setView("messages");
+                  }
+                  return result._tag === "Success";
                 }
                 const result = await sendToSession({
                   environmentId: props.environmentId,
-                  input: {
-                    threadId: target.threadId,
-                    messageId: MessageId.make(randomUUID()),
-                    body,
-                  },
+                  input: { threadId: target.threadId, messageId, body },
                 });
                 return result._tag === "Success";
               }}

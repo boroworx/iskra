@@ -24,9 +24,9 @@ export interface AgentEntry {
   readonly presence: AgentPresence;
 }
 
-/** A live session an agent's DM can write into. */
+/** Where an agent's DM composer writes: the DM itself (`threadId` null) or one of its live sessions. */
 export interface DmTarget {
-  readonly threadId: ThreadId;
+  readonly threadId: ThreadId | null;
   readonly label: string;
 }
 
@@ -89,22 +89,68 @@ export function sessionWhere(
     return run.cardTitle ?? "a card";
   }
   const channel = channels.find((candidate) => candidate.id === run.channelId);
-  return channel === undefined ? "a channel" : `#${channel.name}`;
+  if (channel === undefined) {
+    return "a channel";
+  }
+  return channel.kind === "dm" ? "this DM" : `#${channel.name}`;
 }
 
+/** An agent's active DM channel, once its first direct message has opened one. */
+export function agentDmChannel(
+  channels: ReadonlyArray<OrchestrationChannelShell>,
+  agentId: AgentId,
+): OrchestrationChannelShell | null {
+  return (
+    channels.find((channel) => channel.kind === "dm" && channel.memberAgentIds.includes(agentId)) ??
+    null
+  );
+}
+
+const DIRECT_MESSAGE_TARGET: DmTarget = { threadId: null, label: "Direct message" };
+
 /**
- * The live sessions an agent's DM can write into, most recently started first:
- * its conversations and the cards it owns. Helpers and critics take no messages.
+ * Where an agent's DM composer can write: the DM first, then the live sessions
+ * outside it, most recently started first: its channel conversations and the
+ * cards it owns. Helpers and critics take no messages; a run in the DM is the DM.
  */
 export function dmTargets(
   runs: ReadonlyArray<OrchestrationAgentRun>,
   channels: ReadonlyArray<OrchestrationChannelShell>,
 ): ReadonlyArray<DmTarget> {
+  const dmChannelIds = new Set(
+    channels.filter((channel) => channel.kind === "dm").map((channel) => channel.id),
+  );
   // ponytail: "most recently active" is approximated by start time; use the thread's last activity if it misleads.
-  return runs
-    .filter((run) => run.endedAt === null && (run.role === "conversation" || run.role === "owner"))
+  const sessions = runs
+    .filter(
+      (run) =>
+        run.endedAt === null &&
+        (run.role === "conversation" || run.role === "owner") &&
+        (run.channelId === null || !dmChannelIds.has(run.channelId)),
+    )
     .toSorted((left, right) => right.startedAt.localeCompare(left.startedAt))
     .map((run) => ({ threadId: run.threadId, label: sessionWhere(run, channels) }));
+  return [DIRECT_MESSAGE_TARGET, ...sessions];
+}
+
+/**
+ * The channel an agent is busy in, as `#name`, from its live runs outside DMs: where a
+ * queued DM waits for it to finish. Null when it has no such run or the channel is unknown.
+ */
+export function busyChannelName(
+  runs: ReadonlyArray<OrchestrationAgentRun>,
+  channels: ReadonlyArray<OrchestrationChannelShell>,
+): string | null {
+  for (const run of runs) {
+    if (run.endedAt !== null || run.channelId === null) {
+      continue;
+    }
+    const channel = channels.find((candidate) => candidate.id === run.channelId);
+    if (channel !== undefined && channel.kind !== "dm") {
+      return `#${channel.name}`;
+    }
+  }
+  return null;
 }
 
 /** A channel's member agents in name order. */
@@ -200,16 +246,30 @@ export interface DeliveryNote {
   readonly undelivered: boolean;
 }
 
-/** What a human message says about its deliveries: a wait while unread, a warning if never read. */
+const NO_BUSY_CHANNELS: ReadonlyMap<string, string> = new Map();
+
+/**
+ * What a human message says about its deliveries: a wait while unread, a queue
+ * while the agent finishes work elsewhere (`busyChannels` maps agent id to the
+ * `#channel` it works in), and a warning if never read.
+ */
 export function deliveryNotes(
   message: OrchestrationChannelMessage,
   agents: ReadonlyArray<OrchestrationAgentShell>,
+  busyChannels: ReadonlyMap<string, string> = NO_BUSY_CHANNELS,
 ): ReadonlyArray<DeliveryNote> {
   const agentNames = new Map<string, string>(agents.map((agent) => [agent.id, agent.name]));
   return (message.deliveries ?? []).flatMap((delivery): ReadonlyArray<DeliveryNote> => {
     const name = `@${agentNames.get(delivery.agentId) ?? delivery.agentId}`;
     switch (delivery.status) {
-      case "queued":
+      case "queued": {
+        const busyIn = busyChannels.get(delivery.agentId);
+        const text =
+          busyIn === undefined
+            ? `Queued: ${name} is finishing other work`
+            : `Queued: ${name} is finishing work in ${busyIn}`;
+        return [{ agentId: delivery.agentId, text, undelivered: false }];
+      }
       case "pending":
       case "sent":
         return [{ agentId: delivery.agentId, text: `Waiting for ${name}`, undelivered: false }];

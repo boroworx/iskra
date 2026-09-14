@@ -20,6 +20,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   agentListEntries,
+  busyChannelName,
   channelListEntries,
   channelMemberEntries,
   channelMessageRows,
@@ -28,6 +29,7 @@ import {
   runOutputItems,
   presenceDotClassName,
   presenceLabel,
+  sessionWhere,
   toAgentName,
   toChannelName,
 } from "./channels.logic";
@@ -157,9 +159,49 @@ describe("dmTargets", () => {
     );
 
     expect(targets).toEqual([
+      { threadId: null, label: "Direct message" },
       { threadId: "run-owner", label: "Rate limiting" },
       { threadId: "run-conversation", label: "#backend" },
     ]);
+  });
+
+  it("puts the DM first and leaves out a live run in the DM itself", () => {
+    const dm = channel("dm:m1", "dm-backend", {
+      kind: "dm",
+      memberAgentIds: [AgentId.make("agent-backend")],
+    });
+
+    expect(dmTargets([run("run-dm", { channelId: dm.id })], [dm])).toEqual([
+      { threadId: null, label: "Direct message" },
+    ]);
+  });
+
+  it("labels a run in the agent's DM as this DM, and one in a channel by name", () => {
+    const dm = channel("dm:m1", "dm-backend", { kind: "dm" });
+    const backend = channel("channel-backend", "backend");
+
+    expect(sessionWhere(run("run-dm", { channelId: dm.id }), [dm, backend])).toBe("this DM");
+    expect(sessionWhere(run("run-channel", { channelId: backend.id }), [dm, backend])).toBe(
+      "#backend",
+    );
+  });
+
+  it("finds the channel an agent is busy in, never its DM or an ended run", () => {
+    const dm = channel("dm:m1", "dm-backend", { kind: "dm" });
+    const backend = channel("channel-backend", "backend");
+    const api = channel("channel-api", "api");
+
+    expect(
+      busyChannelName(
+        [
+          run("run-dm", { channelId: dm.id }),
+          run("run-ended", { channelId: api.id, endedAt: "2026-01-01T00:01:00.000Z" }),
+          run("run-backend", { channelId: backend.id }),
+        ],
+        [dm, backend, api],
+      ),
+    ).toBe("#backend");
+    expect(busyChannelName([run("run-dm", { channelId: dm.id })], [dm])).toBeNull();
   });
 });
 
@@ -269,6 +311,27 @@ describe("deliveryNotes", () => {
     ).toEqual([
       ["Waiting for @backend", false],
       ["@writer never read this", true],
+    ]);
+  });
+
+  it("says a queued DM waits for the agent to finish work in its busy channel", () => {
+    const queued = {
+      ...message("q", "human", "human", "2026-01-01T10:00:00.000Z"),
+      deliveries: [
+        { agentId: AgentId.make("agent-backend"), status: "queued" as const },
+        { agentId: AgentId.make("agent-writer"), status: "queued" as const },
+      ],
+    };
+
+    expect(
+      deliveryNotes(
+        queued,
+        [agent("agent-backend", "backend"), agent("agent-writer", "writer")],
+        new Map([["agent-backend", "#api"]]),
+      ).map((note) => note.text),
+    ).toEqual([
+      "Queued: @backend is finishing work in #api",
+      "Queued: @writer is finishing other work",
     ]);
   });
 });

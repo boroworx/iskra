@@ -137,6 +137,8 @@ interface TimelineSource {
   readonly channels: ReadonlyArray<OrchestrationChannelShell>;
   readonly cwd: string | undefined;
   readonly environmentId: EnvironmentId;
+  /** Agent id to the `#channel` it is busy in, for queued DM deliveries. */
+  readonly busyChannels?: ReadonlyMap<string, string> | undefined;
 }
 
 /** A scroll container's ref that jumps to the bottom whenever the newest item changes. */
@@ -156,7 +158,8 @@ const messageTimeFormat = new Intl.DateTimeFormat(undefined, {
   minute: "2-digit",
 });
 
-const Timeline = memo(function Timeline(props: TimelineSource) {
+/** A channel's or DM's messages, oldest first, kept scrolled to the newest. */
+export const Timeline = memo(function Timeline(props: TimelineSource) {
   const rows = useMemo(
     () => channelMessageRows(props.messages, props.agents),
     [props.messages, props.agents],
@@ -176,6 +179,7 @@ const Timeline = memo(function Timeline(props: TimelineSource) {
             channels={props.channels}
             cwd={props.cwd}
             environmentId={props.environmentId}
+            busyChannels={props.busyChannels}
           />
         ))}
       </ol>
@@ -189,9 +193,13 @@ function MessageRow(props: {
   readonly channels: ReadonlyArray<OrchestrationChannelShell>;
   readonly cwd: string | undefined;
   readonly environmentId: EnvironmentId;
+  readonly busyChannels: ReadonlyMap<string, string> | undefined;
 }) {
   const { message, authorName, showHeader } = props.row;
-  const notes = message.authorKind === "human" ? deliveryNotes(message, props.agents) : [];
+  const notes =
+    message.authorKind === "human"
+      ? deliveryNotes(message, props.agents, props.busyChannels)
+      : [];
   return (
     <li className={cn("flex min-w-0 flex-col", showHeader ? "mt-4 first:mt-0" : "mt-1")}>
       {showHeader ? (
