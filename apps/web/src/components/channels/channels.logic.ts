@@ -75,6 +75,35 @@ function agentEntries(
     .toSorted(byName);
 }
 
+/**
+ * The `@name` being typed just before the cursor, read the way the server reads
+ * mentions (so `dev@backend` is not one). Null when the cursor is not in a mention.
+ */
+export function mentionQueryAt(
+  text: string,
+  cursor: number,
+): { readonly start: number; readonly query: string } | null {
+  const match = /(^|[^\w@])@([a-z0-9-]*)$/i.exec(text.slice(0, cursor));
+  if (match === null) {
+    return null;
+  }
+  const query = match[2] ?? "";
+  return { start: cursor - query.length - 1, query: query.toLowerCase() };
+}
+
+const MAX_MENTION_CANDIDATES = 8;
+
+/** Agents to offer for a typed mention: names that start with the query, then names that contain it. */
+export function mentionCandidates<T extends { readonly name: string }>(
+  agents: ReadonlyArray<T>,
+  query: string,
+): ReadonlyArray<T> {
+  return [
+    ...agents.filter((agent) => agent.name.startsWith(query)),
+    ...agents.filter((agent) => !agent.name.startsWith(query) && agent.name.includes(query)),
+  ].slice(0, MAX_MENTION_CANDIDATES);
+}
+
 /** A project's agents by name. */
 export function agentListEntries(agents: ReadonlyArray<OrchestrationAgentShell>, projectId: ProjectId) {
   return agentEntries(agents, (agent) => agent.projectId === projectId);

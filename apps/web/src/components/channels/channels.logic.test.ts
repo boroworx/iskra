@@ -26,6 +26,8 @@ import {
   channelMessageRows,
   deliveryNotes,
   dmTargets,
+  mentionCandidates,
+  mentionQueryAt,
   runOutputItems,
   presenceDotClassName,
   presenceLabel,
@@ -333,6 +335,26 @@ describe("deliveryNotes", () => {
       "Queued: @backend is finishing work in #api",
       "Queued: @writer is finishing other work",
     ]);
+  });
+});
+
+describe("mentions", () => {
+  it("finds the mention being typed at the cursor, but not an email address or a finished one", () => {
+    expect(mentionQueryAt("hi @Al", 6)).toEqual({ start: 3, query: "al" });
+    expect(mentionQueryAt("@", 1)).toEqual({ start: 0, query: "" });
+    expect(mentionQueryAt("hi @al there", 6)).toEqual({ start: 3, query: "al" });
+    expect(mentionQueryAt("mail dev@backend", 16)).toBeNull();
+    expect(mentionQueryAt("@alice ", 7)).toBeNull();
+  });
+
+  it("offers names starting with the query before names containing it", () => {
+    const names = [{ name: "backend" }, { name: "alice" }, { name: "al" }, { name: "sally" }];
+    expect(mentionCandidates(names, "al").map((entry) => entry.name)).toEqual([
+      "alice",
+      "al",
+      "sally",
+    ]);
+    expect(mentionCandidates(names, "")).toHaveLength(4);
   });
 });
 

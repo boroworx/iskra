@@ -9,8 +9,9 @@ import {
   type OrchestrationChannelShell,
 } from "@iskra/contracts";
 import { HashIcon } from "lucide-react";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useId, useMemo, useRef, useState } from "react";
 
+import { collapseExpandedComposerCursor, replaceTextRange } from "~/composer-logic";
 import { cn, randomUUID } from "~/lib/utils";
 import { channelEnvironment } from "~/state/channels";
 import { useEnvironmentAgents, useEnvironmentChannels, useProjects } from "~/state/entities";
@@ -30,6 +31,8 @@ import {
   channelMemberEntries,
   channelMessageRows,
   deliveryNotes,
+  mentionCandidates,
+  mentionQueryAt,
   presenceDotClassName,
   presenceLabel,
   type AgentEntry,
@@ -61,6 +64,12 @@ export function ChannelView(props: {
   const members = useMemo(
     () => (channel === null ? [] : channelMemberEntries(channel, agents)),
     [channel, agents],
+  );
+  // Any active agent of the project can be mentioned or lead, member or not.
+  const projectId = channel?.projectId ?? null;
+  const projectAgents = useMemo(
+    () => (projectId === null ? [] : agentListEntries(agents, projectId)),
+    [agents, projectId],
   );
   const title = channel?.name ?? "";
   const postMessage = useAtomCommand(channelEnvironment.postMessage);
@@ -100,7 +109,8 @@ export function ChannelView(props: {
               />
               <MessageComposer
                 key={props.channelId}
-                placeholder={`Message #${title}`}
+                placeholder={`Message #${title} — @mention an agent to wake it`}
+                mentionAgents={projectAgents}
                 onSend={async (body) => {
                   const result = await postMessage({
                     environmentId: props.environmentId,
@@ -117,6 +127,7 @@ export function ChannelView(props: {
             {channel.kind === "channel" ? (
               <ChannelMemberList
                 members={members}
+                leadOptions={projectAgents}
                 channel={channel}
                 agents={agents}
                 environmentId={props.environmentId}
@@ -313,19 +324,50 @@ function RunWorkDetail(props: RunWorkProps) {
 /**
  * The thread composer's surface, editor and send button without its session
  * controls: a channel or DM message has no model or access to pick. `onSend`
- * resolves true once the message is accepted, which clears the editor.
+ * resolves true once the message is accepted, which clears the editor. With
+ * `mentionAgents`, typing `@` offers those agents.
  */
 export function MessageComposer(props: {
   readonly placeholder: string;
   readonly disabled?: boolean;
+  readonly mentionAgents?: ReadonlyArray<AgentEntry>;
   readonly onSend: (body: string) => Promise<boolean>;
 }) {
   const editorRef = useRef<ComposerPromptEditorHandle>(null);
   const [body, setBody] = useState("");
   const [cursor, setCursor] = useState(0);
+  // The cursor as an offset into `body`; `cursor` counts a mention chip as one character.
+  const [textCursor, setTextCursor] = useState(0);
+  const [inMentionChip, setInMentionChip] = useState(false);
+  const [highlighted, setHighlighted] = useState(0);
+  const [dismissedMentionStart, setDismissedMentionStart] = useState<number | null>(null);
   const [sending, setSending] = useState(false);
   const disabled = props.disabled === true;
   const trimmed = body.trim();
+  const listboxId = useId();
+
+  const mentionAgents = props.mentionAgents;
+  const mention =
+    mentionAgents === undefined || inMentionChip ? null : mentionQueryAt(body, textCursor);
+  const candidates =
+    mention === null || mentionAgents === undefined
+      ? []
+      : mentionCandidates(mentionAgents, mention.query);
+  const menuOpen =
+    mention !== null && candidates.length > 0 && dismissedMentionStart !== mention.start;
+  const activeIndex = Math.min(highlighted, candidates.length - 1);
+
+  const pickMention = (agent: AgentEntry) => {
+    if (mention === null) {
+      return;
+    }
+    const next = replaceTextRange(body, mention.start, textCursor, `@${agent.name} `);
+    const nextCursor = collapseExpandedComposerCursor(next.text, next.cursor);
+    setBody(next.text);
+    setCursor(nextCursor);
+    setTextCursor(next.cursor);
+    window.requestAnimationFrame(() => editorRef.current?.focusAt(nextCursor));
+  };
 
   const send = async () => {
     if (trimmed.length === 0 || sending || disabled) {
@@ -337,18 +379,54 @@ export function MessageComposer(props: {
     if (accepted) {
       setBody("");
       setCursor(0);
+      setTextCursor(0);
       editorRef.current?.focus();
     }
   };
 
   return (
     <form
-      className="shrink-0 px-5 pb-5"
+      className="relative shrink-0 px-5 pb-5"
       onSubmit={(event) => {
         event.preventDefault();
         void send();
       }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && menuOpen && mention !== null) {
+          event.preventDefault();
+          setDismissedMentionStart(mention.start);
+        }
+      }}
     >
+      {menuOpen ? (
+        <ul
+          id={listboxId}
+          role="listbox"
+          aria-label="Mention an agent"
+          className="dropdown-glass absolute bottom-full left-5 z-10 mb-1 flex w-60 flex-col rounded-lg p-1 text-popover-foreground shadow-[0_16px_40px_-18px_rgb(0_0_0/55%)] dark:shadow-[0_18px_44px_-18px_rgb(0_0_0/80%)]"
+        >
+          {candidates.map((agent, index) => (
+            <li
+              key={agent.id}
+              role="option"
+              aria-selected={index === activeIndex}
+              // Keep focus in the editor: pick on mouse down, before it blurs.
+              onMouseDown={(event) => {
+                event.preventDefault();
+                pickMention(agent);
+              }}
+              onMouseEnter={() => setHighlighted(index)}
+              className={cn(
+                "flex h-8 cursor-default items-center gap-2 rounded-md px-2 text-sm",
+                index === activeIndex && "bg-accent text-accent-foreground",
+              )}
+            >
+              <span className="truncate">@{agent.name}</span>
+              <PresenceBadge presence={agent.presence} className="ml-auto" />
+            </li>
+          ))}
+        </ul>
+      ) : null}
       <ComposerSurface.Shell className="max-w-none">
         <ComposerSurface.Host>
           <ComposerSurface.Main>
@@ -362,11 +440,28 @@ export function MessageComposer(props: {
                   skills={EMPTY_SKILLS}
                   disabled={disabled}
                   placeholder={props.placeholder}
-                  onChange={(nextValue, nextCursor) => {
+                  onChange={(nextValue, nextCursor, expandedCursor, adjacentToMention) => {
                     setBody(nextValue);
                     setCursor(nextCursor);
+                    setTextCursor(expandedCursor);
+                    setInMentionChip(adjacentToMention);
+                    setHighlighted(0);
                   }}
                   onCommandKeyDown={(key, event) => {
+                    if (menuOpen) {
+                      if (key === "ArrowDown" || key === "ArrowUp") {
+                        const step = key === "ArrowDown" ? 1 : -1;
+                        setHighlighted(
+                          (activeIndex + step + candidates.length) % candidates.length,
+                        );
+                        return true;
+                      }
+                      const picked = candidates[activeIndex];
+                      if (picked !== undefined) {
+                        pickMention(picked);
+                        return true;
+                      }
+                    }
                     if (key !== "Enter" || event.shiftKey) {
                       return false;
                     }
@@ -410,16 +505,13 @@ const NO_LEAD = "none";
 
 const ChannelMemberList = memo(function ChannelMemberList(props: {
   readonly members: ReadonlyArray<AgentEntry>;
+  readonly leadOptions: ReadonlyArray<AgentEntry>;
   readonly channel: OrchestrationChannelShell;
   readonly agents: ReadonlyArray<OrchestrationAgentShell>;
   readonly environmentId: EnvironmentId;
 }) {
   const updateChannel = useAtomCommand(channelEnvironment.update);
-  // Any active agent of the project can lead, member or not.
-  const leadOptions = useMemo(
-    () => agentListEntries(props.agents, props.channel.projectId),
-    [props.agents, props.channel.projectId],
-  );
+  const leadOptions = props.leadOptions;
   const leadName = (agentId: string | null) =>
     agentId === null || agentId === NO_LEAD
       ? "No lead"
