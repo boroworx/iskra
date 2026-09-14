@@ -97,6 +97,10 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "card.session.record":
     case "card.message.record":
     case "card.delivery.update":
+    case "card.spec.approve":
+    case "card.spec.skip":
+    case "card.spec.reopen":
+    case "card.spec.submit":
       return {
         aggregateKind: "card",
         aggregateId: command.cardId,

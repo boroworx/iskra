@@ -744,10 +744,10 @@ export type RenderedRunContext = typeof RenderedRunContext.Type;
  * What a run is for: a conversation in a channel, the one session writing a
  * card (its owner), or a read-only helper answering a question on a card.
  */
-export const RunRole = Schema.Literals(["conversation", "owner", "helper"]);
+export const RunRole = Schema.Literals(["conversation", "owner", "helper", "critic"]);
 export type RunRole = typeof RunRole.Type;
 
-export const CardSessionRole = Schema.Literals(["owner", "helper"]);
+export const CardSessionRole = Schema.Literals(["owner", "helper", "critic"]);
 export type CardSessionRole = typeof CardSessionRole.Type;
 
 /** A decision on a card as a session is handed it, with its author named. */
@@ -1622,6 +1622,19 @@ const CardWorkspaceSetCommand = Schema.Struct({
 const CardWorkspaceClearCommand = cardStatusCommand("card.workspace.clear");
 
 /** Starts a fresh owner session for the card's agent, as after a lost or stopped one. */
+/** Plan gate decisions. Each names only the card: the decider derives where the spec goes. */
+const CardSpecApproveCommand = cardStatusCommand("card.spec.approve");
+const CardSpecSkipCommand = cardStatusCommand("card.spec.skip");
+const CardSpecReopenCommand = cardStatusCommand("card.spec.reopen");
+
+/** Sends a draft spec to a read-only critic: the card's agent, unless another is named. */
+const CardSpecSubmitCommand = Schema.Struct({
+  type: Schema.Literal("card.spec.submit"),
+  commandId: CommandId,
+  cardId: CardId,
+  agentId: Schema.optional(AgentId),
+});
+
 const CardSessionStartCommand = Schema.Struct({
   type: Schema.Literal("card.session.start"),
   commandId: CommandId,
@@ -2097,6 +2110,10 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   CardSessionStartCommand,
   CardHelperRequestCommand,
   CardMessagePostCommand,
+  CardSpecApproveCommand,
+  CardSpecSkipCommand,
+  CardSpecReopenCommand,
+  CardSpecSubmitCommand,
   ChannelCreateCommand,
   ChannelUpdateCommand,
   ChannelArchiveCommand,
@@ -2156,6 +2173,10 @@ export const ClientOrchestrationCommand = Schema.Union([
   CardSessionStartCommand,
   CardHelperRequestCommand,
   CardMessagePostCommand,
+  CardSpecApproveCommand,
+  CardSpecSkipCommand,
+  CardSpecReopenCommand,
+  CardSpecSubmitCommand,
   ChannelCreateCommand,
   ChannelUpdateCommand,
   ChannelArchiveCommand,
@@ -2364,6 +2385,8 @@ export const OrchestrationEventType = Schema.Literals([
   "card.helper-requested",
   "card.message-posted",
   "card.delivery-updated",
+  "card.spec-submitted",
+  "card.spec-state-changed",
   "channel.created",
   "channel.updated",
   "channel.archived",
@@ -2595,6 +2618,21 @@ export const CardDeliveryUpdatedPayload = Schema.Struct({
   messageIds: Schema.Array(MessageId),
   status: ChannelDeliveryStatus,
   threadId: Schema.NullOr(ThreadId),
+  updatedAt: IsoDateTime,
+});
+
+export const CardSpecSubmittedPayload = Schema.Struct({
+  cardId: CardId,
+  agentId: AgentId,
+  submittedAt: IsoDateTime,
+});
+
+/** A plan gate decision and who made it; each also joins the card's decision log. */
+export const CardSpecStateChangedPayload = Schema.Struct({
+  cardId: CardId,
+  from: CardSpecState,
+  to: CardSpecState,
+  by: CardAuthor,
   updatedAt: IsoDateTime,
 });
 
@@ -3033,6 +3071,16 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("card.delivery-updated"),
     payload: CardDeliveryUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.spec-submitted"),
+    payload: CardSpecSubmittedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.spec-state-changed"),
+    payload: CardSpecStateChangedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

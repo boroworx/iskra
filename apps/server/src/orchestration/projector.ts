@@ -45,6 +45,7 @@ import {
   CardUpdatedPayload,
   CardWorkspaceClearedPayload,
   CardSessionStartedPayload,
+  CardSpecStateChangedPayload,
   CardWorkspaceSetPayload,
   ChannelArchivedPayload,
   ChannelCreatedPayload,
@@ -1445,7 +1446,20 @@ export function projectEvent(
     case "card.helper-requested":
     case "card.message-posted":
     case "card.delivery-updated":
+    case "card.spec-submitted":
       return Effect.succeed(nextBase);
+
+    case "card.spec-state-changed":
+      return decodeForEvent(CardSpecStateChangedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          cards: updateCard(nextBase.cards ?? [], payload.cardId, (card) => ({
+            ...card,
+            specState: payload.to,
+            updatedAt: payload.updatedAt,
+          })),
+        })),
+      );
 
     // Channel messages are paged from their projection, never held in the read model.
     case "channel.message-posted":

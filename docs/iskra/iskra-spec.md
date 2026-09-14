@@ -631,6 +631,19 @@ the chosen live session. `agentDmThreadId`, the DM prompt and its persisted reco
 **M2.4 — Plan gate.** Spec states, the critic run, approval and skip. _Accept when:_ a write
 session is refused on a `draft` spec; the critic's findings appear on the card; a skip is recorded
 with who skipped; editing an approved spec returns it to `draft`.
+_Accepted:_ `card.spec.approve`, `card.spec.skip` and their reverse `card.spec.reopen` record
+`card.spec-state-changed` with who decided, and the projection adds each to the card's decision
+log, so every later handoff brief carries it. `decider.planGate.test.ts` refuses
+`card.session.start` and an owner `card.session.record` while the spec is a draft and allows both
+once it is approved or skipped; records the skip with the human who made it; refuses a decision
+the spec already has; returns an approved spec to `draft` when its text changes but not its title;
+and sends a draft spec to a critic (the card's agent unless another is named), refusing an empty or
+non-draft spec and any critic session that is not read-only. In `CardSessionReactor.test.ts`, an
+agent assigned to a draft card starts nothing; `card.spec.submit` starts a read-only critic whose
+answer is posted to the card's activity, not delivered to the owner; approving the spec then starts
+the owner, whose brief says "user: Approved the spec."; and a skipped card's brief says "user:
+Skipped the plan gate.". A critic takes no DM messages. Cards reach clients in M2.5, which adds the
+controls.
 
 **M2.5 — Board and Needs you.** Web: the board by status with card faces (owner, delegate, branch,
 badges, diff size, plan progress, spend, children); drag only for human decisions, snapping back

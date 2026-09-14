@@ -87,7 +87,10 @@ const layer = CardSessionReactor.layer.pipe(
  * and the reactors running. `nextEvent` consumes one tap on domain events, so
  * await events in the order they happen.
  */
-const makeWorld = Effect.fn("makeWorld")(function* (name: string) {
+const makeWorld = Effect.fn("makeWorld")(function* (
+  name: string,
+  spec: "skipped" | "draft" = "skipped",
+) {
   const engine = yield* OrchestrationEngineService;
   const snapshotQuery = yield* ProjectionSnapshotQuery;
   const fileSystem = yield* FileSystem.FileSystem;
@@ -168,6 +171,13 @@ const makeWorld = Effect.fn("makeWorld")(function* (name: string) {
     text: "Use a token bucket.",
     createdAt: now,
   });
+  if (spec === "skipped") {
+    yield* engine.dispatch({
+      type: "card.spec.skip",
+      commandId: CommandId.make(`cmd-skip-${name}`),
+      cardId,
+    });
+  }
 
   const nextEvent = <Type extends OrchestrationEvent["type"]>(
     type: Type,
@@ -288,6 +298,8 @@ it.layer(layer)("CardSessionReactor", (it) => {
         });
         expect(card?.worktreePath).not.toBeNull();
         expect(first.payload.rendered.firstMessage).toContain("Use a token bucket.");
+        // The skip is recorded with who skipped, and every later brief says so.
+        expect(first.payload.rendered.firstMessage).toContain("user: Skipped the plan gate.");
         expect(first.payload.rendered.firstMessage).toContain("## Changes so far\n\nNo changes yet.");
         // Exactly what the inspector shows is what the session was sent.
         expect((yield* world.userMessages(first.payload.threadId)).map((message) => message.text)).toEqual([
@@ -362,6 +374,50 @@ it.layer(layer)("CardSessionReactor", (it) => {
           (event) => event.payload.status === "delivered",
         );
         expect(delivered.payload.threadId).toBe(owner.payload.threadId);
+      }),
+    ),
+  );
+
+  it.effect("holds the owner behind the plan gate and posts a critic's findings to the card", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const world = yield* makeWorld("gate", "draft");
+        yield* world.assign("backend");
+        yield* world.engine.dispatch({
+          type: "card.spec.submit",
+          commandId: CommandId.make("cmd-gate-submit"),
+          cardId: world.cardId,
+          agentId: world.agent("reviewer"),
+        });
+
+        // The draft spec starts the critic, not the assigned owner.
+        const critic = yield* world.nextSession();
+        expect(critic.payload).toMatchObject({
+          role: "critic",
+          agentId: world.agent("reviewer"),
+          capabilities: ["read"],
+        });
+        yield* world.setSession(critic.payload.threadId, "running", "turn-critic");
+        yield* world.answer(critic.payload.threadId, "turn-critic", "Say what happens past the limit.");
+        yield* world.setSession(critic.payload.threadId, "ready", null);
+        const findings = yield* world.nextEvent(
+          "card.message-posted",
+          (event) => event.payload.runThreadId === critic.payload.threadId,
+        );
+        expect(findings.payload).toMatchObject({
+          authorKind: "agent",
+          forOwner: false,
+          body: "Say what happens past the limit.",
+        });
+
+        yield* world.engine.dispatch({
+          type: "card.spec.approve",
+          commandId: CommandId.make("cmd-gate-approve"),
+          cardId: world.cardId,
+        });
+        const owner = yield* world.nextSession();
+        expect(owner.payload).toMatchObject({ role: "owner", agentId: world.agent("backend") });
+        expect(owner.payload.rendered.firstMessage).toContain("user: Approved the spec.");
       }),
     ),
   );

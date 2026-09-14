@@ -67,7 +67,9 @@ export const RunBlock = memo(function RunBlock(props: {
       ? `Building ${where}`
       : props.run.role === "helper"
         ? `Helping on ${where}`
-        : `In ${where}`;
+        : props.run.role === "critic"
+          ? `Reviewing ${where}`
+          : `In ${where}`;
 
   return (
     <section aria-label={heading} className="min-w-0 border-l-2 border-border pl-3">

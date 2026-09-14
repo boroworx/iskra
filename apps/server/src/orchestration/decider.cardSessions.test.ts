@@ -65,6 +65,7 @@ const setup: ReadonlyArray<OrchestrationCommand> = [
     createdAt: now,
   },
   { type: "card.approve", commandId: nextCommandId(), cardId },
+  { type: "card.spec.approve", commandId: nextCommandId(), cardId },
 ];
 
 const assign = (agentId: AgentId): OrchestrationCommand => ({

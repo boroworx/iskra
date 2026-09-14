@@ -78,7 +78,9 @@ export function renderCardBrief(brief: CardBriefPayload): RenderedRunContext {
   const intro =
     brief.role === "owner"
       ? `You are @${brief.agent.name}, the agent building the card "${card.title}". You work in its worktree and are the only agent writing to it.`
-      : `You are @${brief.agent.name}, helping on the card "${card.title}". You can read its worktree but not change it; your answer goes to the agent building the card.`;
+      : brief.role === "critic"
+        ? `You are @${brief.agent.name}, reviewing the spec of the card "${card.title}" before any work starts. You can read the repository but not change it. List concrete gaps, ambiguities and risks in the spec, or say plainly that it is ready.`
+        : `You are @${brief.agent.name}, helping on the card "${card.title}". You can read its worktree but not change it; your answer goes to the agent building the card.`;
   const systemPrompt = [intro, brief.agent.rolePrompt.trim()]
     .filter((part) => part.length > 0)
     .join("\n\n");

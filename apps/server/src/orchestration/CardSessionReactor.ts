@@ -50,11 +50,13 @@ export class CardSessionReactor extends Context.Service<
 
 type HelperRequestedEvent = Extract<OrchestrationEvent, { type: "card.helper-requested" }>;
 type SessionRequestedEvent = Extract<OrchestrationEvent, { type: "card.session-requested" }>;
+type SpecSubmittedEvent = Extract<OrchestrationEvent, { type: "card.spec-submitted" }>;
 
 type CardSessionRequest =
   | { readonly kind: "assigned"; readonly cardId: CardId; readonly key: string }
   | { readonly kind: "requested"; readonly event: SessionRequestedEvent }
   | { readonly kind: "helper"; readonly event: HelperRequestedEvent }
+  | { readonly kind: "critic"; readonly event: SpecSubmittedEvent }
   | { readonly kind: "deliver"; readonly cardId: CardId }
   | { readonly kind: "finished"; readonly cardId: CardId; readonly key: string }
   | { readonly kind: "settled"; readonly threadId: ThreadId }
@@ -158,7 +160,9 @@ const make = Effect.gen(function* () {
       title:
         input.role === "owner"
           ? `@${agent.name} on ${card.title}`
-          : `@${agent.name} helping on ${card.title}`,
+          : input.role === "critic"
+            ? `@${agent.name} reviewing ${card.title}`
+            : `@${agent.name} helping on ${card.title}`,
       modelSelection: agent.modelSelection,
       runtimeMode: "approval-required",
       interactionMode: "default",
@@ -195,7 +199,7 @@ const make = Effect.gen(function* () {
         postSystem(
           input.cardId,
           input.key,
-          `A ${input.role === "owner" ? "session" : "helper"} could not start: ${error.message}`,
+          `A ${input.role === "owner" ? "session" : input.role} could not start: ${error.message}`,
         ),
       ),
     );
@@ -219,7 +223,8 @@ const make = Effect.gen(function* () {
       }
       return;
     }
-    if (card.delegateAgentId !== null) {
+    // The plan gate: the owner starts once a human approves or skips the spec.
+    if (card.delegateAgentId !== null && card.specState !== "draft") {
       yield* startSession({
         cardId,
         agentId: card.delegateAgentId,
@@ -323,17 +328,17 @@ const make = Effect.gen(function* () {
         message.role === "assistant" && message.turnId === turnId && message.text.trim().length > 0,
     );
     if (reply !== undefined) {
-      // The helper's answer joins the card's activity and waits for the owner.
+      // A helper's answer waits for the owner; a critic's findings stay on the card.
       yield* engine.dispatch({
         type: "card.message.record",
-        commandId: CommandId.make(`card-helper-reply:${threadId}:${turnId}`),
+        commandId: CommandId.make(`card-${role}-reply:${threadId}:${turnId}`),
         cardId,
-        messageId: MessageId.make(`card-helper-reply:${threadId}:${turnId}`),
+        messageId: MessageId.make(`card-${role}-reply:${threadId}:${turnId}`),
         authorKind: "agent",
         authorId: agentId,
         body: reply.text,
         runThreadId: threadId,
-        forOwner: true,
+        forOwner: role === "helper",
         createdAt: yield* nowIso,
       });
     }
@@ -399,6 +404,14 @@ const make = Effect.gen(function* () {
           key: request.event.eventId,
           question: request.event.payload.question,
         });
+      case "critic":
+        return startSession({
+          cardId: request.event.payload.cardId,
+          agentId: request.event.payload.agentId,
+          role: "critic",
+          key: request.event.eventId,
+          question: null,
+        });
       case "deliver":
         return deliverToOwner(request.cardId);
       case "finished":
@@ -439,6 +452,12 @@ const make = Effect.gen(function* () {
         return worker.enqueue({ kind: "requested", event });
       case "card.helper-requested":
         return worker.enqueue({ kind: "helper", event });
+      case "card.spec-submitted":
+        return worker.enqueue({ kind: "critic", event });
+      case "card.spec-state-changed":
+        return event.payload.to === "draft"
+          ? Effect.void
+          : worker.enqueue({ kind: "assigned", cardId: event.payload.cardId, key: event.eventId });
       case "card.message-posted":
         return event.payload.forOwner
           ? worker.enqueue({ kind: "deliver", cardId: event.payload.cardId })

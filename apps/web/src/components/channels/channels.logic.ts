@@ -92,7 +92,7 @@ export function sessionWhere(
 
 /**
  * The live sessions an agent's DM can write into, most recently started first:
- * its conversations and the cards it owns. A helper takes no messages.
+ * its conversations and the cards it owns. Helpers and critics take no messages.
  */
 export function dmTargets(
   runs: ReadonlyArray<OrchestrationAgentRun>,
@@ -100,7 +100,7 @@ export function dmTargets(
 ): ReadonlyArray<DmTarget> {
   // ponytail: "most recently active" is approximated by start time; use the thread's last activity if it misleads.
   return runs
-    .filter((run) => run.endedAt === null && run.role !== "helper")
+    .filter((run) => run.endedAt === null && (run.role === "conversation" || run.role === "owner"))
     .toSorted((left, right) => right.startedAt.localeCompare(left.startedAt))
     .map((run) => ({ threadId: run.threadId, label: sessionWhere(run, channels) }));
 }

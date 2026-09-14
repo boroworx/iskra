@@ -788,6 +788,28 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             yield* projectionCardRepository.updateDeliveries(event.payload);
             return;
 
+          // A plan gate decision joins the log, so later briefs say who decided.
+          case "card.spec-state-changed": {
+            const payload = event.payload;
+            yield* patchCard(payload.cardId, (row) => ({
+              ...row,
+              specState: payload.to,
+              updatedAt: payload.updatedAt,
+            }));
+            yield* projectionCardRepository.appendDecision({
+              decisionId: `spec-state:${event.eventId}`,
+              cardId: payload.cardId,
+              author: payload.by,
+              text: {
+                approved: "Approved the spec.",
+                skipped: "Skipped the plan gate.",
+                draft: "Returned the spec to draft.",
+              }[payload.to],
+              createdAt: payload.updatedAt,
+            });
+            return;
+          }
+
           case "card.decision-recorded":
             yield* projectionCardRepository.appendDecision({
               decisionId: event.payload.decisionId,

@@ -277,6 +277,13 @@ const liveOwnerRun = (readModel: OrchestrationReadModel, cardId: CardId) =>
   (readModel.liveRuns ?? []).find((run) => run.cardId === cardId && run.role === "owner");
 
 const FINISHED_CARD_SESSION_REASON = "A card that has landed or been abandoned takes no new sessions.";
+// Invariant 12: no writing before the plan gate.
+const PLAN_GATE_REASON = "Approve or skip the card's spec before an agent writes to it.";
+const SPEC_DECISION_TARGET = {
+  "card.spec.approve": "approved",
+  "card.spec.skip": "skipped",
+  "card.spec.reopen": "draft",
+} as const;
 const SECOND_WRITER_REASON =
   "The card already has a live session writing to it; one session writes at a time.";
 const sessionCapReason = `${DEFAULT_PROJECT_RUN_CAP} sessions are already live in this project.`;
@@ -2318,6 +2325,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           cardId: command.cardId,
           ...(command.title !== undefined ? { title: command.title } : {}),
           ...(command.spec !== undefined ? { spec: command.spec } : {}),
+          // Changing an approved or skipped spec sends it back through the plan gate.
+          ...(command.spec !== undefined &&
+          command.spec !== card.spec &&
+          card.specState !== "draft"
+            ? { specState: "draft" as const }
+            : {}),
           ...(command.tags !== undefined ? { tags: command.tags } : {}),
           updatedAt: occurredAt,
         },
@@ -2524,6 +2537,83 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "card.spec.approve":
+    case "card.spec.skip":
+    case "card.spec.reopen": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      const refuse = (detail: string) =>
+        new OrchestrationCommandInvariantError({ commandType: command.type, detail });
+      if (isFinishedCardStatus(card.status)) {
+        return yield* refuse("A card that has landed or been abandoned keeps its spec as it is.");
+      }
+      const to = SPEC_DECISION_TARGET[command.type];
+      if (to === "draft" ? card.specState === "draft" : card.specState !== "draft") {
+        return yield* refuse(
+          card.specState === "draft"
+            ? "The spec is already a draft."
+            : `The spec is already ${card.specState}.`,
+        );
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "card",
+          aggregateId: command.cardId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "card.spec-state-changed",
+        payload: {
+          cardId: command.cardId,
+          from: card.specState,
+          to,
+          by: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "card.spec.submit": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      const refuse = (detail: string) =>
+        new OrchestrationCommandInvariantError({ commandType: command.type, detail });
+      if (isFinishedCardStatus(card.status)) {
+        return yield* refuse(FINISHED_CARD_SESSION_REASON);
+      }
+      if (card.specState !== "draft") {
+        return yield* refuse("Only a draft spec is reviewed; reopen the spec first.");
+      }
+      if (card.spec.trim().length === 0) {
+        return yield* refuse("Write a spec before submitting it.");
+      }
+      const criticId = command.agentId ?? card.delegateAgentId;
+      if (criticId === null) {
+        return yield* refuse("Choose an agent to review the spec.");
+      }
+      const critic = yield* requireAgent({ readModel, command, agentId: criticId });
+      if (critic.projectId !== card.projectId || critic.archivedAt !== null) {
+        return yield* refuse(`@${critic.name} isn't an active agent of this card's project.`);
+      }
+      if (projectLiveRunCount(readModel, card.projectId) >= DEFAULT_PROJECT_RUN_CAP) {
+        return yield* refuse(sessionCapReason);
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "card",
+          aggregateId: command.cardId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "card.spec-submitted",
+        payload: {
+          cardId: command.cardId,
+          agentId: critic.id,
+          submittedAt: occurredAt,
+        },
+      };
+    }
+
     case "card.session.start": {
       const card = yield* requireCard({ readModel, command, cardId: command.cardId });
       const refuse = (detail: string) =>
@@ -2533,6 +2623,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       }
       if (card.delegateAgentId === null) {
         return yield* refuse("Assign an agent before starting a session.");
+      }
+      if (card.specState === "draft") {
+        return yield* refuse(PLAN_GATE_REASON);
       }
       // Invariant 11: one writer per card.
       if (liveOwnerRun(readModel, card.id) !== undefined) {
@@ -2658,6 +2751,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         if (card.worktreePath === null) {
           return yield* refuse("An owner session works in the card's worktree, which is missing.");
         }
+        if (card.specState === "draft") {
+          return yield* refuse(PLAN_GATE_REASON);
+        }
         const beyond = command.capabilities.filter(
           (capability) => !agent.capabilities.includes(capability),
         );
@@ -2665,8 +2761,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           return yield* refuse(`@${agent.name} is not allowed ${beyond.join(", ")}.`);
         }
       } else if (command.capabilities.some((capability) => capability !== "read")) {
-        // Invariant 11: helpers are read-only.
-        return yield* refuse("A helper session is read-only.");
+        // Invariant 11: helpers and critics are read-only.
+        return yield* refuse(`A ${command.role} session is read-only.`);
       }
       if (projectLiveRunCount(readModel, card.projectId) >= DEFAULT_PROJECT_RUN_CAP) {
         return yield* refuse(sessionCapReason);
@@ -2746,8 +2842,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       if (run === undefined) {
         return yield* refuse("That session has ended; a DM message never starts a session.");
       }
-      if (run.role === "helper") {
-        return yield* refuse("A helper takes no messages; write to the card's owner session.");
+      if (run.role === "helper" || run.role === "critic") {
+        return yield* refuse(`A ${run.role} takes no messages; write to the card's owner session.`);
       }
       if (run.cardId !== null) {
         return yield* decideOrchestrationCommand({
