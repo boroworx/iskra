@@ -3,6 +3,7 @@ import {
   type CardId,
   type CardStatus,
   type OrchestrationCard,
+  type OrchestrationCardShell,
   type ProjectId,
   type RunSessionState,
   type CardPriority,
@@ -99,6 +100,17 @@ interface CardSessionSummary {
   readonly state: RunSessionState;
   /** When the session reached this state. */
   readonly since: string;
+}
+
+/** The standing of each card's owner session, for cards that have one. */
+export function cardOwnerSessions(
+  cards: ReadonlyArray<Pick<OrchestrationCardShell, "id" | "ownerSession">>,
+): ReadonlyArray<CardSessionSummary> {
+  return cards.flatMap((card) =>
+    card.ownerSession === null
+      ? []
+      : [{ cardId: card.id, state: card.ownerSession.state, since: card.ownerSession.since }],
+  );
 }
 
 export type NeedsYouKind =

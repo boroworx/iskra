@@ -19,7 +19,7 @@ import {
   useProjects,
 } from "../state/entities";
 import { usePrimaryEnvironmentId } from "../state/environments";
-import { needsYouItems } from "@iskra/client-runtime/cards";
+import { cardOwnerSessions, needsYouItems } from "@iskra/client-runtime/cards";
 import {
   agentListEntries,
   channelListEntries,
@@ -45,15 +45,7 @@ function NeedsYouEntry() {
   const cards = useEnvironmentCards(usePrimaryEnvironmentId());
   // Read once: the count follows card changes, and a snooze ending shows on the next one.
   const [now] = useState(() => Date.now());
-  const count = needsYouItems({
-    cards,
-    sessions: cards.flatMap((card) =>
-      card.ownerSession === null
-        ? []
-        : [{ cardId: card.id, state: card.ownerSession.state, since: card.ownerSession.since }],
-    ),
-    now,
-  }).length;
+  const count = needsYouItems({ cards, sessions: cardOwnerSessions(cards), now }).length;
   return (
     <SidebarMenu className="px-2 pt-2">
       <SidebarMenuItem>

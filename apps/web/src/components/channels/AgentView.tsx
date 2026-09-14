@@ -1,4 +1,4 @@
-import { needsYouItems } from "@iskra/client-runtime/cards";
+import { cardOwnerSessions, needsYouItems } from "@iskra/client-runtime/cards";
 import {
   MessageId,
   type AgentId,
@@ -178,15 +178,7 @@ function AgentStats(props: {
   const own = props.cards.filter((card) => card.delegateAgentId === props.agent.id);
   const landed = own.filter((card) => card.status === "landed").length;
   const returns = own.reduce((total, card) => total + card.reviewReturns, 0);
-  const waiting = needsYouItems({
-    cards: own,
-    sessions: own.flatMap((card) =>
-      card.ownerSession === null
-        ? []
-        : [{ cardId: card.id, state: card.ownerSession.state, since: card.ownerSession.since }],
-    ),
-    now,
-  }).length;
+  const waiting = needsYouItems({ cards: own, sessions: cardOwnerSessions(own), now }).length;
   return (
     <span className="hidden truncate text-xs tabular-nums text-muted-foreground sm:inline">
       ${(props.agent.spentUsd ?? 0).toFixed(2)} spent · {landed} landed · {returns} sent back ·{" "}

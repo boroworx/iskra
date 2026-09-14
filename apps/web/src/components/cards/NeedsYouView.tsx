@@ -1,5 +1,6 @@
 import {
   NEEDS_YOU_LABEL,
+  cardOwnerSessions,
   isCardSnoozed,
   needsYouItems,
   waitingLabel,
@@ -39,16 +40,7 @@ export function NeedsYouView() {
   }, []);
 
   const items = useMemo(
-    () =>
-      needsYouItems({
-        cards,
-        sessions: cards.flatMap((card) =>
-          card.ownerSession === null
-            ? []
-            : [{ cardId: card.id, state: card.ownerSession.state, since: card.ownerSession.since }],
-        ),
-        now,
-      }),
+    () => needsYouItems({ cards, sessions: cardOwnerSessions(cards), now }),
     [cards, now],
   );
   const snoozed = useMemo(() => cards.filter((card) => isCardSnoozed(card, now)), [cards, now]);
