@@ -2723,6 +2723,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           cardId: command.cardId,
           sourceMessageId: lead?.sourceMessageId ?? null,
+          proposalReasoning: lead?.reasoning ?? null,
           projectId: command.projectId,
           channelId,
           parentCardId,

@@ -185,7 +185,12 @@ it.layer(NodeServices.layer)("decider board tools", (it) => {
         "card.relation-added",
       ]);
       expect(events[0]).toMatchObject({
-        payload: { status: "triage", sourceMessageId, createdBy: { kind: "lead", id: reviewer } },
+        payload: {
+          status: "triage",
+          sourceMessageId,
+          proposalReasoning: expect.stringContaining("webhooks"),
+          createdBy: { kind: "lead", id: reviewer },
+        },
       });
       expect(events[1]).toMatchObject({
         payload: { author: { kind: "lead", id: reviewer }, text: expect.stringContaining("webhooks") },

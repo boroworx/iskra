@@ -52,6 +52,8 @@ export function NeedsYouView() {
     [cards, now],
   );
   const snoozed = useMemo(() => cards.filter((card) => isCardSnoozed(card, now)), [cards, now]);
+  const proposalReasoningOf = (cardId: CardId) =>
+    cards.find((card) => card.id === cardId)?.proposalReasoning ?? null;
   const projectTitle = (projectId: string) =>
     projects.find((project) => project.environmentId === environmentId && project.id === projectId)
       ?.title ?? "";
@@ -82,6 +84,11 @@ export function NeedsYouView() {
                     <span className="truncate text-xs text-muted-foreground">
                       {NEEDS_YOU_LABEL[item.kind]} · {projectTitle(item.projectId)}
                     </span>
+                    {item.kind === "triage" && proposalReasoningOf(item.cardId) !== null ? (
+                      <p className="line-clamp-2 text-xs text-muted-foreground">
+                        {proposalReasoningOf(item.cardId)}
+                      </p>
+                    ) : null}
                   </div>
                   <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
                     waiting {waitingLabel(item.since, now)}

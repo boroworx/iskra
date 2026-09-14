@@ -231,6 +231,9 @@ const CardFace = memo(function CardFace(props: {
       )}
     >
       <h3 className="line-clamp-2 font-medium">{card.title}</h3>
+      {card.status === "triage" && card.proposalReasoning !== null ? (
+        <p className="line-clamp-3 text-xs text-muted-foreground">{card.proposalReasoning}</p>
+      ) : null}
       {badges.length > 0 ? (
         <ul className="flex flex-wrap gap-1">
           {badges.map((badge) => (

@@ -701,6 +701,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               attemptGroupId: event.payload.attemptGroupId ?? null,
               linearIssue: null,
               sourceMessageId: event.payload.sourceMessageId ?? null,
+              proposalReasoning: event.payload.proposalReasoning ?? null,
               createdBy: event.payload.createdBy,
               createdAt: event.payload.createdAt,
               updatedAt: event.payload.updatedAt,

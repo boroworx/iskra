@@ -9904,6 +9904,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   attemptGroupId: null,
                   linearIssue: null,
                   sourceMessageId: null,
+                  proposalReasoning: null,
                   createdBy: { kind: "human" as const, id: "human" },
                   createdAt: now,
                   updatedAt: now,

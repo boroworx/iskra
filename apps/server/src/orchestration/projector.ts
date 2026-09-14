@@ -1262,6 +1262,7 @@ export function projectEvent(
             attemptGroupId: payload.attemptGroupId ?? null,
             linearIssue: null,
             sourceMessageId: payload.sourceMessageId ?? null,
+            proposalReasoning: payload.proposalReasoning ?? null,
             createdBy: payload.createdBy,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,

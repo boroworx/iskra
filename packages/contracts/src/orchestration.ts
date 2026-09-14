@@ -711,6 +711,8 @@ export const OrchestrationCard = Schema.Struct({
   linearIssue: Schema.NullOr(CardLinearIssue).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   // The channel message a lead proposed the card from.
   sourceMessageId: Schema.NullOr(MessageId).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  // Why the channel's lead proposed the card, for the person triaging it.
+  proposalReasoning: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   relations: Schema.Array(CardRelation),
   createdBy: CardAuthor,
   createdAt: IsoDateTime,
@@ -2802,6 +2804,7 @@ export const CardCreatedPayload = Schema.Struct({
   // Optional so events from before attempts still decode.
   attemptGroupId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   sourceMessageId: Schema.optional(Schema.NullOr(MessageId)),
+  proposalReasoning: Schema.optional(Schema.NullOr(Schema.String)),
   projectId: ProjectId,
   channelId: Schema.NullOr(ChannelId),
   parentCardId: Schema.NullOr(CardId),

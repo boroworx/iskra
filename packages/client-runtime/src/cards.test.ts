@@ -47,6 +47,7 @@ const card = (id: string, overrides: Partial<OrchestrationCard> = {}): Orchestra
   attemptGroupId: null,
   linearIssue: null,
   sourceMessageId: null,
+  proposalReasoning: null,
   ...overrides,
 });
 

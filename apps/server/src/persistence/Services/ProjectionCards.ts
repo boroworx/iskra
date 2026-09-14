@@ -62,6 +62,7 @@ export const ProjectionCard = Schema.Struct({
   attemptGroupId: Schema.NullOr(Schema.String),
   linearIssue: Schema.NullOr(CardLinearIssue),
   sourceMessageId: Schema.NullOr(MessageId),
+  proposalReasoning: Schema.NullOr(Schema.String),
   relations: Schema.Array(CardRelation),
   createdBy: CardAuthor,
   createdAt: IsoDateTime,
