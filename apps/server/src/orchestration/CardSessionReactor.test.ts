@@ -15,6 +15,7 @@ import {
   type ThreadId,
 } from "@iskra/contracts";
 import { expect, it } from "@effect/vitest";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -23,6 +24,7 @@ import * as Stream from "effect/Stream";
 import * as ServerSettings from "../serverSettings.ts";
 import * as CardScheduler from "./CardScheduler.ts";
 import * as CardSessionReactor from "./CardSessionReactor.ts";
+import * as CardWatchdog from "./CardWatchdog.ts";
 import * as CardWorkspace from "./CardWorkspace.ts";
 import * as HostAdmission from "./HostAdmission.ts";
 import {
@@ -599,6 +601,61 @@ it.layer(layer)("CardSessionReactor", (it) => {
         yield* world.reactor.drain;
         expect((yield* world.card)?.paused?.reason.code).toBe("sessionFailed");
       }),
+    ),
+  );
+
+  it.effect("nudges an owner idle on a card in progress with a message for its next turn", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // The watchdog is built here rather than in the shared layer, so its worker reads this test's clock.
+        const world = yield* makeWorld("idle");
+        yield* world.assign("backend");
+        const owner = yield* world.nextSession();
+        yield* world.nextEvent("card.status-changed", (event) => event.payload.to === "inProgress");
+        // The owner settled six minutes ago by the test clock, idle on a card in progress. Moving the
+        // clock instead would stall the engine's clock-driven work under the frozen test clock.
+        const settledAt = DateTime.formatIso(DateTime.subtract(yield* DateTime.now, { minutes: 6 }));
+        yield* world.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.make("cmd-idle-settled"),
+          threadId: owner.payload.threadId,
+          session: {
+            threadId: owner.payload.threadId,
+            status: "ready",
+            providerName: "claudeAgent",
+            runtimeMode: "approval-required",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: settledAt,
+          },
+          createdAt: settledAt,
+        });
+
+        // The watchdog's first check nudges once.
+        yield* (yield* CardWatchdog.CardWatchdog).start();
+        const flagged = yield* world.nextEvent(
+          "card.activity-recorded",
+          (event) => event.payload.cardId === world.cardId && event.payload.kind === "error",
+        );
+        expect(flagged.payload).toMatchObject({
+          author: { kind: "system" },
+          runThreadId: owner.payload.threadId,
+          reason: { code: "idleInProgress" },
+          deliverTo: null,
+        });
+        // The nudge is a builder message, delivered as the owner's next turn like any other.
+        const nudge = yield* world.nextEvent(
+          "card.activity-recorded",
+          (event) => event.payload.cardId === world.cardId && event.payload.deliverTo === "builder",
+        );
+        expect(nudge.payload).toMatchObject({
+          kind: "message",
+          delivery: "pending",
+          runThreadId: owner.payload.threadId,
+        });
+        expect(nudge.payload.body).toContain("The card is still in progress.");
+        expect((yield* world.card)?.paused).toBeNull();
+      }).pipe(Effect.provide(CardWatchdog.layer)),
     ),
   );
 });
