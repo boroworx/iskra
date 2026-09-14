@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import {
   ForwardCompatibleNullable,
+  PositiveInt,
   ProjectId,
   TrimmedNonEmptyString,
   TrimmedString,
@@ -1008,7 +1009,50 @@ export const ProjectSettingsOverrides = Schema.Struct({
 } satisfies Record<ProjectScopedServerSettingKey, unknown>);
 export type ProjectSettingsOverrides = typeof ProjectSettingsOverrides.Type;
 
+/**
+ * How this machine runs card work: its limits differ per laptop and reactors enforce them, so
+ * they live in server settings rather than a project's orchestration policy. Null means derived
+ * from the machine's cores and memory.
+ */
+export const CardRuntimeSettings = Schema.Struct({
+  // Heavy jobs (checks, journeys, evidence, setup) running at once across all projects.
+  heavyJobConcurrency: PositiveInt.pipe(Schema.withDecodingDefault(Effect.succeed(1))),
+  environmentSessionCap: Schema.NullOr(PositiveInt).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  // A heavy job waits while load exceeds cores × load, or free memory falls below freeMem.
+  admission: Schema.Struct({
+    load: Schema.Number.pipe(Schema.withDecodingDefault(Effect.succeed(1))),
+    freeMem: Schema.Number.pipe(Schema.withDecodingDefault(Effect.succeed(0.2))),
+  }).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  // Overrides both the derived values and a project file's hints.
+  resourceProfile: Schema.Struct({
+    turboConcurrency: Schema.NullOr(PositiveInt).pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+    vitestMaxWorkers: Schema.NullOr(PositiveInt).pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+    nodeMaxOldSpaceMb: Schema.NullOr(PositiveInt).pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  }).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  // Named secrets per project; values live in the secret store. `setup` secrets reach only the
+  // setup process, `workspace` ones may be written into the card's worktree.
+  secrets: Schema.Record(
+    ProjectId,
+    Schema.Array(
+      Schema.Struct({
+        name: TrimmedNonEmptyString,
+        exposure: Schema.Literals(["setup", "workspace"]),
+      }),
+    ),
+  ).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+});
+export type CardRuntimeSettings = typeof CardRuntimeSettings.Type;
+
 export const ServerSettings = Schema.Struct({
+  cardRuntime: CardRuntimeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   // How assistant text reaches clients during a turn. Deliberately a fresh
   // key (was `enableLegacyTokenStreaming`, before that
   // `enableAssistantStreaming`): decoding drops the old key, so everyone,
@@ -1356,6 +1400,8 @@ const OpenCodeSettingsPatch = Schema.Struct({
 
 export const ServerSettingsPatch = Schema.Struct({
   // Server settings
+  // Whole replacement: clients hold the current value from the last snapshot.
+  cardRuntime: Schema.optionalKey(CardRuntimeSettings),
   responseStreamingMode: Schema.optionalKey(ResponseStreamingMode),
   enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
   continueThreadsAfterServerUpdate: Schema.optionalKey(Schema.Boolean),

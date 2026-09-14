@@ -486,6 +486,96 @@ export const ProjectIconOverride = Schema.Union([
 ]);
 export type ProjectIconOverride = typeof ProjectIconOverride.Type;
 
+/** A card's spending cap until a person raises it. */
+export const DEFAULT_CARD_BUDGET_USD = 10;
+
+/** Why something automated happened or waits, as people and agents read it. */
+export const Reason = Schema.Struct({
+  code: TrimmedNonEmptyString,
+  text: TrimmedNonEmptyString,
+});
+export type Reason = typeof Reason.Type;
+
+/** How a card's work lands: a pull request on the host, or a local fast-forward. */
+export const ProjectLandingMode = Schema.Literals(["pullRequest", "local"]);
+export type ProjectLandingMode = typeof ProjectLandingMode.Type;
+
+/**
+ * A project's orchestration policy: everything the decider enforces or that widens what agents
+ * may do. Changed only by a person's `project.orchestration.set`; no tool or reactor sends it.
+ * Every field decodes to its default, so an absent or older policy reads as the defaults.
+ */
+export const ProjectOrchestration = Schema.Struct({
+  // The branch cards start from and land into; null uses the repository's default branch.
+  baseBranch: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  // Owner sessions live at once in this project; null leaves only the environment's cap.
+  sessionCap: Schema.NullOr(PositiveInt).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  // Agent pull requests waiting on a person before new cards start.
+  openAgentPrCap: PositiveInt.pipe(Schema.withDecodingDefault(Effect.succeed(5))),
+  // Null opens a pull request when a remote and host auth exist, and lands locally otherwise.
+  landing: Schema.NullOr(ProjectLandingMode).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  ciFixRounds: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(2))),
+  reviewFixRounds: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(2))),
+  budgets: Schema.Struct({
+    projectUsd: Schema.NullOr(Schema.Number).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+    perAgentUsd: Schema.NullOr(Schema.Number).pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+    cardDefaultUsd: Schema.Number.pipe(
+      Schema.withDecodingDefault(Effect.succeed(DEFAULT_CARD_BUDGET_USD)),
+    ),
+  }).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  // A person's choice to let review proceed without any check script.
+  checksWaived: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  autoMerge: Schema.Struct({
+    enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+    minSatisfaction: Schema.Number.pipe(Schema.withDecodingDefault(Effect.succeed(0.9))),
+  }).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  // Paths one card at a time may land changes to, with what others run after rebasing onto it.
+  exclusivePaths: Schema.Array(
+    Schema.Struct({
+      glob: TrimmedNonEmptyString,
+      afterRebase: Schema.NullOr(TrimmedNonEmptyString).pipe(
+        Schema.withDecodingDefault(Effect.succeed(null)),
+      ),
+    }),
+  ).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  // What agent shells may reach: nothing, or only the allowed domains.
+  egress: Schema.Struct({
+    mode: Schema.Literals(["none", "allowlist"]).pipe(
+      Schema.withDecodingDefault(Effect.succeed("none" as const)),
+    ),
+    allow: Schema.Array(TrimmedNonEmptyString).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+    deny: Schema.Array(TrimmedNonEmptyString).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  }).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  // Owner sessions start only once a person reviewed the project's scheduled and outbound jobs.
+  sideEffectGuard: Schema.Struct({
+    acknowledgedAt: Schema.NullOr(IsoDateTime).pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+    killSwitchEnv: Schema.NullOr(TrimmedNonEmptyString).pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  }).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  // Commands agents run only through run_checks, such as the full test suite.
+  heavyCommands: Schema.Array(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  builderSubCardsMax: PositiveInt.pipe(Schema.withDecodingDefault(Effect.succeed(8))),
+});
+export type ProjectOrchestration = typeof ProjectOrchestration.Type;
+
+export const DEFAULT_PROJECT_ORCHESTRATION: ProjectOrchestration = Schema.decodeSync(
+  ProjectOrchestration,
+)({});
+
+/** A project's policy, defaults included when it never set one. */
+export const projectOrchestrationOf = (project: {
+  readonly orchestration?: ProjectOrchestration | undefined;
+}): ProjectOrchestration => project.orchestration ?? DEFAULT_PROJECT_ORCHESTRATION;
+
 export const OrchestrationProject = Schema.Struct({
   id: ProjectId,
   title: TrimmedNonEmptyString,
@@ -502,6 +592,8 @@ export const OrchestrationProject = Schema.Struct({
   faviconPath: Schema.optional(Schema.NullOr(ProjectFaviconPath)),
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
   scripts: Schema.Array(ProjectScript),
+  // Absent until a person sets one; read it through `projectOrchestrationOf`.
+  orchestration: Schema.optional(ProjectOrchestration),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -555,6 +647,12 @@ export const OrchestrationChannel = Schema.Struct({
   memberAgentIds: Schema.Array(AgentId),
   // The agent woken by messages that mention no one; it only proposes triage cards.
   leadAgentId: Schema.NullOr(AgentId).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  // The lead's questions nobody has answered yet, with the options each offers.
+  openElicitations: Schema.optional(
+    Schema.Array(
+      Schema.Struct({ messageId: MessageId, optionIds: Schema.Array(TrimmedNonEmptyString) }),
+    ),
+  ),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime),
@@ -616,6 +714,8 @@ export const CardMove = Schema.Literals([
   "landed",
   "abandon",
   "reopen",
+  // A plan child or an auto-merge project entering landing with no person's approval.
+  "beginLanding",
 ]);
 export type CardMove = typeof CardMove.Type;
 
@@ -639,9 +739,6 @@ export type CardChecks = typeof CardChecks.Type;
 
 /** Failed check runs in a row after which a card stops going back to its agent and waits for a person. */
 export const CARD_AUTOFIX_ATTEMPTS = 3;
-
-/** A card's spending cap until a person raises it. */
-export const DEFAULT_CARD_BUDGET_USD = 10;
 
 /** How many attempts a person can start on one card at a time. */
 export const CARD_ATTEMPTS_MIN = 2;
@@ -677,6 +774,181 @@ export const CardLinearIssue = Schema.Struct({
   promptsSyncedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
 });
 export type CardLinearIssue = typeof CardLinearIssue.Type;
+
+/** A plan card breaks its work into child cards that land into the plan's own branch. */
+export const CardKind = Schema.Literals(["task", "plan"]);
+export type CardKind = typeof CardKind.Type;
+
+/**
+ * One observable outcome the card's work is held to. `manual` criteria (such as mobile UI) are
+ * checked by a person at review; `automated` ones by checks and captured evidence.
+ */
+export const CardCriterion = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  text: TrimmedNonEmptyString,
+  verification: Schema.Literals(["automated", "manual"]).pipe(
+    Schema.withDecodingDefault(Effect.succeed("automated" as const)),
+  ),
+});
+export type CardCriterion = typeof CardCriterion.Type;
+
+/** A card's acceptance criteria, which only a person confirms. */
+export const CardAcceptance = Schema.Struct({
+  criteria: Schema.Array(CardCriterion),
+  state: Schema.Literals(["draft", "confirmed"]),
+});
+export type CardAcceptance = typeof CardAcceptance.Type;
+
+/** Criteria of cards from before acceptance criteria: none, and nothing to confirm. */
+export const LEGACY_CARD_ACCEPTANCE: CardAcceptance = { criteria: [], state: "confirmed" };
+
+/** The proposer's sizing of a card, shown before it starts. */
+export const CardEstimate = Schema.Struct({
+  size: Schema.Literals(["S", "M", "L", "XL"]),
+  likelyAreas: Schema.Array(TrimmedNonEmptyString),
+  risks: Schema.Array(TrimmedNonEmptyString),
+  // A suggestion to split the card instead, with the smaller cards it would become.
+  split: Schema.NullOr(
+    Schema.Struct({
+      reason: TrimmedNonEmptyString,
+      cards: Schema.Array(
+        Schema.Struct({
+          title: TrimmedNonEmptyString,
+          criteria: Schema.Array(TrimmedNonEmptyString),
+        }),
+      ),
+    }),
+  ).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+});
+export type CardEstimate = typeof CardEstimate.Type;
+
+/** What the requester wants and whether the proposed card gets there. */
+export const CardPremise = Schema.Struct({
+  goal: TrimmedNonEmptyString,
+  getsThere: Schema.Boolean,
+  pushback: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+});
+export type CardPremise = typeof CardPremise.Type;
+
+/** What sent a card back to work: failing checks or CI, or review feedback. */
+export const CardFixRound = Schema.Literals(["ci", "review"]);
+export type CardFixRound = typeof CardFixRound.Type;
+
+/** Automatic returns to work used so far; capped by the project's fix rounds until a person resets them. */
+export const CardFixRounds = Schema.Struct({
+  ci: NonNegativeInt,
+  review: NonNegativeInt,
+});
+export type CardFixRounds = typeof CardFixRounds.Type;
+
+/** A card held out of the queue by a person or by Iskra itself, and why. */
+export const CardPause = Schema.Struct({
+  reason: Reason,
+  by: Schema.Literals(["human", "system"]),
+  pausedAt: IsoDateTime,
+});
+export type CardPause = typeof CardPause.Type;
+
+/** Why a card that could run is waiting, such as for a session slot or machine capacity. */
+export const CardWaitReason = Schema.Struct({
+  ...Reason.fields,
+  since: IsoDateTime,
+});
+export type CardWaitReason = typeof CardWaitReason.Type;
+
+/** The owner's open request to show a person its work so far before going on. */
+export const CardCheckpoint = Schema.Struct({
+  checkpointId: TrimmedNonEmptyString,
+  whatToTry: TrimmedNonEmptyString,
+  question: Schema.NullOr(TrimmedNonEmptyString),
+  // The evidence captured for this checkpoint, once there is some.
+  evidenceId: Schema.NullOr(TrimmedNonEmptyString),
+  requestedAt: IsoDateTime,
+});
+export type CardCheckpoint = typeof CardCheckpoint.Type;
+
+export const CardCheckpointDecision = Schema.Literals(["continue", "redirect", "stop"]);
+export type CardCheckpointDecision = typeof CardCheckpointDecision.Type;
+
+/** A change the scope judge flags; a hard flag needs a person's acknowledgement before merging. */
+export const CardScopeFlag = Schema.Struct({
+  kind: Schema.Literals([
+    "deletedTest",
+    "skippedTest",
+    "dependencyDowngrade",
+    "protectedPath",
+    "outsideLikelyAreas",
+  ]),
+  path: TrimmedNonEmptyString,
+  detail: Schema.String,
+  hard: Schema.Boolean,
+});
+export type CardScopeFlag = typeof CardScopeFlag.Type;
+
+const CardRiskLevel = Schema.Literals(["low", "medium", "high"]);
+
+/** The owner's own claims about its change's risks, shown as claims, never as evidence. */
+export const CardRiskClaims = Schema.Struct({
+  sideEffect: CardRiskLevel,
+  performance: CardRiskLevel,
+  compatibility: CardRiskLevel,
+  notes: Schema.String,
+});
+export type CardRiskClaims = typeof CardRiskClaims.Type;
+
+/** One piece of captured evidence: a check's result, or a screenshot or recording of the preview. */
+export const CardEvidenceItem = Schema.Struct({
+  itemId: TrimmedNonEmptyString,
+  kind: Schema.Literals(["check", "screenshot", "recording"]),
+  source: Schema.Literals(["local", "ci", "preview"]),
+  name: TrimmedNonEmptyString,
+  criterionId: Schema.NullOr(TrimmedNonEmptyString),
+  // A check's exit code; null for captures and for a check that never exited.
+  exitCode: Schema.NullOr(Schema.Int),
+  timedOut: Schema.Boolean,
+  durationMs: Schema.NullOr(NonNegativeInt),
+  // The end of the output, the only part agents see.
+  logTail: Schema.String,
+  artifactPath: Schema.NullOr(TrimmedNonEmptyString),
+  // Why this item could not be captured, such as no connected preview host.
+  unavailable: Schema.NullOr(Reason),
+});
+export type CardEvidenceItem = typeof CardEvidenceItem.Type;
+
+export const CardEvidencePurpose = Schema.Literals(["review", "checkpoint"]);
+export type CardEvidencePurpose = typeof CardEvidencePurpose.Type;
+
+/** The latest evidence a card has, as its face shows it; the items stream with the card. */
+export const CardEvidenceSummary = Schema.Struct({
+  evidenceId: TrimmedNonEmptyString,
+  headSha: TrimmedNonEmptyString,
+  purpose: CardEvidencePurpose,
+  passed: Schema.Boolean,
+  checkCount: NonNegativeInt,
+  failedChecks: Schema.Array(TrimmedNonEmptyString),
+  unavailable: Schema.Array(TrimmedNonEmptyString),
+  flags: Schema.Array(CardScopeFlag),
+  flagsAcknowledgedAt: Schema.NullOr(IsoDateTime),
+  recordedAt: IsoDateTime,
+});
+export type CardEvidenceSummary = typeof CardEvidenceSummary.Type;
+
+/** Where a card's work lands: its pull request, or the local branch it fast-forwards. */
+export const CardLanding = Schema.Struct({
+  mode: ProjectLandingMode,
+  url: Schema.NullOr(TrimmedNonEmptyString),
+  number: Schema.NullOr(PositiveInt),
+  headSha: Schema.NullOr(TrimmedNonEmptyString),
+  draft: Schema.Boolean,
+  linkedAt: IsoDateTime,
+});
+export type CardLanding = typeof CardLanding.Type;
+
+/** Why a card lands without a person approving its merge. */
+export const CardLandingBeginReason = Schema.Literals(["planChild", "autoMergePolicy"]);
+export type CardLandingBeginReason = typeof CardLandingBeginReason.Type;
 
 export const OrchestrationCard = Schema.Struct({
   id: CardId,
@@ -766,6 +1038,28 @@ export const ChannelMessageDelivery = Schema.Struct({
 });
 export type ChannelMessageDelivery = typeof ChannelMessageDelivery.Type;
 
+/** A question with two or three answers to pick from, one of them recommended. */
+export const Elicitation = Schema.Struct({
+  question: TrimmedNonEmptyString,
+  options: Schema.Array(
+    Schema.Struct({
+      id: TrimmedNonEmptyString,
+      label: TrimmedNonEmptyString,
+    }),
+  ),
+  recommendedOptionId: Schema.NullOr(TrimmedNonEmptyString),
+  // Whether a written answer is accepted instead of an option.
+  allowText: Schema.Boolean,
+});
+export type Elicitation = typeof Elicitation.Type;
+
+/** What a message answers: the question's message or activity, and the option picked, if any. */
+export const ElicitationAnswer = Schema.Struct({
+  questionId: TrimmedNonEmptyString,
+  optionId: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type ElicitationAnswer = typeof ElicitationAnswer.Type;
+
 export const OrchestrationChannelMessage = Schema.Struct({
   id: MessageId,
   channelId: ChannelId,
@@ -777,7 +1071,60 @@ export const OrchestrationChannelMessage = Schema.Struct({
   runThreadId: Schema.optional(ThreadId),
   // A human message's standing with each agent it woke.
   deliveries: Schema.optional(Schema.Array(ChannelMessageDelivery)),
+  // A lead's question with options, and when a person answered it.
+  elicitation: Schema.optional(Elicitation),
+  answeredAt: Schema.optional(IsoDateTime),
+  // The question a person's message answers.
+  answers: Schema.optional(ElicitationAnswer),
 });
+
+export const CardActivityKind = Schema.Literals([
+  "message",
+  "decision",
+  "plan",
+  "elicitation",
+  "response",
+  "status",
+  "evidence",
+  "landing",
+  "error",
+  "critique",
+  "help",
+]);
+export type CardActivityKind = typeof CardActivityKind.Type;
+
+export const CardActivityAuthor = Schema.Struct({
+  kind: Schema.Literals(["human", "agent", "system", "linear", "github"]),
+  id: TrimmedNonEmptyString,
+});
+export type CardActivityAuthor = typeof CardActivityAuthor.Type;
+
+/**
+ * One entry in a card's activity: the single stream its messages, decisions, questions, status
+ * moves and evidence are read from. `deliverTo` entries wait for that session's next turn, and
+ * `delivery` says where they stand with it.
+ */
+export const CardActivity = Schema.Struct({
+  activityId: TrimmedNonEmptyString,
+  cardId: CardId,
+  kind: CardActivityKind,
+  author: CardActivityAuthor,
+  body: Schema.String,
+  runThreadId: Schema.NullOr(ThreadId),
+  deliverTo: Schema.NullOr(Schema.Literals(["builder", "coordinator"])),
+  delivery: Schema.NullOr(ChannelDeliveryStatus),
+  elicitation: Schema.NullOr(Elicitation).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  answers: Schema.NullOr(ElicitationAnswer).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  status: Schema.NullOr(Schema.Struct({ from: CardStatus, to: CardStatus })).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  evidenceId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  reason: Schema.NullOr(Reason).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  createdAt: IsoDateTime,
+});
+export type CardActivity = typeof CardActivity.Type;
 export type OrchestrationChannelMessage = typeof OrchestrationChannelMessage.Type;
 
 /** One channel message as an agent sees it, with its author resolved to a display name. */
@@ -925,6 +1272,8 @@ export const CardSession = Schema.Struct({
   capabilities: RunCapabilities,
   context: CardBriefPayload,
   rendered: RenderedRunContext,
+  // Times the card's owner was restarted before this session, counted by the scheduler.
+  restarts: Schema.optional(NonNegativeInt),
   startedAt: IsoDateTime,
 });
 export type CardSession = typeof CardSession.Type;
@@ -1295,6 +1644,7 @@ export const OrchestrationProjectShell = Schema.Struct({
   faviconPath: Schema.optional(Schema.NullOr(ProjectFaviconPath)),
   projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
   scripts: Schema.Array(ProjectScript),
+  orchestration: Schema.optional(ProjectOrchestration),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -1627,6 +1977,12 @@ export const CardCreatedPayload = Schema.Struct({
   proposalReasoning: Schema.optional(Schema.NullOr(Schema.String)),
   suggestedAgentId: Schema.optional(Schema.NullOr(AgentId)),
   priority: Schema.optional(CardPriority),
+  // Optional so cards from before the card contract still decode; absent reads as a legacy card.
+  kind: Schema.optional(CardKind),
+  acceptance: Schema.optional(CardAcceptance),
+  estimate: Schema.optional(Schema.NullOr(CardEstimate)),
+  premise: Schema.optional(Schema.NullOr(CardPremise)),
+  budgetCapUsd: Schema.optional(Schema.Number),
   projectId: ProjectId,
   channelId: Schema.NullOr(ChannelId),
   parentCardId: Schema.NullOr(CardId),
@@ -1659,6 +2015,8 @@ export const CardStatusChangedPayload = Schema.Struct({
   move: CardMove,
   // Set when something returned the card to work: failed checks, a review comment, a conflict.
   reason: Schema.optional(TrimmedNonEmptyString),
+  // The fix round an automatic return to work used.
+  round: Schema.optional(CardFixRound),
   updatedAt: IsoDateTime,
 });
 
@@ -1806,6 +2164,75 @@ export const CardSpecStateChangedPayload = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 
+/** An entry in the card's activity stream, written by a person, an agent's tool or Iskra. */
+export const CardActivityRecordedPayload = CardActivity;
+
+export const CardAcceptanceSetPayload = Schema.Struct({
+  cardId: CardId,
+  acceptance: CardAcceptance,
+  updatedAt: IsoDateTime,
+});
+
+export const CardPausedPayload = Schema.Struct({
+  cardId: CardId,
+  ...CardPause.fields,
+});
+
+export const CardResumedPayload = Schema.Struct({
+  cardId: CardId,
+  resumedAt: IsoDateTime,
+});
+
+/** Why a card waits, or null once it no longer does. A thread names the session that waits. */
+export const CardWaitNotedPayload = Schema.Struct({
+  cardId: CardId,
+  threadId: Schema.NullOr(ThreadId),
+  reason: Schema.NullOr(Reason),
+  notedAt: IsoDateTime,
+});
+
+export const CardCheckpointRequestedPayload = Schema.Struct({
+  cardId: CardId,
+  checkpoint: CardCheckpoint,
+});
+
+export const CardCheckpointResolvedPayload = Schema.Struct({
+  cardId: CardId,
+  checkpointId: TrimmedNonEmptyString,
+  decision: CardCheckpointDecision,
+  note: Schema.NullOr(TrimmedNonEmptyString),
+  resolvedAt: IsoDateTime,
+});
+
+/** Evidence captured for the card's commit `headSha`; `passed` is decided when it is recorded. */
+export const CardEvidenceRecordedPayload = Schema.Struct({
+  cardId: CardId,
+  evidenceId: TrimmedNonEmptyString,
+  headSha: TrimmedNonEmptyString,
+  purpose: CardEvidencePurpose,
+  items: Schema.Array(CardEvidenceItem),
+  flags: Schema.Array(CardScopeFlag),
+  risks: Schema.NullOr(CardRiskClaims),
+  passed: Schema.Boolean,
+  recordedAt: IsoDateTime,
+});
+
+export const CardFlagsAcknowledgedPayload = Schema.Struct({
+  cardId: CardId,
+  evidenceId: TrimmedNonEmptyString,
+  acknowledgedAt: IsoDateTime,
+});
+
+export const CardFixRoundsResetPayload = Schema.Struct({
+  cardId: CardId,
+  resetAt: IsoDateTime,
+});
+
+export const CardLandingLinkedPayload = Schema.Struct({
+  cardId: CardId,
+  landing: CardLanding,
+});
+
 export const ChannelCreatedPayload = Schema.Struct({
   channelId: ChannelId,
   projectId: ProjectId,
@@ -1851,6 +2278,10 @@ export const ChannelMessagePostedPayload = Schema.Struct({
   runThreadId: Schema.optional(ThreadId),
   // The project agents a human message named, resolved when it was posted.
   mentions: Schema.optional(Schema.Array(AgentId)),
+  // A lead's question with options to pick from.
+  elicitation: Schema.optional(Elicitation),
+  // The lead question a person's message answers.
+  answers: Schema.optional(ElicitationAnswer),
 });
 
 export const ChannelAgentWakeRequestedPayload = Schema.Struct({
@@ -2930,6 +3361,18 @@ export const OrchestrationEventType = Schema.Literals([
   "card.budget-set",
   "card.unpriced-accepted",
   "card.linear-synced",
+  "card.activity-recorded",
+  "card.acceptance-set",
+  "card.paused",
+  "card.resumed",
+  "card.wait-noted",
+  "card.checkpoint-requested",
+  "card.checkpoint-resolved",
+  "card.evidence-recorded",
+  "card.flags-acknowledged",
+  "card.fix-rounds-reset",
+  "card.landing-linked",
+  "project.orchestration-set",
   "channel.created",
   "channel.updated",
   "channel.archived",
@@ -3011,6 +3454,13 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
 export const ProjectDeletedPayload = Schema.Struct({
   projectId: ProjectId,
   deletedAt: IsoDateTime,
+});
+
+/** A person replacing the project's whole orchestration policy. */
+export const ProjectOrchestrationSetPayload = Schema.Struct({
+  projectId: ProjectId,
+  orchestration: ProjectOrchestration,
+  updatedAt: IsoDateTime,
 });
 
 export const ThreadCreatedPayload = Schema.Struct({
@@ -3433,6 +3883,66 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("card.unpriced-accepted"),
     payload: CardUnpricedAcceptedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.activity-recorded"),
+    payload: CardActivityRecordedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.acceptance-set"),
+    payload: CardAcceptanceSetPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.paused"),
+    payload: CardPausedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.resumed"),
+    payload: CardResumedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.wait-noted"),
+    payload: CardWaitNotedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.checkpoint-requested"),
+    payload: CardCheckpointRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.checkpoint-resolved"),
+    payload: CardCheckpointResolvedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.evidence-recorded"),
+    payload: CardEvidenceRecordedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.flags-acknowledged"),
+    payload: CardFlagsAcknowledgedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.fix-rounds-reset"),
+    payload: CardFixRoundsResetPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.landing-linked"),
+    payload: CardLandingLinkedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("project.orchestration-set"),
+    payload: ProjectOrchestrationSetPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

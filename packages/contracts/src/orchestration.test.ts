@@ -5,6 +5,10 @@ import * as Schema from "effect/Schema";
 import { CommandId, ProjectId, ThreadId } from "./baseSchemas.ts";
 
 import {
+  CardActivity,
+  DEFAULT_PROJECT_ORCHESTRATION,
+  ProjectOrchestration,
+  projectOrchestrationOf,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   type ChatImageAttachment,
@@ -56,6 +60,9 @@ const decodeOrchestrationSession = Schema.decodeUnknownEffect(OrchestrationSessi
 const decodeOrchestrationThread = Schema.decodeUnknownEffect(OrchestrationThread);
 const decodeOrchestrationThreadShell = Schema.decodeUnknownEffect(OrchestrationThreadShell);
 const encodeThreadCreatedPayload = Schema.encodeEffect(ThreadCreatedPayload);
+const decodeProjectOrchestration = Schema.decodeUnknownSync(ProjectOrchestration);
+const decodeEvent = Schema.decodeUnknownSync(OrchestrationEvent);
+const decodeCardActivity = Schema.decodeUnknownSync(CardActivity);
 
 function getOptionValue(
   options: ReadonlyArray<{ id: string; value: unknown }> | undefined,
@@ -1508,6 +1515,134 @@ it.effect("rejects thread history imports without messages", () =>
     assert.strictEqual(result._tag, "Failure");
   }),
 );
+
+it("a project without an orchestration policy decodes to the defaults", () => {
+  const policy = decodeProjectOrchestration({});
+  assert.deepStrictEqual(policy, DEFAULT_PROJECT_ORCHESTRATION);
+  assert.strictEqual(policy.sessionCap, null);
+  assert.strictEqual(policy.ciFixRounds, 2);
+  assert.strictEqual(policy.reviewFixRounds, 2);
+  assert.strictEqual(policy.builderSubCardsMax, 8);
+  assert.strictEqual(policy.checksWaived, false);
+  assert.strictEqual(policy.autoMerge.enabled, false);
+  assert.strictEqual(policy.egress.mode, "none");
+  assert.strictEqual(policy.sideEffectGuard.acknowledgedAt, null);
+  assert.strictEqual(projectOrchestrationOf({}), DEFAULT_PROJECT_ORCHESTRATION);
+  // A partial policy keeps what it sets and defaults the rest.
+  const partial = decodeProjectOrchestration({
+    budgets: { projectUsd: 200 },
+    egress: { mode: "allowlist", allow: ["registry.npmjs.org"] },
+  });
+  assert.deepStrictEqual(partial.budgets, { projectUsd: 200, perAgentUsd: null, cardDefaultUsd: 10 });
+  assert.deepStrictEqual(partial.egress, {
+    mode: "allowlist",
+    allow: ["registry.npmjs.org"],
+    deny: [],
+  });
+});
+
+it("card events written before the card contract still decode", () => {
+  const base = {
+    sequence: 1,
+    eventId: "event-legacy",
+    aggregateKind: "card",
+    aggregateId: "card-1",
+    occurredAt: "2026-03-01T00:00:00.000Z",
+    commandId: null,
+    causationEventId: null,
+    correlationId: null,
+    metadata: {},
+  };
+  const legacy = [
+    {
+      type: "card.created",
+      payload: {
+        cardId: "card-1",
+        projectId: "project-1",
+        channelId: null,
+        parentCardId: null,
+        title: "Rate limiting",
+        spec: "",
+        specState: "draft",
+        tags: [],
+        status: "triage",
+        ownerHumanId: "human",
+        baseBranch: null,
+        createdBy: { kind: "human", id: "human" },
+        createdAt: "2026-03-01T00:00:00.000Z",
+        updatedAt: "2026-03-01T00:00:00.000Z",
+      },
+    },
+    {
+      type: "card.message-posted",
+      payload: {
+        cardId: "card-1",
+        messageId: "message-1",
+        authorKind: "human",
+        authorId: "human",
+        body: "Also cap bursts.",
+        runThreadId: null,
+        forOwner: true,
+        createdAt: "2026-03-01T00:00:00.000Z",
+      },
+    },
+    {
+      type: "card.decision-recorded",
+      payload: {
+        cardId: "card-1",
+        decisionId: "decision-1",
+        author: { kind: "agent", id: "agent-1" },
+        text: "Use Redis.",
+        createdAt: "2026-03-01T00:00:00.000Z",
+      },
+    },
+    {
+      type: "card.delivery-updated",
+      payload: {
+        cardId: "card-1",
+        messageIds: ["message-1"],
+        status: "sent",
+        threadId: "thread-1",
+        updatedAt: "2026-03-01T00:00:00.000Z",
+      },
+    },
+    {
+      type: "card.checks-updated",
+      payload: {
+        cardId: "card-1",
+        checks: {
+          state: "failed",
+          failedRuns: 2,
+          summary: "lint",
+          updatedAt: "2026-03-01T00:00:00.000Z",
+        },
+      },
+    },
+  ];
+  for (const event of legacy) {
+    assert.strictEqual(decodeEvent({ ...base, ...event }).type, event.type);
+  }
+  const created = decodeEvent({ ...base, ...legacy[0] });
+  assert.isTrue(created.type === "card.created" && created.payload.acceptance === undefined);
+});
+
+it("a card activity decodes with its optional parts defaulted", () => {
+  const activity = decodeCardActivity({
+    activityId: "activity-1",
+    cardId: "card-1",
+    kind: "message",
+    author: { kind: "human", id: "human" },
+    body: "Hello",
+    runThreadId: null,
+    deliverTo: "builder",
+    delivery: "pending",
+    createdAt: "2026-03-01T00:00:00.000Z",
+  });
+  assert.deepStrictEqual(
+    [activity.elicitation, activity.answers, activity.status, activity.evidenceId, activity.reason],
+    [null, null, null, null, null],
+  );
+});
 
 it("isProviderSendTurnSupportedImageMimeType accepts raster formats and rejects svg", () => {
   assert.strictEqual(isProviderSendTurnSupportedImageMimeType("image/png"), true);
