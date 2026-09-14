@@ -118,6 +118,21 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "card.linear.intake":
     case "card.linear.sync":
     case "card.decision.agent.record":
+    case "card.criteria.set":
+    case "card.criteria.confirm":
+    case "card.activity.record":
+    case "card.checkpoint.request":
+    case "card.checkpoint.resolve":
+    case "card.evidence.record":
+    case "card.flags.acknowledge":
+    case "card.review.enter":
+    case "card.landing.begin":
+    case "card.landing.link":
+    case "card.fix-rounds.reset":
+    case "card.pause":
+    case "card.pause.system":
+    case "card.resume":
+    case "card.wait.note":
       return {
         aggregateKind: "card",
         aggregateId: command.cardId,
@@ -132,6 +147,7 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "channel.message.agent.post":
     case "channel.message.system.post":
     case "channel.delivery.update":
+    case "channel.elicitation.answer":
       return {
         aggregateKind: "channel",
         aggregateId: command.channelId,
@@ -139,6 +155,7 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "project.create":
     case "project.meta.update":
     case "project.delete":
+    case "project.orchestration.set":
       return {
         aggregateKind: "project",
         aggregateId: command.projectId,

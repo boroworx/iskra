@@ -143,7 +143,11 @@ type CardOnlyCommandType =
   | "card.spec.reopen"
   | "card.unpriced.accept"
   | "card.unpriced.refuse"
-  | "card.unsnooze";
+  | "card.unsnooze"
+  | "card.criteria.confirm"
+  | "card.fix-rounds.reset"
+  | "card.pause"
+  | "card.resume";
 
 /** A command that names nothing but its card. */
 export const onCard = (type: CardOnlyCommandType, id: string = cardId) =>

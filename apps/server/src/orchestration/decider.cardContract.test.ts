@@ -471,7 +471,10 @@ it.layer(NodeServices.layer)("decider card contract", (it) => {
         setPolicy({ builderSubCardsMax: 1 }),
         ...cardInProgress(),
       ]);
-      const propose = (id: string, agentId = backend): OrchestrationCommand => ({
+      const propose = (
+        id: string,
+        agentId = backend,
+      ): Extract<OrchestrationCommand, { type: "card.propose" }> => ({
         type: "card.propose",
         commandId: nextCommandId(),
         cardId: CardId.make(id),

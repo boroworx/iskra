@@ -234,6 +234,7 @@ describe("ProviderSessionReaper", () => {
       Layer.provideMerge(
         Layer.succeed(ProjectionSnapshotQuery, {
           getUserInputActivity: () => Effect.die("unused"),
+          getCardActivity: () => Effect.die("unused"),
           getRunByThreadId: () => Effect.die("unused"),
           getAgentShellById: () => Effect.die("unused"),
           getChannelShellById: () => Effect.die("unused"),

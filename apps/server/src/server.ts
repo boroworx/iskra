@@ -266,7 +266,11 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(CardSessionReactor.layer),
   Layer.provideMerge(CardScheduler.layer),
   Layer.provideMerge(CardWatchdog.layer),
-  Layer.provideMerge(Layer.mergeAll(CardReviewReactor.layer, CardLandingReactor.layer)),
+  Layer.provideMerge(
+    Layer.mergeAll(CardReviewReactor.layer, CardLandingReactor.layer).pipe(
+      Layer.provide(ProcessRunner.layer),
+    ),
+  ),
   Layer.provideMerge(CardSpendReactor.layer),
   Layer.provideMerge(
     LinearSyncReactor.layer.pipe(

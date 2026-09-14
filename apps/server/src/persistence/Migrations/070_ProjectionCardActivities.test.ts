@@ -125,10 +125,10 @@ layer("070_ProjectionCardActivities", (it) => {
         },
       ]);
       // The old tables are left as they were.
-      const [{ messages }] = yield* sql<{ readonly messages: number }>`
+      const counts = yield* sql<{ readonly messages: number }>`
         SELECT COUNT(*) AS messages FROM projection_card_messages
       `;
-      assert.strictEqual(messages, 2);
+      assert.strictEqual(counts[0]?.messages, 2);
     }),
   );
 });

@@ -4668,7 +4668,7 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
       const cardRepository = yield* ProjectionCardRepository;
       const channelRepository = yield* ProjectionChannelRepository;
       const projectRepository = yield* ProjectionProjectRepository;
-      const at = (minute: number) => new Date(Date.UTC(2026, 2, 1, 0, minute)).toISOString();
+      const at = (minute: number) => `2026-03-01T00:${String(minute).padStart(2, "0")}:00.000Z`;
       const [question, answer, openQuestion] = [
         MessageId.make("message-question"),
         MessageId.make("message-answer"),
