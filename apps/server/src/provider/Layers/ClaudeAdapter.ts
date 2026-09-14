@@ -89,6 +89,8 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { hostResourceEnv } from "../../orchestration/ResourceEnv.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { BOARD_CLAUDE_TOOL_NAMES, LEAD_CLAUDE_TOOL_NAMES } from "../../mcp/toolkits/board/tools.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
@@ -2022,6 +2024,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const serverConfig = yield* ServerConfig;
+  const serverSettings = yield* ServerSettingsService;
   const crypto = yield* Crypto.Crypto;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, options?.environment).pipe(
@@ -4885,6 +4888,16 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(input.cwd ? [input.cwd] : []),
         serverConfig.attachmentsDir,
       ];
+      // Agent shells share the machine, so a run's builds and tests start throttled.
+      const resourceEnv = input.run
+        ? hostResourceEnv(
+            null,
+            yield* serverSettings.getSettings.pipe(
+              Effect.map((settings) => settings.cardRuntime.resourceProfile),
+              Effect.orElseSucceed(() => null),
+            ),
+          )
+        : {};
       const queryOptions: ClaudeQueryOptions = {
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
@@ -4926,7 +4939,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         // The SDK's env replaces the CLI's environment, so a run inherits only the allowlist.
         env: McpProviderSession.withAgentDeviceEnvironment(
           input.run
-            ? runEnvironment(claudeEnvironment, claudeRunEnvNames(claudeEnvironment))
+            ? {
+                ...runEnvironment(claudeEnvironment, claudeRunEnvNames(claudeEnvironment)),
+                ...resourceEnv,
+              }
             : claudeEnvironment,
           mcpSession,
         ),

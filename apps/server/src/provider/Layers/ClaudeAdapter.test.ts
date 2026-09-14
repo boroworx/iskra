@@ -56,6 +56,7 @@ import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import type { ClaudeScopedLimitNames } from "./claudeUsageLimits.ts";
 import { makeClaudeAdapter, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
 import { DEFAULT_HEAVY_COMMANDS, HEAVY_COMMAND_REFUSAL } from "../runEnforcement.ts";
+import { hostResourceEnv } from "../../orchestration/ResourceEnv.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 const encodeUnknownJsonString = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
@@ -7114,7 +7115,7 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
-  it.effect("gives a run only the allowlisted environment", () => {
+  it.effect("gives a run only the allowlisted environment, throttled for the machine", () => {
     const harness = makeHarness({
       environment: {
         PATH: "/usr/bin",
@@ -7138,6 +7139,7 @@ describe("ClaudeAdapterLive", () => {
         HOME: "/Users/dev",
         ANTHROPIC_API_KEY: "anthropic",
         GIT_TERMINAL_PROMPT: "0",
+        ...hostResourceEnv(),
       });
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
