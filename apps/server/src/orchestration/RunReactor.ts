@@ -7,6 +7,7 @@ import {
   type ChannelDeliveryStatus,
   type ChannelId,
   type OrchestrationEvent,
+  type OrchestrationSession,
 } from "@iskra/contracts";
 import { makeDrainableWorker } from "@iskra/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
@@ -62,6 +63,25 @@ type RunRequest =
   | { readonly kind: "settled"; readonly threadId: ThreadId }
   | { readonly kind: "running"; readonly threadId: ThreadId }
   | { readonly kind: "ended"; readonly threadId: ThreadId };
+
+/** What a session change means for the run on its thread, if anything. */
+export const runSessionChange = (
+  session: OrchestrationSession,
+): "settled" | "running" | "ended" | null => {
+  // A turn ended: the session is ready again with nothing running.
+  if (session.status === "ready" && session.activeTurnId === null) {
+    return "settled";
+  }
+  if (session.status === "running" && session.activeTurnId !== null) {
+    return "running";
+  }
+  return isRunEndingSessionStatus(session.status) ? "ended" : null;
+};
+
+const sentInto = (deliveries: ReadonlyArray<ProjectionOpenChannelDelivery>, threadId: ThreadId) =>
+  deliveries.filter(
+    (delivery) => delivery.status === "sent" && delivery.deliveryRunThreadId === threadId,
+  );
 
 const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngine.OrchestrationEngineService;
@@ -276,13 +296,10 @@ const make = Effect.gen(function* () {
     }
     const { channelId, agentId } = { ...run.value, channelId: run.value.channelId };
     // A turn is running in this run: the provider has what was sent into it.
-    const sent = (yield* channels.listOpenDeliveries({ agentId, channelId })).filter(
-      (delivery) => delivery.status === "sent" && delivery.deliveryRunThreadId === threadId,
-    );
     yield* updateDeliveries({
       channelId,
       agentId,
-      deliveries: sent,
+      deliveries: sentInto(yield* channels.listOpenDeliveries({ agentId, channelId }), threadId),
       status: "delivered",
       runThreadId: threadId,
     });
@@ -299,9 +316,7 @@ const make = Effect.gen(function* () {
     yield* updateDeliveries({
       channelId,
       agentId,
-      deliveries: open.filter(
-        (delivery) => delivery.status === "sent" && delivery.deliveryRunThreadId === threadId,
-      ),
+      deliveries: sentInto(open, threadId),
       status: "undelivered",
       runThreadId: threadId,
     });
@@ -366,18 +381,8 @@ const make = Effect.gen(function* () {
       case "channel.agent-wake-requested":
         return worker.enqueue({ kind: "wake", event });
       case "thread.session-set": {
-        const { threadId, session } = event.payload;
-        // A turn ended: the session is ready again with nothing running.
-        if (session.status === "ready" && session.activeTurnId === null) {
-          return worker.enqueue({ kind: "settled", threadId });
-        }
-        if (session.status === "running" && session.activeTurnId !== null) {
-          return worker.enqueue({ kind: "running", threadId });
-        }
-        if (isRunEndingSessionStatus(session.status)) {
-          return worker.enqueue({ kind: "ended", threadId });
-        }
-        return Effect.void;
+        const kind = runSessionChange(event.payload.session);
+        return kind === null ? Effect.void : worker.enqueue({ kind, threadId: event.payload.threadId });
       }
       default:
         return Effect.void;

@@ -327,7 +327,7 @@ const budgetCardOf = (readModel: OrchestrationReadModel, card: OrchestrationCard
     : card;
 
 /** The card's live owner session, if it has one. */
-const liveOwnerRun = (readModel: OrchestrationReadModel, cardId: CardId) =>
+export const liveOwnerRun = (readModel: OrchestrationReadModel, cardId: CardId) =>
   (readModel.liveRuns ?? []).find((run) => run.cardId === cardId && run.role === "owner");
 
 const FINISHED_CARD_SESSION_REASON =

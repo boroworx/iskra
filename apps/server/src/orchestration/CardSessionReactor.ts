@@ -3,7 +3,6 @@ import {
   CommandId,
   MessageId,
   ThreadId,
-  isRunEndingSessionStatus,
   type AgentId,
   type CardId,
   type CardSessionRole,
@@ -26,6 +25,8 @@ import { forkParked } from "../serverActivation.ts";
 import { buildCardBrief, diffStatOf, renderCardBrief, renderCardMessages } from "./cardBrief.ts";
 import { isFinishedCardStatus } from "./cardRules.ts";
 import * as CardWorkspace from "./CardWorkspace.ts";
+import { liveOwnerRun } from "./decider.ts";
+import { runSessionChange } from "./RunReactor.ts";
 import * as OrchestrationEngine from "./Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts";
 
@@ -49,15 +50,14 @@ export class CardSessionReactor extends Context.Service<
   }
 >()("@iskra/cli/orchestration/CardSessionReactor") {}
 
-type HelperRequestedEvent = Extract<OrchestrationEvent, { type: "card.helper-requested" }>;
-type SessionRequestedEvent = Extract<OrchestrationEvent, { type: "card.session-requested" }>;
-type SpecSubmittedEvent = Extract<OrchestrationEvent, { type: "card.spec-submitted" }>;
+type SessionStartEvent = Extract<
+  OrchestrationEvent,
+  { type: "card.session-requested" | "card.helper-requested" | "card.spec-submitted" }
+>;
 
 type CardSessionRequest =
   | { readonly kind: "assigned"; readonly cardId: CardId; readonly key: string }
-  | { readonly kind: "requested"; readonly event: SessionRequestedEvent }
-  | { readonly kind: "helper"; readonly event: HelperRequestedEvent }
-  | { readonly kind: "critic"; readonly event: SpecSubmittedEvent }
+  | { readonly kind: "session"; readonly role: CardSessionRole; readonly event: SessionStartEvent }
   | { readonly kind: "deliver"; readonly cardId: CardId }
   | { readonly kind: "finished"; readonly cardId: CardId; readonly key: string }
   | { readonly kind: "settled"; readonly threadId: ThreadId }
@@ -215,9 +215,7 @@ const make = Effect.gen(function* () {
     if (card === undefined || isFinishedCardStatus(card.status)) {
       return;
     }
-    const owner = (model.liveRuns ?? []).find(
-      (run) => run.cardId === cardId && run.role === "owner",
-    );
+    const owner = liveOwnerRun(model, cardId);
     if (owner !== undefined) {
       // Hand off: the new agent starts once this session has ended.
       if (owner.agentId !== card.delegateAgentId) {
@@ -240,7 +238,7 @@ const make = Effect.gen(function* () {
   const deliverToOwner = Effect.fn("CardSessionReactor.deliverToOwner")(function* (
     cardId: CardId,
   ) {
-    const owner = (yield* liveCardRuns(cardId)).find((run) => run.role === "owner");
+    const owner = liveOwnerRun(yield* readModel(), cardId);
     if (owner === undefined) {
       return;
     }
@@ -389,15 +387,12 @@ const make = Effect.gen(function* () {
     // A reassignment was waiting for this session to end: the new agent starts now.
     const model = yield* readModel();
     const card = model.cards?.find((candidate) => candidate.id === cardId);
-    const ownerLive = (model.liveRuns ?? []).some(
-      (candidate) => candidate.cardId === cardId && candidate.role === "owner",
-    );
     if (
       card !== undefined &&
       !isFinishedCardStatus(card.status) &&
       card.delegateAgentId !== null &&
       card.delegateAgentId !== agentId &&
-      !ownerLive
+      liveOwnerRun(model, cardId) === undefined
     ) {
       yield* startSession({
         cardId,
@@ -413,30 +408,16 @@ const make = Effect.gen(function* () {
     switch (request.kind) {
       case "assigned":
         return onAssigned(request.cardId, request.key);
-      case "requested":
+      case "session": {
+        const { event } = request;
         return startSession({
-          cardId: request.event.payload.cardId,
-          agentId: request.event.payload.agentId,
-          role: "owner",
-          key: request.event.eventId,
-          question: null,
+          cardId: event.payload.cardId,
+          agentId: event.payload.agentId,
+          role: request.role,
+          key: event.eventId,
+          question: event.type === "card.helper-requested" ? event.payload.question : null,
         });
-      case "helper":
-        return startSession({
-          cardId: request.event.payload.cardId,
-          agentId: request.event.payload.agentId,
-          role: "helper",
-          key: request.event.eventId,
-          question: request.event.payload.question,
-        });
-      case "critic":
-        return startSession({
-          cardId: request.event.payload.cardId,
-          agentId: request.event.payload.agentId,
-          role: "critic",
-          key: request.event.eventId,
-          question: null,
-        });
+      }
       case "deliver":
         return deliverToOwner(request.cardId);
       case "finished":
@@ -474,11 +455,11 @@ const make = Effect.gen(function* () {
       case "card.delegate-changed":
         return worker.enqueue({ kind: "assigned", cardId: event.payload.cardId, key: event.eventId });
       case "card.session-requested":
-        return worker.enqueue({ kind: "requested", event });
+        return worker.enqueue({ kind: "session", role: "owner", event });
       case "card.helper-requested":
-        return worker.enqueue({ kind: "helper", event });
+        return worker.enqueue({ kind: "session", role: "helper", event });
       case "card.spec-submitted":
-        return worker.enqueue({ kind: "critic", event });
+        return worker.enqueue({ kind: "session", role: "critic", event });
       case "card.spec-state-changed":
         return event.payload.to === "draft"
           ? Effect.void
@@ -506,17 +487,8 @@ const make = Effect.gen(function* () {
           ? worker.enqueue({ kind: "assigned", cardId: event.payload.cardId, key: event.eventId })
           : Effect.void;
       case "thread.session-set": {
-        const { threadId, session } = event.payload;
-        if (session.status === "ready" && session.activeTurnId === null) {
-          return worker.enqueue({ kind: "settled", threadId });
-        }
-        if (session.status === "running" && session.activeTurnId !== null) {
-          return worker.enqueue({ kind: "running", threadId });
-        }
-        if (isRunEndingSessionStatus(session.status)) {
-          return worker.enqueue({ kind: "ended", threadId });
-        }
-        return Effect.void;
+        const kind = runSessionChange(event.payload.session);
+        return kind === null ? Effect.void : worker.enqueue({ kind, threadId: event.payload.threadId });
       }
       default:
         return Effect.void;
