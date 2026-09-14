@@ -54,6 +54,8 @@ export const ORCHESTRATION_WS_METHODS = {
   listAgentDefinitions: "orchestration.listAgentDefinitions",
   archiveAgentDefinition: "orchestration.archiveAgentDefinition",
   listArchivedChannels: "orchestration.listArchivedChannels",
+  setProjectSecret: "project.secrets.set",
+  removeProjectSecret: "project.secrets.remove",
 } as const;
 
 export const ProviderApprovalPolicy = Schema.Literals([
@@ -4564,6 +4566,24 @@ export const OrchestrationSaveAgentDefinitionResult = Schema.Struct({
 export type OrchestrationSaveAgentDefinitionResult =
   typeof OrchestrationSaveAgentDefinitionResult.Type;
 
+/** A project secret's name, as setup scripts and env templates refer to it. */
+export const PROJECT_SECRET_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const ProjectSecretName = TrimmedNonEmptyString.check(Schema.isPattern(PROJECT_SECRET_NAME_PATTERN));
+
+/** Stores a project secret's value on the environment. Write-only: no RPC returns a value. */
+export const OrchestrationSetProjectSecretInput = Schema.Struct({
+  projectId: ProjectId,
+  name: ProjectSecretName,
+  value: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(65_536)),
+});
+export type OrchestrationSetProjectSecretInput = typeof OrchestrationSetProjectSecretInput.Type;
+
+export const OrchestrationRemoveProjectSecretInput = Schema.Struct({
+  projectId: ProjectId,
+  name: ProjectSecretName,
+});
+export type OrchestrationRemoveProjectSecretInput = typeof OrchestrationRemoveProjectSecretInput.Type;
+
 export const OrchestrationImportAgentDefinitionsInput = Schema.Struct({
   projectId: ProjectId,
 });
@@ -4774,6 +4794,14 @@ export const OrchestrationRpcSchemas = {
     input: OrchestrationListArchivedChannelsInput,
     output: OrchestrationListArchivedChannelsResult,
   },
+  setProjectSecret: {
+    input: OrchestrationSetProjectSecretInput,
+    output: Schema.Struct({}),
+  },
+  removeProjectSecret: {
+    input: OrchestrationRemoveProjectSecretInput,
+    output: Schema.Struct({}),
+  },
 } as const;
 
 export class OrchestrationGetSnapshotError extends Schema.TaggedError<OrchestrationGetSnapshotError>()(
@@ -4787,6 +4815,14 @@ export class OrchestrationGetSnapshotError extends Schema.TaggedError<Orchestrat
 /** Reading, writing or applying a project's agent files failed. */
 export class AgentDefinitionError extends Schema.TaggedError<AgentDefinitionError>()(
   "AgentDefinitionError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
+export class ProjectSecretError extends Schema.TaggedError<ProjectSecretError>()(
+  "ProjectSecretError",
   {
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect()),

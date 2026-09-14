@@ -2,6 +2,7 @@
 import * as NodePath from "node:path";
 
 import {
+  PROJECT_SECRET_NAME_PATTERN,
   CARD_PORT_BLOCK_SIZE,
   CommandId,
   projectOrchestrationOf,
@@ -182,7 +183,6 @@ const CARD_PORT_BLOCK_LIMIT = 500;
 const SCRIPT_TIMEOUT = "10 minutes";
 const SCRIPT_OUTPUT_TAIL = 2_000;
 const CHECK_LOG_MAX_BYTES = 1_048_576;
-const SECRET_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** A card's script terminals live under this terminal thread id. */
 export const cardTerminalThreadId = (cardId: CardId): string => `card:${cardId}`;
@@ -540,7 +540,7 @@ const make = Effect.gen(function* () {
   /** The project's declared secrets with their values from the secret store. */
   const projectSecrets = (cardId: CardId, project: OrchestrationProject, settings: ServerSettings) =>
     Effect.forEach(settings.cardRuntime.secrets[project.id] ?? [], (declared) =>
-      (SECRET_NAME.test(declared.name) && /^[A-Za-z0-9_-]+$/.test(project.id)
+      (PROJECT_SECRET_NAME_PATTERN.test(declared.name) && /^[A-Za-z0-9_-]+$/.test(project.id)
         ? secretStore.get(cardSecretStoreName(project.id, declared.name))
         : Effect.succeed(Option.none<Uint8Array>())
       ).pipe(

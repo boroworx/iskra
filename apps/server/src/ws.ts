@@ -39,6 +39,7 @@ import {
   type OrchestrationShellStreamItem,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
+  ProjectSecretError,
   OrchestrationSearchThreadsError,
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
@@ -175,6 +176,7 @@ import * as VcsDriverRegistry from "./vcs/VcsDriverRegistry.ts";
 import * as VcsProjectConfig from "./vcs/VcsProjectConfig.ts";
 import * as PairingGrantStore from "./auth/PairingGrantStore.ts";
 import * as SessionStore from "./auth/SessionStore.ts";
+import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 import * as RelayClient from "@iskra/shared/relayClient";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
@@ -507,6 +509,22 @@ const makeWsRpcLayer = (
       const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
       const agentDefinitionSync = yield* AgentDefinitionSync.AgentDefinitionSync;
       const cardWorkspace = yield* CardWorkspace.CardWorkspace;
+      const secretStore = yield* ServerSecretStore.ServerSecretStore;
+      /** Where a project's secret value lives in the secret store; refuses an unknown project. */
+      const projectSecretKey = (input: { readonly projectId: ProjectId; readonly name: string }) =>
+        projectionSnapshotQuery.getProjectShellById(input.projectId).pipe(
+          Effect.mapError(
+            (cause) => new ProjectSecretError({ message: "The project couldn't be read.", cause }),
+          ),
+          Effect.flatMap(
+            Option.match({
+              onNone: () =>
+                Effect.fail(new ProjectSecretError({ message: `No project ${input.projectId}.` })),
+              onSome: () =>
+                Effect.succeed(CardWorkspace.cardSecretStoreName(input.projectId, input.name)),
+            }),
+          ),
+        );
       /** A reference's host-level link key; the project's own host where the ref names none. */
       const resolvePullRequestSyncKey = (reference: PullRequestRef) =>
         reference.host !== undefined && reference.repository.includes("/")
@@ -2401,6 +2419,37 @@ const makeWsRpcLayer = (
                     cause,
                   }),
               ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.setProjectSecret]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.setProjectSecret,
+            projectSecretKey(input).pipe(
+              Effect.flatMap((key) =>
+                secretStore.set(key, new TextEncoder().encode(input.value)).pipe(
+                  Effect.mapError(
+                    (cause) => new ProjectSecretError({ message: "The secret couldn't be saved.", cause }),
+                  ),
+                ),
+              ),
+              Effect.as({}),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.removeProjectSecret]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.removeProjectSecret,
+            projectSecretKey(input).pipe(
+              Effect.flatMap((key) =>
+                secretStore.remove(key).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new ProjectSecretError({ message: "The secret couldn't be removed.", cause }),
+                  ),
+                ),
+              ),
+              Effect.as({}),
             ),
             { "rpc.aggregate": "orchestration" },
           ),

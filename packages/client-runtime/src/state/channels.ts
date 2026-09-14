@@ -135,6 +135,17 @@ export function createChannelEnvironmentAtoms<R, E>(
       execute: (input: EnvironmentRpcInput<typeof ORCHESTRATION_WS_METHODS.saveAgentDefinition>) =>
         request(ORCHESTRATION_WS_METHODS.saveAgentDefinition, input),
     }),
+    /** Stores a project secret's value on the environment; nothing ever reads it back. */
+    setProjectSecret: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:project:set-secret",
+      execute: (input: EnvironmentRpcInput<typeof ORCHESTRATION_WS_METHODS.setProjectSecret>) =>
+        request(ORCHESTRATION_WS_METHODS.setProjectSecret, input),
+    }),
+    removeProjectSecret: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:project:remove-secret",
+      execute: (input: EnvironmentRpcInput<typeof ORCHESTRATION_WS_METHODS.removeProjectSecret>) =>
+        request(ORCHESTRATION_WS_METHODS.removeProjectSecret, input),
+    }),
     importAgentDefinitions: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:agent:import-definitions",
       execute: (

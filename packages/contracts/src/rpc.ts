@@ -92,6 +92,7 @@ import {
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetFullThreadDiffInput,
   AgentDefinitionError,
+  ProjectSecretError,
   OrchestrationGetSnapshotError,
   OrchestrationSearchThreadsError,
   OrchestrationSearchThreadsInput,
@@ -1284,6 +1285,18 @@ const WsOrchestrationListArchivedChannelsRpc = Rpc.make(
   },
 );
 
+const WsProjectSetSecretRpc = Rpc.make(ORCHESTRATION_WS_METHODS.setProjectSecret, {
+  payload: OrchestrationRpcSchemas.setProjectSecret.input,
+  success: OrchestrationRpcSchemas.setProjectSecret.output,
+  error: Schema.Union([ProjectSecretError, EnvironmentAuthorizationError]),
+});
+
+const WsProjectRemoveSecretRpc = Rpc.make(ORCHESTRATION_WS_METHODS.removeProjectSecret, {
+  payload: OrchestrationRpcSchemas.removeProjectSecret.input,
+  success: OrchestrationRpcSchemas.removeProjectSecret.output,
+  error: Schema.Union([ProjectSecretError, EnvironmentAuthorizationError]),
+});
+
 const WsOrchestrationSaveAgentDefinitionRpc = Rpc.make(
   ORCHESTRATION_WS_METHODS.saveAgentDefinition,
   {
@@ -1532,4 +1545,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationListAgentDefinitionsRpc,
   WsOrchestrationArchiveAgentDefinitionRpc,
   WsOrchestrationListArchivedChannelsRpc,
+  WsProjectSetSecretRpc,
+  WsProjectRemoveSecretRpc,
 );

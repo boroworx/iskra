@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema";
 import { CommandId, ProjectId, ThreadId } from "./baseSchemas.ts";
 
 import {
+  OrchestrationSetProjectSecretInput,
   CardActivity,
   DEFAULT_PROJECT_ORCHESTRATION,
   ProjectOrchestration,
@@ -1648,4 +1649,15 @@ it("isProviderSendTurnSupportedImageMimeType accepts raster formats and rejects 
   assert.strictEqual(isProviderSendTurnSupportedImageMimeType("image/png"), true);
   assert.strictEqual(isProviderSendTurnSupportedImageMimeType("IMAGE/JPEG"), true);
   assert.strictEqual(isProviderSendTurnSupportedImageMimeType("image/svg+xml"), false);
+});
+
+it("accepts a project secret name its scripts can read, and refuses any other", () => {
+  const decode = Schema.decodeUnknownExit(OrchestrationSetProjectSecretInput);
+  const input = (name: string, value = "s3cret") => ({ projectId: "project-1", name, value });
+  assert.isTrue(Exit.isSuccess(decode(input("DATABASE_URL"))));
+  assert.isTrue(Exit.isSuccess(decode(input("_token2"))));
+  for (const name of ["2FA", "API-KEY", "A B", "../x"]) {
+    assert.isTrue(Exit.isFailure(decode(input(name))));
+  }
+  assert.isTrue(Exit.isFailure(decode(input("TOKEN", ""))));
 });

@@ -38,6 +38,9 @@ export const RPC_REQUIRED_SCOPES = {
   [ORCHESTRATION_WS_METHODS.listAgentDefinitions]: AuthOrchestrationReadScope,
   [ORCHESTRATION_WS_METHODS.archiveAgentDefinition]: AuthOrchestrationOperateScope,
   [ORCHESTRATION_WS_METHODS.listArchivedChannels]: AuthOrchestrationReadScope,
+  // Write-only, like the settings that declare the secret names.
+  [ORCHESTRATION_WS_METHODS.setProjectSecret]: AuthOrchestrationOperateScope,
+  [ORCHESTRATION_WS_METHODS.removeProjectSecret]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverProbe]: AuthOrchestrationReadScope,
   [WS_METHODS.serverGetConfig]: AuthOrchestrationReadScope,
   [WS_METHODS.serverRefreshProviders]: AuthOrchestrationOperateScope,
