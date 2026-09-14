@@ -6,7 +6,7 @@ import type {
   ProjectId,
   ThreadId,
 } from "@iskra/contracts";
-import { Link, useParams } from "@tanstack/react-router";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import {
   ArchiveIcon,
   AtSignIcon,
@@ -25,7 +25,10 @@ import {
   useEnvironmentChannels,
   useProjects,
 } from "../state/entities";
+import { channelEnvironment } from "../state/channels";
 import { usePrimaryEnvironmentId } from "../state/environments";
+import { useEnvironmentQuery } from "../state/query";
+import { useAtomCommand } from "../state/use-atom-command";
 import { cardOwnerSessions, needsYouItems } from "@iskra/client-runtime/cards";
 import {
   agentListEntries,
@@ -244,6 +247,11 @@ const ProjectChannels = memo(function ProjectChannels(props: {
             </button>
           </SidebarMenuItem>
         ))}
+        <ArchivedChannels
+          environmentId={environmentId}
+          projectId={projectId}
+          activeCount={channelEntries.length}
+        />
       </SidebarListGroup>
       <SidebarListGroup
         label="Agents"
@@ -326,6 +334,80 @@ const ProjectChannels = memo(function ProjectChannels(props: {
     </>
   );
 });
+
+/**
+ * A project's archived channels, collapsed under its channels, so an archive is
+ * never a one-way door: each row unarchives its channel and opens it.
+ */
+function ArchivedChannels(props: {
+  readonly environmentId: EnvironmentId;
+  readonly projectId: ProjectId;
+  readonly activeCount: number;
+}) {
+  const archivedChannels = useEnvironmentQuery(
+    channelEnvironment.archivedChannels({
+      environmentId: props.environmentId,
+      input: { projectId: props.projectId },
+    }),
+  );
+  const unarchive = useAtomCommand(channelEnvironment.unarchive);
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  // The list does not stream: refetch when a channel is archived or unarchived.
+  const refresh = archivedChannels.refresh;
+  const seenCount = useRef(props.activeCount);
+  useEffect(() => {
+    if (seenCount.current !== props.activeCount) {
+      seenCount.current = props.activeCount;
+      refresh();
+    }
+  }, [props.activeCount, refresh]);
+  const archived = archivedChannels.data?.channels ?? [];
+  if (archived.length === 0) {
+    return null;
+  }
+  const unarchiveChannel = async (channelId: ChannelId) => {
+    const result = await unarchive({ environmentId: props.environmentId, input: { channelId } });
+    refresh();
+    if (result._tag === "Success") {
+      void navigate({
+        to: "/channels/$environmentId/$channelId",
+        params: { environmentId: props.environmentId, channelId },
+      });
+    }
+  };
+  return (
+    <>
+      <SidebarMenuItem>
+        <SidebarMenuButton
+          size="sm"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+        >
+          <ArchiveIcon />
+          <span className="truncate text-sidebar-muted-foreground">
+            Archived ({archived.length})
+          </span>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+      {open
+        ? archived.map((channel) => (
+            <SidebarMenuItem key={channel.id}>
+              <SidebarMenuButton
+                size="sm"
+                className="pl-6 text-sidebar-muted-foreground"
+                aria-label={`Unarchive #${channel.name}`}
+                onClick={() => void unarchiveChannel(channel.id)}
+              >
+                <span className="truncate">#{channel.name}</span>
+                <span className="ml-auto shrink-0 text-xs">Unarchive</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          ))
+        : null}
+    </>
+  );
+}
 
 /**
  * A project's archived agents, collapsed under its agents, so an archive is never

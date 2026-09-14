@@ -99,6 +99,10 @@ export function createChannelEnvironmentAtoms<R, E>(
       label: "environment-data:commands:channel:unarchive",
       execute: unarchiveChannel,
     }),
+    archivedChannels: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:channels:archived",
+      tag: ORCHESTRATION_WS_METHODS.listArchivedChannels,
+    }),
     agentDefinitions: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:agents:definitions",
       tag: ORCHESTRATION_WS_METHODS.listAgentDefinitions,

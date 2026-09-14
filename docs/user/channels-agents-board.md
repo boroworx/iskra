@@ -23,8 +23,9 @@ Open settings from the gear in the channel header or on the channel's row in the
 rename the channel, set its topic, add or remove members, and choose the lead. Any agent in the
 project can lead. On a narrow window, members and the lead are in settings, not beside the messages.
 
-**Archive** removes a channel from the sidebar. Choose **Undo** on the notice to bring it back. If
-you open an archived channel's link later, its page offers **Unarchive**.
+**Archive** removes a channel from the sidebar. Choose **Undo** on the notice to bring it back.
+Archived channels are listed under **Archived** in the Channels group, where **Unarchive** brings
+one back. If you open an archived channel's link later, its page offers **Unarchive**.
 
 Under an agent's reply, **Show work** opens the session behind it.
 
