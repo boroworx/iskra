@@ -77,7 +77,7 @@ export interface LinearIssueChanges {
 
 /** One activity in a Linear agent session, as the agent posts it. */
 export type LinearAgentActivityContent =
-  | { readonly type: "elicitation" | "response"; readonly body: string }
+  | { readonly type: "elicitation" | "response" | "thought" | "error"; readonly body: string }
   | { readonly type: "action"; readonly action: string; readonly parameter: string };
 
 export interface LinearAgentPrompt {

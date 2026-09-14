@@ -14,7 +14,7 @@ import {
   type OrchestrationEvent,
 } from "@iskra/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { expect, it } from "@effect/vitest";
+import { describe, expect, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -279,7 +279,104 @@ const makeWorld = Effect.fn("makeWorld")(function* (name: string) {
   return { engine, reactor, projectId, cardId, issueId, commandId, cardOf, nextEvent };
 });
 
+describe("Linear acceptance criteria", () => {
+  it.each([
+    [
+      "a heading and a checklist under it",
+      "Rate limit the API.\n\n## Acceptance criteria\n- [ ] A key over 100/min gets a 429\n- [x] Limits show in the dashboard\n\n## Notes\n- not this",
+      ["A key over 100/min gets a 429", "Limits show in the dashboard"],
+    ],
+    [
+      "a bold label and a numbered list",
+      "**Definition of done:**\n1. Emails go out at 80%\n2) Slack too",
+      ["Emails go out at 80%", "Slack too"],
+    ],
+    ["checklist items anywhere", "Do it.\n- [ ] First\n- plain bullet\n- [ ] Second", ["First", "Second"]],
+    ["plain bullets without a heading", "Do it.\n- one\n- two", []],
+    [
+      "Iskra's own block",
+      "Spec.\n\n## Acceptance criteria (from Iskra)\n\n- [ ] Mine\n\n_Managed by Iskra: edit them on the card._",
+      [],
+    ],
+  ] as const)("reads criteria from %s", (_name, description, expected) => {
+    expect(
+      LinearSyncReactor.criteriaFromDescription(description).map((criterion) => criterion.text),
+    ).toEqual(expected);
+  });
+
+  it("keeps its criteria block out of the spec, and out of an issue that lists the same criteria", () => {
+    const criteria = [
+      { id: "c1", text: "Emails at 80%", verification: "automated" as const },
+      { id: "c2", text: "Slack too", verification: "manual" as const },
+    ];
+    const shown = LinearSyncReactor.withCriteriaBlock("Budget alerts.", criteria);
+    expect(LinearSyncReactor.withoutCriteriaBlock(shown)).toBe("Budget alerts.");
+    expect(LinearSyncReactor.withCriteriaBlock("", criteria)).toBe(
+      "## Acceptance criteria (from Iskra)\n\n- Emails at 80%\n- Slack too\n\n_Managed by Iskra: edit them on the card._",
+    );
+    const listed = "## Acceptance criteria\n- Emails at 80%\n- Slack too";
+    expect(LinearSyncReactor.withCriteriaBlock(listed, criteria)).toBe(listed);
+    expect(LinearSyncReactor.withCriteriaBlock("Spec.", [])).toBe("Spec.");
+  });
+});
+
 it.layer(layer)("LinearSyncReactor", (it) => {
+  it.effect("takes a delegated issue's criteria from its description, or asks the requester for them", () =>
+    Effect.gen(function* () {
+      const world = yield* makeWorld("criteria");
+      yield* world.reactor.start();
+      inLinear.put({
+        id: "issue-with-criteria",
+        identifier: "ENG-300",
+        url: "https://linear.app/acme/issue/ENG-300",
+        teamId: TEAM,
+        title: "Export CSV",
+        description: "Export the table.\n\n### Acceptance criteria\n- [ ] A CSV downloads\n- [ ] It has headers",
+        stateId: "state-triage",
+        delegateId: APP_USER,
+      });
+      yield* world.reactor.syncNow;
+      expect(
+        (yield* world.cardOf(CardId.make("card-linear-issue-with-criteria")))?.acceptance,
+      ).toEqual({
+        criteria: [
+          { id: "c1", text: "A CSV downloads", verification: "automated" },
+          { id: "c2", text: "It has headers", verification: "automated" },
+        ],
+        state: "confirmed",
+      });
+
+      const asked = yield* awaitActivity("elicitation");
+      inLinear.put({
+        id: "issue-without-criteria",
+        identifier: "ENG-301",
+        url: "https://linear.app/acme/issue/ENG-301",
+        teamId: TEAM,
+        title: "Make it faster",
+        description: "It's slow.",
+        stateId: "state-triage",
+        delegateId: APP_USER,
+      });
+      yield* world.reactor.syncNow;
+      expect(yield* Deferred.await(asked)).toEqual({
+        type: "elicitation",
+        body: LinearSyncReactor.CRITERIA_QUESTION,
+      });
+      const cardId = CardId.make("card-linear-issue-without-criteria");
+      expect((yield* world.cardOf(cardId))?.acceptance.criteria).toEqual([]);
+
+      // The requester adds them in Linear: the card takes them on the next sync.
+      inLinear.edit("issue-without-criteria", {
+        description: "It's slow.\n\nAcceptance criteria:\n- The board loads in under a second",
+      });
+      yield* world.reactor.syncNow;
+      expect((yield* world.cardOf(cardId))?.acceptance).toMatchObject({
+        criteria: [{ text: "The board loads in under a second" }],
+        state: "confirmed",
+      });
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("brings an issue delegated to Iskra in as a ready card", () =>
     Effect.gen(function* () {
       const world = yield* makeWorld("intake");
@@ -311,10 +408,12 @@ it.layer(layer)("LinearSyncReactor", (it) => {
   it.effect("opens an issue for an approved card and syncs title, spec and comments both ways", () =>
     Effect.gen(function* () {
       const world = yield* makeWorld("roundtrip");
+      // The issue carries the card's criteria in a block Iskra manages; the spec syncs without it.
       expect(issues.get(world.issueId)).toMatchObject({
         teamId: TEAM,
         title: "Budget alerts",
-        description: "Email at 80%.",
+        description:
+          "Email at 80%.\n\n## Acceptance criteria (from Iskra)\n\n- An email goes out at 80% of budget.\n\n_Managed by Iskra: edit them on the card._",
         stateId: "state-todo",
       });
 
@@ -400,7 +499,25 @@ it.layer(layer)("LinearSyncReactor", (it) => {
       };
       /** The delegate asks a question answered by message, the way ask_owner records it. */
       const askQuestion = (activityId: string, requestId: string, question: string) =>
-        world.engine.dispatch({
+        Effect.andThen(
+          world.engine.dispatch({
+            type: "card.activity.record",
+            commandId: world.commandId(),
+            activityId: requestId,
+            cardId: world.cardId,
+            kind: "elicitation",
+            author: { kind: "agent", id: agentId },
+            body: question,
+            runThreadId: threadId,
+            deliverTo: null,
+            elicitation: null,
+            answers: null,
+            status: null,
+            evidenceId: null,
+            reason: null,
+            createdAt: now,
+          }),
+          world.engine.dispatch({
           type: "thread.activity.append",
           commandId: world.commandId(),
           threadId,
@@ -427,7 +544,8 @@ it.layer(layer)("LinearSyncReactor", (it) => {
             turnId: null,
             createdAt: now,
           },
-        });
+          }),
+        );
       yield* world.engine.dispatch({
         type: "agent.create",
         commandId: world.commandId(),

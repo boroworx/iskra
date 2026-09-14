@@ -1,9 +1,13 @@
 import {
+  AgentId,
   ApprovalRequestId,
   CardId,
+  CHANNEL_SYSTEM_AUTHOR_ID,
   CommandId,
   MessageId,
   CardLinearIssue,
+  type CardActivity,
+  type CardCriterion,
   type CardStatus,
   type OrchestrationCard,
   type OrchestrationCardShell,
@@ -31,7 +35,7 @@ import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as LinearClient from "../linear/LinearClient.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { isFinishedCardStatus, questionText } from "./cardRules.ts";
+import { isFinishedCardStatus } from "./cardRules.ts";
 import { liveOwnerRun } from "./decider.ts";
 import * as OrchestrationEngine from "./Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts";
@@ -95,6 +99,101 @@ export function mergeLinearField<T>(input: {
   const iskraChanged = input.iskra !== input.base;
   const value = linearChanged && (!iskraChanged || input.linearIsNewer) ? input.linear : input.iskra;
   return { value, pull: value !== input.iskra, push: value !== input.linear };
+}
+
+const CRITERIA_BLOCK_HEADING = "## Acceptance criteria (from Iskra)";
+const CRITERIA_BLOCK_FOOTER = "_Managed by Iskra: edit them on the card._";
+const CRITERIA_BLOCK = /\s*## Acceptance criteria \(from Iskra\)[\s\S]*?_Managed by Iskra: edit them on the card\._\s*/;
+
+/** An issue description without the criteria block Iskra keeps in it. */
+export const withoutCriteriaBlock = (description: string): string =>
+  description.replace(CRITERIA_BLOCK, "");
+
+/**
+ * The acceptance criteria an issue's description lists: the items under an "Acceptance criteria"
+ * or "Definition of done" heading, else its checklist items. Iskra's own criteria block is ignored.
+ */
+export function criteriaFromDescription(description: string): ReadonlyArray<CardCriterion> {
+  const lines = withoutCriteriaBlock(description).split("\n");
+  const heading =
+    /^\s*(?:#{1,6}\s*)?(?:\*\*|__)?\s*(?:acceptance criteria|definition of done)\s*(?:\*\*|__)?\s*:?\s*(?:\*\*|__)?\s*$/i;
+  const item = /^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?(.*\S)\s*$/;
+  const checklistItem = /^\s*[-*+]\s+\[[ xX]\]\s+(.*\S)\s*$/;
+  let texts: Array<string> = [];
+  const start = lines.findIndex((line) => heading.test(line));
+  if (start >= 0) {
+    for (const line of lines.slice(start + 1)) {
+      if (/^\s*#{1,6}\s/.test(line)) break;
+      const match = item.exec(line);
+      if (match !== null) texts.push(match[1]!);
+      else if (line.trim().length > 0 && texts.length > 0) break;
+    }
+  }
+  if (texts.length === 0) {
+    texts = lines.flatMap((line) => {
+      const match = checklistItem.exec(line);
+      return match === null ? [] : [match[1]!];
+    });
+  }
+  return texts
+    .slice(0, 10)
+    .map((text, index) => ({ id: `c${index + 1}`, text, verification: "automated" as const }));
+}
+
+/**
+ * The description Linear shows: the card's spec, then its criteria in a block Iskra manages. The
+ * block is left out when the spec already lists the same criteria, or when there are none.
+ */
+export function withCriteriaBlock(spec: string, criteria: ReadonlyArray<CardCriterion>): string {
+  const listed = criteriaFromDescription(spec).map((criterion) => criterion.text);
+  if (
+    criteria.length === 0 ||
+    (listed.length === criteria.length && criteria.every((criterion, index) => criterion.text === listed[index]))
+  ) {
+    return spec;
+  }
+  const block = [
+    CRITERIA_BLOCK_HEADING,
+    criteria.map((criterion) => `- ${criterion.text}`).join("\n"),
+    CRITERIA_BLOCK_FOOTER,
+  ].join("\n\n");
+  return spec.trim().length === 0 ? block : `${spec}\n\n${block}`;
+}
+
+export const CRITERIA_QUESTION =
+  "What should be true when this is done? Add an \"Acceptance criteria\" list to the issue description, or set the criteria on the card; work starts once it has them.";
+
+/** How a card activity shows in its Linear agent session, or null when it doesn't. */
+export function linearActivityOf(activity: CardActivity): LinearClient.LinearAgentActivityContent | null {
+  switch (activity.kind) {
+    case "decision":
+    case "plan":
+    case "critique":
+    case "help":
+      return { type: "thought", body: activity.body };
+    case "message":
+      // A person's message goes to Linear as a comment; its agent's replies go as responses.
+      return activity.author.kind === "human" || activity.author.kind === "linear"
+        ? null
+        : { type: "thought", body: activity.body };
+    case "elicitation": {
+      const elicitation = activity.elicitation;
+      const options =
+        elicitation === null || elicitation.options.length === 0
+          ? ""
+          : `\n\n${elicitation.options
+              .map(
+                (option) =>
+                  `- ${option.label}${option.id === elicitation.recommendedOptionId ? " (recommended)" : ""}`,
+              )
+              .join("\n")}`;
+      return { type: "elicitation", body: `${elicitation?.question ?? activity.body}${options}` };
+    }
+    case "error":
+      return { type: "error", body: activity.body };
+    default:
+      return null;
+  }
 }
 
 const linkOf = (issue: LinearClient.LinearIssue): CardLinearIssue => ({
@@ -209,8 +308,13 @@ export const make = Effect.gen(function* () {
       titleMerge.value.trim().length === 0
         ? { value: card.title, pull: false, push: true }
         : titleMerge;
-    const description = merge(link.description, issue.description, card.spec);
+    // The criteria block is Iskra's own; the spec merges without it.
+    const description = merge(link.description, withoutCriteriaBlock(issue.description), card.spec);
     const priority = merge(link.priority, issue.priority, card.priority);
+    const derivedCriteria =
+      finished || card.acceptance.criteria.length > 0 ? [] : criteriaFromDescription(description.value);
+    const criteria = derivedCriteria.length > 0 ? derivedCriteria : card.acceptance.criteria;
+    const linearDescription = withCriteriaBlock(description.value, criteria);
 
     const expected = linearStateFor(input.states, card.status);
     const linearMoved = issue.stateId !== link.stateId;
@@ -230,7 +334,7 @@ export const make = Effect.gen(function* () {
 
     const changes: LinearClient.LinearIssueChanges = {
       ...(title.push ? { title: title.value } : {}),
-      ...(description.push ? { description: description.value } : {}),
+      ...(linearDescription !== issue.description ? { description: linearDescription } : {}),
       ...(priority.push ? { priority: priority.value } : {}),
       ...(restoreStateId !== null ? { stateId: restoreStateId } : {}),
     };
@@ -249,6 +353,15 @@ export const make = Effect.gen(function* () {
         ...(title.pull ? { title: title.value } : {}),
         ...(description.pull ? { spec: description.value } : {}),
         ...(priority.pull ? { priority: priority.value } : {}),
+      });
+    }
+    // A card from Linear without criteria takes the ones its issue lists once someone adds them.
+    if (derivedCriteria.length > 0) {
+      yield* tryDispatch({
+        type: "card.criteria.set",
+        commandId: yield* freshCommandId("criteria"),
+        cardId: card.id,
+        criteria: derivedCriteria,
       });
     }
 
@@ -360,16 +473,48 @@ export const make = Effect.gen(function* () {
       Effect.suspend(() => {
         if (linkedIssueIds.has(issue.id) || issue.title.trim().length === 0) return Effect.void;
         linkedIssueIds.add(issue.id);
-        return dispatch({
-          type: "card.linear.intake",
-          commandId: CommandId.make(`server:linear-intake:${issue.id}`),
-          cardId: CardId.make(`card-linear-${issue.id}`),
-          projectId,
-          title: issue.title.trim(),
-          issue: linkOf(issue),
-          // Delegating the issue to Iskra is a person's approval; a labeled issue waits in triage.
-          delegated: issue.delegateId === viewerId,
-          createdAt: nowIso,
+        const cardId = CardId.make(`card-linear-${issue.id}`);
+        // Delegating the issue to Iskra is a person's approval; a labeled issue waits in triage.
+        const delegated = issue.delegateId === viewerId;
+        const criteria = criteriaFromDescription(issue.description);
+        return Effect.gen(function* () {
+          yield* dispatch({
+            type: "card.linear.intake",
+            commandId: CommandId.make(`server:linear-intake:${issue.id}`),
+            cardId,
+            projectId,
+            title: issue.title.trim(),
+            issue: linkOf(issue),
+            delegated,
+            createdAt: nowIso,
+          });
+          if (criteria.length > 0) {
+            // Confirmed on a delegated card: the requester wrote them and delegating approved it.
+            yield* dispatch({
+              type: "card.criteria.set",
+              commandId: CommandId.make(`server:linear-intake-criteria:${issue.id}`),
+              cardId,
+              criteria,
+            });
+          } else if (delegated) {
+            yield* dispatch({
+              type: "card.activity.record",
+              commandId: CommandId.make(`server:linear-criteria-ask:${issue.id}`),
+              activityId: `linear-criteria-ask:${issue.id}`,
+              cardId,
+              kind: "elicitation",
+              author: { kind: "system", id: CHANNEL_SYSTEM_AUTHOR_ID },
+              body: CRITERIA_QUESTION,
+              runThreadId: null,
+              deliverTo: null,
+              elicitation: null,
+              answers: null,
+              status: null,
+              evidenceId: null,
+              reason: { code: "criteriaMissing", text: "The issue lists no acceptance criteria." },
+              createdAt: nowIso,
+            });
+          }
         }).pipe(Effect.catchCause(logSkipped("Linear intake skipped", { issue: issue.identifier })));
       });
     for (const issue of yield* linear.delegatedIssues) {
@@ -400,7 +545,7 @@ export const make = Effect.gen(function* () {
         const issue = yield* linear.createIssue({
           teamId,
           title: card.title,
-          description: card.spec,
+          description: withCriteriaBlock(card.spec, card.acceptance.criteria),
           priority: card.priority,
           ...(state === undefined ? {} : { stateId: state.id }),
         });
@@ -522,32 +667,44 @@ export const make = Effect.gen(function* () {
       });
       return;
     }
-    if (
-      activity.kind !== "user-input.requested" ||
-      !Predicate.isObject(activity.payload) ||
-      activity.payload.responseMode !== "message"
-    )
-      return;
-    const owned = yield* ownerLinkOf(event.payload.threadId);
-    if (owned === null) return;
-    const text = questionText(activity.payload.questions);
-    if (text.length === 0) return;
-    const session = yield* agentSessionFor(owned.card, owned.link);
+  });
+
+  /**
+   * A card's activity as its Linear agent session shows it: decisions and plans as thoughts,
+   * questions as elicitations, errors as errors. Without a session a question goes out as a comment.
+   */
+  const pushActivity = Effect.fn("LinearSyncReactor.pushActivity")(function* (
+    activity: CardActivity,
+  ) {
+    const content = linearActivityOf(activity);
+    if (content === null) return;
+    const card = yield* snapshots.getCardShellById(activity.cardId);
+    if (Option.isNone(card) || card.value.linearIssue === null) return;
+    const link = card.value.linearIssue;
+    const session = yield* agentSessionFor(card.value, link);
     if (session !== null) {
-      yield* linear.createAgentActivity(session, { type: "elicitation", body: text });
+      yield* linear.createAgentActivity(session, content);
       return;
     }
-    const agent = yield* snapshots.getAgentShellById(owned.run.agentId);
-    const name = Option.match(agent, {
-      onNone: () => "The delegate",
-      onSome: (value) => `@${value.name}`,
-    });
-    yield* linear.createComment(owned.link.id, `**${name} asks:** ${text}\n\nReply here to answer.`);
+    if (content.type !== "elicitation") return;
+    const asker =
+      activity.author.kind === "agent"
+        ? Option.match(yield* snapshots.getAgentShellById(AgentId.make(activity.author.id)), {
+            onNone: () => "The delegate",
+            onSome: (value) => `@${value.name}`,
+          })
+        : "Iskra";
+    yield* linear.createComment(link.id, `**${asker} asks:** ${content.body}\n\nReply here to answer.`);
   });
 
   const worker = yield* makeDrainableWorker(
     (job: { readonly kind: "sweep" } | { readonly kind: "push"; readonly event: OrchestrationEvent }) =>
-      (job.kind === "sweep" ? sweep() : push(job.event)).pipe(
+      (job.kind === "sweep"
+        ? sweep()
+        : job.event.type === "card.activity-recorded"
+          ? pushActivity(job.event.payload)
+          : push(job.event)
+      ).pipe(
         Effect.catchCause(logSkipped("Linear sync failed", { job: job.kind })),
       ),
   );
@@ -558,7 +715,9 @@ export const make = Effect.gen(function* () {
       yield* forkParked(
         Stream.runForEach(events, (event) =>
           event.type === "card.message-posted" ||
-          event.type === "thread.activity-appended" ||
+          event.type === "card.activity-recorded" ||
+          (event.type === "thread.activity-appended" &&
+            event.payload.activity.kind === "tool.completed") ||
           event.type === "thread.message-sent"
             ? worker.enqueue({ kind: "push", event })
             : Effect.void,
