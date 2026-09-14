@@ -552,6 +552,8 @@ export const OrchestrationChannel = Schema.Struct({
   wakeDepth: NonNegativeInt,
   // A `dm` has exactly one agent; its human is implicit until there is more than one.
   memberAgentIds: Schema.Array(AgentId),
+  // The agent woken by messages that mention no one; it only proposes triage cards.
+  leadAgentId: Schema.NullOr(AgentId).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime),
@@ -707,6 +709,8 @@ export const OrchestrationCard = Schema.Struct({
   // Set on the sibling sub-cards of one best-of-N run; an attempt never lands on its own.
   attemptGroupId: Schema.NullOr(TrimmedNonEmptyString),
   linearIssue: Schema.NullOr(CardLinearIssue).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  // The channel message a lead proposed the card from.
+  sourceMessageId: Schema.NullOr(MessageId).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   relations: Schema.Array(CardRelation),
   createdBy: CardAuthor,
   createdAt: IsoDateTime,
@@ -798,6 +802,17 @@ export const RunContextPayload = Schema.Struct({
   // The newest `wakeDepth` messages before the trigger, oldest first.
   history: Schema.Array(RunContextMessage),
   trigger: RunContextMessage,
+  // What a channel's lead also reads: who works in the channel and the project's open cards.
+  lead: Schema.optional(
+    Schema.Struct({
+      members: Schema.Array(
+        Schema.Struct({ name: AgentName, roleTags: Schema.Array(TrimmedNonEmptyString) }),
+      ),
+      openCards: Schema.Array(
+        Schema.Struct({ id: CardId, title: TrimmedNonEmptyString, status: CardStatus }),
+      ),
+    }),
+  ),
 });
 export type RunContextPayload = typeof RunContextPayload.Type;
 
@@ -812,7 +827,7 @@ export type RenderedRunContext = typeof RenderedRunContext.Type;
  * What a run is for: a conversation in a channel, the one session writing a
  * card (its owner), or a read-only helper answering a question on a card.
  */
-export const RunRole = Schema.Literals(["conversation", "owner", "helper", "critic"]);
+export const RunRole = Schema.Literals(["conversation", "owner", "helper", "critic", "lead"]);
 export type RunRole = typeof RunRole.Type;
 
 export const CardSessionRole = Schema.Literals(["owner", "helper", "critic"]);
@@ -875,6 +890,8 @@ export type OrchestrationRun = typeof OrchestrationRun.Type;
 /** A conversation run as `channel.run-started` records it. */
 export const ChannelRun = Schema.Struct({
   threadId: ThreadId,
+  // A lead run proposes cards and never replies. Absent on runs from before leads.
+  role: Schema.optional(Schema.Literals(["conversation", "lead"])),
   channelId: ChannelId,
   agentId: AgentId,
   triggerMessageId: MessageId,
@@ -1356,6 +1373,8 @@ export const OrchestrationChannelShell = Schema.Struct({
   name: TrimmedNonEmptyString,
   topic: Schema.String,
   memberAgentIds: Schema.Array(AgentId),
+  // The agent woken by messages that mention no one; it only proposes triage cards.
+  leadAgentId: Schema.NullOr(AgentId).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
 });
 export type OrchestrationChannelShell = typeof OrchestrationChannelShell.Type;
 
@@ -1831,6 +1850,14 @@ const CardProposeCommand = Schema.Struct({
   title: TrimmedNonEmptyString,
   spec: Schema.String,
   tags: Schema.Array(TrimmedNonEmptyString),
+  // Set when a channel's lead proposes the card from a message.
+  lead: Schema.optional(
+    Schema.Struct({
+      sourceMessageId: MessageId,
+      reasoning: TrimmedNonEmptyString,
+      likelyDuplicateCardIds: Schema.Array(CardId),
+    }),
+  ),
   createdAt: IsoDateTime,
 });
 
@@ -1949,6 +1976,7 @@ const ChannelCreateCommand = Schema.Struct({
   pinnedSpec: Schema.optional(Schema.String),
   wakeDepth: Schema.optional(NonNegativeInt),
   memberAgentIds: Schema.Array(AgentId),
+  leadAgentId: Schema.optional(Schema.NullOr(AgentId)),
   createdAt: IsoDateTime,
 });
 
@@ -1961,6 +1989,7 @@ const ChannelUpdateCommand = Schema.Struct({
   pinnedSpec: Schema.optional(Schema.String),
   wakeDepth: Schema.optional(NonNegativeInt),
   memberAgentIds: Schema.optional(Schema.Array(AgentId)),
+  leadAgentId: Schema.optional(Schema.NullOr(AgentId)),
 });
 
 const ChannelArchiveCommand = Schema.Struct({
@@ -2772,6 +2801,7 @@ export const CardCreatedPayload = Schema.Struct({
   cardId: CardId,
   // Optional so events from before attempts still decode.
   attemptGroupId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  sourceMessageId: Schema.optional(Schema.NullOr(MessageId)),
   projectId: ProjectId,
   channelId: Schema.NullOr(ChannelId),
   parentCardId: Schema.NullOr(CardId),
@@ -2961,6 +2991,7 @@ export const ChannelCreatedPayload = Schema.Struct({
   pinnedSpec: Schema.String,
   wakeDepth: NonNegativeInt,
   memberAgentIds: Schema.Array(AgentId),
+  leadAgentId: Schema.optional(Schema.NullOr(AgentId)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -2972,6 +3003,7 @@ export const ChannelUpdatedPayload = Schema.Struct({
   pinnedSpec: Schema.optional(Schema.String),
   wakeDepth: Schema.optional(NonNegativeInt),
   memberAgentIds: Schema.optional(Schema.Array(AgentId)),
+  leadAgentId: Schema.optional(Schema.NullOr(AgentId)),
   updatedAt: IsoDateTime,
 });
 

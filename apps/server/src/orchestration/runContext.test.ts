@@ -44,6 +44,7 @@ const channel = (overrides: Partial<OrchestrationChannel> = {}): OrchestrationCh
   pinnedSpec: "",
   wakeDepth: 30,
   memberAgentIds: [backend.id, frontend.id],
+  leadAgentId: null,
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
   archivedAt: null,

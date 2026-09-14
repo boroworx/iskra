@@ -470,4 +470,39 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
       ]);
     }),
   );
+  it.effect("wakes only the channel's lead on a message that mentions no one; a mention bypasses it", () =>
+    Effect.gen(function* () {
+      const lead = AgentId.make("agent-lead");
+      const withLead = (
+        id: string,
+        kind: "channel" | "dm",
+        members: ReadonlyArray<AgentId>,
+        leadAgentId: AgentId,
+      ) => ({ ...createChannel(id, kind, members), leadAgentId }) as OrchestrationCommand;
+      const base = [...setup, createAgent(lead, "lead"), withLead("triage", "channel", [backend], lead)];
+
+      const unmentioned = yield* decidePost(base, "triage", "the export button is broken");
+      expect(unmentioned.map((event) => event.type)).toEqual([
+        "channel.message-posted",
+        "channel.agent-wake-requested",
+      ]);
+      expect(unmentioned[1]).toMatchObject({ payload: { agentId: lead } });
+
+      const mentioned = yield* decidePost(base, "triage", "@backend the export button is broken");
+      expect(mentioned.map((event) => event.type)).toEqual([
+        "channel.message-posted",
+        "channel.agent-wake-requested",
+      ]);
+      expect(mentioned[1]).toMatchObject({ payload: { agentId: backend } });
+
+      const member = yield* Effect.flip(
+        applyCommands([...setup, withLead("both", "channel", [backend], backend)]),
+      );
+      expect(member.message).toContain("a lead is not a member");
+      const dm = yield* Effect.flip(
+        applyCommands([...setup, createAgent(lead, "lead"), withLead("dm-lead", "dm", [backend], lead)]),
+      );
+      expect(dm.message).toContain("Only a channel can have a lead");
+    }),
+  );
 });

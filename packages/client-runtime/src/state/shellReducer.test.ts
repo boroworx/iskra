@@ -108,6 +108,7 @@ describe("agents and channels", () => {
       name: "general",
       topic: "",
       memberAgentIds: [agent.id],
+      leadAgentId: null,
     };
 
     it("adds, updates and removes agents on a snapshot that has none yet", () => {

@@ -83,7 +83,7 @@ export function sessionWhere(
   run: Pick<OrchestrationAgentRun, "role" | "channelId" | "cardTitle">,
   channels: ReadonlyArray<OrchestrationChannelShell>,
 ): string {
-  if (run.role !== "conversation") {
+  if (run.role !== "conversation" && run.role !== "lead") {
     return run.cardTitle ?? "a card";
   }
   const channel = channels.find((candidate) => candidate.id === run.channelId);

@@ -59,6 +59,7 @@ const channel = (id: string, name: string, overrides: Partial<OrchestrationChann
     name,
     topic: "",
     memberAgentIds: [],
+    leadAgentId: null,
     ...overrides,
   }) satisfies OrchestrationChannelShell;
 

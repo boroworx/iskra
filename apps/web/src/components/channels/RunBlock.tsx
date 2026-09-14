@@ -79,7 +79,9 @@ export const RunBlock = memo(function RunBlock(props: {
         ? `Helping on ${where}`
         : props.run.role === "critic"
           ? `Reviewing ${where}`
-          : `In ${where}`;
+          : props.run.role === "lead"
+            ? `Leading ${where}`
+            : `In ${where}`;
 
   return (
     <section aria-label={heading} className="min-w-0 border-l-2 border-border pl-3">
@@ -208,7 +210,7 @@ function RunContextDialog(props: {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
 }) {
-  const isCardSession = props.run.role !== "conversation";
+  const isCardSession = props.run.role !== "conversation" && props.run.role !== "lead";
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogPopup className="max-w-3xl">

@@ -621,6 +621,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pinned_spec AS "pinnedSpec",
           wake_depth AS "wakeDepth",
           member_agent_ids_json AS "memberAgentIds",
+          lead_agent_id AS "leadAgentId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           archived_at AS "archivedAt"
@@ -663,6 +664,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           review_returns AS "reviewReturns",
           attempt_group_id AS "attemptGroupId",
           COALESCE(linear_issue_json, 'null') AS "linearIssue",
+          source_message_id AS "sourceMessageId",
           relations_json AS "relations",
           created_by_json AS "createdBy",
           created_at AS "createdAt",
@@ -710,6 +712,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           cards.review_returns AS "reviewReturns",
           cards.attempt_group_id AS "attemptGroupId",
           COALESCE(cards.linear_issue_json, 'null') AS "linearIssue",
+          cards.source_message_id AS "sourceMessageId",
           runs.thread_id AS "ownerThreadId",
           runs.agent_id AS "ownerAgentId",
           runs.started_at AS "ownerStartedAt",
@@ -764,6 +767,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     reviewReturns: row.reviewReturns,
     attemptGroupId: row.attemptGroupId,
     linearIssue: row.linearIssue,
+    sourceMessageId: row.sourceMessageId,
     createdBy: row.createdBy,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -862,7 +866,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           kind,
           name,
           topic,
-          member_agent_ids_json AS "memberAgentIds"
+          member_agent_ids_json AS "memberAgentIds",
+          lead_agent_id AS "leadAgentId"
         FROM projection_channels
         WHERE archived_at IS NULL
           AND ${filter === undefined ? sql`1 = 1` : sql`channel_id = ${filter.channelId}`}
@@ -2921,6 +2926,7 @@ pending_approval_requests AS (
                   pinnedSpec: row.pinnedSpec,
                   wakeDepth: row.wakeDepth,
                   memberAgentIds: row.memberAgentIds,
+                  leadAgentId: row.leadAgentId,
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
                   archivedAt: row.archivedAt,
@@ -2953,6 +2959,7 @@ pending_approval_requests AS (
                   reviewReturns: row.reviewReturns,
                   attemptGroupId: row.attemptGroupId,
                   linearIssue: row.linearIssue,
+                  sourceMessageId: row.sourceMessageId,
                   relations: row.relations,
                   createdBy: row.createdBy,
                   createdAt: row.createdAt,

@@ -40,6 +40,7 @@ export const ProjectionChannel = Schema.Struct({
   pinnedSpec: Schema.String,
   wakeDepth: NonNegativeInt,
   memberAgentIds: Schema.Array(AgentId),
+  leadAgentId: Schema.NullOr(AgentId),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime),

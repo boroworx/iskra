@@ -121,12 +121,14 @@ const make = Effect.gen(function* () {
       (candidate) => candidate.projectId === channel.projectId,
     );
     const history = yield* channels.listWakeHistory({ channelId });
+    const lead = channel.leadAgentId === agentId;
     const context = buildRunContext({
       agent,
       channel,
       agents: projectAgents,
       messages: history.map(toOrchestrationChannelMessage),
       trigger: toOrchestrationChannelMessage(trigger.value),
+      ...(lead ? { lead: { cards: readModel.cards ?? [] } } : {}),
     });
     const rendered = renderRunContext(context);
     // Ids derive from the wake event, so a retried wake cannot start a second run.
@@ -140,6 +142,7 @@ const make = Effect.gen(function* () {
       channelId,
       agentId,
       triggerMessageId,
+      ...(lead ? { role: "lead" as const } : {}),
       capabilities: ["read"],
       context,
       rendered,
@@ -200,7 +203,8 @@ const make = Effect.gen(function* () {
       (message) =>
         message.role === "assistant" && message.turnId === turnId && message.text.trim().length > 0,
     );
-    if (reply !== undefined) {
+    // A lead never answers in the channel; what it does is propose cards.
+    if (reply !== undefined && run.value.role !== "lead") {
       // Ids derive from the turn, so a repeated settle posts the reply once.
       yield* engine.dispatch({
         type: "channel.message.agent.post",

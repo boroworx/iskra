@@ -415,4 +415,73 @@ it.layer(layer)("RunReactor", (it) => {
       }),
     ),
   );
+  it.effect("wakes a channel's lead on a message that mentions no one, and the lead posts nothing", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const world = yield* startChannel("leadworld");
+        const snapshotQuery = yield* ProjectionSnapshotQuery;
+        const reactor = yield* RunReactor.RunReactor;
+        const leadId = AgentId.make("agent-triager");
+        const leadChannelId = ChannelId.make("channel-leadworld");
+        yield* world.engine.dispatch({
+          type: "agent.create",
+          commandId: CommandId.make("cmd-agent-triager"),
+          agentId: leadId,
+          projectId: ProjectId.make("project-leadworld"),
+          name: "triager",
+          roleTags: ["triage"],
+          rolePrompt: "",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("claudeAgent"),
+            model: "claude-haiku-4-5",
+          },
+          capabilities: ["read"],
+          createdAt: now,
+        });
+        yield* world.engine.dispatch({
+          type: "channel.update",
+          commandId: CommandId.make("cmd-lead-set"),
+          channelId: leadChannelId,
+          leadAgentId: leadId,
+        });
+
+        yield* world.post("message-lead-request", "exports time out on big projects");
+        const turnStart = yield* world.nextEvent("thread.turn-start-requested");
+        const threadId = ThreadId.make(turnStart.aggregateId);
+        const run = yield* snapshotQuery
+          .getRunByThreadId(threadId)
+          .pipe(Effect.map(Option.getOrThrow));
+        expect(run).toMatchObject({
+          role: "lead",
+          agentId: leadId,
+          triggerMessageId: "message-lead-request",
+          capabilities: ["read"],
+        });
+        expect(run.rendered.systemPrompt).toContain("You never reply in the channel");
+        expect(run.rendered.systemPrompt).toContain("@leadworld");
+        expect(run.rendered.firstMessage).toContain("## Open cards");
+
+        yield* world.setSession(threadId, "running", "turn-lead");
+        yield* world.answer(threadId, "turn-lead", "This asks for faster exports.");
+        yield* world.setSession(threadId, "ready", null);
+        yield* reactor.drain;
+        const messages = yield* snapshotQuery.listChannelMessages(leadChannelId, 50);
+        expect(messages.map((message) => message.authorKind)).toEqual(["human"]);
+
+        const refused = yield* Effect.flip(
+          world.engine.dispatch({
+            type: "channel.message.agent.post",
+            commandId: CommandId.make("cmd-lead-post"),
+            channelId: leadChannelId,
+            messageId: MessageId.make("message-lead-reply"),
+            agentId: leadId,
+            runThreadId: threadId,
+            body: "Faster exports it is.",
+            createdAt: now,
+          }),
+        );
+        expect(refused.message).toContain("does not post in the channel");
+      }),
+    ),
+  );
 });

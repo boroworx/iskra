@@ -37,6 +37,7 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
           pinned_spec,
           wake_depth,
           member_agent_ids_json,
+          lead_agent_id,
           created_at,
           updated_at,
           archived_at
@@ -50,6 +51,7 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
           ${row.pinnedSpec},
           ${row.wakeDepth},
           ${JSON.stringify(row.memberAgentIds)},
+          ${row.leadAgentId},
           ${row.createdAt},
           ${row.updatedAt},
           ${row.archivedAt}
@@ -63,6 +65,7 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
           pinned_spec = excluded.pinned_spec,
           wake_depth = excluded.wake_depth,
           member_agent_ids_json = excluded.member_agent_ids_json,
+          lead_agent_id = excluded.lead_agent_id,
           created_at = excluded.created_at,
           updated_at = excluded.updated_at,
           archived_at = excluded.archived_at
@@ -83,6 +86,7 @@ const makeProjectionChannelRepository = Effect.gen(function* () {
           pinned_spec AS "pinnedSpec",
           wake_depth AS "wakeDepth",
           member_agent_ids_json AS "memberAgentIds",
+          lead_agent_id AS "leadAgentId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           archived_at AS "archivedAt"

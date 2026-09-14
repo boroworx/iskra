@@ -1,7 +1,9 @@
 import {
   AgentId,
   CardId,
+  ChannelId,
   CommandId,
+  MessageId,
   ProjectId,
   ProviderInstanceId,
   type OrchestrationCommand,
@@ -138,6 +140,60 @@ it.layer(NodeServices.layer)("decider board tools", (it) => {
       ]);
       const outsider = yield* Effect.flip(decide(readModel, record(reviewer)));
       expect(outsider.message).toContain("isn't working on this card");
+    }),
+  );
+  it.effect("records a channel lead's proposal with its message, reasoning and likely duplicates", () =>
+    Effect.gen(function* () {
+      const channelId = ChannelId.make("channel-general");
+      const sourceMessageId = MessageId.make("message-export");
+      const readModel = yield* applyCommands([
+        ...setup,
+        {
+          type: "channel.create",
+          commandId: nextCommandId(),
+          channelId,
+          projectId,
+          kind: "channel",
+          name: "general",
+          memberAgentIds: [backend],
+          leadAgentId: reviewer,
+          createdAt: now,
+        },
+      ]);
+      const propose = (agentId: AgentId): OrchestrationCommand => ({
+        type: "card.propose",
+        commandId: nextCommandId(),
+        cardId: CardId.make("card-limits-webhooks"),
+        agentId,
+        projectId,
+        channelId,
+        title: "Limit webhook calls",
+        spec: "Webhooks need their own limit.",
+        tags: [],
+        lead: {
+          sourceMessageId,
+          reasoning: "The message asks for limits on webhooks, which the open card leaves out.",
+          likelyDuplicateCardIds: [cardId],
+        },
+        createdAt: now,
+      });
+
+      const events = yield* decide(readModel, propose(reviewer));
+      expect(events.map((event) => event.type)).toEqual([
+        "card.created",
+        "card.decision-recorded",
+        "card.relation-added",
+      ]);
+      expect(events[0]).toMatchObject({
+        payload: { status: "triage", sourceMessageId, createdBy: { kind: "lead", id: reviewer } },
+      });
+      expect(events[1]).toMatchObject({
+        payload: { author: { kind: "lead", id: reviewer }, text: expect.stringContaining("webhooks") },
+      });
+      expect(events[2]).toMatchObject({ payload: { kind: "duplicateOf", otherCardId: cardId } });
+
+      const notLead = yield* Effect.flip(decide(readModel, propose(backend)));
+      expect(notLead.message).toContain("doesn't lead this channel");
     }),
   );
 });

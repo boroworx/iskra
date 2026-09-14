@@ -25,6 +25,15 @@ export class BoardSessionRequiredError extends Schema.TaggedError<BoardSessionRe
 }
 
 /** The decider refused the command; its reason is what the agent should read. */
+export class LeadSessionRequiredError extends Schema.TaggedError<LeadSessionRequiredError>()(
+  "LeadSessionRequiredError",
+  {},
+) {
+  override get message(): string {
+    return "propose_triage_card works only in a channel lead's session.";
+  }
+}
+
 export class BoardCommandRefusedError extends Schema.TaggedError<BoardCommandRefusedError>()(
   "BoardCommandRefusedError",
   { detail: Schema.String },
@@ -46,6 +55,7 @@ export class BoardToolFailedError extends Schema.TaggedError<BoardToolFailedErro
 export const BoardToolError = Schema.Union([
   McpCapabilityUnavailableError,
   BoardSessionRequiredError,
+  LeadSessionRequiredError,
   BoardCommandRefusedError,
   BoardToolFailedError,
 ]);
@@ -145,6 +155,32 @@ const AskOwnerTool = Tool.make("ask_owner", {
   .annotate(Tool.Idempotent, false)
   .annotate(Tool.OpenWorld, false);
 
+const ProposeTriageCardTool = Tool.make("propose_triage_card", {
+  description:
+    "Propose a card for work the message you were woken by asks for. It enters triage linked to that message, with your reasoning and the open cards it likely duplicates; a person decides what happens to it.",
+  parameters: Schema.Struct({
+    title: TrimmedNonEmptyString.annotate({ description: "A short, specific title." }),
+    spec: Schema.String.annotate({ description: "What the work is, in plain language." }),
+    reasoning: TrimmedNonEmptyString.annotate({
+      description: "Why this message calls for this card, and how it differs from open cards.",
+    }),
+    likelyDuplicateCardIds: Schema.optional(
+      Schema.Array(TrimmedNonEmptyString).annotate({
+        description: "Ids of open cards that may already cover this work.",
+      }),
+    ),
+    tags: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  }),
+  success: Schema.Struct({ cardId: Schema.String }),
+  failure: BoardToolError,
+  dependencies,
+})
+  .annotate(Tool.Title, "Propose a triage card")
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, false)
+  .annotate(Tool.OpenWorld, false);
+
 /** Tools create commands only: none of them approves, assigns or lands a card. */
 export const BoardToolkit = Toolkit.make(
   ProposeCardTool,
@@ -152,9 +188,20 @@ export const BoardToolkit = Toolkit.make(
   UpdatePlanTool,
   RequestReviewTool,
   AskOwnerTool,
+  ProposeTriageCardTool,
 );
 
-/** How Claude names the board tools once they are served as the `iskra` MCP server. */
-export const BOARD_CLAUDE_TOOL_NAMES = Object.keys(BoardToolkit.tools).map(
-  (name) => `mcp__iskra__${name}`,
-);
+const claudeToolNames = (names: ReadonlyArray<keyof typeof BoardToolkit.tools>) =>
+  names.map((name) => `mcp__iskra__${name}`);
+
+/** The tools a card's owner session is allowed, as Claude names them from the `iskra` MCP server. */
+export const BOARD_CLAUDE_TOOL_NAMES = claudeToolNames([
+  "propose_card",
+  "record_decision",
+  "update_plan",
+  "request_review",
+  "ask_owner",
+]);
+
+/** A channel lead is allowed exactly one tool. */
+export const LEAD_CLAUDE_TOOL_NAMES = claudeToolNames(["propose_triage_card"]);

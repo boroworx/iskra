@@ -61,6 +61,7 @@ const card: OrchestrationCard = {
   reviewReturns: 0,
   attemptGroupId: null,
   linearIssue: null,
+  sourceMessageId: null,
   createdBy: { kind: "human", id: "human" },
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",

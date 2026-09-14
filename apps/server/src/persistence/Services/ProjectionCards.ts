@@ -61,6 +61,7 @@ export const ProjectionCard = Schema.Struct({
   reviewReturns: Schema.Number,
   attemptGroupId: Schema.NullOr(Schema.String),
   linearIssue: Schema.NullOr(CardLinearIssue),
+  sourceMessageId: Schema.NullOr(MessageId),
   relations: Schema.Array(CardRelation),
   createdBy: CardAuthor,
   createdAt: IsoDateTime,

@@ -46,7 +46,9 @@ export function decideWake(input: {
 }): WakeDecision {
   const { readModel, channel, agent } = input;
   const where = channel.kind === "dm" ? "this DM" : `#${channel.name}`;
-  if (agent.archivedAt !== null || !channel.memberAgentIds.includes(agent.id)) {
+  // A channel's lead is woken there without being a member.
+  const belongs = channel.memberAgentIds.includes(agent.id) || channel.leadAgentId === agent.id;
+  if (agent.archivedAt !== null || !belongs) {
     return { kind: "refuse", reason: `@${agent.name} isn't an active member of ${where}.` };
   }
 

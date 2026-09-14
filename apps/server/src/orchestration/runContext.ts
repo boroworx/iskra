@@ -1,11 +1,14 @@
 import type {
   OrchestrationAgent,
+  OrchestrationCard,
   OrchestrationChannel,
   OrchestrationChannelMessage,
   RenderedRunContext,
   RunContextMessage,
   RunContextPayload,
 } from "@iskra/contracts";
+
+import { isFinishedCardStatus } from "./cardRules.ts";
 
 export interface RunContextInput {
   readonly agent: OrchestrationAgent;
@@ -16,6 +19,8 @@ export interface RunContextInput {
   readonly messages: ReadonlyArray<OrchestrationChannelMessage>;
   /** The message that woke the agent. */
   readonly trigger: OrchestrationChannelMessage;
+  /** Set when the agent is woken as the channel's lead: the project's cards. */
+  readonly lead?: { readonly cards: ReadonlyArray<OrchestrationCard> };
 }
 
 function authorName(
@@ -64,6 +69,19 @@ export function buildRunContext(input: RunContextInput): RunContextPayload {
     wakeDepth: channel.wakeDepth,
     history: history.map((message) => toRunContextMessage(message, input.agents)),
     trigger: toRunContextMessage(input.trigger, input.agents),
+    ...(input.lead === undefined
+      ? {}
+      : {
+          lead: {
+            members: channel.memberAgentIds.flatMap((memberId) => {
+              const member = input.agents.find((candidate) => candidate.id === memberId);
+              return member === undefined ? [] : [{ name: member.name, roleTags: member.roleTags }];
+            }),
+            openCards: input.lead.cards
+              .filter((card) => card.projectId === channel.projectId && !isFinishedCardStatus(card.status))
+              .map((card) => ({ id: card.id, title: card.title, status: card.status })),
+          },
+        }),
   };
 }
 
@@ -86,6 +104,9 @@ export function renderNewMessage(message: RunContextMessage): string {
 export function renderRunContext(payload: RunContextPayload): RenderedRunContext {
   const where =
     payload.channel.kind === "dm" ? "a direct message with the user" : `#${payload.channel.name}`;
+  if (payload.lead !== undefined) {
+    return renderLeadContext(payload, payload.lead, where);
+  }
   const systemPrompt = [
     `You are @${payload.agent.name}, an agent working in ${where}.`,
     payload.agent.rolePrompt.trim(),
@@ -96,6 +117,46 @@ export function renderRunContext(payload: RunContextPayload): RenderedRunContext
     payload.history.length === 0
       ? ""
       : `Recent messages in ${where}:\n${payload.history.map(formatMessage).join("\n")}`,
+    renderNewMessage(payload.trigger),
+  ];
+  return {
+    systemPrompt: systemPrompt.filter((part) => part.length > 0).join("\n\n"),
+    firstMessage: firstMessage.filter((part) => part.length > 0).join("\n\n"),
+  };
+}
+
+/** A lead reads the channel to propose cards; it is told it never replies and has one tool. */
+function renderLeadContext(
+  payload: RunContextPayload,
+  lead: NonNullable<RunContextPayload["lead"]>,
+  where: string,
+): RenderedRunContext {
+  const systemPrompt = [
+    `You are @${payload.agent.name}, the lead of ${where}. You read the messages there that mention no one and turn requests for work into proposed cards, which people then triage.`,
+    "You never reply in the channel, and you never assign, approve or wake agents: nothing you write as text is posted.",
+    "For each distinct piece of work the new message asks for, call propose_triage_card once with a short title, a plain-language spec, your reasoning, and the ids of open cards it likely duplicates. If the message asks for no work, do nothing.",
+    payload.agent.rolePrompt.trim(),
+    section("Channel topic", payload.channel.topic),
+    section("Pinned spec", payload.pinnedSpec),
+    section(
+      "Channel members",
+      lead.members
+        .map(
+          (member) =>
+            `- @${member.name}${member.roleTags.length > 0 ? ` (${member.roleTags.join(", ")})` : ""}`,
+        )
+        .join("\n"),
+    ),
+  ];
+  const firstMessage = [
+    payload.history.length === 0
+      ? ""
+      : `Recent messages in ${where}:\n${payload.history.map(formatMessage).join("\n")}`,
+    `## Open cards\n\n${
+      lead.openCards.length === 0
+        ? "No open cards."
+        : lead.openCards.map((card) => `- ${card.id} [${card.status}] ${card.title}`).join("\n")
+    }`,
     renderNewMessage(payload.trigger),
   ];
   return {

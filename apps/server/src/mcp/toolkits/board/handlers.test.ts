@@ -7,6 +7,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   type OrchestrationCardShell,
+  type OrchestrationChannelShell,
   type OrchestrationCommand,
   type OrchestrationRun,
 } from "@iskra/contracts";
@@ -54,6 +55,8 @@ const ownerRun = (role: OrchestrationRun["role"] = "owner") =>
 
 const card = { id: CARD_ID, projectId: PROJECT_ID, channelId: CHANNEL_ID } as OrchestrationCardShell;
 
+const channelShell = { id: CHANNEL_ID, projectId: PROJECT_ID } as unknown as OrchestrationChannelShell;
+
 const makeHarness = Effect.fn("makeBoardToolkitHarness")(function* (options: {
   readonly run?: OrchestrationRun | null;
   readonly reject?: (command: OrchestrationCommand) => OrchestrationCommandInvariantError | null;
@@ -74,6 +77,8 @@ const makeHarness = Effect.fn("makeBoardToolkitHarness")(function* (options: {
         Effect.succeed(threadId === THREAD_ID ? Option.fromNullishOr(run) : Option.none()),
       getCardShellById: (cardId) =>
         Effect.succeed(cardId === CARD_ID ? Option.some(card) : Option.none()),
+      getChannelShellById: (channelId) =>
+        Effect.succeed(channelId === CHANNEL_ID ? Option.some(channelShell) : Option.none()),
     }),
     Layer.mock(OrchestrationEngineService)({
       readEvents: () => Stream.empty,
@@ -119,6 +124,7 @@ describe("board toolkit handlers", () => {
       "update_plan",
       "request_review",
       "ask_owner",
+      "propose_triage_card",
     ]);
   });
 
@@ -231,6 +237,46 @@ describe("board toolkit handlers", () => {
           },
         },
       ]);
+    }),
+  );
+  it.effect("lets a channel lead propose a triage card from the message that woke it, and nothing else", () =>
+    Effect.gen(function* () {
+      const leadRun = {
+        ...ownerRun("lead"),
+        channelId: CHANNEL_ID,
+        cardId: null,
+        triggerMessageId: "message-export",
+      } as unknown as OrchestrationRun;
+      const lead = yield* makeHarness({ run: leadRun });
+      yield* lead.call(
+        "propose_triage_card",
+        {
+          title: "Limit webhook calls",
+          spec: "Webhooks need their own limit.",
+          reasoning: "Asked for in #api; the open card leaves webhooks out.",
+          likelyDuplicateCardIds: ["card-limits"],
+        },
+        ["lead"],
+      );
+      expect(yield* Ref.get(lead.commands)).toMatchObject([
+        {
+          type: "card.propose",
+          agentId: AGENT_ID,
+          projectId: PROJECT_ID,
+          channelId: CHANNEL_ID,
+          lead: { sourceMessageId: "message-export", likelyDuplicateCardIds: ["card-limits"] },
+        },
+      ]);
+      expect(
+        yield* lead.call("propose_card", { title: "Other", spec: "" }, ["lead"]).pipe(Effect.flip),
+      ).toMatchObject({ _tag: "McpCapabilityUnavailableError", capability: "board" });
+
+      const owner = yield* makeHarness();
+      expect(
+        yield* owner
+          .call("propose_triage_card", { title: "Other", spec: "", reasoning: "None." })
+          .pipe(Effect.flip),
+      ).toMatchObject({ _tag: "McpCapabilityUnavailableError", capability: "lead" });
     }),
   );
 });

@@ -85,7 +85,10 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
-import { BOARD_CLAUDE_TOOL_NAMES } from "../../mcp/toolkits/board/tools.ts";
+import {
+  BOARD_CLAUDE_TOOL_NAMES,
+  LEAD_CLAUDE_TOOL_NAMES,
+} from "../../mcp/toolkits/board/tools.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
 import { claudeSignedOutMessage, makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import { planClaudeSkillDispatch } from "../Drivers/ClaudeSkillDispatch.ts";
@@ -4738,11 +4741,16 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           ? { autoCompactWindow: Number(claudeSettings.autoCompactWindow) }
           : {}),
       };
-      // A run connects to Iskra's MCP server only for the board tools, which it alone is allowed.
+      // A run connects to Iskra's MCP server only for the tools its role is given, and only those.
       const threadMcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
-      const mcpSession =
-        input.run && !threadMcpSession?.capabilities.has("board") ? undefined : threadMcpSession;
-      const runAllowedTools = mcpSession ? [...allowedTools, ...BOARD_CLAUDE_TOOL_NAMES] : allowedTools;
+      const runToolNames = threadMcpSession?.capabilities.has("board")
+        ? BOARD_CLAUDE_TOOL_NAMES
+        : threadMcpSession?.capabilities.has("lead")
+          ? LEAD_CLAUDE_TOOL_NAMES
+          : null;
+      const mcpSession = input.run && runToolNames === null ? undefined : threadMcpSession;
+      const runAllowedTools =
+        input.run && runToolNames !== null ? [...allowedTools, ...runToolNames] : allowedTools;
       // The attachments dir grant lets the agent Read/copy pasted images at
       // the paths ProviderService injects into the turn text, without an
       // approval prompt. It is a leaf directory holding only attachment

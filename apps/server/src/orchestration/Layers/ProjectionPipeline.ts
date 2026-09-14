@@ -700,6 +700,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               reviewReturns: 0,
               attemptGroupId: event.payload.attemptGroupId ?? null,
               linearIssue: null,
+              sourceMessageId: event.payload.sourceMessageId ?? null,
               createdBy: event.payload.createdBy,
               createdAt: event.payload.createdAt,
               updatedAt: event.payload.updatedAt,
@@ -942,6 +943,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             pinnedSpec: event.payload.pinnedSpec,
             wakeDepth: event.payload.wakeDepth,
             memberAgentIds: event.payload.memberAgentIds,
+            leadAgentId: event.payload.leadAgentId ?? null,
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
             archivedAt: null,
@@ -967,6 +969,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               : {}),
             ...(event.payload.memberAgentIds !== undefined
               ? { memberAgentIds: event.payload.memberAgentIds }
+              : {}),
+            ...(event.payload.leadAgentId !== undefined
+              ? { leadAgentId: event.payload.leadAgentId }
               : {}),
             updatedAt: event.payload.updatedAt,
           });
@@ -1006,7 +1011,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         case "channel.run-started":
           yield* projectionChannelRepository.insertRun({
             ...event.payload,
-            role: "conversation",
+            role: event.payload.role ?? "conversation",
             cardId: null,
           });
           return;

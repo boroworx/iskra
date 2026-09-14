@@ -20,6 +20,7 @@ import {
   BoardSessionRequiredError,
   BoardToolFailedError,
   BoardToolkit,
+  LeadSessionRequiredError,
 } from "./tools.ts";
 
 const make = Effect.gen(function* () {
@@ -47,6 +48,25 @@ const make = Effect.gen(function* () {
     return { ...run.value, cardId: run.value.cardId };
   });
 
+  /** A lead's proposal always comes from its own channel and the message that woke it. */
+  const requireLeadSession = Effect.gen(function* () {
+    const scope = yield* McpInvocationContext.requireMcpCapability("lead");
+    const run = yield* snapshots.getRunByThreadId(scope.threadId).pipe(Effect.mapError(failed));
+    if (
+      Option.isNone(run) ||
+      run.value.role !== "lead" ||
+      run.value.channelId === null ||
+      run.value.triggerMessageId === null
+    ) {
+      return yield* new LeadSessionRequiredError({});
+    }
+    return {
+      ...run.value,
+      channelId: run.value.channelId,
+      triggerMessageId: run.value.triggerMessageId,
+    };
+  });
+
   const dispatch = (command: OrchestrationCommand) =>
     engine.dispatch(command).pipe(
       Effect.asVoid,
@@ -58,6 +78,37 @@ const make = Effect.gen(function* () {
     );
 
   return BoardToolkit.of({
+    // ponytail: a lead run that takes later messages as further turns still links proposals to the
+    // message that first woke it; carry each turn's message on the run if that misleads.
+    propose_triage_card: (input) =>
+      Effect.gen(function* () {
+        const session = yield* requireLeadSession;
+        const channel = yield* snapshots.getChannelShellById(session.channelId).pipe(
+          Effect.mapError(failed),
+          Effect.flatMap(
+            Option.match({ onNone: () => new LeadSessionRequiredError({}), onSome: Effect.succeed }),
+          ),
+        );
+        const cardId = CardId.make(`card-${yield* uuid}`);
+        yield* dispatch({
+          type: "card.propose",
+          commandId: yield* commandId("lead-propose", session.threadId),
+          cardId,
+          agentId: session.agentId,
+          projectId: channel.projectId,
+          channelId: channel.id,
+          title: input.title,
+          spec: input.spec,
+          tags: input.tags ?? [],
+          lead: {
+            sourceMessageId: session.triggerMessageId,
+            reasoning: input.reasoning,
+            likelyDuplicateCardIds: (input.likelyDuplicateCardIds ?? []).map((id) => CardId.make(id)),
+          },
+          createdAt: yield* nowIso,
+        });
+        return { cardId };
+      }),
     propose_card: (input) =>
       Effect.gen(function* () {
         const session = yield* requireOwnerSession;

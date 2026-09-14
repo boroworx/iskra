@@ -6852,6 +6852,44 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("connects a channel lead's run to its one tool", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      McpProviderSession.setMcpProviderSession({
+        environmentId: EnvironmentId.make("environment-lead"),
+        threadId: THREAD_ID,
+        providerSessionId: "provider-session-lead",
+        providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+        endpoint: "http://127.0.0.1:1/mcp",
+        authorizationHeader: "Bearer lead-token",
+        capabilities: new Set(["lead"]),
+      });
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => McpProviderSession.clearMcpProviderSession(THREAD_ID)),
+      );
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+        run: { systemPrompt: "", capabilities: ["read"] },
+      });
+
+      const options = harness.getLastCreateQueryInput()?.options;
+      assert.deepEqual(options?.allowedTools, [
+        "Read",
+        "Glob",
+        "Grep",
+        "mcp__iskra__propose_triage_card",
+      ]);
+      assert.deepEqual(Object.keys(options?.mcpServers ?? {}), ["iskra"]);
+    }).pipe(
+      Effect.scoped,
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("never widens a run's permission mode when a turn changes interaction mode", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

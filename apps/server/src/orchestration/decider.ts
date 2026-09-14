@@ -77,6 +77,27 @@ import { threadHasQueuedTurnStart } from "./ThreadSettlementPolicy.ts";
 const isScriptRunCommand = Schema.is(SCRIPT_RUN_COMMAND_PATTERN);
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
+
+type ReadModelChannel = NonNullable<OrchestrationReadModel["channels"]>[number];
+
+/** Why an agent cannot lead a channel, or null: a lead is an active agent of the project, not a member. */
+function channelLeadProblem(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly projectId: ReadModelChannel["projectId"];
+  readonly kind: ReadModelChannel["kind"];
+  readonly leadAgentId: ReadModelChannel["leadAgentId"];
+  readonly memberAgentIds: ReadModelChannel["memberAgentIds"];
+}): string | null {
+  if (input.leadAgentId === null) return null;
+  if (input.kind !== "channel") return "Only a channel can have a lead, not a DM.";
+  const agent = (input.readModel.agents ?? []).find((candidate) => candidate.id === input.leadAgentId);
+  if (agent === undefined || agent.projectId !== input.projectId || agent.archivedAt !== null) {
+    return "A channel's lead must be an active agent of its project.";
+  }
+  return input.memberAgentIds.includes(agent.id)
+    ? `@${agent.name} is a member of this channel; a lead is not a member.`
+    : null;
+}
 const decodeUserInputRequestedPayload = Schema.decodeUnknownOption(UserInputRequestedPayload);
 const threadPullRequestLinksEqual = Schema.toEquivalence(Schema.NullOr(ThreadLinkedPullRequest));
 
@@ -2662,13 +2683,18 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         return yield* refuse(`@${agent.name} isn't an active agent of this project.`);
       }
       const channelId = command.channelId ?? null;
-      if (
-        channelId !== null &&
-        !(readModel.channels ?? []).some(
-          (channel) => channel.id === channelId && channel.projectId === command.projectId,
-        )
-      ) {
+      const channel =
+        channelId === null
+          ? undefined
+          : (readModel.channels ?? []).find(
+              (candidate) => candidate.id === channelId && candidate.projectId === command.projectId,
+            );
+      if (channelId !== null && channel === undefined) {
         return yield* refuse(`Channel '${channelId}' is not in this project.`);
+      }
+      const lead = command.lead;
+      if (lead !== undefined && channel?.leadAgentId !== agent.id) {
+        return yield* refuse(`@${agent.name} doesn't lead this channel.`);
       }
       const parentCardId = command.parentCardId ?? null;
       if (parentCardId !== null) {
@@ -2677,16 +2703,26 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           return yield* refuse("A sub-card needs a live card of the same project.");
         }
       }
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "card",
-          aggregateId: command.cardId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
+      const duplicateIds = [...new Set(lead?.likelyDuplicateCardIds ?? [])];
+      for (const duplicateId of duplicateIds) {
+        const duplicate = (readModel.cards ?? []).find((card) => card.id === duplicateId);
+        if (duplicate === undefined || duplicate.projectId !== command.projectId) {
+          return yield* refuse(`Card '${duplicateId}' is not a card of this project.`);
+        }
+      }
+      const eventBase = withEventBase({
+        aggregateKind: "card",
+        aggregateId: command.cardId,
+        occurredAt: command.createdAt,
+        commandId: command.commandId,
+      });
+      const author = { kind: lead === undefined ? "agent" : "lead", id: agent.id } as const;
+      const created: PlannedOrchestrationEvent = {
+        ...(yield* eventBase),
         type: "card.created",
         payload: {
           cardId: command.cardId,
+          sourceMessageId: lead?.sourceMessageId ?? null,
           projectId: command.projectId,
           channelId,
           parentCardId,
@@ -2697,11 +2733,42 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           status: "triage",
           ownerHumanId: CHANNEL_HUMAN_AUTHOR_ID,
           baseBranch: null,
-          createdBy: { kind: "agent", id: agent.id },
+          createdBy: author,
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
       };
+      if (lead === undefined) {
+        return created;
+      }
+      // A lead's proposal carries why it was made and what it may duplicate, for triage to judge.
+      const events: PlannedOrchestrationEvent[] = [
+        created,
+        {
+          ...(yield* eventBase),
+          type: "card.decision-recorded",
+          payload: {
+            cardId: command.cardId,
+            decisionId: `${command.cardId}:lead-reasoning`,
+            author,
+            text: lead.reasoning,
+            createdAt: command.createdAt,
+          },
+        },
+      ];
+      for (const otherCardId of duplicateIds) {
+        events.push({
+          ...(yield* eventBase),
+          type: "card.relation-added",
+          payload: {
+            cardId: command.cardId,
+            kind: "duplicateOf",
+            otherCardId,
+            updatedAt: command.createdAt,
+          },
+        });
+      }
+      return events;
     }
 
     case "card.decision.agent.record": {
@@ -3474,6 +3541,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       if (run === undefined) {
         return yield* refuse("That session has ended; a DM message never starts a session.");
       }
+      if (run.role === "lead") {
+        return yield* refuse("A channel's lead takes no messages; post in its channel instead.");
+      }
       if (run.role === "helper" || run.role === "critic") {
         return yield* refuse(`A ${run.role} takes no messages; write to the card's owner session.`);
       }
@@ -3530,6 +3600,19 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         kind: command.kind,
         memberAgentIds: command.memberAgentIds,
       });
+      const createLeadProblem = channelLeadProblem({
+        readModel,
+        projectId: command.projectId,
+        kind: command.kind,
+        leadAgentId: command.leadAgentId ?? null,
+        memberAgentIds: command.memberAgentIds,
+      });
+      if (createLeadProblem !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: createLeadProblem,
+        });
+      }
       return {
         ...(yield* withEventBase({
           aggregateKind: "channel",
@@ -3547,6 +3630,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           pinnedSpec: command.pinnedSpec ?? "",
           wakeDepth: command.wakeDepth ?? DEFAULT_CHANNEL_WAKE_DEPTH,
           memberAgentIds: command.memberAgentIds,
+          leadAgentId: command.leadAgentId ?? null,
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
@@ -3569,6 +3653,22 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           exceptChannelId: channel.id,
         });
       }
+      if (command.leadAgentId !== undefined || command.memberAgentIds !== undefined) {
+        const updateLeadProblem = channelLeadProblem({
+          readModel,
+          projectId: channel.projectId,
+          kind: channel.kind,
+          leadAgentId:
+            command.leadAgentId === undefined ? channel.leadAgentId : command.leadAgentId,
+          memberAgentIds: command.memberAgentIds ?? channel.memberAgentIds,
+        });
+        if (updateLeadProblem !== null) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: updateLeadProblem,
+          });
+        }
+      }
       const occurredAt = yield* nowIso;
       return {
         ...(yield* withEventBase({
@@ -3587,6 +3687,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.memberAgentIds !== undefined
             ? { memberAgentIds: command.memberAgentIds }
             : {}),
+          ...(command.leadAgentId !== undefined ? { leadAgentId: command.leadAgentId } : {}),
           updatedAt: occurredAt,
         },
       };
@@ -3694,8 +3795,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         },
       };
 
-      // Invariant 3: only a mention, or a message in an agent's DM, wakes anyone.
-      const targets = channel.kind === "dm" ? channel.memberAgentIds : mentions;
+      // Invariant 3: a mention, or a message in an agent's DM, wakes its agents. A channel message
+      // that mentions no one wakes only the channel's lead, if it has one.
+      const targets =
+        channel.kind === "dm"
+          ? channel.memberAgentIds
+          : mentions.length > 0 || channel.leadAgentId === null
+            ? mentions
+            : [channel.leadAgentId];
       const events: PlannedOrchestrationEvent[] = [messageEvent];
       let newRuns = 0;
       for (const agentId of targets) {
@@ -3802,6 +3909,16 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: "A channel conversation run is read-only; writing requires a card.",
         });
       }
+      if (
+        command.role === "lead" &&
+        (readModel.channels ?? []).find((channel) => channel.id === command.channelId)
+          ?.leadAgentId !== command.agentId
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Only a channel's lead starts a lead run in it.",
+        });
+      }
       return {
         ...(yield* withEventBase({
           aggregateKind: "channel",
@@ -3815,6 +3932,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           channelId: command.channelId,
           agentId: command.agentId,
           triggerMessageId: command.triggerMessageId,
+          ...(command.role !== undefined ? { role: command.role } : {}),
           capabilities: command.capabilities,
           context: command.context,
           rendered: command.rendered,
@@ -3863,6 +3981,17 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail: `Channel '${command.channelId}' is archived and cannot receive messages.`,
+        });
+      }
+      // A lead never answers in its channel; it only proposes cards.
+      if (
+        (readModel.liveRuns ?? []).some(
+          (run) => run.threadId === command.runThreadId && run.role === "lead",
+        )
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A channel's lead does not post in the channel.",
         });
       }
       return {

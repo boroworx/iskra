@@ -805,6 +805,38 @@ The GraphQL queries follow Linear's documented API but have not been run against
 card linked to the message, with reasoning and likely duplicates; an `@mention` bypasses the lead;
 the lead cannot answer, assign, approve or wake another agent.
 
+_Accepted:_ A channel has an optional `leadAgentId`, picked in the channel's member list. A lead is
+an active agent of the project, is not a member of the channel, and exists only on `channel`
+channels, never DMs.
+
+**Waking.** A channel message that mentions no one wakes only the lead, and any mention bypasses it
+(`decider.channels.test.ts`). A lead wake goes through the same wake limits as every other wake.
+
+**The lead run.** The wake starts a read-only run with role `lead`. Its context adds the channel's
+members and the project's open cards, and its prompt says it never replies. The run never posts: the
+run reactor skips its reply, and the decider refuses a channel post from a lead run.
+`RunReactor.test.ts` covers both. A DM cannot write into a lead run either.
+
+**Proposing.** The run's MCP credential carries only the `lead` capability, and Claude allows it one
+tool, `propose_triage_card`. The handler takes the channel, the agent and the triggering message from
+the run record. It dispatches `card.propose` with a `lead` part, which the decider accepts only from
+that channel's lead. The result is:
+- `card.created` in `triage`, authored by the lead, with `sourceMessageId` set to the message;
+- a `card.decision-recorded` holding the reasoning;
+- one `duplicateOf` relation per likely duplicate.
+
+`decider.boardTools.test.ts`, `handlers.test.ts` and `ClaudeAdapter.test.ts` cover this.
+
+**What the lead cannot do.** None of its tools approves, assigns or lands. Its output is never posted,
+so it cannot answer and cannot wake anyone with a mention.
+
+**Limits:**
+- A lead run that takes later messages as further turns still links its proposals to the message
+  that first woke it.
+- The board face does not yet show a proposal's reasoning. The reasoning lives in the card's decision
+  log and is handed to its sessions.
+- No browser pass has been done on the lead picker.
+
 ### M3–M5 (not yet briefed)
 
 M3 knowledge: agents propose AGENTS.md edits as items a human reviews; a per-agent scratchpad

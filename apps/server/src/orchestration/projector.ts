@@ -1261,6 +1261,7 @@ export function projectEvent(
             reviewReturns: 0,
             attemptGroupId: payload.attemptGroupId ?? null,
             linearIssue: null,
+            sourceMessageId: payload.sourceMessageId ?? null,
             createdBy: payload.createdBy,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
@@ -1380,6 +1381,7 @@ export function projectEvent(
             pinnedSpec: payload.pinnedSpec,
             wakeDepth: payload.wakeDepth,
             memberAgentIds: payload.memberAgentIds,
+            leadAgentId: payload.leadAgentId ?? null,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             archivedAt: null,
@@ -1407,6 +1409,7 @@ export function projectEvent(
             ...(payload.memberAgentIds !== undefined
               ? { memberAgentIds: payload.memberAgentIds }
               : {}),
+            ...(payload.leadAgentId !== undefined ? { leadAgentId: payload.leadAgentId } : {}),
             updatedAt: payload.updatedAt,
           }),
         })),
@@ -1442,7 +1445,7 @@ export function projectEvent(
             ...(nextBase.liveRuns ?? []).filter((run) => run.threadId !== payload.threadId),
             {
               threadId: payload.threadId,
-              role: "conversation" as const,
+              role: payload.role ?? "conversation",
               channelId: payload.channelId,
               cardId: null,
               agentId: payload.agentId,

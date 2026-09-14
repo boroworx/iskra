@@ -22,6 +22,7 @@ import { ComposerSurface } from "../chat/ComposerSurface";
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
 import { EMPTY_COMPOSER_CONTEXT_RECORDS } from "../composerContextPresentation";
 import { Button } from "../ui/button";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { SidebarInset } from "../ui/sidebar";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import {
@@ -112,7 +113,14 @@ export function ChannelView(props: {
                 }}
               />
             </main>
-            {channel.kind === "channel" ? <ChannelMemberList members={members} /> : null}
+            {channel.kind === "channel" ? (
+              <ChannelMemberList
+                members={members}
+                channel={channel}
+                agents={agents}
+                environmentId={props.environmentId}
+              />
+            ) : null}
           </div>
         )}
       </div>
@@ -384,14 +392,60 @@ const EMPTY_SKILLS: ReadonlyArray<never> = [];
 
 function noop() {}
 
+const NO_LEAD = "none";
+
 const ChannelMemberList = memo(function ChannelMemberList(props: {
   readonly members: ReadonlyArray<ChannelMemberEntry>;
+  readonly channel: OrchestrationChannelShell;
+  readonly agents: ReadonlyArray<OrchestrationAgentShell>;
+  readonly environmentId: EnvironmentId;
 }) {
+  const updateChannel = useAtomCommand(channelEnvironment.update);
+  // A lead is an agent of the project that is not a member of the channel.
+  const leadOptions = props.agents.filter(
+    (agent) =>
+      agent.projectId === props.channel.projectId &&
+      !props.channel.memberAgentIds.includes(agent.id),
+  );
+  const leadName = (agentId: string | null) =>
+    agentId === null || agentId === NO_LEAD
+      ? "No lead"
+      : `@${props.agents.find((agent) => agent.id === agentId)?.name ?? agentId}`;
   return (
     <aside
       aria-label="Members"
       className="hidden w-56 shrink-0 flex-col gap-1 overflow-y-auto border-l border-border px-3 py-4 lg:flex"
     >
+      <h2 className="px-2 text-xs font-medium text-muted-foreground">Lead</h2>
+      <div className="px-2 pb-3">
+        <Select
+          value={props.channel.leadAgentId ?? NO_LEAD}
+          onValueChange={(value) =>
+            void updateChannel({
+              environmentId: props.environmentId,
+              input: {
+                channelId: props.channel.id,
+                leadAgentId: value === null || value === NO_LEAD ? null : AgentId.make(value),
+              },
+            })
+          }
+        >
+          <SelectTrigger aria-label="Channel lead">
+            <SelectValue>{leadName}</SelectValue>
+          </SelectTrigger>
+          <SelectPopup>
+            <SelectItem value={NO_LEAD}>No lead</SelectItem>
+            {leadOptions.map((agent) => (
+              <SelectItem key={agent.id} value={agent.id}>
+                @{agent.name}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          Reads messages that mention no one and proposes cards from them.
+        </p>
+      </div>
       <h2 className="px-2 text-xs font-medium text-muted-foreground">
         Members {props.members.length}
       </h2>
