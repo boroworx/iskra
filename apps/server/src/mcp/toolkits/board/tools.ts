@@ -11,6 +11,8 @@ import * as Tool from "effect/unstable/ai/Tool";
 import * as Toolkit from "effect/unstable/ai/Toolkit";
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
+import * as CardWorkspace from "../../../orchestration/CardWorkspace.ts";
+import * as HostAdmission from "../../../orchestration/HostAdmission.ts";
 import * as OrchestrationEngine from "../../../orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ThreadPlanProgressService } from "../../../orchestration/ThreadPlanProgress.ts";
@@ -20,6 +22,8 @@ const dependencies = [
   OrchestrationEngine.OrchestrationEngineService,
   ProjectionSnapshotQuery.ProjectionSnapshotQuery,
   ThreadPlanProgressService,
+  HostAdmission.HostAdmission,
+  CardWorkspace.CardWorkspace,
 ];
 
 export class BoardSessionRequiredError extends Schema.TaggedError<BoardSessionRequiredError>()(
@@ -145,6 +149,26 @@ const UpdatePlanTool = Tool.make("update_plan", {
   .annotate(Tool.Title, "Update the plan")
   .annotateMerge(boardToolAnnotations)
   .annotate(Tool.Idempotent, true);
+
+const RunChecksTool = Tool.make("run_checks", {
+  description:
+    "Run the project's checks on your worktree through the machine's queue. This is the only way to run the full suite; a single test file is fine to run yourself. It returns at once with your place in the queue; the results arrive as your next message, so end your turn after calling it.",
+  parameters: Schema.Struct({
+    scope: Schema.Literals(["targeted", "full"]).annotate({
+      description: "targeted runs each check's targeted command with your filter; full runs everything.",
+    }),
+    filter: Schema.optional(
+      TrimmedNonEmptyString.annotate({
+        description: "What a targeted run narrows to, such as a test file or package name.",
+      }),
+    ),
+  }),
+  success: Schema.Struct({ jobId: Schema.String, position: Schema.Int }),
+  failure: BoardToolError,
+  dependencies,
+})
+  .annotate(Tool.Title, "Run the checks")
+  .annotateMerge(boardToolAnnotations);
 
 const RequestReviewTool = Tool.make("request_review", {
   description:
@@ -276,6 +300,7 @@ export const BoardToolkit = Toolkit.make(
   ProposeCardTool,
   RecordDecisionTool,
   UpdatePlanTool,
+  RunChecksTool,
   RequestReviewTool,
   RequestCheckpointTool,
   AskOwnerTool,
@@ -292,6 +317,7 @@ export const BOARD_CLAUDE_TOOL_NAMES = claudeToolNames([
   "propose_card",
   "record_decision",
   "update_plan",
+  "run_checks",
   "request_review",
   "request_checkpoint",
   "ask_owner",

@@ -13,6 +13,7 @@ import {
 } from "@iskra/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -20,7 +21,9 @@ import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import type { Tool } from "effect/unstable/ai";
 
+import * as CardWorkspace from "../../../orchestration/CardWorkspace.ts";
 import { OrchestrationCommandInvariantError } from "../../../orchestration/Errors.ts";
+import * as HostAdmission from "../../../orchestration/HostAdmission.ts";
 import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
@@ -90,11 +93,16 @@ const makeHarness = Effect.fn("makeBoardToolkitHarness")(function* (
   const commands = yield* Ref.make<ReadonlyArray<OrchestrationCommand>>([]);
   const run = options.run === undefined ? ownerRun() : options.run;
   const planProgress = ThreadPlanProgress.make();
+  // Resolves with the result a run_checks job hands the owner.
+  const checksDelivered = yield* Deferred.make<OrchestrationCommand>();
   const dispatch: OrchestrationEngineShape["dispatch"] = (command) =>
     Effect.gen(function* () {
       const rejection = options.reject?.(command) ?? null;
       if (rejection !== null) return yield* rejection;
       yield* Ref.update(commands, (recorded) => [...recorded, command]);
+      if (command.type === "card.activity.record" && command.reason?.code === "runChecksResult") {
+        yield* Deferred.succeed(checksDelivered, command);
+      }
       return { sequence: 1 };
     });
   const dependencies = Layer.mergeAll(
@@ -114,6 +122,32 @@ const makeHarness = Effect.fn("makeBoardToolkitHarness")(function* (
     }),
     Layer.succeed(ThreadPlanProgress.ThreadPlanProgressService, planProgress),
     Layer.succeed(Crypto.Crypto, testCrypto),
+    Layer.succeed(
+      HostAdmission.HostAdmission,
+      HostAdmission.HostAdmission.of({
+        run: (_job, effect) => effect,
+        snapshot: Effect.succeed({ running: [], waiting: [], memoryPressureSince: null }),
+        cancelLowestPriority: Effect.succeed(null),
+      }),
+    ),
+    Layer.mock(CardWorkspace.CardWorkspace)({
+      runChecks: (input) =>
+        Effect.succeed({
+          passed: false,
+          summary: "test failed.",
+          results: [
+            {
+              id: "test",
+              name: `test ${input.filter ?? ""}`.trim(),
+              exitCode: 1,
+              timedOut: false,
+              durationMs: 4_200,
+              logTail: "FAIL limits.test.ts\n",
+              logArtifactPath: null,
+            },
+          ],
+        }),
+    }),
   );
   const toolkit = yield* BoardToolkit.pipe(
     Effect.provide(BoardToolkitHandlersLive.pipe(Layer.provide(dependencies))),
@@ -139,7 +173,7 @@ const makeHarness = Effect.fn("makeBoardToolkitHarness")(function* (
       }),
       Effect.provide(dependencies),
     );
-  return { commands, call, planProgress };
+  return { commands, call, planProgress, checksDelivered };
 });
 
 describe("board toolkit handlers", () => {
@@ -148,6 +182,7 @@ describe("board toolkit handlers", () => {
       "propose_card",
       "record_decision",
       "update_plan",
+      "run_checks",
       "request_review",
       "request_checkpoint",
       "ask_owner",
@@ -295,6 +330,31 @@ describe("board toolkit handlers", () => {
           },
         },
       ]);
+    }),
+  );
+
+  it.effect("runs the checks through the machine's queue and hands the result to the owner's next turn", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      const result = yield* harness.call("run_checks", { scope: "targeted", filter: "limits" });
+      expect(result.position).toBe(0);
+      expect(result.jobId).toMatch(/^run-checks-/);
+
+      const delivered = yield* Deferred.await(harness.checksDelivered);
+      expect(delivered).toMatchObject({
+        type: "card.activity.record",
+        activityId: result.jobId,
+        cardId: CARD_ID,
+        author: { kind: "system" },
+        deliverTo: "builder",
+        runThreadId: THREAD_ID,
+        body: "run_checks (targeted) failed.\n- test limits: exit 1 in 4s\n```\nFAIL limits.test.ts\n```",
+      });
+
+      const helper = yield* makeHarness({ run: ownerRun("helper") });
+      expect(yield* helper.call("run_checks", { scope: "full" }).pipe(Effect.flip)).toMatchObject({
+        _tag: "BoardSessionRequiredError",
+      });
     }),
   );
 

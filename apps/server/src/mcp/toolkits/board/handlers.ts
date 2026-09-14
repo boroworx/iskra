@@ -19,6 +19,8 @@ import {
   REVIEW_REQUESTED_CODE,
   renderReviewRequest,
 } from "../../../orchestration/CardEvidence.ts";
+import * as CardWorkspace from "../../../orchestration/CardWorkspace.ts";
+import * as HostAdmission from "../../../orchestration/HostAdmission.ts";
 import * as OrchestrationEngine from "../../../orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ThreadPlanProgressService } from "../../../orchestration/ThreadPlanProgress.ts";
@@ -60,11 +62,35 @@ export const elicitationOf = (
   };
 };
 
+/** The text a run_checks result reaches the owner as. */
+export function renderRunChecksResult(
+  scope: "targeted" | "full",
+  run: CardWorkspace.CardChecksRun,
+): string {
+  if (run.results.length === 0) {
+    return `run_checks (${scope}) ran nothing.${run.summary.trim().length > 0 ? ` ${run.summary.trim()}` : ""}`;
+  }
+  return [
+    `run_checks (${scope}) ${run.passed ? "passed" : "failed"}.`,
+    ...run.results.map((result) => {
+      const failed = result.exitCode !== 0 || result.timedOut;
+      const line = `- ${result.name}: ${result.timedOut ? "timed out" : `exit ${result.exitCode ?? "none"}`} in ${Math.round(result.durationMs / 1000)}s`;
+      return failed && result.logTail.trim().length > 0
+        ? `${line}\n\`\`\`\n${result.logTail.trimEnd()}\n\`\`\``
+        : line;
+    }),
+  ].join("\n");
+}
+
+export const RUN_CHECKS_RESULT_CODE = "runChecksResult";
+
 const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngine.OrchestrationEngineService;
   const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const planProgress = yield* ThreadPlanProgressService;
   const crypto = yield* Crypto.Crypto;
+  const admission = yield* HostAdmission.HostAdmission;
+  const workspace = yield* CardWorkspace.CardWorkspace;
 
   const uuid = crypto.randomUUIDv4.pipe(Effect.orDie);
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -284,6 +310,60 @@ const make = Effect.gen(function* () {
           reason: { code: REVIEW_REQUESTED_CODE, text: "Asked for review." },
         });
         return {};
+      }),
+    run_checks: (input) =>
+      Effect.gen(function* () {
+        const session = yield* requireOwnerSession;
+        const card = yield* snapshots.getCardShellById(session.cardId).pipe(
+          Effect.mapError(failed),
+          Effect.flatMap(
+            Option.match({ onNone: () => new BoardSessionRequiredError({}), onSome: Effect.succeed }),
+          ),
+        );
+        const jobId = `run-checks-${yield* uuid}`;
+        const position = (yield* admission.snapshot).waiting.length;
+        const deliver = (body: string) =>
+          Effect.gen(function* () {
+            yield* engine.dispatch({
+              type: "card.activity.record",
+              commandId: CommandId.make(`server:mcp-board-run-checks:${jobId}`),
+              activityId: jobId,
+              cardId: session.cardId,
+              kind: "message",
+              author: { kind: "system", id: "system" },
+              body,
+              runThreadId: session.threadId,
+              deliverTo: "builder",
+              elicitation: null,
+              answers: null,
+              status: null,
+              evidenceId: null,
+              reason: { code: RUN_CHECKS_RESULT_CODE, text: body.split("\n")[0]!.slice(0, 200) },
+              createdAt: yield* nowIso,
+            });
+          });
+        // The call returns at once so a long suite can't time the tool out; the result is the
+        // owner's next turn.
+        // ponytail: a server restart loses a queued run; rebuild the queue from these activities if
+        // that bites.
+        yield* admission
+          .run(
+            {
+              cardId: card.id,
+              projectId: card.projectId,
+              priority: card.priority,
+              label: `run_checks ${input.scope}`,
+              kind: "runChecks",
+            },
+            workspace.runChecks({ cardId: card.id, scope: input.scope, filter: input.filter }),
+          )
+          .pipe(
+            Effect.flatMap((run) => deliver(renderRunChecksResult(input.scope, run))),
+            Effect.catch((error) => deliver(`run_checks (${input.scope}) couldn't run: ${error.message}`)),
+            Effect.catchCause((cause) => Effect.logWarning("run_checks result was not delivered", { jobId, cause })),
+            Effect.forkDetach,
+          );
+        return { jobId, position };
       }),
     request_checkpoint: (input) =>
       Effect.gen(function* () {
