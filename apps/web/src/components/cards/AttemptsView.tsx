@@ -1,3 +1,4 @@
+import { CARD_SESSION_LABEL } from "@iskra/client-runtime/cards";
 import {
   CARD_ATTEMPTS_MAX,
   CARD_ATTEMPTS_MIN,
@@ -7,6 +8,7 @@ import {
   type OrchestrationAgentShell,
   type OrchestrationCardShell,
 } from "@iskra/contracts";
+import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { randomUUID } from "~/lib/utils";
@@ -18,6 +20,7 @@ import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
 import { toastCommandFailure } from "../toastCommandFailure";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
+import { DisabledReason } from "./DisabledReason";
 
 /**
  * Best-of-N on one card: pick two to four agents to try it at once, then compare
@@ -87,7 +90,15 @@ function StartAttempts(props: {
       <p className="text-sm text-muted-foreground">
         {ready
           ? `Pick ${CARD_ATTEMPTS_MIN} to ${CARD_ATTEMPTS_MAX} agents to try this card at once, each on its own branch.`
-          : "Attempts start on a ready card, before its work begins."}
+          : "Attempts start on a ready card, before its work begins. Approve it on the board first."}{" "}
+        <Link
+          to="/board/$environmentId/$projectId"
+          params={{ environmentId: props.environmentId, projectId: props.card.projectId }}
+          search={{ card: props.card.id }}
+          className="text-foreground underline-offset-2 hover:underline"
+        >
+          Back to the card
+        </Link>
       </p>
       <ul className="flex flex-col gap-1">
         {props.agents.map((agent) => (
@@ -110,25 +121,35 @@ function StartAttempts(props: {
           </li>
         ))}
       </ul>
-      <Button
-        className="self-start"
-        size="sm"
-        disabled={!ready || !countOk || starting}
-        onClick={async () => {
-          setStarting(true);
-          const result = await start({
-            environmentId: props.environmentId,
-            input: {
-              cardId: props.card.id,
-              attempts: chosen.map((agentId) => ({ cardId: CardId.make(randomUUID()), agentId })),
-            },
-          });
-          setStarting(false);
-          toastCommandFailure(result, "The attempts did not start", "The request was refused.");
-        }}
+      <DisabledReason
+        reason={
+          !ready
+            ? "Attempts start on a ready card."
+            : !countOk
+              ? `Pick ${CARD_ATTEMPTS_MIN} to ${CARD_ATTEMPTS_MAX} agents.`
+              : null
+        }
       >
-        Start {chosen.length > 0 ? chosen.length : ""} attempts
-      </Button>
+        <Button
+          className="self-start"
+          size="sm"
+          disabled={!ready || !countOk || starting}
+          onClick={async () => {
+            setStarting(true);
+            const result = await start({
+              environmentId: props.environmentId,
+              input: {
+                cardId: props.card.id,
+                attempts: chosen.map((agentId) => ({ cardId: CardId.make(randomUUID()), agentId })),
+              },
+            });
+            setStarting(false);
+            toastCommandFailure(result, "The attempts did not start", "The request was refused.");
+          }}
+        >
+          Start {chosen.length > 0 ? chosen.length : ""} attempts
+        </Button>
+      </DisabledReason>
     </main>
   );
 }
@@ -158,7 +179,9 @@ function AttemptColumn(props: {
           {props.agent === undefined ? attempt.title : `@${props.agent.name}`}
         </span>
         <span className="shrink-0 text-xs text-muted-foreground">
-          {attempt.ownerSession?.state ?? "not started"}
+          {attempt.ownerSession === null
+            ? "Not started"
+            : CARD_SESSION_LABEL[attempt.ownerSession.state]}
         </span>
         {attempt.diffStat !== null ? (
           <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
@@ -168,19 +191,29 @@ function AttemptColumn(props: {
         <Button className="ml-auto" size="sm" variant="ghost-muted" onClick={() => diff.refresh()}>
           Refresh
         </Button>
-        <Button
-          size="sm"
-          disabled={!canPromote}
-          onClick={async () => {
-            const result = await promote({
-              environmentId: props.environmentId,
-              input: { type: "card.attempt.promote", cardId: attempt.id },
-            });
-            toastCommandFailure(result, "The attempt was not promoted", "The request was refused.");
-          }}
+        <DisabledReason
+          reason={
+            canPromote ? null : "Its session has not made its branch yet; promote it once it has."
+          }
         >
-          Promote
-        </Button>
+          <Button
+            size="sm"
+            disabled={!canPromote}
+            onClick={async () => {
+              const result = await promote({
+                environmentId: props.environmentId,
+                input: { type: "card.attempt.promote", cardId: attempt.id },
+              });
+              toastCommandFailure(
+                result,
+                "The attempt was not promoted",
+                "The request was refused.",
+              );
+            }}
+          >
+            Promote
+          </Button>
+        </DisabledReason>
       </header>
       <pre className="min-h-0 flex-1 overflow-auto whitespace-pre rounded-md bg-muted/40 p-2 font-mono text-xs">
         {diff.error ??

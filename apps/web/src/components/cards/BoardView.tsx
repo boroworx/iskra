@@ -4,19 +4,18 @@ import {
   CARD_PRIORITIES,
   CARD_PRIORITY_LABEL,
   boardColumnOf,
+  cardBadges,
   cardDropDecision,
   isCardSnoozed,
   type BoardColumn,
 } from "@iskra/client-runtime/cards";
-import {
-  CARD_AUTOFIX_ATTEMPTS,
-  type CardId,
-  type CardPriority,
-  type EnvironmentId,
-  type OrchestrationAgentShell,
-  type OrchestrationCardShell,
-  type ProjectId,
-  type RunSessionState,
+import type {
+  CardId,
+  CardPriority,
+  EnvironmentId,
+  OrchestrationAgentShell,
+  OrchestrationCardShell,
+  ProjectId,
 } from "@iskra/contracts";
 import {
   DndContext,
@@ -31,29 +30,28 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { PlusIcon } from "lucide-react";
 import { memo, useCallback, useMemo, useState } from "react";
 
+import { useClientSettings } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
+import {
+  deriveLogicalProjectKeyFromSettings,
+  selectProjectGroupingSettings,
+} from "~/logicalProject";
 import { cardEnvironment } from "~/state/cards";
 import { useEnvironmentAgents, useEnvironmentCards, useProjects } from "~/state/entities";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { searchableSetting } from "../settings/settingsSearch";
 import { SidebarInset } from "../ui/sidebar";
 import { toastManager } from "../ui/toast";
+import { Tooltip, TooltipCreateHandle, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastCommandFailure } from "../toastCommandFailure";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { CardSheet } from "./CardSheet";
 import { NewCardDialog } from "./NewCardDialog";
 
-type Badge = readonly [label: string, alarming: boolean];
-
-const SESSION_BADGE: Partial<Record<RunSessionState, Badge>> = {
-  pending: ["Starting", false],
-  active: ["Working", false],
-  awaitingInput: ["Needs you", true],
-  complete: ["Waiting", false],
-  error: ["Failed", true],
-  stale: ["Stale", false],
-};
+/** One tooltip for every badge on the board; each badge is only a trigger carrying its hint. */
+const badgeHint = TooltipCreateHandle<string>();
 
 /** Which cards wait on an unlanded blocker, and each card's sub-cards, in one pass over the board. */
 function relatedCards(cards: ReadonlyArray<OrchestrationCardShell>) {
@@ -101,6 +99,7 @@ export function BoardView(props: {
   const project = projects.find(
     (entry) => entry.environmentId === props.environmentId && entry.id === props.projectId,
   );
+  const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const allCards = useEnvironmentCards(props.environmentId);
   const agents = useEnvironmentAgents(props.environmentId);
   const decide = useAtomCommand(cardEnvironment.decide);
@@ -165,8 +164,20 @@ export function BoardView(props: {
           <h1 className="truncate text-sm font-semibold">
             {project === undefined ? "Board" : `${project.title} board`}
           </h1>
+          {project !== undefined ? (
+            <Link
+              to="/settings/integrations"
+              search={{
+                project: deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings),
+              }}
+              hash={searchableSetting("linear-team").id}
+              className="ml-auto shrink-0 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            >
+              Linear sync
+            </Link>
+          ) : null}
           <Button
-            className="ml-auto"
+            className={project === undefined ? "ml-auto" : undefined}
             size="sm"
             variant="outline"
             onClick={() => setNewCardOpen(true)}
@@ -190,6 +201,9 @@ export function BoardView(props: {
           now={now}
           onClose={closeCard}
         />
+        <Tooltip handle={badgeHint}>
+          {({ payload }) => <TooltipPopup className="max-w-64">{payload}</TooltipPopup>}
+        </Tooltip>
         {cards.length === 0 ? (
           <main className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-5 text-center">
             <div className="flex max-w-md flex-col gap-1 text-sm text-muted-foreground">
@@ -288,24 +302,10 @@ const CardFace = memo(function CardFace(props: {
   });
   const update = useAtomCommand(cardEnvironment.update);
   const session = card.ownerSession;
-  const sessionBadge = session === null ? undefined : SESSION_BADGE[session.state];
-  const badges: Badge[] = [];
-  if (card.specState === "draft" && card.status !== "triage") badges.push(["Spec draft", false]);
-  if (props.blocked) badges.push(["Blocked", true]);
-  if (isCardSnoozed(card, props.now)) badges.push(["Snoozed", false]);
-  if (sessionBadge !== undefined) badges.push(sessionBadge);
-  if (card.checks !== null && card.status === "inReview") {
-    badges.push(
-      card.checks.state === "running"
-        ? ["Checks running", false]
-        : card.checks.state === "passed"
-          ? ["Checks passed", false]
-          : [`Checks failed ${card.checks.failedRuns}/${CARD_AUTOFIX_ATTEMPTS}`, true],
-    );
-  }
-  if (card.spentUsd >= card.budgetCapUsd && card.status !== "landed")
-    badges.push(["Budget reached", true]);
-  if (card.unpricedTurns > 0 && !card.acceptsUnpriced) badges.push(["Unpriced model", true]);
+  const badges = cardBadges(card, {
+    blocked: props.blocked,
+    snoozed: isCardSnoozed(card, props.now),
+  });
 
   return (
     <article
@@ -338,18 +338,24 @@ const CardFace = memo(function CardFace(props: {
       ) : null}
       {badges.length > 0 ? (
         <ul className="flex flex-wrap gap-1">
-          {badges.map(([label, alarming]) => (
-            <li
-              key={label}
-              className={cn(
-                "rounded px-1.5 py-0.5 text-[11px] leading-none",
-                alarming
-                  ? "bg-destructive/15 text-destructive-foreground"
-                  : "bg-muted text-muted-foreground",
-              )}
+          {badges.map((badge) => (
+            <TooltipTrigger
+              key={badge.label}
+              handle={badgeHint}
+              payload={badge.hint}
+              render={
+                <li
+                  className={cn(
+                    "rounded px-1.5 py-0.5 text-[11px] leading-none",
+                    badge.alarming
+                      ? "bg-destructive/15 text-destructive-foreground"
+                      : "bg-muted text-muted-foreground",
+                  )}
+                />
+              }
             >
-              {label}
-            </li>
+              {badge.label}
+            </TooltipTrigger>
           ))}
         </ul>
       ) : null}
