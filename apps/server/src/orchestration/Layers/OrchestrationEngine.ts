@@ -113,6 +113,8 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "card.unpriced.refuse":
     case "card.attempts.start":
     case "card.attempt.promote":
+    case "card.propose":
+    case "card.decision.agent.record":
       return {
         aggregateKind: "card",
         aggregateId: command.cardId,

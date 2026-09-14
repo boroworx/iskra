@@ -86,7 +86,7 @@ describe("renderCardBrief", () => {
     expect(decodeCardBrief(brief)).toEqual(brief);
     expect(renderCardBrief(brief)).toEqual({
       systemPrompt:
-        'You are @backend, the agent building the card "Rate limiting". You work in its worktree and are the only agent writing to it.\n\nYou own the API.',
+        'You are @backend, the agent building the card "Rate limiting". You work in its worktree and are the only agent writing to it. Use the board tools: record_decision for each choice that matters, update_plan as you go, ask_owner when the spec leaves you stuck, propose_card for work outside this card, and request_review once your work is committed.\n\nYou own the API.',
       firstMessage: [
         "# Handoff brief: Rate limiting",
         "Branch `iskra/rate-limiting-limits`, based on `main`.",

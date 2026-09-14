@@ -8,7 +8,8 @@ import {
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 
-export type McpCapability = "preview" | "device" | "pull-requests";
+/** `board` is granted only to a session building a card. */
+export type McpCapability = "preview" | "device" | "pull-requests" | "board";
 
 export interface McpInvocationScope {
   readonly environmentId: EnvironmentId;

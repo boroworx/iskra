@@ -2571,6 +2571,91 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    // Invariant 5: a card an agent proposes enters triage; only a person promotes it.
+    case "card.propose": {
+      yield* requireProject({ readModel, command, projectId: command.projectId });
+      yield* requireCardAbsent({ readModel, command, cardId: command.cardId });
+      const agent = yield* requireAgent({ readModel, command, agentId: command.agentId });
+      const refuse = (detail: string) =>
+        new OrchestrationCommandInvariantError({ commandType: command.type, detail });
+      if (agent.projectId !== command.projectId || agent.archivedAt !== null) {
+        return yield* refuse(`@${agent.name} isn't an active agent of this project.`);
+      }
+      const channelId = command.channelId ?? null;
+      if (
+        channelId !== null &&
+        !(readModel.channels ?? []).some(
+          (channel) => channel.id === channelId && channel.projectId === command.projectId,
+        )
+      ) {
+        return yield* refuse(`Channel '${channelId}' is not in this project.`);
+      }
+      const parentCardId = command.parentCardId ?? null;
+      if (parentCardId !== null) {
+        const parent = yield* requireCard({ readModel, command, cardId: parentCardId });
+        if (parent.projectId !== command.projectId || isFinishedCardStatus(parent.status)) {
+          return yield* refuse("A sub-card needs a live card of the same project.");
+        }
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "card",
+          aggregateId: command.cardId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "card.created",
+        payload: {
+          cardId: command.cardId,
+          projectId: command.projectId,
+          channelId,
+          parentCardId,
+          title: command.title,
+          spec: command.spec,
+          specState: "draft",
+          tags: command.tags,
+          status: "triage",
+          ownerHumanId: CHANNEL_HUMAN_AUTHOR_ID,
+          baseBranch: null,
+          createdBy: { kind: "agent", id: agent.id },
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "card.decision.agent.record": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      const agent = yield* requireAgent({ readModel, command, agentId: command.agentId });
+      const working =
+        card.delegateAgentId === agent.id ||
+        (readModel.liveRuns ?? []).some(
+          (run) => run.cardId === card.id && run.agentId === agent.id,
+        );
+      if (!working) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `@${agent.name} isn't working on this card, so it cannot record its decisions.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "card",
+          aggregateId: command.cardId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "card.decision-recorded",
+        payload: {
+          cardId: command.cardId,
+          decisionId: command.decisionId,
+          author: { kind: "agent", id: agent.id },
+          text: command.text,
+          createdAt: command.createdAt,
+        },
+      };
+    }
+
     case "card.attempts.start": {
       const parent = yield* requireCard({ readModel, command, cardId: command.cardId });
       const refuse = (detail: string) =>

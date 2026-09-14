@@ -15,6 +15,7 @@ import type {
 import {
   ApprovalRequestId,
   ClaudeSettings,
+  EnvironmentId,
   ProviderDriverKind,
   ProviderItemId,
   ProviderRuntimeEvent,
@@ -39,6 +40,7 @@ import * as TestClock from "effect/testing/TestClock";
 
 import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import {
   SYNTHETIC_CLAUDE_CAPABLE_MODEL,
@@ -6807,6 +6809,48 @@ describe("ClaudeAdapterLive", () => {
       );
     },
   );
+
+  it.effect("connects a card owner's run to the board tools and nothing else of Iskra's", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      McpProviderSession.setMcpProviderSession({
+        environmentId: EnvironmentId.make("environment-board"),
+        threadId: THREAD_ID,
+        providerSessionId: "provider-session-board",
+        providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+        endpoint: "http://127.0.0.1:1/mcp",
+        authorizationHeader: "Bearer board-token",
+        capabilities: new Set(["board"]),
+      });
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => McpProviderSession.clearMcpProviderSession(THREAD_ID)),
+      );
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+        run: { systemPrompt: "", capabilities: ["read"] },
+      });
+
+      const options = harness.getLastCreateQueryInput()?.options;
+      assert.deepEqual(options?.allowedTools, [
+        "Read",
+        "Glob",
+        "Grep",
+        "mcp__iskra__propose_card",
+        "mcp__iskra__record_decision",
+        "mcp__iskra__update_plan",
+        "mcp__iskra__request_review",
+        "mcp__iskra__ask_owner",
+      ]);
+      assert.deepEqual(Object.keys(options?.mcpServers ?? {}), ["iskra"]);
+    }).pipe(
+      Effect.scoped,
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
 
   it.effect("never widens a run's permission mode when a turn changes interaction mode", () => {
     const harness = makeHarness();

@@ -737,6 +737,29 @@ side by side with a Promote button. The page was checked by typecheck, not yet i
 creates a `triage` card; `record_decision` appears in the log and in the next handoff brief;
 `update_plan` shows on the card face; no tool can approve, assign or land.
 
+_Accepted:_ The `board` toolkit on the MCP server serves `propose_card`, `record_decision`,
+`update_plan`, `request_review` and `ask_owner`, and nothing else; its test lists the toolkit to
+prove it. Only a card's owner session is given the `board` capability, and it gets no other
+capability. A Claude run connects to the MCP server only when it holds `board`, and its
+`allowedTools` gains exactly those five tools. Every handler reads the card and agent from the
+session's run record, never from the tool's input, and passes a decider refusal's reason back to the
+agent as the tool error. What each tool does:
+- `propose_card` dispatches `card.propose`. The decider creates the card in `triage` with a draft
+  spec and authored by the agent (`decider.boardTools.test.ts`).
+- `record_decision` dispatches `card.decision.agent.record`. Only the card's delegate, or an agent
+  with a live session on it, may record one. Decisions join the log, and the next brief renders
+  them.
+- `update_plan` sets the owner session's plan progress, which is what the card face shows. It also
+  appends a `turn.plan.updated` activity, which puts the plan in the work log and re-emits the card.
+- `request_review` dispatches the existing `card.review.request`.
+- `ask_owner` appends a message-mode `user-input.requested` activity, which raises `awaitingInput`
+  on the card and in Needs you.
+
+The owner answers inside the session's block in the agent's DM, and the answer becomes the session's
+next message. The owner brief names the tools. Two limits remain. Plan progress is held in memory
+and clears when the turn ends, the same as a provider-reported plan. And there is no browser pass
+yet for the answer form.
+
 **M2.10 — Linear, two-way.** _Accept when:_ an issue delegated to Iskra in Linear becomes a `ready`
 card; a card approved in Iskra creates an issue; title, description and comments round-trip; a
 Linear status change that is not a decision is overwritten with a comment; a question from the

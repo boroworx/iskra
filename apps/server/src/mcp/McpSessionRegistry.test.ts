@@ -55,23 +55,28 @@ it.effect("stores only a token hash, resolves the bearer token, and revokes by t
   }),
 );
 
-it.effect("always grants pull-requests and gates browser and device access independently", () =>
+it.effect("grants exactly the capabilities the session was given", () =>
   Effect.gen(function* () {
     const registry = yield* makeRegistry(() => 1_000);
     const withPreview = yield* registry.issue({
       threadId: ThreadId.make("thread-preview"),
       providerInstanceId: ProviderInstanceId.make("codex"),
-      capabilities: new Set(["preview"]),
+      capabilities: new Set(["preview", "pull-requests"]),
     });
     const withoutPreview = yield* registry.issue({
       threadId: ThreadId.make("thread-no-preview"),
       providerInstanceId: ProviderInstanceId.make("codex"),
-      capabilities: new Set(),
+      capabilities: new Set(["pull-requests"]),
     });
     const withDevice = yield* registry.issue({
       threadId: ThreadId.make("thread-device"),
       providerInstanceId: ProviderInstanceId.make("codex"),
-      capabilities: new Set(["device"]),
+      capabilities: new Set(["device", "pull-requests"]),
+    });
+    const cardSession = yield* registry.issue({
+      threadId: ThreadId.make("thread-card-session"),
+      providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+      capabilities: new Set(["board"]),
     });
     const capabilitiesOf = (issued: typeof withPreview) =>
       registry
@@ -81,6 +86,7 @@ it.effect("always grants pull-requests and gates browser and device access indep
     expect(yield* capabilitiesOf(withPreview)).toEqual(["preview", "pull-requests"]);
     expect(yield* capabilitiesOf(withoutPreview)).toEqual(["pull-requests"]);
     expect(yield* capabilitiesOf(withDevice)).toEqual(["device", "pull-requests"]);
+    expect(yield* capabilitiesOf(cardSession)).toEqual(["board"]);
   }),
 );
 

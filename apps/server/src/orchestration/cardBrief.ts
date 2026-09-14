@@ -78,7 +78,7 @@ export function renderCardBrief(brief: CardBriefPayload): RenderedRunContext {
   const { card } = brief;
   const intro =
     brief.role === "owner"
-      ? `You are @${brief.agent.name}, the agent building the card "${card.title}". You work in its worktree and are the only agent writing to it.`
+      ? `You are @${brief.agent.name}, the agent building the card "${card.title}". You work in its worktree and are the only agent writing to it. Use the board tools: record_decision for each choice that matters, update_plan as you go, ask_owner when the spec leaves you stuck, propose_card for work outside this card, and request_review once your work is committed.`
       : brief.role === "critic"
         ? `You are @${brief.agent.name}, reviewing the spec of the card "${card.title}" before any work starts. You can read the repository but not change it. List concrete gaps, ambiguities and risks in the spec, or say plainly that it is ready.`
         : `You are @${brief.agent.name}, helping on the card "${card.title}". You can read its worktree but not change it; your answer goes to the agent building the card.`;

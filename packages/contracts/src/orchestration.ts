@@ -1780,6 +1780,31 @@ const CardBudgetSetCommand = Schema.Struct({
 const CardUnpricedAcceptCommand = cardStatusCommand("card.unpriced.accept");
 const CardUnpricedRefuseCommand = cardStatusCommand("card.unpriced.refuse");
 
+// Server-only: what agents do through board tools. Tools never approve, assign or land.
+const CardProposeCommand = Schema.Struct({
+  type: Schema.Literal("card.propose"),
+  commandId: CommandId,
+  cardId: CardId,
+  agentId: AgentId,
+  projectId: ProjectId,
+  channelId: Schema.optional(Schema.NullOr(ChannelId)),
+  parentCardId: Schema.optional(Schema.NullOr(CardId)),
+  title: TrimmedNonEmptyString,
+  spec: Schema.String,
+  tags: Schema.Array(TrimmedNonEmptyString),
+  createdAt: IsoDateTime,
+});
+
+const CardDecisionAgentRecordCommand = Schema.Struct({
+  type: Schema.Literal("card.decision.agent.record"),
+  commandId: CommandId,
+  cardId: CardId,
+  agentId: AgentId,
+  decisionId: TrimmedNonEmptyString,
+  text: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
 // Server-only: the spend reactor records each priced turn of a card's sessions.
 const CardSpendRecordCommand = Schema.Struct({
   type: Schema.Literal("card.spend.record"),
@@ -2524,6 +2549,8 @@ const InternalOrchestrationCommand = Schema.Union([
   CardChecksRecordCommand,
   CardOverlapFlagCommand,
   CardSpendRecordCommand,
+  CardProposeCommand,
+  CardDecisionAgentRecordCommand,
   ChannelAgentWakeCommand,
   ChannelRunStartCommand,
   ChannelMessageAgentPostCommand,

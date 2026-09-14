@@ -1,18 +1,27 @@
 import { scopeThreadRef } from "@iskra/client-runtime/environment";
-import { derivePendingRequests } from "@iskra/client-runtime/pending-requests";
+import { derivePendingRequests, type PendingUserInput } from "@iskra/client-runtime/pending-requests";
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@iskra/client-runtime/state/runtime";
 import {
   runSessionState,
   type EnvironmentId,
   type OrchestrationAgentRun,
   type OrchestrationChannelShell,
   type RunSessionState,
+  type ThreadId,
 } from "@iskra/contracts";
 import { memo, useMemo, useState } from "react";
 
 import { cn } from "~/lib/utils";
 import { useThreadDetail } from "~/state/entities";
+import { threadEnvironment } from "~/state/threads";
+import { useAtomCommand } from "~/state/use-atom-command";
 import ChatMarkdown from "../ChatMarkdown";
 import { Button } from "../ui/button";
+import { Textarea } from "../ui/textarea";
+import { toastManager } from "../ui/toast";
 import {
   Dialog,
   DialogDescription,
@@ -53,14 +62,15 @@ export const RunBlock = memo(function RunBlock(props: {
   );
   const thread = useThreadDetail(threadRef);
   const items = useMemo(() => (thread === null ? [] : runOutputItems(thread)), [thread]);
-  const state = useMemo(() => {
-    const pending = thread === null ? null : derivePendingRequests(thread.activities);
-    return runSessionState({
-      endedAt: props.run.endedAt,
-      session: thread?.session ?? null,
-      awaitingInput: pending !== null && pending.approvals.length + pending.userInputs.length > 0,
-    });
-  }, [props.run.endedAt, thread]);
+  const pending = useMemo(
+    () => (thread === null ? null : derivePendingRequests(thread.activities)),
+    [thread],
+  );
+  const state = runSessionState({
+    endedAt: props.run.endedAt,
+    session: thread?.session ?? null,
+    awaitingInput: pending !== null && pending.approvals.length + pending.userInputs.length > 0,
+  });
   const where = sessionWhere(props.run, props.channels);
   const heading =
     props.run.role === "owner"
@@ -106,10 +116,91 @@ export const RunBlock = memo(function RunBlock(props: {
           </li>
         ))}
       </ol>
+      {pending?.userInputs
+        .filter((request) => request.dismissible)
+        .map((request) => (
+          <RunQuestion
+            key={request.requestId}
+            environmentId={props.environmentId}
+            threadId={props.run.threadId}
+            request={request}
+          />
+        ))}
       <RunContextDialog run={props.run} open={inspecting} onOpenChange={setInspecting} />
     </section>
   );
 });
+
+/** A question the session asked by message; the answer becomes its next message. */
+function RunQuestion(props: {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+  readonly request: PendingUserInput;
+}) {
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const respond = useAtomCommand(threadEnvironment.respondToUserInput, { reportFailure: false });
+  const [sending, setSending] = useState(false);
+  const complete = props.request.questions.every(
+    (question) => (answers[question.id] ?? "").trim().length > 0,
+  );
+
+  const send = async () => {
+    setSending(true);
+    const result = await respond({
+      environmentId: props.environmentId,
+      input: { threadId: props.threadId, requestId: props.request.requestId, answers },
+    });
+    setSending(false);
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
+      toastManager.add({
+        type: "error",
+        title: "The answer was not sent",
+        description: error instanceof Error ? error.message : "Try again.",
+      });
+    }
+  };
+
+  return (
+    <form
+      className="mt-2 flex flex-col gap-2 rounded-md border border-border p-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void send();
+      }}
+    >
+      {props.request.questions.map((question) => (
+        <label key={question.id} className="flex flex-col gap-1.5 text-sm">
+          <span>{question.question}</span>
+          {question.options.length > 0 && (
+            <span className="flex flex-wrap gap-1.5">
+              {question.options.map((option) => (
+                <Button
+                  key={option.label}
+                  type="button"
+                  size="compact"
+                  variant={answers[question.id] === option.label ? "secondary" : "outline"}
+                  onClick={() => setAnswers((current) => ({ ...current, [question.id]: option.label }))}
+                >
+                  {option.label}
+                </Button>
+              ))}
+            </span>
+          )}
+          <Textarea
+            value={answers[question.id] ?? ""}
+            onChange={(event) =>
+              setAnswers((current) => ({ ...current, [question.id]: event.target.value }))
+            }
+          />
+        </label>
+      ))}
+      <Button type="submit" size="sm" className="self-end" disabled={!complete || sending}>
+        Answer
+      </Button>
+    </form>
+  );
+}
 
 /** The context inspector: exactly what the session was given, as sent. */
 function RunContextDialog(props: {

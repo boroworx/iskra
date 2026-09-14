@@ -123,6 +123,7 @@ import {
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor.ts";
 import * as PullRequestSyncReactor from "./orchestration/PullRequestSyncReactor.ts";
+import * as ThreadPlanProgress from "./orchestration/ThreadPlanProgress.ts";
 import * as AgentDefinitionSync from "./orchestration/AgentDefinitionSync.ts";
 import * as CardReviewReactor from "./orchestration/CardReviewReactor.ts";
 import * as CardSpendReactor from "./orchestration/CardSpendReactor.ts";
@@ -1058,7 +1059,7 @@ const buildAppUnderTest = (options?: {
 
     const appLayer = servedRoutesLayer.pipe(
       Layer.provide(resourceTelemetryLayer),
-      Layer.provide(UsageService.layerTest),
+      Layer.provide(Layer.mergeAll(UsageService.layerTest, ThreadPlanProgress.layer)),
       Layer.provide(
         Layer.mock(AnalyticsService.AnalyticsService)({
           record: () => Effect.void,

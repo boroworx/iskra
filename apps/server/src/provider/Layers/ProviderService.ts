@@ -921,6 +921,21 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const agentAccessCapabilities = Effect.fn("ProviderService.agentAccessCapabilities")(function* (
     threadId: ThreadId,
   ) {
+    // A card session sees only the board, and only while it owns the card.
+    const run = Option.isSome(projectionQuery)
+      ? yield* projectionQuery.value.getRunByThreadId(threadId).pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning("Could not read the thread's run; granting no board tools.", {
+              cause,
+            }).pipe(Effect.as(Option.none())),
+          ),
+        )
+      : Option.none();
+    if (Option.isSome(run)) {
+      return new Set<McpInvocationContext.McpCapability>(
+        run.value.role === "owner" && run.value.cardId !== null ? ["board"] : [],
+      );
+    }
     const capabilities = new Set<McpInvocationContext.McpCapability>(["pull-requests"]);
     const access = yield* agentAccessSettings(threadId);
     if (access.browser) capabilities.add("preview");
@@ -958,6 +973,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const prepareMcpSession = (threadId: ThreadId, providerInstanceId: ProviderInstanceId) =>
     Effect.gen(function* () {
       const capabilities = yield* agentAccessCapabilities(threadId);
+      if (capabilities.size === 0) return undefined;
       const credential = yield* issueMcpCredential({ threadId, providerInstanceId, capabilities });
       if (credential) {
         const deviceEnvironment = capabilities.has("device")
