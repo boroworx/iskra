@@ -5,6 +5,7 @@ import {
   needsYouItems,
   waitingLabel,
 } from "@iskra/client-runtime/cards";
+import type { AtomCommandResult } from "@iskra/client-runtime/state/runtime";
 import { DEFAULT_CARD_BUDGET_USD, type CardId, type EnvironmentId } from "@iskra/contracts";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
@@ -15,9 +16,13 @@ import { usePrimaryEnvironmentId } from "~/state/environments";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
+import { toastCommandFailure } from "../toastCommandFailure";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 
 const HOUR_MS = 60 * 60_000;
+
+const refused = (title: string) => (result: AtomCommandResult<unknown, unknown>) =>
+  toastCommandFailure(result, title, "The request was refused.");
 
 /**
  * Everything across projects waiting on a person, longest waiting first, with
@@ -52,9 +57,25 @@ export function NeedsYouView() {
 
   const snoozeCard = (id: CardId, snoozedUntil: string | null) => {
     if (environmentId !== null) {
-      void snooze({ environmentId, input: { cardId: id, snoozedUntil } });
+      void snooze({ environmentId, input: { cardId: id, snoozedUntil } }).then(
+        refused("The card was not snoozed"),
+      );
     }
   };
+  const decideOn = (
+    cardId: CardId,
+    type: Parameters<typeof decide>[0]["input"]["type"],
+    failure: string,
+  ) => {
+    if (environmentId !== null) {
+      void decide({ environmentId, input: { type, cardId } }).then(refused(failure));
+    }
+  };
+  const actionButton = (label: string, onClick: () => void) => (
+    <Button size="sm" variant="ghost-muted" onClick={onClick}>
+      {label}
+    </Button>
+  );
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
@@ -68,11 +89,18 @@ export function NeedsYouView() {
           ) : (
             <ol className="flex flex-col divide-y divide-border">
               {items.map((item) => (
-                <li key={item.key} className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 py-2.5">
+                <li
+                  key={item.key}
+                  className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 py-2.5"
+                >
                   <div className="flex min-w-0 flex-1 flex-col">
-                    <BoardLink environmentId={environmentId} projectId={item.projectId}>
+                    <CardLink
+                      environmentId={environmentId}
+                      projectId={item.projectId}
+                      cardId={item.cardId}
+                    >
                       {item.title}
-                    </BoardLink>
+                    </CardLink>
                     <span className="truncate text-xs text-muted-foreground">
                       {NEEDS_YOU_LABEL[item.kind]} · {projectTitle(item.projectId)}
                     </span>
@@ -85,56 +113,54 @@ export function NeedsYouView() {
                   <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
                     waiting {waitingLabel(item.since, now)}
                   </span>
-                  {item.kind === "budgetReached" ? (
-                    <Button
-                      size="sm"
-                      variant="ghost-muted"
-                      onClick={() => {
-                        const capUsd =
-                          (cardById.get(item.cardId)?.budgetCapUsd ?? 0) +
-                          DEFAULT_CARD_BUDGET_USD;
-                        if (environmentId !== null) {
-                          void setBudget({ environmentId, input: { cardId: item.cardId, capUsd } });
-                        }
-                      }}
-                    >
-                      Raise the cap by ${DEFAULT_CARD_BUDGET_USD}
-                    </Button>
+                  {item.kind === "triage" ? (
+                    <div className="flex shrink-0 gap-1">
+                      {actionButton("Approve", () =>
+                        decideOn(item.cardId, "card.approve", "The card was not approved"),
+                      )}
+                      {actionButton("Drop", () =>
+                        decideOn(item.cardId, "card.abandon", "The card was not dropped"),
+                      )}
+                    </div>
+                  ) : item.kind === "spec" ? (
+                    <div className="flex shrink-0 gap-1">
+                      {actionButton("Approve spec", () =>
+                        decideOn(item.cardId, "card.spec.approve", "The spec was not approved"),
+                      )}
+                      {actionButton("Skip spec", () =>
+                        decideOn(item.cardId, "card.spec.skip", "The spec was not skipped"),
+                      )}
+                    </div>
+                  ) : item.kind === "budgetReached" ? (
+                    actionButton(`Raise the cap by $${DEFAULT_CARD_BUDGET_USD}`, () => {
+                      const capUsd =
+                        (cardById.get(item.cardId)?.budgetCapUsd ?? 0) + DEFAULT_CARD_BUDGET_USD;
+                      if (environmentId !== null) {
+                        void setBudget({
+                          environmentId,
+                          input: { cardId: item.cardId, capUsd },
+                        }).then(refused("The cap was not raised"));
+                      }
+                    })
                   ) : item.kind === "unpricedModel" ? (
-                    <Button
-                      size="sm"
-                      variant="ghost-muted"
-                      onClick={() => {
-                        if (environmentId !== null) {
-                          void decide({
-                            environmentId,
-                            input: { type: "card.unpriced.accept", cardId: item.cardId },
-                          });
-                        }
-                      }}
-                    >
-                      Run uncapped
-                    </Button>
+                    // Refusing is the standing state here; the card sheet takes an acceptance back.
+                    actionButton("Run uncapped", () =>
+                      decideOn(
+                        item.cardId,
+                        "card.unpriced.accept",
+                        "The card was not allowed to run uncapped",
+                      ),
+                    )
                   ) : null}
                   {item.snoozable ? (
                     <div className="flex shrink-0 gap-1">
-                      <Button
-                        size="sm"
-                        variant="ghost-muted"
-                        onClick={() => snoozeCard(item.cardId, new Date(now + HOUR_MS).toISOString())}
-                      >
-                        1 hour
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost-muted"
-                        onClick={() => snoozeCard(item.cardId, new Date(now + 24 * HOUR_MS).toISOString())}
-                      >
-                        Tomorrow
-                      </Button>
-                      <Button size="sm" variant="ghost-muted" onClick={() => snoozeCard(item.cardId, null)}>
-                        Until it changes
-                      </Button>
+                      {actionButton("1 hour", () =>
+                        snoozeCard(item.cardId, new Date(now + HOUR_MS).toISOString()),
+                      )}
+                      {actionButton("Tomorrow", () =>
+                        snoozeCard(item.cardId, new Date(now + 24 * HOUR_MS).toISOString()),
+                      )}
+                      {actionButton("Until it changes", () => snoozeCard(item.cardId, null))}
                     </div>
                   ) : null}
                 </li>
@@ -143,7 +169,9 @@ export function NeedsYouView() {
           )}
           {snoozed.length > 0 ? (
             <section aria-label="Snoozed" className="mt-6">
-              <h2 className="text-xs font-medium text-muted-foreground">Snoozed {snoozed.length}</h2>
+              <h2 className="text-xs font-medium text-muted-foreground">
+                Snoozed {snoozed.length}
+              </h2>
               <ul className="mt-1 flex flex-col divide-y divide-border">
                 {snoozed.map((card) => (
                   <li key={card.id} className="flex min-w-0 items-center gap-3 py-2">
@@ -153,17 +181,13 @@ export function NeedsYouView() {
                         ? " · until it changes"
                         : ` · until ${new Date(card.snoozedUntil).toLocaleString()}`}
                     </span>
-                    <Button
-                      size="sm"
-                      variant="ghost-muted"
-                      onClick={() => {
-                        if (environmentId !== null) {
-                          void unsnooze({ environmentId, input: { cardId: card.id } });
-                        }
-                      }}
-                    >
-                      Wake
-                    </Button>
+                    {actionButton("Wake", () => {
+                      if (environmentId !== null) {
+                        void unsnooze({ environmentId, input: { cardId: card.id } }).then(
+                          refused("The card was not woken"),
+                        );
+                      }
+                    })}
                   </li>
                 ))}
               </ul>
@@ -175,9 +199,11 @@ export function NeedsYouView() {
   );
 }
 
-function BoardLink(props: {
+/** The card's title, opening its sheet on the board. */
+function CardLink(props: {
   readonly environmentId: EnvironmentId | null;
   readonly projectId: string;
+  readonly cardId: CardId;
   readonly children: string;
 }) {
   if (props.environmentId === null) {
@@ -187,6 +213,7 @@ function BoardLink(props: {
     <Link
       to="/board/$environmentId/$projectId"
       params={{ environmentId: props.environmentId, projectId: props.projectId }}
+      search={{ card: props.cardId }}
       className="truncate text-sm font-medium hover:underline"
     >
       {props.children}
