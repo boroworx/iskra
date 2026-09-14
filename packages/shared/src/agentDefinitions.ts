@@ -7,6 +7,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   RunCapabilities,
+  type AgentDefinitionInput,
   type RunCapability,
 } from "@iskra/contracts";
 import * as Schema from "effect/Schema";
@@ -16,22 +17,10 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 export const AGENT_DEFINITIONS_DIR = ".iskra/agents";
 
 /** Agent definitions from other tools that can be imported into a project. */
-export const IMPORTABLE_AGENT_SOURCES = [
-  { kind: "claude", dir: ".claude/agents" },
-  { kind: "copilot", dir: ".github/agents" },
-] as const;
-export type ImportableAgentSource = (typeof IMPORTABLE_AGENT_SOURCES)[number]["kind"];
+export const IMPORTABLE_AGENT_SOURCES = [{ dir: ".claude/agents" }, { dir: ".github/agents" }] as const;
 
 /** An agent as its file defines it. `id` is null until the server assigns one. */
-export interface AgentDefinition {
-  readonly id: AgentId | null;
-  readonly name: typeof AgentName.Type;
-  readonly avatar: string | null;
-  readonly tags: ReadonlyArray<string>;
-  readonly modelSelection: ModelSelection;
-  readonly capabilities: ReadonlyArray<RunCapability>;
-  readonly rolePrompt: string;
-}
+export type AgentDefinition = AgentDefinitionInput;
 
 export type AgentFileResult =
   | { readonly ok: true; readonly definition: AgentDefinition }
