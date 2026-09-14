@@ -33,7 +33,7 @@ const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings);
 
 const makeServerSettingsLayer = () =>
   ServerSettingsModule.layer.pipe(
-    Layer.provide(ServerSecretStore.layer),
+    Layer.provideMerge(ServerSecretStore.layer),
     Layer.provideMerge(Layer.fresh(SqlitePersistenceMemory)),
     Layer.provideMerge(
       Layer.fresh(
@@ -1253,6 +1253,9 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
       const serverConfig = yield* ServerConfig.ServerConfig;
       const fileSystem = yield* FileSystem.FileSystem;
+      const storedSecret = (yield* ServerSecretStore.ServerSecretStore)
+        .get("linear-client-secret")
+        .pipe(Effect.map(Option.map((bytes) => new TextDecoder().decode(bytes))));
 
       const saved = yield* serverSettings.updateSettings({
         linearClientId: "lin-app",
@@ -1260,6 +1263,8 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       });
       assert.equal(saved.linearClientSecret, "lin-secret");
       assert.notInclude(yield* fileSystem.readFileString(serverConfig.settingsPath), "lin-secret");
+      assert.deepEqual(yield* storedSecret, Option.some("lin-secret"));
+      assert.equal((yield* serverSettings.getSettings).linearClientSecret, "lin-secret");
       const forClient = ServerSettingsModule.redactServerSettingsForClient(saved);
       assert.notEqual(forClient.linearClientSecret, "lin-secret");
       assert.isAbove(forClient.linearClientSecret.length, 0);
@@ -1270,8 +1275,10 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         linearClientSecret: forClient.linearClientSecret,
       });
       assert.equal(kept.linearClientSecret, "lin-secret");
+      assert.deepEqual(yield* storedSecret, Option.some("lin-secret"));
       const removed = yield* serverSettings.updateSettings({ linearClientSecret: "" });
       assert.equal(removed.linearClientSecret, "");
+      assert.isTrue(Option.isNone(yield* storedSecret));
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
