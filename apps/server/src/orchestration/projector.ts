@@ -1,5 +1,4 @@
 import type {
-  CardRelationKind,
   OrchestrationAgent,
   OrchestrationCard,
   OrchestrationChannel,
@@ -32,7 +31,6 @@ import {
   ChannelRunStartedPayload,
   ChannelUnarchivedPayload,
   ChannelUpdatedPayload,
-  DEFAULT_CARD_BUDGET_USD,
   isImportedAgentSessionMessageId,
   isRunEndingSessionStatus,
   OrchestrationCheckpointSummary,
@@ -76,7 +74,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Predicate from "effect/Predicate";
 
-import { inverseRelationKind, withRelation, withoutRelation } from "./cardRules.ts";
+import { cardPatches, newCard, touchCard } from "./cardRules.ts";
 import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from "./Errors.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
@@ -330,70 +328,148 @@ function compareThreadActivities(
   return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
 }
 
-function updateAgent(
-  agents: ReadonlyArray<OrchestrationAgent>,
-  agentId: string,
-  patch: Partial<Omit<OrchestrationAgent, "id" | "projectId">>,
-): ReadonlyArray<OrchestrationAgent> {
-  return agents.map((agent) => (agent.id === agentId ? { ...agent, ...patch } : agent));
+type AgentPatchEvent = Extract<
+  OrchestrationEvent,
+  { type: "agent.updated" | "agent.archived" | "agent.unarchived" }
+>;
+type ChannelPatchEvent = Extract<
+  OrchestrationEvent,
+  { type: "channel.updated" | "channel.archived" | "channel.unarchived" }
+>;
+
+/** A new agent's fields from its `agent.created` payload. */
+export function newAgent(
+  payload: Extract<OrchestrationEvent, { type: "agent.created" }>["payload"],
+): Omit<OrchestrationAgent, "id"> {
+  return {
+    projectId: payload.projectId,
+    name: payload.name,
+    avatar: payload.avatar,
+    roleTags: payload.roleTags,
+    rolePrompt: payload.rolePrompt,
+    modelSelection: payload.modelSelection,
+    capabilities: payload.capabilities,
+    createdAt: payload.createdAt,
+    updatedAt: payload.updatedAt,
+    archivedAt: null,
+  };
 }
 
-function updateCard(
-  cards: ReadonlyArray<OrchestrationCard>,
-  cardId: string,
-  patch: (card: OrchestrationCard) => OrchestrationCard,
-): ReadonlyArray<OrchestrationCard> {
-  return cards.map((card) => (card.id === cardId ? patch(card) : card));
-}
-
-/** Applies a relation change to the card that named it and, when it has one, the inverse to the other card. */
-function relateCards(
-  cards: ReadonlyArray<OrchestrationCard>,
-  input: {
-    readonly cardId: OrchestrationCard["id"];
-    readonly kind: CardRelationKind;
-    readonly otherCardId: OrchestrationCard["id"];
-    readonly updatedAt: string;
-  },
-  change: typeof withRelation,
-): ReadonlyArray<OrchestrationCard> {
-  const inverse = inverseRelationKind(input.kind);
-  return cards.map((card) => {
-    if (card.id === input.cardId) {
+/** The fields an agent event changes, spread over the read model's agent or its projection row. */
+export function agentPatch(
+  event: AgentPatchEvent,
+): Partial<Omit<OrchestrationAgent, "id" | "projectId">> {
+  switch (event.type) {
+    case "agent.updated": {
+      const { payload } = event;
       return {
-        ...card,
-        relations: change(card.relations, { kind: input.kind, cardId: input.otherCardId }),
-        updatedAt: input.updatedAt,
+        ...(payload.name !== undefined ? { name: payload.name } : {}),
+        ...(payload.avatar !== undefined ? { avatar: payload.avatar } : {}),
+        ...(payload.roleTags !== undefined ? { roleTags: payload.roleTags } : {}),
+        ...(payload.rolePrompt !== undefined ? { rolePrompt: payload.rolePrompt } : {}),
+        ...(payload.modelSelection !== undefined ? { modelSelection: payload.modelSelection } : {}),
+        ...(payload.capabilities !== undefined ? { capabilities: payload.capabilities } : {}),
+        updatedAt: payload.updatedAt,
       };
     }
-    if (inverse !== null && card.id === input.otherCardId) {
+    case "agent.archived":
+      return { archivedAt: event.payload.archivedAt, updatedAt: event.payload.archivedAt };
+    case "agent.unarchived":
+      return { archivedAt: null, updatedAt: event.payload.updatedAt };
+  }
+}
+
+/** A new channel's fields from its `channel.created` payload. */
+export function newChannel(
+  payload: Extract<OrchestrationEvent, { type: "channel.created" }>["payload"],
+): Omit<OrchestrationChannel, "id"> {
+  return {
+    projectId: payload.projectId,
+    kind: payload.kind,
+    name: payload.name,
+    topic: payload.topic,
+    pinnedSpec: payload.pinnedSpec,
+    wakeDepth: payload.wakeDepth,
+    memberAgentIds: payload.memberAgentIds,
+    leadAgentId: payload.leadAgentId ?? null,
+    createdAt: payload.createdAt,
+    updatedAt: payload.updatedAt,
+    archivedAt: null,
+  };
+}
+
+/** The fields a channel event changes, spread over the read model's channel or its projection row. */
+export function channelPatch(
+  event: ChannelPatchEvent,
+): Partial<Omit<OrchestrationChannel, "id" | "projectId" | "kind">> {
+  switch (event.type) {
+    case "channel.updated": {
+      const { payload } = event;
       return {
-        ...card,
-        relations: change(card.relations, { kind: inverse, cardId: input.cardId }),
-        updatedAt: input.updatedAt,
+        ...(payload.name !== undefined ? { name: payload.name } : {}),
+        ...(payload.topic !== undefined ? { topic: payload.topic } : {}),
+        ...(payload.pinnedSpec !== undefined ? { pinnedSpec: payload.pinnedSpec } : {}),
+        ...(payload.wakeDepth !== undefined ? { wakeDepth: payload.wakeDepth } : {}),
+        ...(payload.memberAgentIds !== undefined ? { memberAgentIds: payload.memberAgentIds } : {}),
+        ...(payload.leadAgentId !== undefined ? { leadAgentId: payload.leadAgentId } : {}),
+        updatedAt: payload.updatedAt,
       };
     }
-    return card;
-  });
+    case "channel.archived":
+      return { archivedAt: event.payload.archivedAt, updatedAt: event.payload.archivedAt };
+    case "channel.unarchived":
+      return { archivedAt: null, updatedAt: event.payload.updatedAt };
+  }
 }
 
-function updateChannel(
-  channels: ReadonlyArray<OrchestrationChannel>,
-  channelId: string,
-  patch: Partial<Omit<OrchestrationChannel, "id" | "projectId" | "kind">>,
-): ReadonlyArray<OrchestrationChannel> {
-  return channels.map((channel) => (channel.id === channelId ? { ...channel, ...patch } : channel));
+/** Replaces the entry with the same id, or appends it. */
+function upsertById<T extends { readonly id: string }>(
+  items: ReadonlyArray<T> | undefined,
+  item: T,
+): ReadonlyArray<T> {
+  const current = items ?? [];
+  return current.some((existing) => existing.id === item.id)
+    ? current.map((existing) => (existing.id === item.id ? item : existing))
+    : [...current, item];
 }
 
-/** Marks something happening on a card, which also wakes it from a snooze. */
-function touchCard(
-  readModel: OrchestrationReadModel,
-  cardId: OrchestrationCard["id"],
-  at: string,
+function patchById<T extends { readonly id: string }>(
+  items: ReadonlyArray<T> | undefined,
+  id: string,
+  patch: (item: T) => T,
+): ReadonlyArray<T> {
+  return (items ?? []).map((item) => (item.id === id ? patch(item) : item));
+}
+
+function withAgentPatch(model: OrchestrationReadModel, event: AgentPatchEvent) {
+  const patch = agentPatch(event);
+  return {
+    ...model,
+    agents: patchById(model.agents, event.payload.agentId, (agent) => ({ ...agent, ...patch })),
+  };
+}
+
+function withChannelPatch(model: OrchestrationReadModel, event: ChannelPatchEvent) {
+  const patch = channelPatch(event);
+  return {
+    ...model,
+    channels: patchById(model.channels, event.payload.channelId, (channel) => ({
+      ...channel,
+      ...patch,
+    })),
+  };
+}
+
+function withCardPatches(
+  model: OrchestrationReadModel,
+  patches: ReturnType<typeof cardPatches>,
 ): OrchestrationReadModel {
   return {
-    ...readModel,
-    cards: updateCard(readModel.cards ?? [], cardId, (card) => ({ ...card, activityAt: at })),
+    ...model,
+    cards: patches.reduce<ReadonlyArray<OrchestrationCard>>(
+      (cards, [cardId, patch]) => patchById(cards, cardId, patch),
+      model.cards ?? [],
+    ),
   };
 }
 
@@ -1162,280 +1238,100 @@ export function projectEvent(
 
     case "agent.created":
       return decodeForEvent(AgentCreatedPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => {
-          const agents = nextBase.agents ?? [];
-          const nextAgent: OrchestrationAgent = {
-            id: payload.agentId,
-            projectId: payload.projectId,
-            name: payload.name,
-            avatar: payload.avatar,
-            roleTags: payload.roleTags,
-            rolePrompt: payload.rolePrompt,
-            modelSelection: payload.modelSelection,
-            capabilities: payload.capabilities,
-            createdAt: payload.createdAt,
-            updatedAt: payload.updatedAt,
-            archivedAt: null,
-          };
-          return {
-            ...nextBase,
-            agents: agents.some((agent) => agent.id === payload.agentId)
-              ? agents.map((agent) => (agent.id === payload.agentId ? nextAgent : agent))
-              : [...agents, nextAgent],
-          };
-        }),
+        Effect.map((payload) => ({
+          ...nextBase,
+          agents: upsertById(nextBase.agents, { id: payload.agentId, ...newAgent(payload) }),
+        })),
       );
 
     case "agent.updated":
       return decodeForEvent(AgentUpdatedPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          agents: updateAgent(nextBase.agents ?? [], payload.agentId, {
-            ...(payload.name !== undefined ? { name: payload.name } : {}),
-            ...(payload.avatar !== undefined ? { avatar: payload.avatar } : {}),
-            ...(payload.roleTags !== undefined ? { roleTags: payload.roleTags } : {}),
-            ...(payload.rolePrompt !== undefined ? { rolePrompt: payload.rolePrompt } : {}),
-            ...(payload.modelSelection !== undefined
-              ? { modelSelection: payload.modelSelection }
-              : {}),
-            ...(payload.capabilities !== undefined ? { capabilities: payload.capabilities } : {}),
-            updatedAt: payload.updatedAt,
-          }),
-        })),
+        Effect.map((payload) => withAgentPatch(nextBase, { ...event, payload })),
       );
 
     case "agent.archived":
       return decodeForEvent(AgentArchivedPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          agents: updateAgent(nextBase.agents ?? [], payload.agentId, {
-            archivedAt: payload.archivedAt,
-            updatedAt: payload.archivedAt,
-          }),
-        })),
+        Effect.map((payload) => withAgentPatch(nextBase, { ...event, payload })),
       );
 
     case "agent.unarchived":
       return decodeForEvent(AgentUnarchivedPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          agents: updateAgent(nextBase.agents ?? [], payload.agentId, {
-            archivedAt: null,
-            updatedAt: payload.updatedAt,
-          }),
-        })),
+        Effect.map((payload) => withAgentPatch(nextBase, { ...event, payload })),
       );
 
     case "card.created":
       return decodeForEvent(CardCreatedPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => {
-          const cards = nextBase.cards ?? [];
-          const nextCard: OrchestrationCard = {
-            id: payload.cardId,
-            projectId: payload.projectId,
-            channelId: payload.channelId,
-            parentCardId: payload.parentCardId,
-            title: payload.title,
-            spec: payload.spec,
-            specState: payload.specState,
-            tags: payload.tags,
-            status: payload.status,
-            ownerHumanId: payload.ownerHumanId,
-            delegateAgentId: null,
-            baseBranch: payload.baseBranch,
-            branch: null,
-            worktreePath: null,
-            portBase: null,
-            relations: [],
-            snoozedUntil: null,
-            snoozedAt: null,
-            activityAt: payload.createdAt,
-            diffStat: null,
-            checks: null,
-            spentUsd: 0,
-            budgetCapUsd: DEFAULT_CARD_BUDGET_USD,
-            unpricedTurns: 0,
-            acceptsUnpriced: false,
-            reviewReturns: 0,
-            attemptGroupId: payload.attemptGroupId ?? null,
-            linearIssue: null,
-            sourceMessageId: payload.sourceMessageId ?? null,
-            proposalReasoning: payload.proposalReasoning ?? null,
-            priority: payload.priority ?? 0,
-            createdBy: payload.createdBy,
-            createdAt: payload.createdAt,
-            updatedAt: payload.updatedAt,
-          };
-          return {
-            ...nextBase,
-            cards: cards.some((card) => card.id === payload.cardId)
-              ? cards.map((card) => (card.id === payload.cardId ? nextCard : card))
-              : [...cards, nextCard],
-          };
-        }),
+        Effect.map((payload) => ({
+          ...nextBase,
+          cards: upsertById(nextBase.cards, { id: payload.cardId, ...newCard(payload) }),
+        })),
       );
 
     case "card.updated":
       return decodeForEvent(CardUpdatedPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          cards: updateCard(nextBase.cards ?? [], payload.cardId, (card) => ({
-            ...card,
-            ...(payload.title !== undefined ? { title: payload.title } : {}),
-            ...(payload.spec !== undefined ? { spec: payload.spec } : {}),
-            ...(payload.specState !== undefined ? { specState: payload.specState } : {}),
-            ...(payload.tags !== undefined ? { tags: payload.tags } : {}),
-            ...(payload.priority !== undefined ? { priority: payload.priority } : {}),
-            updatedAt: payload.updatedAt,
-            activityAt: payload.updatedAt,
-          })),
-        })),
+        Effect.map((payload) => withCardPatches(nextBase, cardPatches({ ...event, payload }))),
       );
 
     case "card.status-changed":
       return decodeForEvent(CardStatusChangedPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          cards: updateCard(nextBase.cards ?? [], payload.cardId, (card) => ({
-            ...card,
-            status: payload.to,
-            updatedAt: payload.updatedAt,
-            activityAt: payload.updatedAt,
-            reviewReturns: card.reviewReturns + (payload.move === "returnToWork" ? 1 : 0),
-          })),
-        })),
+        Effect.map((payload) => withCardPatches(nextBase, cardPatches({ ...event, payload }))),
       );
 
     case "card.delegate-changed":
       return decodeForEvent(CardDelegateChangedPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          cards: updateCard(nextBase.cards ?? [], payload.cardId, (card) => ({
-            ...card,
-            delegateAgentId: payload.delegateAgentId,
-            updatedAt: payload.updatedAt,
-            activityAt: payload.updatedAt,
-          })),
-        })),
+        Effect.map((payload) => withCardPatches(nextBase, cardPatches({ ...event, payload }))),
       );
 
     case "card.relation-added":
       return decodeForEvent(CardRelationAddedPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          cards: relateCards(nextBase.cards ?? [], payload, withRelation),
-        })),
+        Effect.map((payload) => withCardPatches(nextBase, cardPatches({ ...event, payload }))),
       );
 
     case "card.relation-removed":
       return decodeForEvent(CardRelationRemovedPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          cards: relateCards(nextBase.cards ?? [], payload, withoutRelation),
-        })),
+        Effect.map((payload) => withCardPatches(nextBase, cardPatches({ ...event, payload }))),
       );
 
     case "card.workspace-set":
       return decodeForEvent(CardWorkspaceSetPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          cards: updateCard(nextBase.cards ?? [], payload.cardId, (card) => ({
-            ...card,
-            branch: payload.branch,
-            worktreePath: payload.worktreePath,
-            portBase: payload.portBase,
-            updatedAt: payload.updatedAt,
-          })),
-        })),
+        Effect.map((payload) => withCardPatches(nextBase, cardPatches({ ...event, payload }))),
       );
 
     case "card.workspace-cleared":
       return decodeForEvent(CardWorkspaceClearedPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          cards: updateCard(nextBase.cards ?? [], payload.cardId, (card) => ({
-            ...card,
-            branch: null,
-            worktreePath: null,
-            portBase: null,
-            updatedAt: payload.updatedAt,
-          })),
-        })),
+        Effect.map((payload) => withCardPatches(nextBase, cardPatches({ ...event, payload }))),
       );
 
     // A card's decision log is paged from its projection; the read model does not hold it.
     case "card.decision-recorded":
       return decodeForEvent(CardDecisionRecordedPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => touchCard(nextBase, payload.cardId, payload.createdAt)),
+        Effect.map((payload) => withCardPatches(nextBase, cardPatches({ ...event, payload }))),
       );
 
     case "channel.created":
       return decodeForEvent(ChannelCreatedPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => {
-          const channels = nextBase.channels ?? [];
-          const nextChannel: OrchestrationChannel = {
+        Effect.map((payload) => ({
+          ...nextBase,
+          channels: upsertById(nextBase.channels, {
             id: payload.channelId,
-            projectId: payload.projectId,
-            kind: payload.kind,
-            name: payload.name,
-            topic: payload.topic,
-            pinnedSpec: payload.pinnedSpec,
-            wakeDepth: payload.wakeDepth,
-            memberAgentIds: payload.memberAgentIds,
-            leadAgentId: payload.leadAgentId ?? null,
-            createdAt: payload.createdAt,
-            updatedAt: payload.updatedAt,
-            archivedAt: null,
-          };
-          return {
-            ...nextBase,
-            channels: channels.some((channel) => channel.id === payload.channelId)
-              ? channels.map((channel) =>
-                  channel.id === payload.channelId ? nextChannel : channel,
-                )
-              : [...channels, nextChannel],
-          };
-        }),
+            ...newChannel(payload),
+          }),
+        })),
       );
 
     case "channel.updated":
       return decodeForEvent(ChannelUpdatedPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          channels: updateChannel(nextBase.channels ?? [], payload.channelId, {
-            ...(payload.name !== undefined ? { name: payload.name } : {}),
-            ...(payload.topic !== undefined ? { topic: payload.topic } : {}),
-            ...(payload.pinnedSpec !== undefined ? { pinnedSpec: payload.pinnedSpec } : {}),
-            ...(payload.wakeDepth !== undefined ? { wakeDepth: payload.wakeDepth } : {}),
-            ...(payload.memberAgentIds !== undefined
-              ? { memberAgentIds: payload.memberAgentIds }
-              : {}),
-            ...(payload.leadAgentId !== undefined ? { leadAgentId: payload.leadAgentId } : {}),
-            updatedAt: payload.updatedAt,
-          }),
-        })),
+        Effect.map((payload) => withChannelPatch(nextBase, { ...event, payload })),
       );
 
     case "channel.archived":
       return decodeForEvent(ChannelArchivedPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          channels: updateChannel(nextBase.channels ?? [], payload.channelId, {
-            archivedAt: payload.archivedAt,
-            updatedAt: payload.archivedAt,
-          }),
-        })),
+        Effect.map((payload) => withChannelPatch(nextBase, { ...event, payload })),
       );
 
     case "channel.unarchived":
       return decodeForEvent(ChannelUnarchivedPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          channels: updateChannel(nextBase.channels ?? [], payload.channelId, {
-            archivedAt: null,
-            updatedAt: payload.updatedAt,
-          }),
-        })),
+        Effect.map((payload) => withChannelPatch(nextBase, { ...event, payload })),
       );
 
     case "channel.run-started":
@@ -1459,8 +1355,7 @@ export function projectEvent(
     case "card.session-started":
       return decodeForEvent(CardSessionStartedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => ({
-          ...nextBase,
-          cards: touchCard(nextBase, payload.cardId, payload.startedAt).cards,
+          ...withCardPatches(nextBase, [[payload.cardId, touchCard(payload.startedAt)]]),
           liveRuns: [
             ...(nextBase.liveRuns ?? []).filter((run) => run.threadId !== payload.threadId),
             {
@@ -1482,98 +1377,20 @@ export function projectEvent(
       return Effect.succeed(nextBase);
 
     case "card.message-posted":
-      return Effect.succeed(touchCard(nextBase, event.payload.cardId, event.payload.createdAt));
-
     case "card.spec-submitted":
-      return Effect.succeed(touchCard(nextBase, event.payload.cardId, event.payload.submittedAt));
-
     case "card.snoozed":
-      return Effect.succeed({
-        ...nextBase,
-        cards: updateCard(nextBase.cards ?? [], event.payload.cardId, (card) => ({
-          ...card,
-          snoozedUntil: event.payload.snoozedUntil,
-          snoozedAt: event.payload.snoozedAt,
-        })),
-      });
-
     case "card.spend-recorded":
-      return Effect.succeed({
-        ...nextBase,
-        cards: updateCard(nextBase.cards ?? [], event.payload.cardId, (card) => ({
-          ...card,
-          spentUsd: card.spentUsd + event.payload.costUsd,
-          unpricedTurns: card.unpricedTurns + (event.payload.costSource === "unpriced" ? 1 : 0),
-        })),
-      });
-
     case "card.linear-synced":
-      return Effect.succeed({
-        ...nextBase,
-        cards: updateCard(nextBase.cards ?? [], event.payload.cardId, (card) => ({
-          ...card,
-          linearIssue: event.payload.issue,
-        })),
-      });
-
     case "card.budget-set":
-      return Effect.succeed({
-        ...nextBase,
-        cards: updateCard(nextBase.cards ?? [], event.payload.cardId, (card) => ({
-          ...card,
-          budgetCapUsd: event.payload.capUsd,
-        })),
-      });
-
     case "card.unpriced-accepted":
-      return Effect.succeed({
-        ...nextBase,
-        cards: updateCard(nextBase.cards ?? [], event.payload.cardId, (card) => ({
-          ...card,
-          acceptsUnpriced: event.payload.accepts,
-        })),
-      });
-
     case "card.checks-updated":
-      return Effect.succeed({
-        ...nextBase,
-        cards: updateCard(nextBase.cards ?? [], event.payload.cardId, (card) => ({
-          ...card,
-          checks: event.payload.checks,
-          activityAt: event.payload.checks.updatedAt,
-        })),
-      });
-
     case "card.diff-measured":
-      return Effect.succeed({
-        ...nextBase,
-        cards: updateCard(nextBase.cards ?? [], event.payload.cardId, (card) => ({
-          ...card,
-          diffStat: event.payload.diffStat,
-        })),
-      });
-
     case "card.unsnoozed":
-      return Effect.succeed({
-        ...nextBase,
-        cards: updateCard(nextBase.cards ?? [], event.payload.cardId, (card) => ({
-          ...card,
-          snoozedUntil: null,
-          snoozedAt: null,
-        })),
-      });
+      return Effect.succeed(withCardPatches(nextBase, cardPatches(event)));
 
     case "card.spec-state-changed":
       return decodeForEvent(CardSpecStateChangedPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          cards: updateCard(nextBase.cards ?? [], payload.cardId, (card) => ({
-            ...card,
-            specState: payload.to,
-            updatedAt: payload.updatedAt,
-            activityAt: payload.updatedAt,
-          })),
-        })),
+        Effect.map((payload) => withCardPatches(nextBase, cardPatches({ ...event, payload }))),
       );
 
     // Channel messages are paged from their projection, never held in the read model.

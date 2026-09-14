@@ -7,7 +7,6 @@ import {
   type OrchestrationEvent,
   type OrchestrationSessionStatus,
   ThreadId,
-  DEFAULT_CARD_BUDGET_USD,
 } from "@iskra/contracts";
 import { compareDateTimeStrings } from "@iskra/shared/dateTime";
 import * as Effect from "effect/Effect";
@@ -50,11 +49,9 @@ import { ProjectionThreadRepository } from "../../persistence/Services/Projectio
 import { ProjectionPendingApprovalRepositoryLive } from "../../persistence/Layers/ProjectionPendingApprovals.ts";
 import { ProjectionAgentRepositoryLive } from "../../persistence/Layers/ProjectionAgents.ts";
 import { ProjectionCardRepositoryLive } from "../../persistence/Layers/ProjectionCards.ts";
-import {
-  type ProjectionCard,
-  ProjectionCardRepository,
-} from "../../persistence/Services/ProjectionCards.ts";
-import { inverseRelationKind, withRelation, withoutRelation } from "../cardRules.ts";
+import { ProjectionCardRepository } from "../../persistence/Services/ProjectionCards.ts";
+import { cardPatches, newCard, touchCard } from "../cardRules.ts";
+import { agentPatch, channelPatch, newAgent, newChannel } from "../projector.ts";
 import { ProjectionChannelRepositoryLive } from "../../persistence/Layers/ProjectionChannels.ts";
 import { ProjectionProjectRepositoryLive } from "../../persistence/Layers/ProjectionProjects.ts";
 import { ProjectionStateRepositoryLive } from "../../persistence/Layers/ProjectionState.ts";
@@ -491,6 +488,17 @@ const runAttachmentSideEffects = Effect.fn("runAttachmentSideEffects")(function*
   );
 });
 
+/** Rewrites an existing projection row through `patch`; a missing row stays missing. */
+const patchRow =
+  <Input, Row>(
+    get: (input: Input) => Effect.Effect<Option.Option<Row>, ProjectionRepositoryError>,
+    upsert: (row: Row) => Effect.Effect<void, ProjectionRepositoryError>,
+  ) =>
+  (input: Input, patch: (row: Row) => Row) =>
+    get(input).pipe(
+      Effect.flatMap((row) => (Option.isNone(row) ? Effect.void : upsert(patch(row.value)))),
+    );
+
 const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjectionPipeline")(
   function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -587,65 +595,31 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       }
     });
 
+    const patchAgent = patchRow(
+      projectionAgentRepository.getById,
+      projectionAgentRepository.upsert,
+    );
+    const patchCard = patchRow(projectionCardRepository.getById, projectionCardRepository.upsert);
+    const patchChannel = patchRow(
+      projectionChannelRepository.getChannelById,
+      projectionChannelRepository.upsertChannel,
+    );
+
     const applyAgentsProjection: ProjectorDefinition["apply"] = Effect.fn("applyAgentsProjection")(
       function* (event, _attachmentSideEffects) {
         switch (event.type) {
           case "agent.created":
             yield* projectionAgentRepository.upsert({
               agentId: event.payload.agentId,
-              projectId: event.payload.projectId,
-              name: event.payload.name,
-              avatar: event.payload.avatar,
-              roleTags: event.payload.roleTags,
-              rolePrompt: event.payload.rolePrompt,
-              modelSelection: event.payload.modelSelection,
-              capabilities: event.payload.capabilities,
-              createdAt: event.payload.createdAt,
-              updatedAt: event.payload.updatedAt,
-              archivedAt: null,
+              ...newAgent(event.payload),
             });
             return;
 
-          case "agent.updated": {
-            const existingRow = yield* projectionAgentRepository.getById({
-              agentId: event.payload.agentId,
-            });
-            if (Option.isNone(existingRow)) {
-              return;
-            }
-            yield* projectionAgentRepository.upsert({
-              ...existingRow.value,
-              ...(event.payload.name !== undefined ? { name: event.payload.name } : {}),
-              ...(event.payload.avatar !== undefined ? { avatar: event.payload.avatar } : {}),
-              ...(event.payload.roleTags !== undefined ? { roleTags: event.payload.roleTags } : {}),
-              ...(event.payload.rolePrompt !== undefined
-                ? { rolePrompt: event.payload.rolePrompt }
-                : {}),
-              ...(event.payload.modelSelection !== undefined
-                ? { modelSelection: event.payload.modelSelection }
-                : {}),
-              ...(event.payload.capabilities !== undefined
-                ? { capabilities: event.payload.capabilities }
-                : {}),
-              updatedAt: event.payload.updatedAt,
-            });
-            return;
-          }
-
+          case "agent.updated":
           case "agent.archived":
           case "agent.unarchived": {
-            const existingRow = yield* projectionAgentRepository.getById({
-              agentId: event.payload.agentId,
-            });
-            if (Option.isNone(existingRow)) {
-              return;
-            }
-            yield* projectionAgentRepository.upsert({
-              ...existingRow.value,
-              ...(event.type === "agent.archived"
-                ? { archivedAt: event.payload.archivedAt, updatedAt: event.payload.archivedAt }
-                : { archivedAt: null, updatedAt: event.payload.updatedAt }),
-            });
+            const patch = agentPatch(event);
+            yield* patchAgent({ agentId: event.payload.agentId }, (row) => ({ ...row, ...patch }));
             return;
           }
 
@@ -655,159 +629,21 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       },
     );
 
-    const patchCard = (
-      cardId: ProjectionCard["cardId"],
-      patch: (row: ProjectionCard) => ProjectionCard,
-    ) =>
-      projectionCardRepository
-        .getById({ cardId })
-        .pipe(
-          Effect.flatMap((row) =>
-            Option.isNone(row) ? Effect.void : projectionCardRepository.upsert(patch(row.value)),
-          ),
-        );
-
     const applyCardsProjection: ProjectorDefinition["apply"] = Effect.fn("applyCardsProjection")(
       function* (event, _attachmentSideEffects) {
+        if (event.type === "card.created") {
+          yield* projectionCardRepository.upsert({
+            cardId: event.payload.cardId,
+            ...newCard(event.payload),
+          });
+          return;
+        }
+        for (const [cardId, patch] of cardPatches(event)) {
+          yield* patchCard({ cardId }, patch);
+        }
         switch (event.type) {
-          case "card.created":
-            yield* projectionCardRepository.upsert({
-              cardId: event.payload.cardId,
-              projectId: event.payload.projectId,
-              channelId: event.payload.channelId,
-              parentCardId: event.payload.parentCardId,
-              title: event.payload.title,
-              spec: event.payload.spec,
-              specState: event.payload.specState,
-              tags: event.payload.tags,
-              status: event.payload.status,
-              ownerHumanId: event.payload.ownerHumanId,
-              delegateAgentId: null,
-              baseBranch: event.payload.baseBranch,
-              branch: null,
-              worktreePath: null,
-              portBase: null,
-              relations: [],
-              snoozedUntil: null,
-              snoozedAt: null,
-              activityAt: event.payload.createdAt,
-              diffStat: null,
-              checks: null,
-              spentUsd: 0,
-              budgetCapUsd: DEFAULT_CARD_BUDGET_USD,
-              unpricedTurns: 0,
-              acceptsUnpriced: false,
-              reviewReturns: 0,
-              attemptGroupId: event.payload.attemptGroupId ?? null,
-              linearIssue: null,
-              sourceMessageId: event.payload.sourceMessageId ?? null,
-              proposalReasoning: event.payload.proposalReasoning ?? null,
-              priority: event.payload.priority ?? 0,
-              createdBy: event.payload.createdBy,
-              createdAt: event.payload.createdAt,
-              updatedAt: event.payload.updatedAt,
-            });
-            return;
-
-          case "card.updated": {
-            const payload = event.payload;
-            yield* patchCard(payload.cardId, (row) => ({
-              ...row,
-              ...(payload.title !== undefined ? { title: payload.title } : {}),
-              ...(payload.spec !== undefined ? { spec: payload.spec } : {}),
-              ...(payload.specState !== undefined ? { specState: payload.specState } : {}),
-              ...(payload.tags !== undefined ? { tags: payload.tags } : {}),
-              ...(payload.priority !== undefined ? { priority: payload.priority } : {}),
-              updatedAt: payload.updatedAt,
-              activityAt: payload.updatedAt,
-            }));
-            return;
-          }
-
-          case "card.status-changed": {
-            const payload = event.payload;
-            yield* patchCard(payload.cardId, (row) => ({
-              ...row,
-              status: payload.to,
-              updatedAt: payload.updatedAt,
-              activityAt: payload.updatedAt,
-              reviewReturns: row.reviewReturns + (payload.move === "returnToWork" ? 1 : 0),
-            }));
-            return;
-          }
-
-          case "card.delegate-changed": {
-            const payload = event.payload;
-            yield* patchCard(payload.cardId, (row) => ({
-              ...row,
-              delegateAgentId: payload.delegateAgentId,
-              updatedAt: payload.updatedAt,
-              activityAt: payload.updatedAt,
-            }));
-            return;
-          }
-
-          case "card.relation-added":
-          case "card.relation-removed": {
-            const { cardId, kind, otherCardId, updatedAt } = event.payload;
-            const change = event.type === "card.relation-added" ? withRelation : withoutRelation;
-            yield* patchCard(cardId, (row) => ({
-              ...row,
-              relations: change(row.relations, { kind, cardId: otherCardId }),
-              updatedAt,
-            }));
-            const inverse = inverseRelationKind(kind);
-            if (inverse !== null) {
-              yield* patchCard(otherCardId, (row) => ({
-                ...row,
-                relations: change(row.relations, { kind: inverse, cardId }),
-                updatedAt,
-              }));
-            }
-            return;
-          }
-
-          case "card.workspace-set": {
-            const payload = event.payload;
-            yield* patchCard(payload.cardId, (row) => ({
-              ...row,
-              branch: payload.branch,
-              worktreePath: payload.worktreePath,
-              portBase: payload.portBase,
-              updatedAt: payload.updatedAt,
-            }));
-            return;
-          }
-
-          case "card.workspace-cleared": {
-            const payload = event.payload;
-            yield* patchCard(payload.cardId, (row) => ({
-              ...row,
-              branch: null,
-              worktreePath: null,
-              portBase: null,
-              updatedAt: payload.updatedAt,
-            }));
-            return;
-          }
-
-          case "card.snoozed": {
-            const payload = event.payload;
-            yield* patchCard(payload.cardId, (row) => ({
-              ...row,
-              snoozedUntil: payload.snoozedUntil,
-              snoozedAt: payload.snoozedAt,
-            }));
-            return;
-          }
-
           case "card.spend-recorded": {
             const payload = event.payload;
-            yield* patchCard(payload.cardId, (row) => ({
-              ...row,
-              spentUsd: row.spentUsd + payload.costUsd,
-              unpricedTurns: row.unpricedTurns + (payload.costSource === "unpriced" ? 1 : 0),
-            }));
             yield* projectionCardRepository.recordSpend({
               spendId: `${payload.threadId}:${payload.turnId}`,
               cardId: payload.cardId,
@@ -820,58 +656,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             return;
           }
 
-          case "card.linear-synced": {
-            const payload = event.payload;
-            yield* patchCard(payload.cardId, (row) => ({ ...row, linearIssue: payload.issue }));
-            return;
-          }
-
-          case "card.budget-set": {
-            const payload = event.payload;
-            yield* patchCard(payload.cardId, (row) => ({ ...row, budgetCapUsd: payload.capUsd }));
-            return;
-          }
-
-          case "card.unpriced-accepted": {
-            const payload = event.payload;
-            yield* patchCard(payload.cardId, (row) => ({ ...row, acceptsUnpriced: payload.accepts }));
-            return;
-          }
-
-          case "card.checks-updated":
-            yield* patchCard(event.payload.cardId, (row) => ({
-              ...row,
-              checks: event.payload.checks,
-              activityAt: event.payload.checks.updatedAt,
-            }));
-            return;
-
-          case "card.diff-measured":
-            yield* patchCard(event.payload.cardId, (row) => ({
-              ...row,
-              diffStat: event.payload.diffStat,
-            }));
-            return;
-
-          case "card.unsnoozed":
-            yield* patchCard(event.payload.cardId, (row) => ({
-              ...row,
-              snoozedUntil: null,
-              snoozedAt: null,
-            }));
-            return;
-
-          case "card.spec-submitted": {
-            const payload = event.payload;
-            yield* patchCard(payload.cardId, (row) => ({ ...row, activityAt: payload.submittedAt }));
-            return;
-          }
-
           case "card.message-posted":
-            yield* patchCard(event.payload.cardId, (row) => ({
-              ...row,
-              activityAt: event.payload.createdAt,
-            }));
             yield* projectionCardRepository.appendMessage({
               messageId: event.payload.messageId,
               cardId: event.payload.cardId,
@@ -892,12 +677,6 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           // A plan gate decision joins the log, so later briefs say who decided.
           case "card.spec-state-changed": {
             const payload = event.payload;
-            yield* patchCard(payload.cardId, (row) => ({
-              ...row,
-              specState: payload.to,
-              updatedAt: payload.updatedAt,
-              activityAt: payload.updatedAt,
-            }));
             yield* projectionCardRepository.appendDecision({
               decisionId: `spec-state:${event.eventId}`,
               cardId: payload.cardId,
@@ -913,10 +692,6 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           }
 
           case "card.decision-recorded":
-            yield* patchCard(event.payload.cardId, (row) => ({
-              ...row,
-              activityAt: event.payload.createdAt,
-            }));
             yield* projectionCardRepository.appendDecision({
               decisionId: event.payload.decisionId,
               cardId: event.payload.cardId,
@@ -939,62 +714,18 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         case "channel.created":
           yield* projectionChannelRepository.upsertChannel({
             channelId: event.payload.channelId,
-            projectId: event.payload.projectId,
-            kind: event.payload.kind,
-            name: event.payload.name,
-            topic: event.payload.topic,
-            pinnedSpec: event.payload.pinnedSpec,
-            wakeDepth: event.payload.wakeDepth,
-            memberAgentIds: event.payload.memberAgentIds,
-            leadAgentId: event.payload.leadAgentId ?? null,
-            createdAt: event.payload.createdAt,
-            updatedAt: event.payload.updatedAt,
-            archivedAt: null,
+            ...newChannel(event.payload),
           });
           return;
 
-        case "channel.updated": {
-          const existingRow = yield* projectionChannelRepository.getChannelById({
-            channelId: event.payload.channelId,
-          });
-          if (Option.isNone(existingRow)) {
-            return;
-          }
-          yield* projectionChannelRepository.upsertChannel({
-            ...existingRow.value,
-            ...(event.payload.name !== undefined ? { name: event.payload.name } : {}),
-            ...(event.payload.topic !== undefined ? { topic: event.payload.topic } : {}),
-            ...(event.payload.pinnedSpec !== undefined
-              ? { pinnedSpec: event.payload.pinnedSpec }
-              : {}),
-            ...(event.payload.wakeDepth !== undefined
-              ? { wakeDepth: event.payload.wakeDepth }
-              : {}),
-            ...(event.payload.memberAgentIds !== undefined
-              ? { memberAgentIds: event.payload.memberAgentIds }
-              : {}),
-            ...(event.payload.leadAgentId !== undefined
-              ? { leadAgentId: event.payload.leadAgentId }
-              : {}),
-            updatedAt: event.payload.updatedAt,
-          });
-          return;
-        }
-
+        case "channel.updated":
         case "channel.archived":
         case "channel.unarchived": {
-          const existingRow = yield* projectionChannelRepository.getChannelById({
-            channelId: event.payload.channelId,
-          });
-          if (Option.isNone(existingRow)) {
-            return;
-          }
-          yield* projectionChannelRepository.upsertChannel({
-            ...existingRow.value,
-            ...(event.type === "channel.archived"
-              ? { archivedAt: event.payload.archivedAt, updatedAt: event.payload.archivedAt }
-              : { archivedAt: null, updatedAt: event.payload.updatedAt }),
-          });
+          const patch = channelPatch(event);
+          yield* patchChannel({ channelId: event.payload.channelId }, (row) => ({
+            ...row,
+            ...patch,
+          }));
           return;
         }
 
@@ -1020,10 +751,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
 
         case "card.session-started":
-          yield* patchCard(event.payload.cardId, (row) => ({
-            ...row,
-            activityAt: event.payload.startedAt,
-          }));
+          yield* patchCard({ cardId: event.payload.cardId }, touchCard(event.payload.startedAt));
           yield* projectionChannelRepository.insertRun({
             ...event.payload,
             channelId: null,
