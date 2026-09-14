@@ -129,6 +129,8 @@ describe("OrchestrationReactor", () => {
             reconcile: () => Effect.void,
             save: () => Effect.die("not used"),
             importDefinitions: () => Effect.die("not used"),
+            list: () => Effect.die("not used"),
+            archive: () => Effect.die("not used"),
           }),
         ),
         Layer.provideMerge(

@@ -2367,6 +2367,18 @@ const makeWsRpcLayer = (
             agentDefinitionSync.importDefinitions(input.projectId),
             { "rpc.aggregate": "orchestration" },
           ),
+        [ORCHESTRATION_WS_METHODS.listAgentDefinitions]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.listAgentDefinitions,
+            agentDefinitionSync.list(input.projectId),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.archiveAgentDefinition]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.archiveAgentDefinition,
+            agentDefinitionSync.archive(input).pipe(Effect.as({})),
+            { "rpc.aggregate": "orchestration" },
+          ),
         [WS_METHODS.serverProbe]: (_input) =>
           observeRpcEffect(WS_METHODS.serverProbe, Effect.succeed({}), {
             "rpc.aggregate": "server",

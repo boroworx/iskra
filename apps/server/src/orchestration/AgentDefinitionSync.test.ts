@@ -281,4 +281,71 @@ it.layer(layer)("AgentDefinitionSync", (it) => {
       }),
     ),
   );
+
+  it.effect(
+    "archives by deleting the file, unarchives by saving, lists both, and refuses a taken name",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const world = yield* makeProject("archive");
+          const definition = (name: string): AgentDefinition => ({
+            id: null,
+            name: name as AgentDefinition["name"],
+            avatar: null,
+            tags: [],
+            modelSelection: haiku,
+            capabilities: ["read"],
+            rolePrompt: `Owns ${name}.`,
+          });
+          const { agentId } = yield* world.sync.save({
+            projectId: world.projectId,
+            definition: definition("frontend"),
+          });
+          const backend = yield* world.sync.save({
+            projectId: world.projectId,
+            definition: definition("backend"),
+          });
+
+          const renameOnto = yield* Effect.flip(
+            world.sync.save({
+              projectId: world.projectId,
+              definition: { ...definition("frontend"), id: backend.agentId },
+            }),
+          );
+          expect(renameOnto.message).toBe("An agent named frontend already exists in this project.");
+
+          yield* world.sync.archive({ projectId: world.projectId, agentId });
+          expect(yield* world.fileSystem.exists(world.agentFile("frontend.md"))).toBe(false);
+          expect((yield* world.sync.list(world.projectId)).agents).toMatchObject([
+            { definition: { id: agentId, name: "frontend" }, archived: true },
+            { definition: { id: backend.agentId, name: "backend" }, archived: false },
+          ]);
+          const again = yield* Effect.flip(
+            world.sync.archive({ projectId: world.projectId, agentId }),
+          );
+          expect(again.message).toBe("That agent is already archived.");
+
+          const createOnto = yield* Effect.flip(
+            world.sync.save({ projectId: world.projectId, definition: definition("frontend") }),
+          );
+          expect(createOnto.message).toBe(
+            "An agent named frontend already exists in this project (archived).",
+          );
+
+          yield* world.sync.save({
+            projectId: world.projectId,
+            definition: { ...definition("frontend"), id: agentId },
+          });
+          expect((yield* world.agents).find((agent) => agent.id === agentId)?.archivedAt).toBeNull();
+
+          yield* world.writeAgentFile("broken.md", "---\ncapabilities: [deploy]\n---\n");
+          const blocked = yield* Effect.flip(
+            world.sync.archive({ projectId: world.projectId, agentId: backend.agentId }),
+          );
+          expect(blocked.message).toBe(
+            "@backend was not archived: fix the invalid files in .iskra/agents first.",
+          );
+        }),
+      ),
+  );
 });

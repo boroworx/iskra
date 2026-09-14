@@ -50,6 +50,8 @@ export const ORCHESTRATION_WS_METHODS = {
   getCardDiff: "orchestration.getCardDiff",
   saveAgentDefinition: "orchestration.saveAgentDefinition",
   importAgentDefinitions: "orchestration.importAgentDefinitions",
+  listAgentDefinitions: "orchestration.listAgentDefinitions",
+  archiveAgentDefinition: "orchestration.archiveAgentDefinition",
 } as const;
 
 export const ProviderApprovalPolicy = Schema.Literals([
@@ -3841,6 +3843,36 @@ export const OrchestrationImportAgentDefinitionsResult = Schema.Struct({
 export type OrchestrationImportAgentDefinitionsResult =
   typeof OrchestrationImportAgentDefinitionsResult.Type;
 
+export const OrchestrationListAgentDefinitionsInput = Schema.Struct({
+  projectId: ProjectId,
+});
+export type OrchestrationListAgentDefinitionsInput =
+  typeof OrchestrationListAgentDefinitionsInput.Type;
+
+/** A project's agents as their files define them, archived ones included. */
+export const OrchestrationListAgentDefinitionsResult = Schema.Struct({
+  agents: Schema.Array(
+    Schema.Struct({
+      definition: Schema.Struct({ ...AgentDefinitionInput.fields, id: AgentId }),
+      archived: Schema.Boolean,
+    }),
+  ),
+});
+export type OrchestrationListAgentDefinitionsResult =
+  typeof OrchestrationListAgentDefinitionsResult.Type;
+
+/** Archives an agent by deleting its file. Saving its definition again unarchives it. */
+export const OrchestrationArchiveAgentDefinitionInput = Schema.Struct({
+  projectId: ProjectId,
+  agentId: AgentId,
+});
+export type OrchestrationArchiveAgentDefinitionInput =
+  typeof OrchestrationArchiveAgentDefinitionInput.Type;
+
+export const OrchestrationArchiveAgentDefinitionResult = Schema.Struct({});
+export type OrchestrationArchiveAgentDefinitionResult =
+  typeof OrchestrationArchiveAgentDefinitionResult.Type;
+
 /** How many of a channel's newest messages a channel subscription starts with. */
 export const CHANNEL_SUBSCRIBE_MESSAGE_LIMIT = 200;
 
@@ -3923,6 +3955,14 @@ export const OrchestrationRpcSchemas = {
   importAgentDefinitions: {
     input: OrchestrationImportAgentDefinitionsInput,
     output: OrchestrationImportAgentDefinitionsResult,
+  },
+  listAgentDefinitions: {
+    input: OrchestrationListAgentDefinitionsInput,
+    output: OrchestrationListAgentDefinitionsResult,
+  },
+  archiveAgentDefinition: {
+    input: OrchestrationArchiveAgentDefinitionInput,
+    output: OrchestrationArchiveAgentDefinitionResult,
   },
 } as const;
 

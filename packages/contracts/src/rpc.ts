@@ -1286,6 +1286,24 @@ const WsOrchestrationImportAgentDefinitionsRpc = Rpc.make(
   },
 );
 
+const WsOrchestrationListAgentDefinitionsRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.listAgentDefinitions,
+  {
+    payload: OrchestrationRpcSchemas.listAgentDefinitions.input,
+    success: OrchestrationRpcSchemas.listAgentDefinitions.output,
+    error: Schema.Union([AgentDefinitionError, EnvironmentAuthorizationError]),
+  },
+);
+
+const WsOrchestrationArchiveAgentDefinitionRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.archiveAgentDefinition,
+  {
+    payload: OrchestrationRpcSchemas.archiveAgentDefinition.input,
+    success: OrchestrationRpcSchemas.archiveAgentDefinition.output,
+    error: Schema.Union([AgentDefinitionError, EnvironmentAuthorizationError]),
+  },
+);
+
 const WsSubscribeTerminalEventsRpc = Rpc.make(WS_METHODS.subscribeTerminalEvents, {
   payload: Schema.Struct({}),
   success: TerminalEvent,
@@ -1494,4 +1512,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationGetCardDiffRpc,
   WsOrchestrationSaveAgentDefinitionRpc,
   WsOrchestrationImportAgentDefinitionsRpc,
+  WsOrchestrationListAgentDefinitionsRpc,
+  WsOrchestrationArchiveAgentDefinitionRpc,
 );

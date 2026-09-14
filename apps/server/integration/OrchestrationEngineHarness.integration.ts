@@ -437,6 +437,8 @@ export const makeOrchestrationIntegrationHarness = (
           reconcile: () => Effect.void,
           save: () => Effect.die("agent files are not used by the engine harness"),
           importDefinitions: () => Effect.die("agent files are not used by the engine harness"),
+          list: () => Effect.die("agent files are not used by the engine harness"),
+          archive: () => Effect.die("agent files are not used by the engine harness"),
         }),
       ),
       Layer.provideMerge(

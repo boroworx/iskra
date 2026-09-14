@@ -34,6 +34,8 @@ export const RPC_REQUIRED_SCOPES = {
   [ORCHESTRATION_WS_METHODS.getCardDiff]: AuthOrchestrationReadScope,
   [ORCHESTRATION_WS_METHODS.saveAgentDefinition]: AuthOrchestrationOperateScope,
   [ORCHESTRATION_WS_METHODS.importAgentDefinitions]: AuthOrchestrationOperateScope,
+  [ORCHESTRATION_WS_METHODS.listAgentDefinitions]: AuthOrchestrationReadScope,
+  [ORCHESTRATION_WS_METHODS.archiveAgentDefinition]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverProbe]: AuthOrchestrationReadScope,
   [WS_METHODS.serverGetConfig]: AuthOrchestrationReadScope,
   [WS_METHODS.serverRefreshProviders]: AuthOrchestrationOperateScope,

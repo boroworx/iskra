@@ -6,6 +6,7 @@ import {
   type ModelSelection,
   type OrchestrationAgent,
   type OrchestrationCommand,
+  type OrchestrationListAgentDefinitionsResult,
   type OrchestrationProject,
   type OrchestrationReadModel,
   type ProjectId,
@@ -64,6 +65,15 @@ export class AgentDefinitionSync extends Context.Service<
       readonly projectId: ProjectId;
       readonly definition: AgentDefinition;
     }) => Effect.Effect<{ readonly agentId: AgentId }, AgentDefinitionError>;
+    /** A project's agents as definitions, archived ones included. */
+    readonly list: (
+      projectId: ProjectId,
+    ) => Effect.Effect<OrchestrationListAgentDefinitionsResult, AgentDefinitionError>;
+    /** Archives an agent by deleting its file; saving its definition again unarchives it. */
+    readonly archive: (input: {
+      readonly projectId: ProjectId;
+      readonly agentId: AgentId;
+    }) => Effect.Effect<void, AgentDefinitionError>;
     readonly importDefinitions: (
       projectId: ProjectId,
     ) => Effect.Effect<AgentImportResult, AgentDefinitionError>;
@@ -371,13 +381,16 @@ const make = Effect.gen(function* () {
         const projectAgents = ((yield* readModel).agents ?? []).filter(
           (agent) => agent.projectId === project.id,
         );
-        const agentId =
-          definition.id ??
-          projectAgents.find(
-            (agent) =>
-              agent.name === definition.name && !files.some((file) => definedId(file) === agent.id),
-          )?.id ??
-          (yield* newAgentId);
+        // Names are unique among a project's agents, archived ones included: unarchive instead.
+        const taken = projectAgents.find(
+          (agent) => agent.name === definition.name && agent.id !== definition.id,
+        );
+        if (taken !== undefined) {
+          return yield* new AgentDefinitionError({
+            message: `An agent named ${definition.name} already exists in this project${taken.archivedAt !== null ? " (archived)" : ""}.`,
+          });
+        }
+        const agentId = definition.id ?? (yield* newAgentId);
         if (files.some((file) => file.filePath === target && definedId(file) !== agentId)) {
           return yield* new AgentDefinitionError({
             message: `Another agent is already defined in ${AGENT_DEFINITIONS_DIR}/${definition.name}.md.`,
@@ -395,7 +408,8 @@ const make = Effect.gen(function* () {
         }
         yield* reconcileProject(project, yield* readModel);
         const saved = ((yield* readModel).agents ?? []).some(
-          (agent) => agent.id === agentId && agent.archivedAt === null,
+          (agent) =>
+            agent.id === agentId && agent.archivedAt === null && agent.name === definition.name,
         );
         if (!saved) {
           return yield* new AgentDefinitionError({
@@ -404,6 +418,53 @@ const make = Effect.gen(function* () {
         }
         return { agentId };
       }).pipe(Effect.mapError(asDefinitionError(`Could not save ${definition.name}.`))),
+    );
+
+  const list: AgentDefinitionSync["Service"]["list"] = (projectId) =>
+    Effect.gen(function* () {
+      const model = yield* readModel;
+      yield* findProject(model, projectId);
+      return {
+        agents: (model.agents ?? [])
+          .filter((agent) => agent.projectId === projectId)
+          .map((agent) => ({
+            definition: { ...definitionOfAgent(agent), id: agent.id },
+            archived: agent.archivedAt !== null,
+          })),
+      };
+    });
+
+  const archive: AgentDefinitionSync["Service"]["archive"] = ({ projectId, agentId }) =>
+    semaphore.withPermits(1)(
+      Effect.gen(function* () {
+        const model = yield* readModel;
+        const project = yield* findProject(model, projectId);
+        // Write out a project's agents first, so there is a file to delete.
+        yield* reconcileProject(project, model);
+        const agent = ((yield* readModel).agents ?? []).find(
+          (candidate) => candidate.id === agentId && candidate.projectId === project.id,
+        );
+        if (agent === undefined) {
+          return yield* new AgentDefinitionError({ message: "That agent no longer exists." });
+        }
+        if (agent.archivedAt !== null) {
+          return yield* new AgentDefinitionError({ message: "That agent is already archived." });
+        }
+        for (const file of yield* readAgentFiles(agentsDir(project))) {
+          if (definedId(file) === agentId) {
+            yield* fileSystem.remove(file.filePath);
+          }
+        }
+        yield* reconcileProject(project, yield* readModel);
+        const archived = ((yield* readModel).agents ?? []).some(
+          (candidate) => candidate.id === agentId && candidate.archivedAt !== null,
+        );
+        if (!archived) {
+          return yield* new AgentDefinitionError({
+            message: `@${agent.name} was not archived: fix the invalid files in ${AGENT_DEFINITIONS_DIR} first.`,
+          });
+        }
+      }).pipe(Effect.mapError(asDefinitionError("Could not archive the agent."))),
     );
 
   const importDefinitions: AgentDefinitionSync["Service"]["importDefinitions"] = (projectId) =>
@@ -490,6 +551,8 @@ const make = Effect.gen(function* () {
     start,
     reconcile,
     save,
+    list,
+    archive,
     importDefinitions,
   } satisfies AgentDefinitionSync["Service"];
 });
