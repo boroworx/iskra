@@ -26,6 +26,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { SidebarInset } from "../ui/sidebar";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import {
+  agentListEntries,
   channelMemberEntries,
   channelMessageRows,
   deliveryNotes,
@@ -414,11 +415,10 @@ const ChannelMemberList = memo(function ChannelMemberList(props: {
   readonly environmentId: EnvironmentId;
 }) {
   const updateChannel = useAtomCommand(channelEnvironment.update);
-  // A lead is an agent of the project that is not a member of the channel.
-  const leadOptions = props.agents.filter(
-    (agent) =>
-      agent.projectId === props.channel.projectId &&
-      !props.channel.memberAgentIds.includes(agent.id),
+  // Any active agent of the project can lead, member or not.
+  const leadOptions = useMemo(
+    () => agentListEntries(props.agents, props.channel.projectId),
+    [props.agents, props.channel.projectId],
   );
   const leadName = (agentId: string | null) =>
     agentId === null || agentId === NO_LEAD
@@ -456,7 +456,7 @@ const ChannelMemberList = memo(function ChannelMemberList(props: {
           </SelectPopup>
         </Select>
         <p className="mt-1.5 text-xs text-muted-foreground">
-          Reads messages that mention no one and proposes cards from them.
+          The lead reads unaddressed messages and turns them into cards.
         </p>
       </div>
       <h2 className="px-2 text-xs font-medium text-muted-foreground">
