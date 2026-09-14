@@ -126,6 +126,8 @@ import {
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { buildThreadRouteParams, resolveThreadRouteTarget } from "../threadRoutes";
 import { useAvailableSettingsSearchItems } from "./settings/useAvailableSettingsSearchItems";
+import { cardEnvironment } from "../state/cards";
+import { toastCommandFailure } from "./toastCommandFailure";
 import { channelListEntries } from "./channels/channels.logic";
 import { openCreateDialog, useRouteProject } from "./channels/IskraCreateDialogs";
 import {
@@ -1159,26 +1161,87 @@ function OpenCommandPaletteDialog(props: {
 
   // A card opens its sheet on its project's board.
   const primaryCards = useEnvironmentCards(primaryEnvironmentId);
+  const decideCard = useAtomCommand(cardEnvironment.decide);
+  const resolveCardCheckpoint = useAtomCommand(cardEnvironment.resolveCheckpoint);
+  // Each open card also offers pause or resume, and continuing an open checkpoint.
   const cardItems = useMemo(
     (): CommandPaletteActionItem[] =>
       primaryEnvironmentId === null
         ? []
-        : primaryCards.map((card) => ({
-            kind: "action",
-            value: `card:${primaryEnvironmentId}:${card.id}`,
-            searchTerms: [card.title],
-            title: card.title,
-            description: projectTitleById.get(card.projectId),
-            icon: <StickyNoteIcon className={ITEM_ICON_CLASS} />,
-            run: async () => {
-              await navigate({
-                to: "/board/$environmentId/$projectId",
-                params: { environmentId: primaryEnvironmentId, projectId: card.projectId },
-                search: { card: card.id },
+        : primaryCards.flatMap((card): CommandPaletteActionItem[] => {
+            const description = projectTitleById.get(card.projectId);
+            const icon = <StickyNoteIcon className={ITEM_ICON_CLASS} />;
+            const items: CommandPaletteActionItem[] = [
+              {
+                kind: "action",
+                value: `card:${primaryEnvironmentId}:${card.id}`,
+                searchTerms: [card.title],
+                title: card.title,
+                description,
+                icon,
+                run: async () => {
+                  await navigate({
+                    to: "/board/$environmentId/$projectId",
+                    params: { environmentId: primaryEnvironmentId, projectId: card.projectId },
+                    search: { card: card.id },
+                  });
+                },
+              },
+            ];
+            if (card.status === "landed" || card.status === "abandoned") {
+              return items;
+            }
+            const paused = card.paused !== null;
+            items.push({
+              kind: "action",
+              value: `card-${paused ? "resume" : "pause"}:${primaryEnvironmentId}:${card.id}`,
+              searchTerms: [card.title, paused ? "resume card" : "pause card"],
+              title: `${paused ? "Resume" : "Pause"}: ${card.title}`,
+              description,
+              icon,
+              run: async () => {
+                const result = await decideCard({
+                  environmentId: primaryEnvironmentId,
+                  input: { type: paused ? "card.resume" : "card.pause", cardId: card.id },
+                });
+                toastCommandFailure(
+                  result,
+                  paused ? "The card was not resumed" : "The card was not paused",
+                  "The request was refused.",
+                );
+              },
+            });
+            if (card.checkpoint !== null) {
+              items.push({
+                kind: "action",
+                value: `card-checkpoint:${primaryEnvironmentId}:${card.id}`,
+                searchTerms: [card.title, "continue checkpoint resolve"],
+                title: `Continue after checkpoint: ${card.title}`,
+                description,
+                icon,
+                run: async () => {
+                  const result = await resolveCardCheckpoint({
+                    environmentId: primaryEnvironmentId,
+                    input: { cardId: card.id, decision: "continue" },
+                  });
+                  toastCommandFailure(
+                    result,
+                    "The checkpoint was not answered",
+                    "The request was refused.",
+                  );
+                },
               });
-            },
-          })),
-    [navigate, primaryCards, primaryEnvironmentId, projectTitleById],
+            }
+            return items;
+          }),
+    [
+      decideCard,
+      navigate,
+      primaryCards,
+      primaryEnvironmentId,
+      projectTitleById,
+      resolveCardCheckpoint,
+    ],
   );
 
   // New channel, agent and card, and the board, act on the project the route is about.

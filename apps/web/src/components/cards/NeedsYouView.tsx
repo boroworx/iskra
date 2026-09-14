@@ -1,5 +1,6 @@
 import {
   NEEDS_YOU_LABEL,
+  cardWaitItems,
   cardOwnerSessions,
   isCardSnoozed,
   needsYouItems,
@@ -10,6 +11,11 @@ import { DEFAULT_CARD_BUDGET_USD, type CardId, type EnvironmentId } from "@iskra
 import { Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
+import { useClientSettings } from "~/hooks/useSettings";
+import {
+  deriveLogicalProjectKeyFromSettings,
+  selectProjectGroupingSettings,
+} from "~/logicalProject";
 import { cardEnvironment } from "~/state/cards";
 import { useEnvironmentAgents, useEnvironmentCards, useProjects } from "~/state/entities";
 import { usePrimaryEnvironmentId } from "~/state/environments";
@@ -50,10 +56,29 @@ export function NeedsYouView() {
     return () => window.clearInterval(interval);
   }, []);
 
-  const items = useMemo(
-    () => needsYouItems({ cards, sessions: cardOwnerSessions(cards), now }),
-    [cards, now],
+  const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
+  const environmentProjects = useMemo(
+    () => projects.filter((project) => project.environmentId === environmentId),
+    [projects, environmentId],
   );
+  const items = useMemo(
+    () =>
+      needsYouItems({
+        cards,
+        sessions: cardOwnerSessions(cards),
+        projects: environmentProjects,
+        now,
+      }),
+    [cards, environmentProjects, now],
+  );
+  // Cards waiting on Iskra itself, such as machine capacity: shown, not counted as waiting on you.
+  const waits = useMemo(() => cardWaitItems(cards), [cards]);
+  const orchestrationSettingsSearch = (projectId: string) => {
+    const project = environmentProjects.find((entry) => entry.id === projectId);
+    return project === undefined
+      ? null
+      : { project: deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings) };
+  };
   const snoozed = useMemo(() => cards.filter((card) => isCardSnoozed(card, now)), [cards, now]);
   const cardById = useMemo(() => new Map(cards.map((card) => [card.id, card])), [cards]);
   // Who can own a proposal, per project, for Approve & start.
@@ -122,6 +147,11 @@ export function NeedsYouView() {
                       <span className="truncate text-xs text-muted-foreground">
                         {NEEDS_YOU_LABEL[item.kind]} · {projectTitle(item.projectId)}
                       </span>
+                      {item.reason !== null && item.kind !== "checkpoint" ? (
+                        <p className="line-clamp-2 text-xs text-muted-foreground">
+                          Why: {item.reason}
+                        </p>
+                      ) : null}
                       {item.kind === "triage" && proposalReasoningOf(item.cardId) !== null ? (
                         <p className="line-clamp-2 text-xs text-muted-foreground">
                           {proposalReasoningOf(item.cardId)}
@@ -178,6 +208,21 @@ export function NeedsYouView() {
                           }).then(refused("The cap was not raised"));
                         }
                       })
+                    ) : item.kind === "fixRoundsExhausted" ? (
+                      actionButton("Give it more rounds", () =>
+                        decideOn(
+                          item.cardId,
+                          "card.fix-rounds.reset",
+                          "The fix rounds were not reset",
+                        ),
+                      )
+                    ) : itemCard?.paused != null &&
+                      (item.kind === "paused" || item.kind === "sessionFailed") ? (
+                      actionButton("Resume", () =>
+                        decideOn(item.cardId, "card.resume", "The card was not resumed"),
+                      )
+                    ) : item.kind === "sideEffectGuard" ? (
+                      <GuardLink search={orchestrationSettingsSearch(item.projectId)} />
                     ) : item.kind === "unpricedModel" ? (
                       // Refusing is the standing state here; the card sheet takes an acceptance back.
                       actionButton("Run uncapped", () =>
@@ -204,6 +249,37 @@ export function NeedsYouView() {
               })}
             </ol>
           )}
+          {waits.length > 0 ? (
+            <section aria-label="Waiting on Iskra" className="mt-6">
+              <h2 className="text-xs font-medium text-muted-foreground">
+                Waiting on Iskra {waits.length}
+              </h2>
+              <ul className="mt-1 flex flex-col divide-y divide-border">
+                {waits.map((wait) => (
+                  <li
+                    key={wait.cardId}
+                    className="flex min-w-0 flex-wrap items-center gap-x-3 py-2"
+                  >
+                    <div className="flex min-w-0 flex-1 flex-col">
+                      <CardLink
+                        environmentId={environmentId}
+                        projectId={wait.projectId}
+                        cardId={wait.cardId}
+                      >
+                        {wait.title}
+                      </CardLink>
+                      <span className="truncate text-xs text-muted-foreground">
+                        {wait.label === wait.reason ? wait.reason : `${wait.label}: ${wait.reason}`}
+                      </span>
+                    </div>
+                    <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                      waiting {waitingLabel(wait.since, now)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
           {snoozed.length > 0 ? (
             <section aria-label="Snoozed" className="mt-6">
               <h2 className="text-xs font-medium text-muted-foreground">
@@ -233,6 +309,20 @@ export function NeedsYouView() {
         </main>
       </div>
     </SidebarInset>
+  );
+}
+
+/** Where a project's side-effect guard is reviewed: its orchestration settings. */
+function GuardLink(props: { readonly search: { readonly project: string } | null }) {
+  if (props.search === null) return null;
+  return (
+    <Button
+      size="sm"
+      variant="ghost-muted"
+      render={<Link to="/settings/projects" search={props.search} hash="project-orchestration" />}
+    >
+      Review the guard
+    </Button>
   );
 }
 

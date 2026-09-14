@@ -5,6 +5,7 @@ import {
   boardColumnOf,
   cardMoveActions,
   isCardSnoozed,
+  waitReasonLabel,
 } from "@iskra/client-runtime/cards";
 import type { AtomCommandResult } from "@iskra/client-runtime/state/runtime";
 import {
@@ -195,6 +196,32 @@ function CardSheetBody(props: {
       </SheetHeader>
       <SheetPanel className="flex flex-col gap-5">
         <Section label="Move">
+          {open && card.status !== "triage" ? (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  card.paused === null
+                    ? decideOn("card.pause", "The card was not paused")
+                    : decideOn("card.resume", "The card was not resumed")
+                }
+              >
+                {card.paused === null ? "Pause" : "Resume"}
+              </Button>
+              {card.paused !== null ? (
+                <span className="text-xs text-muted-foreground">
+                  Paused: {card.paused.reason.text}
+                </span>
+              ) : card.waitReason !== null ? (
+                <span className="text-xs text-muted-foreground">
+                  {waitReasonLabel(card.waitReason) === card.waitReason.text
+                    ? card.waitReason.text
+                    : `${waitReasonLabel(card.waitReason)}: ${card.waitReason.text}`}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
           {card.status === "landed" ? (
             <p className="text-xs text-muted-foreground">A landed card is finished.</p>
           ) : (

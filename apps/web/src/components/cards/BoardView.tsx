@@ -307,6 +307,7 @@ const CardFace = memo(function CardFace(props: {
     id: card.id,
   });
   const update = useAtomCommand(cardEnvironment.update);
+  const decide = useAtomCommand(cardEnvironment.decide);
   const session = card.ownerSession;
   const badges = cardBadges(card, {
     blocked: props.blocked,
@@ -364,6 +365,23 @@ const CardFace = memo(function CardFace(props: {
             </TooltipTrigger>
           ))}
         </ul>
+      ) : null}
+      {card.paused !== null && card.status !== "landed" && card.status !== "abandoned" ? (
+        <Button
+          size="compact"
+          variant="outline"
+          className="self-start"
+          onClick={() =>
+            void decide({
+              environmentId: props.environmentId,
+              input: { type: "card.resume", cardId: card.id },
+            }).then((result) =>
+              toastCommandFailure(result, "The card was not resumed", "The request was refused."),
+            )
+          }
+        >
+          Resume
+        </Button>
       ) : null}
       <dl className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
         <dd>
