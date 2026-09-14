@@ -947,6 +947,20 @@ export const CardLanding = Schema.Struct({
 });
 export type CardLanding = typeof CardLanding.Type;
 
+/** What a question is for: the owner asking, a checkpoint, or a proposed change to the criteria. */
+export const ElicitationKind = Schema.Literals(["question", "checkpoint", "criteriaChange"]);
+export type ElicitationKind = typeof ElicitationKind.Type;
+
+/** A question on a card nobody has answered yet: its activity, what it is for and its options. */
+export const CardOpenElicitation = Schema.Struct({
+  activityId: TrimmedNonEmptyString,
+  kind: ElicitationKind,
+  // Empty for a question answered in a person's own words only.
+  optionIds: Schema.Array(TrimmedNonEmptyString),
+  askedAt: IsoDateTime,
+});
+export type CardOpenElicitation = typeof CardOpenElicitation.Type;
+
 /** Why a card lands without a person approving its merge. */
 export const CardLandingBeginReason = Schema.Literals(["planChild", "autoMergePolicy"]);
 export type CardLandingBeginReason = typeof CardLandingBeginReason.Type;
@@ -1019,6 +1033,10 @@ export const OrchestrationCard = Schema.Struct({
   waitReason: Schema.NullOr(CardWaitReason).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   // When the card last became ready to run, which orders the queue after priority.
   queuedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  // Questions on the card nobody has answered yet, oldest first.
+  openElicitations: Schema.Array(CardOpenElicitation).pipe(
+    Schema.withDecodingDefault(Effect.succeed([] as ReadonlyArray<CardOpenElicitation>)),
+  ),
   relations: Schema.Array(CardRelation),
   createdBy: CardAuthor,
   createdAt: IsoDateTime,
@@ -1039,6 +1057,7 @@ export const LEGACY_CARD_CONTRACT = {
   paused: null,
   waitReason: null,
   queuedAt: null,
+  openElicitations: [],
 } as const satisfies Partial<OrchestrationCard>;
 
 export const ChannelMessageAuthorKind = Schema.Literals(["human", "agent", "system", "webhook"]);
@@ -1084,6 +1103,8 @@ export const Elicitation = Schema.Struct({
   recommendedOptionId: Schema.NullOr(TrimmedNonEmptyString),
   // Whether a written answer is accepted instead of an option.
   allowText: Schema.Boolean,
+  // What the question is for; one recorded before kinds were reads as a plain question.
+  kind: ElicitationKind.pipe(Schema.withDecodingDefault(Effect.succeed("question" as const))),
 });
 export type Elicitation = typeof Elicitation.Type;
 
@@ -1130,6 +1151,9 @@ export type CardActivityKind = typeof CardActivityKind.Type;
 export const CardActivityAuthor = Schema.Struct({
   kind: Schema.Literals(["human", "agent", "system", "linear", "github"]),
   id: TrimmedNonEmptyString,
+  // Set on a pull request comment: whether its author may direct work on the repository. An
+  // untrusted comment is shown on the card and reaches the builder only when a person forwards it.
+  trusted: Schema.optional(Schema.Boolean),
 });
 export type CardActivityAuthor = typeof CardActivityAuthor.Type;
 
@@ -2478,6 +2502,18 @@ const CardCheckpointResolveCommand = Schema.Struct({
   note: Schema.optional(TrimmedNonEmptyString),
 });
 
+/** A person answering an open question on a card with an offered option or their own words. */
+const CardElicitationAnswerCommand = Schema.Struct({
+  type: Schema.Literal("card.elicitation.answer"),
+  commandId: CommandId,
+  cardId: CardId,
+  // The question's activity: an owner's question, a checkpoint or a proposed criteria change.
+  activityId: TrimmedNonEmptyString,
+  optionId: Schema.NullOr(TrimmedNonEmptyString),
+  body: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
 /** A person accepting the hard scope flags on the card's latest evidence, so its merge can be approved. */
 const CardFlagsAcknowledgeCommand = Schema.Struct({
   type: Schema.Literal("card.flags.acknowledge"),
@@ -3261,6 +3297,7 @@ const IskraClientCommands = [
   CardCriteriaSetCommand,
   CardCriteriaConfirmCommand,
   CardCheckpointResolveCommand,
+  CardElicitationAnswerCommand,
   CardFlagsAcknowledgeCommand,
   CardFixRoundsResetCommand,
   CardPauseCommand,

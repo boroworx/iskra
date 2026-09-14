@@ -1,6 +1,5 @@
 import {
   AgentId,
-  ApprovalRequestId,
   CardId,
   CHANNEL_SYSTEM_AUTHOR_ID,
   CommandId,
@@ -260,30 +259,6 @@ export const make = Effect.gen(function* () {
       Effect.catchTag("OrchestrationCommandInvariantError", () => Effect.succeed(false)),
     );
 
-  /** The oldest message-mode question the session asked and nobody has answered yet. */
-  const openQuestion = Effect.fn("LinearSyncReactor.openQuestion")(function* (threadId: ThreadId) {
-    const thread = yield* snapshots.getThreadDetailById(threadId, {
-      activityKinds: ["user-input.requested", "user-input.resolved"],
-    });
-    if (Option.isNone(thread)) return null;
-    const requestIdOf = (payload: unknown) =>
-      Predicate.isObject(payload) && typeof payload.requestId === "string" ? payload.requestId : null;
-    const resolved = new Set(
-      thread.value.activities
-        .filter((activity) => activity.kind === "user-input.resolved")
-        .map((activity) => requestIdOf(activity.payload)),
-    );
-    const open = thread.value.activities.find(
-      (activity) =>
-        activity.kind === "user-input.requested" &&
-        Predicate.isObject(activity.payload) &&
-        activity.payload.responseMode === "message" &&
-        !resolved.has(requestIdOf(activity.payload)),
-    );
-    const requestId = open === undefined ? null : requestIdOf(open.payload);
-    return requestId === null ? null : ApprovalRequestId.make(requestId);
-  });
-
   const syncLinkedCard = Effect.fn("LinearSyncReactor.syncLinkedCard")(function* (input: {
     readonly card: OrchestrationCard;
     readonly link: CardLinearIssue;
@@ -385,40 +360,29 @@ export const make = Effect.gen(function* () {
       ...freshComments.map((comment) => ({ key: `comment:${comment.id}`, ...comment })),
       ...freshPrompts.map((prompt) => ({ key: `prompt:${prompt.id}`, ...prompt })),
     ].toSorted((left, right) => left.createdAt.localeCompare(right.createdAt));
-    // ponytail: the first new reply answers the delegate's open question, whether or not it was
-    // written as an answer; match Linear threads if people talk past the question.
-    let question = input.ownerThreadId === null ? null : yield* openQuestion(input.ownerThreadId);
+    // ponytail: the first new reply answers the builder's oldest open question, whether or not it
+    // was written as an answer; match Linear threads if people talk past the question.
+    let question = card.openElicitations.find((open) => open.kind === "question") ?? null;
     for (const reply of replies) {
-      if (question !== null && input.ownerThreadId !== null) {
-        const answered = yield* tryDispatch({
-          type: "thread.user-input.respond",
-          commandId: CommandId.make(`server:linear-answer:${reply.key}`),
-          threadId: input.ownerThreadId,
-          requestId: question,
-          answers: { answer: reply.body },
-          createdAt: input.nowIso,
-        });
-        question = null;
-        if (answered) continue;
-      }
       // A Linear reply is a person writing: it reaches the card's builder as its next turn.
       yield* dispatch({
         type: "card.activity.record",
         commandId: CommandId.make(`server:linear-${reply.key}`),
         activityId: `linear-${reply.key}`,
         cardId: card.id,
-        kind: "message",
+        kind: question === null ? "message" : "response",
         author: { kind: "linear", id: reply.authorName },
         body: reply.body,
         runThreadId: null,
         deliverTo: "builder",
         elicitation: null,
-        answers: null,
+        answers: question === null ? null : { questionId: question.activityId, optionId: null },
         status: null,
         evidenceId: null,
         reason: null,
         createdAt: reply.createdAt,
       });
+      question = null;
     }
 
     const next: CardLinearIssue = {

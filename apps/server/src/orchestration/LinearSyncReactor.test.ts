@@ -20,7 +20,6 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
 import * as Stream from "effect/Stream";
 
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
@@ -498,55 +497,25 @@ it.layer(layer)("LinearSyncReactor", (it) => {
         instanceId: ProviderInstanceId.make("claudeAgent"),
         model: "claude-haiku-4-5",
       };
-      /** The delegate asks a question answered by message, the way ask_owner records it. */
-      const askQuestion = (activityId: string, requestId: string, question: string) =>
-        Effect.andThen(
-          world.engine.dispatch({
-            type: "card.activity.record",
-            commandId: world.commandId(),
-            activityId: requestId,
-            cardId: world.cardId,
-            kind: "elicitation",
-            author: { kind: "agent", id: agentId },
-            body: question,
-            runThreadId: threadId,
-            deliverTo: null,
-            elicitation: null,
-            answers: null,
-            status: null,
-            evidenceId: null,
-            reason: null,
-            createdAt: now,
-          }),
-          world.engine.dispatch({
-          type: "thread.activity.append",
+      /** The delegate asks a question on the card, the way ask_owner records it. */
+      const askQuestion = (requestId: string, question: string) =>
+        world.engine.dispatch({
+          type: "card.activity.record",
           commandId: world.commandId(),
-          threadId,
+          activityId: requestId,
+          cardId: world.cardId,
+          kind: "elicitation",
+          author: { kind: "agent", id: agentId },
+          body: question,
+          runThreadId: threadId,
+          deliverTo: null,
+          elicitation: null,
+          answers: null,
+          status: null,
+          evidenceId: null,
+          reason: null,
           createdAt: now,
-          activity: {
-            id: EventId.make(activityId),
-            tone: "info",
-            kind: "user-input.requested",
-            summary: "User input requested",
-            payload: {
-              requestId,
-              responseMode: "message",
-              questions: [
-                {
-                  id: "answer",
-                  header: "Question",
-                  question,
-                  options: [],
-                  allowCustomAnswer: true,
-                  multiSelect: false,
-                },
-              ],
-            },
-            turnId: null,
-            createdAt: now,
-          },
-          }),
-        );
+        });
       yield* world.engine.dispatch({
         type: "agent.create",
         commandId: world.commandId(),
@@ -610,21 +579,22 @@ it.layer(layer)("LinearSyncReactor", (it) => {
 
       yield* world.reactor.start();
       const elicitation = yield* awaitActivity("elicitation");
-      yield* askQuestion("activity-ask-question", "ask-owner:question", "Per key or per account?");
+      yield* askQuestion("ask-owner:question", "Per key or per account?");
       expect(yield* Deferred.await(elicitation)).toEqual({
         type: "elicitation",
         body: "Per key or per account?",
       });
 
       const answered = world.nextEvent(
-        "thread.activity-appended",
-        (event) => event.payload.activity.kind === "user-input.resolved",
+        "card.activity-recorded",
+        (event) => event.payload.answers?.questionId === "ask-owner:question",
       );
       inLinear.comment(world.issueId, "Per key.", ANA);
       yield* world.reactor.syncNow;
-      expect((yield* answered).payload.activity.payload).toMatchObject({
-        requestId: "ask-owner:question",
-        answers: { answer: "Per key." },
+      expect((yield* answered).payload).toMatchObject({
+        kind: "response",
+        body: "Per key.",
+        deliverTo: "builder",
       });
 
       // The delegate's work shows as activity: a tool call as an action, its reply as a response.
@@ -675,14 +645,11 @@ it.layer(layer)("LinearSyncReactor", (it) => {
 
       // A second question is answered by a prompt in the agent session.
       const second = yield* awaitActivity("elicitation");
-      yield* askQuestion("activity-ask-second", "ask-owner:second", "Include webhooks?");
+      yield* askQuestion("ask-owner:second", "Include webhooks?");
       expect(yield* Deferred.await(second)).toMatchObject({ body: "Include webhooks?" });
       const secondAnswered = world.nextEvent(
-        "thread.activity-appended",
-        (event) =>
-          event.payload.activity.kind === "user-input.resolved" &&
-          Predicate.isObject(event.payload.activity.payload) &&
-          event.payload.activity.payload.requestId === "ask-owner:second",
+        "card.activity-recorded",
+        (event) => event.payload.answers?.questionId === "ask-owner:second",
       );
       agentPrompts.set(`session-${world.issueId}`, [
         {
@@ -694,9 +661,9 @@ it.layer(layer)("LinearSyncReactor", (it) => {
         },
       ]);
       yield* world.reactor.syncNow;
-      expect((yield* secondAnswered).payload.activity.payload).toMatchObject({
-        requestId: "ask-owner:second",
-        answers: { answer: "Yes, webhooks too." },
+      expect((yield* secondAnswered).payload).toMatchObject({
+        kind: "response",
+        body: "Yes, webhooks too.",
       });
     }).pipe(Effect.scoped),
   );

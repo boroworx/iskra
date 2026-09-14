@@ -63,6 +63,8 @@ export const OPEN_CHECKPOINT_REASON = "Only an open checkpoint can be resolved."
 export const PAUSED_REASON = "The card is paused; resume it first.";
 export const ALREADY_ANSWERED_REASON = "This question was already answered.";
 export const ANSWER_OPTION_REASON = "Choose one of the offered answers or write your own.";
+export const NO_OPEN_QUESTION_REASON =
+  "This card has no open question with that id; it may already be answered.";
 
 /** Why a set of acceptance criteria can't be used, or null. */
 export function criteriaRefusal(criteria: ReadonlyArray<{ readonly id: string }>): string | null {
@@ -455,6 +457,26 @@ export const SPEC_STATE_DECISION_TEXT = {
   draft: "Returned the spec to draft.",
 } as const;
 
+/** A card's open questions after an activity: a question opens one, a response naming it closes it. */
+export function withCardElicitations(
+  open: OrchestrationCard["openElicitations"],
+  activity: CardActivity,
+): OrchestrationCard["openElicitations"] {
+  if (activity.kind === "elicitation") {
+    return [
+      ...open.filter((question) => question.activityId !== activity.activityId),
+      {
+        activityId: activity.activityId,
+        kind: activity.elicitation?.kind ?? "question",
+        optionIds: activity.elicitation?.options.map((option) => option.id) ?? [],
+        askedAt: activity.createdAt,
+      },
+    ];
+  }
+  const { answers } = activity;
+  return answers === null ? open : open.filter((question) => question.activityId !== answers.questionId);
+}
+
 /** The answers a checkpoint offers, continue recommended. */
 export const CHECKPOINT_OPTIONS = [
   { id: "continue", label: "Continue" },
@@ -573,6 +595,7 @@ export function cardActivitiesOf(event: OrchestrationEvent): ReadonlyArray<CardA
             options: CHECKPOINT_OPTIONS,
             recommendedOptionId: "continue",
             allowText: true,
+            kind: "checkpoint",
           },
           evidenceId: checkpoint.evidenceId,
           createdAt: checkpoint.requestedAt,
@@ -689,7 +712,9 @@ export function cardPatches(
               payload.move === "reopen" && card.acceptance.criteria.length > 0
                 ? { ...card.acceptance, state: "draft" as const }
                 : card.acceptance,
-            ...(isFinishedCardStatus(payload.to) ? { checkpoint: null, waitReason: null } : {}),
+            ...(isFinishedCardStatus(payload.to)
+              ? { checkpoint: null, waitReason: null, openElicitations: [] }
+              : {}),
           }),
         ],
       ];
@@ -736,7 +761,27 @@ export function cardPatches(
     }
     case "card.checkpoint-requested": {
       const { cardId, checkpoint } = event.payload;
-      return [[cardId, (card) => ({ ...card, checkpoint, activityAt: checkpoint.requestedAt })]];
+      return [
+        [
+          cardId,
+          (card) => ({
+            ...card,
+            checkpoint,
+            openElicitations: [
+              ...card.openElicitations.filter(
+                (question) => question.activityId !== checkpoint.checkpointId,
+              ),
+              {
+                activityId: checkpoint.checkpointId,
+                kind: "checkpoint",
+                optionIds: CHECKPOINT_OPTIONS.map((option) => option.id),
+                askedAt: checkpoint.requestedAt,
+              },
+            ],
+            activityAt: checkpoint.requestedAt,
+          }),
+        ],
+      ];
     }
     case "card.checkpoint-resolved": {
       const { cardId, checkpointId, resolvedAt } = event.payload;
@@ -746,6 +791,9 @@ export function cardPatches(
           (card) => ({
             ...card,
             checkpoint: card.checkpoint?.checkpointId === checkpointId ? null : card.checkpoint,
+            openElicitations: card.openElicitations.filter(
+              (question) => question.activityId !== checkpointId,
+            ),
             activityAt: resolvedAt,
           }),
         ],
@@ -792,8 +840,19 @@ export function cardPatches(
       const { cardId, landing } = event.payload;
       return [[cardId, (card) => ({ ...card, landing })]];
     }
-    case "card.activity-recorded":
-      return [[event.payload.cardId, touchCard(event.payload.createdAt)]];
+    case "card.activity-recorded": {
+      const recorded = event.payload;
+      const touch = touchCard(recorded.createdAt);
+      return [
+        [
+          recorded.cardId,
+          (card) => ({
+            ...touch(card),
+            openElicitations: withCardElicitations(card.openElicitations, recorded),
+          }),
+        ],
+      ];
+    }
     case "card.delegate-changed": {
       const { payload } = event;
       return [

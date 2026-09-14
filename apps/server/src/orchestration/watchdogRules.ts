@@ -126,8 +126,8 @@ export function watchOwnerRun(facts: OwnerRunFacts, now: number): WatchdogAction
     };
   }
   if (facts.awaitingInput) {
-    // ponytail: a question left unanswered pauses the card to free its slot; an elicitation-aware
-    // scheduler could instead restart it once answered.
+    // An approval or a thread question left unanswered pauses the card; questions on the card free
+    // the slot through the scheduler instead and restart once answered.
     return now - facts.sessionSince >= L.awaitingInputMs
       ? {
           kind: "pause",

@@ -17,7 +17,6 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
@@ -33,7 +32,7 @@ import {
 } from "../persistence/Services/ProjectionRunLiveness.ts";
 import { forkParked } from "../serverActivation.ts";
 import { buildCardBrief, diffStatOf, renderCardBrief, renderCardMessages } from "./cardBrief.ts";
-import { isFinishedCardStatus, questionText } from "./cardRules.ts";
+import { isFinishedCardStatus } from "./cardRules.ts";
 import * as CardWorkspace from "./CardWorkspace.ts";
 import { liveOwnerRun } from "./decider.ts";
 import { runSessionChange } from "./RunReactor.ts";
@@ -81,7 +80,7 @@ type CardSessionRequest =
 
 type ProgressEvent = Extract<
   OrchestrationEvent,
-  { type: "card.status-changed" | "thread.activity-appended" }
+  { type: "card.status-changed" | "card.activity-recorded" }
 >;
 
 const EPOCH = "1970-01-01T00:00:00.000Z";
@@ -495,20 +494,12 @@ const make = Effect.gen(function* () {
       cardId = event.payload.cardId;
       note = moveNote;
     } else {
-      const { activity, threadId } = event.payload;
-      const question = Predicate.isObject(activity.payload)
-        ? questionText(activity.payload.questions)
-        : "";
-      const run = yield* snapshotQuery.getRunByThreadId(threadId);
-      if (
-        question.length === 0 ||
-        Option.isNone(run) ||
-        run.value.role !== "owner" ||
-        run.value.cardId === null
-      ) {
+      const activity = event.payload;
+      const question = activity.elicitation?.question ?? activity.body;
+      if (activity.kind !== "elicitation" || activity.author.kind !== "agent") {
         return;
       }
-      cardId = run.value.cardId;
+      cardId = activity.cardId;
       marker = "card-question";
       note = (_title, owner) => `${owner} asks: ${question}`;
     }
@@ -601,10 +592,16 @@ const make = Effect.gen(function* () {
         return event.payload.forOwner
           ? worker.enqueue({ kind: "deliver", cardId: event.payload.cardId })
           : Effect.void;
-      case "card.activity-recorded":
-        return event.payload.deliverTo === "builder"
-          ? worker.enqueue({ kind: "deliver", cardId: event.payload.cardId })
-          : Effect.void;
+      case "card.activity-recorded": {
+        const deliver =
+          event.payload.deliverTo === "builder"
+            ? worker.enqueue({ kind: "deliver", cardId: event.payload.cardId })
+            : Effect.void;
+        // An agent's question is worth a note in the card's channel.
+        return event.payload.kind === "elicitation" && event.payload.author.kind === "agent"
+          ? Effect.andThen(deliver, worker.enqueue({ kind: "progress", event }))
+          : deliver;
+      }
       // A raised cap or an accepted model lets the card spend again. Starting a session, here or
       // after returnToWork or the plan gate, is the scheduler's.
       case "card.budget-set":
@@ -619,11 +616,6 @@ const make = Effect.gen(function* () {
             )
           : progress;
       }
-      // Only a question is worth a note; every other activity is skipped before the queue.
-      case "thread.activity-appended":
-        return event.payload.activity.kind === "user-input.requested"
-          ? worker.enqueue({ kind: "progress", event })
-          : Effect.void;
       case "thread.session-set": {
         const { session, threadId } = event.payload;
         const kind = runSessionChange(session);

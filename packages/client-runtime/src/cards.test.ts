@@ -474,7 +474,12 @@ describe("elicitationAnswer", () => {
       reason: null,
       createdAt: at(1),
     };
-    const elicitation = { question: "Which?", ...question, recommendedOptionId: "keep" };
+    const elicitation = {
+      question: "Which?",
+      ...question,
+      recommendedOptionId: "keep",
+      kind: "question" as const,
+    };
     const open = openCardElicitations([
       { ...base, activityId: "q1", kind: "elicitation", elicitation, answers: null },
       { ...base, activityId: "q2", kind: "elicitation", elicitation, answers: null },

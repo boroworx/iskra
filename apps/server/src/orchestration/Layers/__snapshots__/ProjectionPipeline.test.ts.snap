@@ -153,6 +153,7 @@ exports[`card, agent and channel projection > projects every card, agent and cha
       "deliveryThreadId": null,
       "elicitation": {
         "allowText": true,
+        "kind": "question",
         "options": [
           {
             "id": "redis",
@@ -210,6 +211,7 @@ exports[`card, agent and channel projection > projects every card, agent and cha
       "deliveryThreadId": null,
       "elicitation": {
         "allowText": true,
+        "kind": "checkpoint",
         "options": [
           {
             "id": "continue",
@@ -596,6 +598,7 @@ exports[`card, agent and channel projection > projects every card, agent and cha
         "title": "Rate limit the API",
         "url": "https://linear.app/issue/ISK-1",
       },
+      "openElicitations": [],
       "ownerHumanId": "human",
       "parentCardId": null,
       "paused": null,
@@ -728,6 +731,7 @@ exports[`card, agent and channel projection > projects every card, agent and cha
         "title": "Rate limit the API",
         "url": "https://linear.app/issue/ISK-1",
       },
+      "openElicitations": [],
       "ownerHumanId": "human",
       "ownerSession": {
         "agentId": "agent-api",
@@ -801,6 +805,7 @@ exports[`card, agent and channel projection > projects every card, agent and cha
       "createdAt": "2026-03-01T01:07:00.000Z",
       "elicitation": {
         "allowText": true,
+        "kind": "question",
         "options": [
           {
             "id": "redis",
@@ -836,6 +841,7 @@ exports[`card, agent and channel projection > projects every card, agent and cha
       "createdAt": "2026-03-01T01:09:00.000Z",
       "elicitation": {
         "allowText": true,
+        "kind": "question",
         "options": [
           {
             "id": "redis",
@@ -1252,6 +1258,7 @@ exports[`card, agent and channel projection > projects every card, agent and cha
           "title": "Rate limit the API",
           "url": "https://linear.app/issue/ISK-1",
         },
+        "openElicitations": [],
         "ownerHumanId": "human",
         "parentCardId": null,
         "paused": null,
@@ -1324,6 +1331,7 @@ exports[`card, agent and channel projection > projects every card, agent and cha
         "kind": "task",
         "landing": null,
         "linearIssue": null,
+        "openElicitations": [],
         "ownerHumanId": "human",
         "parentCardId": "card-1",
         "paused": null,
@@ -1388,6 +1396,7 @@ exports[`card, agent and channel projection > projects every card, agent and cha
         "kind": "task",
         "landing": null,
         "linearIssue": null,
+        "openElicitations": [],
         "ownerHumanId": "human",
         "parentCardId": null,
         "paused": null,
@@ -1718,6 +1727,7 @@ exports[`card, agent and channel projection > projects every card, agent and cha
           "title": "Rate limit the API",
           "url": "https://linear.app/issue/ISK-1",
         },
+        "openElicitations": [],
         "ownerHumanId": "human",
         "ownerSession": {
           "agentId": "agent-api",
@@ -1797,6 +1807,7 @@ exports[`card, agent and channel projection > projects every card, agent and cha
         "kind": "task",
         "landing": null,
         "linearIssue": null,
+        "openElicitations": [],
         "ownerHumanId": "human",
         "ownerSession": null,
         "parentCardId": "card-1",
@@ -1862,6 +1873,7 @@ exports[`card, agent and channel projection > projects every card, agent and cha
         "kind": "task",
         "landing": null,
         "linearIssue": null,
+        "openElicitations": [],
         "ownerHumanId": "human",
         "ownerSession": null,
         "parentCardId": null,
@@ -1932,6 +1944,7 @@ exports[`card, agent and channel projection > projects every card, agent and cha
       "createdAt": "2026-03-01T01:09:00.000Z",
       "elicitation": {
         "allowText": true,
+        "kind": "question",
         "options": [
           {
             "id": "redis",

@@ -59,6 +59,7 @@ export const elicitationOf = (
         ? null
         : (offered.find((option) => option.label === recommended)?.id ?? recommended),
     allowText: true,
+    kind: "question",
   };
 };
 
@@ -396,7 +397,8 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const session = yield* requireOwnerSession;
         const requestId = ApprovalRequestId.make(`ask-owner:${yield* uuid}`);
-        // The card's record of the question first, so a refused option set asks nothing.
+        // The question lives on the card: a person answers it there or from Linear, and the answer
+        // reaches this session as its next turn.
         yield* recordActivity(session, "ask-activity", {
           activityId: requestId,
           kind: "elicitation",
@@ -405,39 +407,6 @@ const make = Effect.gen(function* () {
             input.options === undefined
               ? null
               : elicitationOf(input.question, input.options, input.recommended),
-        });
-        const createdAt = yield* nowIso;
-        // A message-mode question: the answer is committed as the session's next user message.
-        yield* dispatch({
-          type: "thread.activity.append",
-          commandId: yield* commandId("ask", session.threadId),
-          threadId: session.threadId,
-          createdAt,
-          activity: {
-            id: EventId.make(`mcp-ask:${requestId}`),
-            tone: "info",
-            kind: "user-input.requested",
-            summary: "User input requested",
-            payload: {
-              requestId,
-              responseMode: "message",
-              questions: [
-                {
-                  id: "answer",
-                  header: "Question",
-                  question: input.question,
-                  options: (input.options ?? []).map((label) => ({
-                    label,
-                    description: label === input.recommended ? "Recommended" : "",
-                  })),
-                  allowCustomAnswer: true,
-                  multiSelect: false,
-                },
-              ],
-            },
-            turnId: null,
-            createdAt,
-          },
         });
         return { requestId };
       }),
@@ -463,6 +432,7 @@ const make = Effect.gen(function* () {
             ],
             recommendedOptionId: null,
             allowText: true,
+            kind: "criteriaChange",
           },
           reason: { code: "criteriaChange", text: input.reason },
         });

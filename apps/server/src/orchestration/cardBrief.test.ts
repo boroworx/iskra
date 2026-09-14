@@ -276,6 +276,7 @@ describe("card worklog", () => {
               ],
               recommendedOptionId: "o1",
               allowText: true,
+              kind: "question",
             },
           }),
           entry("r1", "response", "Key", 5, {

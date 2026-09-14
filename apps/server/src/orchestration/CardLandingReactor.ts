@@ -579,7 +579,7 @@ const make = Effect.gen(function* () {
           kind: "message",
           body,
           deliverTo: "builder",
-          author: { kind: "github", id: login },
+          author: { kind: "github", id: login, trusted: true },
           reason: { code: "reviewComment", text: `${login} commented on the pull request.` },
         });
         trustedKey = remark.id;
@@ -589,7 +589,7 @@ const make = Effect.gen(function* () {
           kind: "message",
           body,
           deliverTo: null,
-          author: { kind: "github", id: login },
+          author: { kind: "github", id: login, trusted: false },
           reason: { code: "untrustedComment", text: `${login} can't direct work on this repository; forward it if it should.` },
         });
       }

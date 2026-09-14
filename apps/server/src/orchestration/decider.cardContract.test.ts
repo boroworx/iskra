@@ -22,6 +22,7 @@ import {
   AUTO_MERGE_OFF_REASON,
   NO_CHECKS_REASON,
   NO_CRITERIA_REASON,
+  NO_OPEN_QUESTION_REASON,
   OPEN_CHECKPOINT_REASON,
   PAUSED_REASON,
   PLAN_CHILD_LANDING_REASON,
@@ -568,6 +569,104 @@ it.layer(NodeServices.layer)("decider card contract", (it) => {
     }),
   );
 
+  it.effect("a person answers a card's open question once; a checkpoint's answer resolves it", () =>
+    Effect.gen(function* () {
+      const ask: OrchestrationCommand = {
+        type: "card.activity.record",
+        commandId: nextCommandId(),
+        activityId: "question-1",
+        cardId,
+        kind: "elicitation",
+        author: { kind: "agent", id: backend },
+        body: "Which store?",
+        runThreadId: null,
+        deliverTo: null,
+        elicitation: {
+          question: "Which store?",
+          options: [
+            { id: "redis", label: "Redis" },
+            { id: "memory", label: "Memory" },
+          ],
+          recommendedOptionId: "redis",
+          allowText: true,
+          kind: "question",
+        },
+        answers: null,
+        status: null,
+        evidenceId: null,
+        reason: null,
+        createdAt: now,
+      };
+      const answer = (activityId: string, optionId: string | null): OrchestrationCommand => ({
+        type: "card.elicitation.answer",
+        commandId: nextCommandId(),
+        cardId,
+        activityId,
+        optionId,
+        body: "Redis",
+        createdAt: now,
+      });
+      expect(isClientCommand(answer("question-1", "redis"))).toBe(true);
+      const asked = yield* applyCommands([
+        ...setup,
+        createCard(),
+        approveAndStart(cardId, criteria),
+        onCard("card.work.start"),
+        ask,
+      ]);
+      expect(cardIn(asked)?.openElicitations).toEqual([
+        { activityId: "question-1", kind: "question", optionIds: ["redis", "memory"], askedAt: now },
+      ]);
+      expect(yield* refusal(asked, answer("question-2", null))).toBe(NO_OPEN_QUESTION_REASON);
+      expect(yield* refusal(asked, answer("question-1", "postgres"))).toBe(ANSWER_OPTION_REASON);
+      expect(yield* decide(asked, answer("question-1", "redis"))).toMatchObject([
+        {
+          type: "card.activity-recorded",
+          payload: {
+            activityId: "question-1:answer",
+            kind: "response",
+            author: { kind: "human" },
+            deliverTo: "builder",
+            delivery: "pending",
+            answers: { questionId: "question-1", optionId: "redis" },
+          },
+        },
+      ]);
+      const answered = yield* applyTo(asked, [answer("question-1", null)]);
+      expect(cardIn(answered)?.openElicitations).toEqual([]);
+      expect(yield* refusal(answered, answer("question-1", "redis"))).toBe(NO_OPEN_QUESTION_REASON);
+
+      const checkpointed = yield* applyTo(answered, [
+        {
+          type: "card.checkpoint.request",
+          commandId: nextCommandId(),
+          cardId,
+          checkpoint: {
+            checkpointId: "checkpoint-1",
+            whatToTry: "Open the limits page.",
+            question: null,
+            evidenceId: null,
+            requestedAt: now,
+          },
+        },
+      ]);
+      expect(cardIn(checkpointed)?.openElicitations).toEqual([
+        {
+          activityId: "checkpoint-1",
+          kind: "checkpoint",
+          optionIds: ["continue", "redirect", "stop"],
+          askedAt: now,
+        },
+      ]);
+      const stopped = yield* applyTo(checkpointed, [answer("checkpoint-1", "stop")]);
+      expect(cardIn(stopped)).toMatchObject({
+        checkpoint: null,
+        openElicitations: [],
+        paused: { reason: { code: "checkpointStopped" } },
+      });
+    }),
+  );
+
   it.effect("only a person's command sets the orchestration policy, and it must be coherent", () =>
     Effect.gen(function* () {
       const command = setPolicy({ egress: { mode: "allowlist", allow: ["a.dev"], deny: ["a.dev"] } });
@@ -592,7 +691,13 @@ it.layer(NodeServices.layer)("decider card contract", (it) => {
         agentId: backend,
         runThreadId: ThreadId.make("thread-lead"),
         body: "Which store?",
-        elicitation: { question: "Which store?", options, recommendedOptionId: "redis", allowText: true },
+        elicitation: {
+          question: "Which store?",
+          options,
+          recommendedOptionId: "redis",
+          allowText: true,
+          kind: "question",
+        },
         createdAt: now,
       });
       const answer = (optionId: string | null, messageId: string): OrchestrationCommand => ({

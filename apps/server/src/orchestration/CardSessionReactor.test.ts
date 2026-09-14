@@ -4,7 +4,6 @@ import {
   ChannelId,
   CommandId,
   DEFAULT_PROJECT_ORCHESTRATION,
-  EventId,
   MessageId,
   ORPHANED_PROVIDER_SESSION_ERROR,
   ProjectId,
@@ -406,32 +405,21 @@ it.layer(layer)("CardSessionReactor", (it) => {
         );
 
         yield* world.engine.dispatch({
-          type: "thread.activity.append",
+          type: "card.activity.record",
           commandId: CommandId.make("cmd-progress-ask"),
-          threadId: owner.payload.threadId,
+          activityId: "ask-owner:progress",
+          cardId,
+          kind: "elicitation",
+          author: { kind: "agent", id: world.agent("frontend") },
+          body: "Which color scheme?",
+          runThreadId: owner.payload.threadId,
+          deliverTo: null,
+          elicitation: null,
+          answers: null,
+          status: null,
+          evidenceId: null,
+          reason: null,
           createdAt: now,
-          activity: {
-            id: EventId.make("activity-progress-ask"),
-            tone: "info",
-            kind: "user-input.requested",
-            summary: "User input requested",
-            payload: {
-              requestId: "ask-owner:progress",
-              responseMode: "message",
-              questions: [
-                {
-                  id: "answer",
-                  header: "Question",
-                  question: "Which color scheme?",
-                  options: [],
-                  allowCustomAnswer: true,
-                  multiSelect: false,
-                },
-              ],
-            },
-            turnId: null,
-            createdAt: now,
-          },
         });
         yield* world.nextEvent(
           "channel.message-posted",

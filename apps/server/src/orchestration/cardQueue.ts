@@ -1,3 +1,5 @@
+import * as DateTime from "effect/DateTime";
+
 import {
   projectOrchestrationOf,
   type CardId,
@@ -18,6 +20,9 @@ import {
 import { budgetCardOf } from "./decider.ts";
 import { priorityRank } from "./HostAdmission.ts";
 import { busyRunsOf, holdsSlot } from "./wakeRouting.ts";
+
+/** An idle owner whose card waited this long on a person's answer is stopped to free its slot. */
+export const QUESTION_SLOT_RELEASE_MS = 10 * 60_000;
 
 /** Wait reason codes the scheduler owns: it sets them, and clears them once they no longer hold. */
 export const SCHEDULER_WAIT_CODES = [
@@ -98,6 +103,7 @@ export function planStarts(input: PlanStartsInput): StartPlan {
       card.specState !== "draft" &&
       card.acceptance.state === "confirmed" &&
       card.checkpoint === null &&
+      card.openElicitations.length === 0 &&
       !input.starting.has(card.id) &&
       sideEffectGuardRefusal(policyOf(card.projectId)) === null &&
       cardBudgetRefusal(budgetCardOf(readModel, card)) === null;
@@ -189,7 +195,17 @@ export function planStarts(input: PlanStartsInput): StartPlan {
     if (run.role !== "owner" || run.cardId === null) return [];
     const card = cards.find((candidate) => candidate.id === run.cardId);
     const idle = !holdsSlot(readModel.threads.find((thread) => thread.id === run.threadId)?.session);
-    return card !== undefined && (card.status === "inReview" || card.status === "landing") && idle
+    // A question asked a while ago frees the slot; the answer restarts the card from its brief.
+    const waitingOnPerson =
+      card !== undefined &&
+      card.openElicitations.some(
+        (question) =>
+          input.now - DateTime.toEpochMillis(DateTime.makeUnsafe(question.askedAt)) >=
+          QUESTION_SLOT_RELEASE_MS,
+      );
+    return card !== undefined &&
+      (card.status === "inReview" || card.status === "landing" || waitingOnPerson) &&
+      idle
       ? [run.threadId]
       : [];
   });

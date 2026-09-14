@@ -201,6 +201,11 @@ export const setCardCriteria = command("setCardCriteria", "card.criteria.set");
 /** A person's answer to the owner's checkpoint: continue, redirect with a note, or stop. */
 export const resolveCardCheckpoint = command("resolveCardCheckpoint", "card.checkpoint.resolve");
 export const acknowledgeCardFlags = command("acknowledgeCardFlags", "card.flags.acknowledge");
+/** A person answering a card's open question (the owner's, a checkpoint or a criteria change). */
+export const answerCardElicitation = timestampedCommand(
+  "answerCardElicitation",
+  "card.elicitation.answer",
+);
 /** A person answering a lead's question with an offered option or their own words. */
 export const answerChannelElicitation = timestampedCommand(
   "answerChannelElicitation",

@@ -30,6 +30,7 @@ import {
   CardMessageAuthorKind,
   CardStatus,
   CardWaitReason,
+  CardOpenElicitation,
   ChannelDeliveryStatus,
   ChannelId,
   Elicitation,
@@ -96,6 +97,7 @@ export const ProjectionCard = Schema.Struct({
   paused: Schema.NullOr(CardPause),
   waitReason: Schema.NullOr(CardWaitReason),
   queuedAt: Schema.NullOr(IsoDateTime),
+  openElicitations: Schema.Array(CardOpenElicitation),
   relations: Schema.Array(CardRelation),
   createdBy: CardAuthor,
   createdAt: IsoDateTime,
@@ -122,6 +124,7 @@ export const ProjectionCardDbRow = ProjectionCard.mapFields(
     landing: Schema.fromJsonString(Schema.NullOr(CardLanding)),
     paused: Schema.fromJsonString(Schema.NullOr(CardPause)),
     waitReason: Schema.fromJsonString(Schema.NullOr(CardWaitReason)),
+    openElicitations: Schema.fromJsonString(Schema.Array(CardOpenElicitation)),
   }),
 );
 
@@ -172,6 +175,7 @@ export const PROJECTION_CARD_COLUMNS = `
   COALESCE(paused_json, 'null') AS "paused",
   COALESCE(wait_reason_json, 'null') AS "waitReason",
   queued_at AS "queuedAt",
+  COALESCE(open_elicitations_json, '[]') AS "openElicitations",
   relations_json AS "relations",
   created_by_json AS "createdBy",
   created_at AS "createdAt",

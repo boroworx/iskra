@@ -57,6 +57,8 @@ const REPLAN_EVENTS: ReadonlySet<OrchestrationEvent["type"]> = new Set([
   "card.paused",
   "card.resumed",
   "card.checkpoint-resolved",
+  // An answer lets a card waiting on a person start again.
+  "card.activity-recorded",
   "card.landing-linked",
   "card.spend-recorded",
   "project.orchestration-set",

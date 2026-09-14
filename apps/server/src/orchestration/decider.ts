@@ -67,6 +67,8 @@ import {
 import {
   ALREADY_ANSWERED_REASON,
   ANSWER_OPTION_REASON,
+  CHECKPOINT_OPTIONS,
+  NO_OPEN_QUESTION_REASON,
   NO_CRITERIA_REASON,
   OPEN_CHECKPOINT_REASON,
   PAUSED_REASON,
@@ -3594,6 +3596,55 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             }),
           ]
         : resolved;
+    }
+
+    case "card.elicitation.answer": {
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        "A card that has landed or been abandoned takes no answers.",
+      );
+      const question = card.openElicitations.find(
+        (open) => open.activityId === command.activityId,
+      );
+      if (question === undefined) {
+        return yield* refuse(command, NO_OPEN_QUESTION_REASON);
+      }
+      if (command.optionId !== null && !question.optionIds.includes(command.optionId)) {
+        return yield* refuse(command, ANSWER_OPTION_REASON);
+      }
+      // A checkpoint's answer resolves it; stopping pauses the card.
+      if (question.kind === "checkpoint") {
+        return yield* decideOrchestrationCommand({
+          command: {
+            type: "card.checkpoint.resolve",
+            commandId: command.commandId,
+            cardId: command.cardId,
+            decision:
+              CHECKPOINT_OPTIONS.find((option) => option.id === command.optionId)?.id ?? "redirect",
+            note: command.body,
+          },
+          readModel,
+        });
+      }
+      return yield* planned(command, "card", card.id, command.createdAt, {
+        type: "card.activity-recorded",
+        payload: {
+          activityId: `${command.activityId}:answer`,
+          cardId: card.id,
+          kind: "response",
+          author: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
+          body: command.body,
+          runThreadId: null,
+          deliverTo: "builder",
+          delivery: "pending",
+          elicitation: null,
+          answers: { questionId: command.activityId, optionId: command.optionId },
+          status: null,
+          evidenceId: null,
+          reason: null,
+          createdAt: command.createdAt,
+        },
+      });
     }
 
     case "card.evidence.record": {

@@ -4668,7 +4668,8 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
       const cardRepository = yield* ProjectionCardRepository;
       const channelRepository = yield* ProjectionChannelRepository;
       const projectRepository = yield* ProjectionProjectRepository;
-      const at = (minute: number) => `2026-03-01T00:${String(minute).padStart(2, "0")}:00.000Z`;
+      const at = (minute: number) =>
+        `2026-03-01T${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}:00.000Z`;
       const [question, answer, openQuestion] = [
         MessageId.make("message-question"),
         MessageId.make("message-answer"),
@@ -4682,6 +4683,7 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
         ],
         recommendedOptionId: "redis",
         allowText: true,
+        kind: "question" as const,
       };
       const noActivityParts = {
         runThreadId: null,

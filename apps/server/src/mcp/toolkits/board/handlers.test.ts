@@ -285,7 +285,7 @@ describe("board toolkit handlers", () => {
     }),
   );
 
-  it.effect("asks the owner a question with a recommended answer, on the card and the session", () =>
+  it.effect("asks the owner a question with a recommended answer, on the card", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness();
       const { requestId } = yield* harness.call("ask_owner", {
@@ -307,26 +307,7 @@ describe("board toolkit handlers", () => {
             ],
             recommendedOptionId: "o1",
             allowText: true,
-          },
-        },
-        {
-          type: "thread.activity.append",
-          threadId: THREAD_ID,
-          activity: {
-            kind: "user-input.requested",
-            payload: {
-              requestId,
-              responseMode: "message",
-              questions: [
-                {
-                  question: "Per key or per account?",
-                  options: [
-                    { label: "Per key", description: "Recommended" },
-                    { label: "Per account", description: "" },
-                  ],
-                },
-              ],
-            },
+            kind: "question",
           },
         },
       ]);

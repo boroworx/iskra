@@ -133,6 +133,7 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "card.pause.system":
     case "card.resume":
     case "card.wait.note":
+    case "card.elicitation.answer":
       return {
         aggregateKind: "card",
         aggregateId: command.cardId,
