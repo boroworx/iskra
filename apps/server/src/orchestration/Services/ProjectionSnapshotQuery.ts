@@ -25,6 +25,7 @@ import type {
   OrchestrationChannelMessage,
   OrchestrationCardShell,
   OrchestrationChannelShell,
+  OrchestrationArchivedChannel,
   OrchestrationRun,
   OrchestrationSearchThreadsInput,
   OrchestrationSearchThreadsResult,
@@ -241,6 +242,11 @@ export interface ProjectionSnapshotQueryShape {
   readonly getChannelShellById: (
     channelId: ChannelId,
   ) => Effect.Effect<Option.Option<OrchestrationChannelShell>, ProjectionRepositoryError>;
+
+  /** A project's archived channels, most recently archived first. DMs are left out. */
+  readonly listArchivedChannels: (
+    projectId: ProjectId,
+  ) => Effect.Effect<ReadonlyArray<OrchestrationArchivedChannel>, ProjectionRepositoryError>;
 
   /** A channel's newest `limit` messages, oldest first. */
   readonly listChannelMessages: (

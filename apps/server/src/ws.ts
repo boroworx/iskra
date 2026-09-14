@@ -2335,6 +2335,21 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "orchestration" },
           ),
+        [ORCHESTRATION_WS_METHODS.listArchivedChannels]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.listArchivedChannels,
+            projectionSnapshotQuery.listArchivedChannels(input.projectId).pipe(
+              Effect.map((channels) => ({ channels })),
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationGetSnapshotError({
+                    message: `Failed to load archived channels for project ${input.projectId}`,
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
         [ORCHESTRATION_WS_METHODS.getCardDiff]: (input) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.getCardDiff,

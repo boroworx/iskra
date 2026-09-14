@@ -52,6 +52,7 @@ export const ORCHESTRATION_WS_METHODS = {
   importAgentDefinitions: "orchestration.importAgentDefinitions",
   listAgentDefinitions: "orchestration.listAgentDefinitions",
   archiveAgentDefinition: "orchestration.archiveAgentDefinition",
+  listArchivedChannels: "orchestration.listArchivedChannels",
 } as const;
 
 export const ProviderApprovalPolicy = Schema.Literals([
@@ -3873,6 +3874,33 @@ export const OrchestrationArchiveAgentDefinitionResult = Schema.Struct({});
 export type OrchestrationArchiveAgentDefinitionResult =
   typeof OrchestrationArchiveAgentDefinitionResult.Type;
 
+export const OrchestrationListArchivedChannelsInput = Schema.Struct({
+  projectId: ProjectId,
+});
+export type OrchestrationListArchivedChannelsInput =
+  typeof OrchestrationListArchivedChannelsInput.Type;
+
+/** An archived channel, as a client lists it to unarchive. */
+export const OrchestrationArchivedChannel = Schema.Struct({
+  id: ChannelId,
+  name: TrimmedNonEmptyString,
+  kind: ChannelKind,
+  topic: Schema.String,
+  archivedAt: IsoDateTime,
+});
+export type OrchestrationArchivedChannel = typeof OrchestrationArchivedChannel.Type;
+
+/**
+ * A project's archived channels, most recently archived first. Archived channels
+ * leave the shell stream, so this is how a client finds one to unarchive. DMs are
+ * left out: messaging the agent opens a new one.
+ */
+export const OrchestrationListArchivedChannelsResult = Schema.Struct({
+  channels: Schema.Array(OrchestrationArchivedChannel),
+});
+export type OrchestrationListArchivedChannelsResult =
+  typeof OrchestrationListArchivedChannelsResult.Type;
+
 /** How many of a channel's newest messages a channel subscription starts with. */
 export const CHANNEL_SUBSCRIBE_MESSAGE_LIMIT = 200;
 
@@ -3963,6 +3991,10 @@ export const OrchestrationRpcSchemas = {
   archiveAgentDefinition: {
     input: OrchestrationArchiveAgentDefinitionInput,
     output: OrchestrationArchiveAgentDefinitionResult,
+  },
+  listArchivedChannels: {
+    input: OrchestrationListArchivedChannelsInput,
+    output: OrchestrationListArchivedChannelsResult,
   },
 } as const;
 

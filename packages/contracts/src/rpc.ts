@@ -1268,6 +1268,15 @@ const WsOrchestrationListAgentRunsRpc = Rpc.make(ORCHESTRATION_WS_METHODS.listAg
   error: Schema.Union([OrchestrationGetSnapshotError, EnvironmentAuthorizationError]),
 });
 
+const WsOrchestrationListArchivedChannelsRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.listArchivedChannels,
+  {
+    payload: OrchestrationRpcSchemas.listArchivedChannels.input,
+    success: OrchestrationRpcSchemas.listArchivedChannels.output,
+    error: Schema.Union([OrchestrationGetSnapshotError, EnvironmentAuthorizationError]),
+  },
+);
+
 const WsOrchestrationSaveAgentDefinitionRpc = Rpc.make(
   ORCHESTRATION_WS_METHODS.saveAgentDefinition,
   {
@@ -1514,4 +1523,5 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationImportAgentDefinitionsRpc,
   WsOrchestrationListAgentDefinitionsRpc,
   WsOrchestrationArchiveAgentDefinitionRpc,
+  WsOrchestrationListArchivedChannelsRpc,
 );

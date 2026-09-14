@@ -1,5 +1,6 @@
 import {
   AgentSessionImportSource,
+  OrchestrationArchivedChannel,
   ApprovalRequestId,
   ChatAttachment,
   OrchestrationMessageContext,
@@ -813,6 +814,25 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         WHERE archived_at IS NULL
           AND ${filter === undefined ? sql`1 = 1` : sql`channel_id = ${filter.channelId}`}
         ORDER BY created_at ASC, channel_id ASC
+      `,
+  });
+
+  const listArchivedChannelRows = SqlSchema.findAll({
+    Request: Schema.Struct({ projectId: ProjectId }),
+    Result: OrchestrationArchivedChannel,
+    execute: ({ projectId }) =>
+      sql`
+        SELECT
+          channel_id AS "id",
+          name,
+          kind,
+          topic,
+          archived_at AS "archivedAt"
+        FROM projection_channels
+        WHERE project_id = ${projectId}
+          AND archived_at IS NOT NULL
+          AND kind = 'channel'
+        ORDER BY archived_at DESC, channel_id ASC
       `,
   });
 
@@ -4033,6 +4053,11 @@ pending_approval_requests AS (
       Effect.map(Arr.head),
     );
 
+  const listArchivedChannels: ProjectionSnapshotQueryShape["listArchivedChannels"] = (projectId) =>
+    listArchivedChannelRows({ projectId }).pipe(
+      Effect.mapError(queryError("listArchivedChannels")),
+    );
+
   const listChannelMessageRows = SqlSchema.findAll({
     Request: Schema.Struct({ channelId: Schema.String, limit: Schema.Number }),
     Result: ProjectionChannelMessage,
@@ -4156,6 +4181,7 @@ pending_approval_requests AS (
     getRunByThreadId,
     getAgentShellById,
     getChannelShellById,
+    listArchivedChannels,
     getCardShellById,
     listChannelMessages,
     listRunsByAgent,

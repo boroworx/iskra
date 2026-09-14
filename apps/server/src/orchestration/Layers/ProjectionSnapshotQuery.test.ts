@@ -1,5 +1,6 @@
 import {
   type AgentSessionImportSource,
+  ChannelId,
   ChatAttachment,
   ComposerContextId,
   CheckpointRef,
@@ -2355,6 +2356,48 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       assert.deepStrictEqual(
         (yield* snapshotQuery.searchThreads({ query: "user needle" })).matches,
         [],
+      );
+    }),
+  );
+
+  it.effect("lists a project's archived channels without active ones, DMs or other projects", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`
+        INSERT INTO projection_channels
+          (channel_id, project_id, kind, name, topic, pinned_spec, wake_depth,
+           member_agent_ids_json, created_at, updated_at, archived_at)
+        VALUES
+          ('ch-active', 'project-archive', 'channel', 'active', '', '', 20, '[]',
+           '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z', NULL),
+          ('ch-old', 'project-archive', 'channel', 'old', 'Old work', '', 20, '[]',
+           '2026-09-01T00:00:00.000Z', '2026-09-02T00:00:00.000Z', '2026-09-02T00:00:00.000Z'),
+          ('ch-recent', 'project-archive', 'channel', 'recent', '', '', 20, '[]',
+           '2026-09-01T00:00:00.000Z', '2026-09-03T00:00:00.000Z', '2026-09-03T00:00:00.000Z'),
+          ('ch-dm', 'project-archive', 'dm', 'backend', '', '', 20, '["agent-1"]',
+           '2026-09-01T00:00:00.000Z', '2026-09-04T00:00:00.000Z', '2026-09-04T00:00:00.000Z'),
+          ('ch-elsewhere', 'project-elsewhere', 'channel', 'elsewhere', '', '', 20, '[]',
+           '2026-09-01T00:00:00.000Z', '2026-09-04T00:00:00.000Z', '2026-09-04T00:00:00.000Z')
+      `;
+      assert.deepStrictEqual(
+        yield* snapshotQuery.listArchivedChannels(asProjectId("project-archive")),
+        [
+          {
+            id: ChannelId.make("ch-recent"),
+            name: "recent",
+            kind: "channel",
+            topic: "",
+            archivedAt: "2026-09-03T00:00:00.000Z",
+          },
+          {
+            id: ChannelId.make("ch-old"),
+            name: "old",
+            kind: "channel",
+            topic: "Old work",
+            archivedAt: "2026-09-02T00:00:00.000Z",
+          },
+        ],
       );
     }),
   );
