@@ -5,7 +5,11 @@ import {
   LEGACY_CARD_CONTRACT,
   type CardActivity,
   type CardAuthor,
+  type CardEvidenceItem,
   type CardEvidenceSummary,
+  type CardFixRound,
+  type CardLandingBeginReason,
+  type ProjectOrchestration,
   type CardId,
   type CardMove,
   type CardRelation,
@@ -31,7 +35,158 @@ export interface CardFacts {
   readonly openChildCount: number;
   /** `blockedBy` relations whose blocker has not landed. */
   readonly openBlockerCount: number;
+  /** A person confirmed the card's acceptance criteria (cards from before criteria count as confirmed). */
+  readonly criteriaConfirmed: boolean;
+  /** The latest evidence has hard scope flags nobody acknowledged. */
+  readonly unacknowledgedHardFlags: boolean;
 }
+
+export const NO_CRITERIA_REASON = "Add at least one acceptance criterion.";
+export const WORK_CRITERIA_REASON =
+  "Confirm the acceptance criteria before work starts; they are what checks and review hold the work to.";
+export const BLOCKED_REASON = "It is blocked by a card that has not landed.";
+export const UNACKNOWLEDGED_FLAGS_REASON =
+  "Acknowledge the flagged changes (deleted tests, protected files) before approving the merge.";
+export const REVIEW_EVIDENCE_REASON =
+  "The card can't enter review without passing evidence for its latest commit.";
+export const NO_CHECKS_REASON =
+  "This project has no checks. Add a check script or waive checks once for this project.";
+export const PLAN_CHILD_LANDING_REASON =
+  "Only a plan child whose checks, evidence and verifier passed lands on its own, into its plan's branch.";
+export const AUTO_MERGE_OFF_REASON =
+  "This project doesn't merge cards without a person; turn on auto-merge in its orchestration policy.";
+export const SIDE_EFFECT_GUARD_REASON =
+  "Review this project's side-effect guard in project settings before agents start work.";
+export const PREMISE_REASON =
+  "The request doesn't get to its goal as proposed; ask the requester instead.";
+export const OPEN_CHECKPOINT_REASON = "Only an open checkpoint can be resolved.";
+export const PAUSED_REASON = "The card is paused; resume it first.";
+export const ALREADY_ANSWERED_REASON = "This question was already answered.";
+export const ANSWER_OPTION_REASON = "Choose one of the offered answers or write your own.";
+
+/** Why a set of acceptance criteria can't be used, or null. */
+export function criteriaRefusal(criteria: ReadonlyArray<{ readonly id: string }>): string | null {
+  if (criteria.length === 0) return NO_CRITERIA_REASON;
+  return new Set(criteria.map((criterion) => criterion.id)).size === criteria.length
+    ? null
+    : "Each acceptance criterion needs its own id.";
+}
+
+/** Why a question with options can't be asked, or null. */
+export function elicitationRefusal(elicitation: {
+  readonly options: ReadonlyArray<{ readonly id: string }>;
+  readonly recommendedOptionId: string | null;
+}): string | null {
+  const ids = elicitation.options.map((option) => option.id);
+  if (ids.length < 2 || ids.length > 3) return "A question offers two or three answers.";
+  if (new Set(ids).size !== ids.length) return "Each answer needs its own id.";
+  return elicitation.recommendedOptionId === null || ids.includes(elicitation.recommendedOptionId)
+    ? null
+    : "The recommended answer must be one of the offered answers.";
+}
+
+/** Checks pass when every check exited 0 without timing out; captures never fail a recording. */
+export const evidencePassed = (
+  items: ReadonlyArray<Pick<CardEvidenceItem, "kind" | "exitCode" | "timedOut">>,
+): boolean =>
+  items.every((item) => item.kind !== "check" || (item.exitCode === 0 && !item.timedOut));
+
+/** Passing review evidence whose checks ran, or that the project waived checks for. */
+const hasPassingReviewEvidence = (
+  card: Pick<OrchestrationCard, "evidence">,
+  policy: Pick<ProjectOrchestration, "checksWaived">,
+) =>
+  card.evidence !== null &&
+  card.evidence.purpose === "review" &&
+  card.evidence.passed &&
+  (card.evidence.checkCount > 0 || policy.checksWaived);
+
+/** Why a card can't enter review at commit `headSha`, or null. */
+export function reviewEntryRefusal(
+  card: Pick<OrchestrationCard, "evidence">,
+  policy: Pick<ProjectOrchestration, "checksWaived">,
+  headSha: string,
+): string | null {
+  const { evidence } = card;
+  if (
+    evidence === null ||
+    evidence.headSha !== headSha ||
+    evidence.purpose !== "review" ||
+    !evidence.passed
+  ) {
+    return REVIEW_EVIDENCE_REASON;
+  }
+  return hasPassingReviewEvidence(card, policy) ? null : NO_CHECKS_REASON;
+}
+
+/** Why an automatic return to work can't use another `round`, or null. */
+export function fixRoundRefusal(
+  card: Pick<OrchestrationCard, "fixRounds">,
+  policy: Pick<ProjectOrchestration, "ciFixRounds" | "reviewFixRounds">,
+  round: CardFixRound,
+): string | null {
+  const cap = round === "ci" ? policy.ciFixRounds : policy.reviewFixRounds;
+  return card.fixRounds[round] < cap
+    ? null
+    : `The card used its ${cap} ${round === "ci" ? "CI" : "review"} fix rounds; a person can give it more.`;
+}
+
+/**
+ * Why a card can't land without a person approving its merge, or null. A plan child lands only into
+ * its plan's branch once its evidence passed; any other card only when the project turned on
+ * auto-merge. Hard flags and blockers are refused by the status move itself.
+ */
+export function landingBeginRefusal(input: {
+  readonly card: Pick<OrchestrationCard, "evidence" | "baseBranch">;
+  readonly parent: Pick<OrchestrationCard, "kind" | "branch"> | undefined;
+  readonly policy: Pick<ProjectOrchestration, "checksWaived" | "autoMerge">;
+  readonly reason: CardLandingBeginReason;
+}): string | null {
+  const { card, parent, policy } = input;
+  if (input.reason === "autoMergePolicy") {
+    if (!policy.autoMerge.enabled) return AUTO_MERGE_OFF_REASON;
+    return hasPassingReviewEvidence(card, policy) ? null : REVIEW_EVIDENCE_REASON;
+  }
+  const intoPlanBranch =
+    parent?.kind === "plan" && parent.branch !== null && card.baseBranch === parent.branch;
+  return intoPlanBranch && hasPassingReviewEvidence(card, policy)
+    ? null
+    : PLAN_CHILD_LANDING_REASON;
+}
+
+/** Owner sessions start only once a person reviewed the project's side-effect guard. */
+export const sideEffectGuardRefusal = (
+  policy: Pick<ProjectOrchestration, "sideEffectGuard">,
+): string | null =>
+  policy.sideEffectGuard.acknowledgedAt === null ? SIDE_EFFECT_GUARD_REASON : null;
+
+/** Why the project's own session cap refuses another session, or null when it has none or room. */
+export const sessionCapRefusal = (
+  policy: Pick<ProjectOrchestration, "sessionCap">,
+  liveSessions: number,
+): string | null =>
+  policy.sessionCap !== null && liveSessions >= policy.sessionCap
+    ? `All ${policy.sessionCap} session slots in this project are busy; the card starts when one frees.`
+    : null;
+
+/** Why a builder can't add another sub-card to its card, or null. */
+export const subCardRefusal = (
+  openSubCards: number,
+  policy: Pick<ProjectOrchestration, "builderSubCardsMax">,
+): string | null =>
+  openSubCards >= policy.builderSubCardsMax
+    ? `This card already has ${policy.builderSubCardsMax} open sub-cards; land or drop one first.`
+    : null;
+
+/** Why the owner can't ask for a checkpoint now, or null. */
+export const checkpointRequestRefusal = (
+  card: Pick<OrchestrationCard, "status" | "checkpoint">,
+): string | null =>
+  card.status !== "inProgress"
+    ? "Only a card in progress can ask for a checkpoint."
+    : card.checkpoint !== null
+      ? "The card already has an open checkpoint."
+      : null;
 
 export type CardMoveResult =
   | { readonly ok: true; readonly status: CardStatus }
@@ -60,9 +215,13 @@ export function nextCardStatus(card: CardFacts, move: CardMove): CardMoveResult 
       if (from !== "ready") {
         return reject("Work can only start on a ready card.");
       }
-      return card.delegateAgentId === null
-        ? reject("Assign an agent before work starts.")
-        : to("inProgress");
+      if (card.delegateAgentId === null) {
+        return reject("Assign an agent before work starts.");
+      }
+      if (!card.criteriaConfirmed) {
+        return reject(WORK_CRITERIA_REASON);
+      }
+      return card.openBlockerCount > 0 ? reject(BLOCKED_REASON) : to("inProgress");
     case "requestReview":
       return from === "inProgress"
         ? to("inReview")
@@ -72,15 +231,17 @@ export function nextCardStatus(card: CardFacts, move: CardMove): CardMoveResult 
         ? to("inProgress")
         : reject("Only a card in review or landing can go back to work.");
     case "approveMerge":
+    case "beginLanding":
       if (from !== "inReview") {
         return reject("Only a card in review can be approved to merge.");
       }
       if (card.openChildCount > 0) {
         return reject("Land or abandon its sub-cards first.");
       }
-      return card.openBlockerCount > 0
-        ? reject("It is blocked by a card that has not landed.")
-        : to("landing");
+      if (card.unacknowledgedHardFlags) {
+        return reject(UNACKNOWLEDGED_FLAGS_REASON);
+      }
+      return card.openBlockerCount > 0 ? reject(BLOCKED_REASON) : to("landing");
     case "cancelLanding":
       return from === "landing"
         ? to("inReview")
@@ -138,6 +299,11 @@ export function cardFactsOf(
     openBlockerCount: card.relations.filter(
       (relation) => relation.kind === "blockedBy" && statusById.get(relation.cardId) !== "landed",
     ).length,
+    criteriaConfirmed: card.acceptance.state === "confirmed",
+    unacknowledgedHardFlags:
+      card.evidence !== null &&
+      card.evidence.flagsAcknowledgedAt === null &&
+      card.evidence.flags.some((flag) => flag.hard),
   };
 }
 

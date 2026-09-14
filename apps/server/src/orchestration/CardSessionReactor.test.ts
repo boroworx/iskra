@@ -3,6 +3,7 @@ import {
   CardId,
   ChannelId,
   CommandId,
+  DEFAULT_PROJECT_ORCHESTRATION,
   EventId,
   MessageId,
   ORPHANED_PROVIDER_SESSION_ERROR,
@@ -63,6 +64,15 @@ const makeWorld = Effect.fn("makeWorld")(function* (
     workspaceRoot: root,
     createdAt: now,
   });
+  yield* engine.dispatch({
+    type: "project.orchestration.set",
+    commandId: CommandId.make(`cmd-guard-${name}`),
+    projectId,
+    orchestration: {
+      ...DEFAULT_PROJECT_ORCHESTRATION,
+      sideEffectGuard: { acknowledgedAt: now, killSwitchEnv: null },
+    },
+  });
   const createAgent = (id: string, capabilities: ReadonlyArray<RunCapability>) =>
     engine.dispatch({
       type: "agent.create",
@@ -90,6 +100,7 @@ const makeWorld = Effect.fn("makeWorld")(function* (
     title: "Rate limiting",
     spec: "Limit each key to 100 requests a minute.",
     tags: [],
+    criteria: [{ id: "limit", text: "Each key gets 100 requests a minute.", verification: "automated" }],
     createdAt: now,
   });
   yield* engine.dispatch({
@@ -317,6 +328,7 @@ it.layer(layer)("CardSessionReactor", (it) => {
           title: "Landing page",
           spec: "A landing page for Iskra in apps/web.",
           tags: [],
+          criteria: [{ id: "page", text: "The page renders.", verification: "automated" }],
           createdAt: now,
         });
         yield* world.engine.dispatch({
@@ -367,6 +379,7 @@ it.layer(layer)("CardSessionReactor", (it) => {
           title: "Landing page",
           spec: "A landing page.",
           tags: [],
+          criteria: [{ id: "page", text: "The page renders.", verification: "automated" }],
           createdAt: now,
         });
         yield* world.engine.dispatch({

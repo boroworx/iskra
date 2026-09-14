@@ -11,12 +11,17 @@ import {
   cardInReview,
   createAgent,
   createProject,
+  guardProject,
   decide,
   nextCommandId,
   now,
 } from "./decider.testkit.ts";
 
-const setup: ReadonlyArray<OrchestrationCommand> = [createProject(), createAgent(backend)];
+const setup: ReadonlyArray<OrchestrationCommand> = [
+  createProject(),
+  guardProject(),
+  createAgent(backend),
+];
 
 const checks = (id: string, state: "running" | "passed" | "failed"): OrchestrationCommand => ({
   type: "card.checks.record",

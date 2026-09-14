@@ -2,6 +2,7 @@ import {
   AgentId,
   CardId,
   CommandId,
+  DEFAULT_PROJECT_ORCHESTRATION,
   EventId,
   MessageId,
   ProjectId,
@@ -235,6 +236,15 @@ const makeWorld = Effect.fn("makeWorld")(function* (name: string) {
     createdAt: now,
   });
   yield* engine.dispatch({
+    type: "project.orchestration.set",
+    commandId: commandId(),
+    projectId,
+    orchestration: {
+      ...DEFAULT_PROJECT_ORCHESTRATION,
+      sideEffectGuard: { acknowledgedAt: now, killSwitchEnv: null },
+    },
+  });
+  yield* engine.dispatch({
     type: "card.create",
     commandId: commandId(),
     cardId,
@@ -242,6 +252,7 @@ const makeWorld = Effect.fn("makeWorld")(function* (name: string) {
     title: "Budget alerts",
     spec: "Email at 80%.",
     tags: [],
+    criteria: [{ id: "alert", text: "An email goes out at 80% of budget.", verification: "automated" }],
     createdAt: now,
   });
   yield* engine.dispatch({ type: "card.approve", commandId: commandId(), cardId });

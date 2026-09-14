@@ -10,7 +10,9 @@ import {
   ThreadLinkedPullRequest,
   UserInputRequestedPayload,
   isImportedAgentSessionMessageId,
-  type AgentId,
+  projectOrchestrationOf,
+  AgentId,
+  type CardFixRound,
   type CardId,
   type CardMove,
   type OrchestrationCommand,
@@ -20,7 +22,6 @@ import {
   type ThreadPullRequestKey,
   type ThreadPullRequestLink,
   type OrchestrationThreadActivity,
-  DEFAULT_PROJECT_RUN_CAP,
   CARD_ATTEMPTS_MAX,
   CARD_ATTEMPTS_MIN,
   type OrchestrationCard,
@@ -64,11 +65,27 @@ import {
   requireThreadNotArchived,
 } from "./commandInvariants.ts";
 import {
+  ALREADY_ANSWERED_REASON,
+  ANSWER_OPTION_REASON,
+  NO_CRITERIA_REASON,
+  OPEN_CHECKPOINT_REASON,
+  PAUSED_REASON,
+  PREMISE_REASON,
   canChangeDelegate,
   cardBudgetRefusal,
   cardFactsOf,
+  checkpointRequestRefusal,
+  criteriaRefusal,
+  elicitationRefusal,
+  evidencePassed,
+  fixRoundRefusal,
   isFinishedCardStatus,
+  landingBeginRefusal,
   nextCardStatus,
+  reviewEntryRefusal,
+  sessionCapRefusal,
+  sideEffectGuardRefusal,
+  subCardRefusal,
 } from "./cardRules.ts";
 import { parseMentions } from "./mentions.ts";
 import { projectEvent } from "./projector.ts";
@@ -267,6 +284,7 @@ const decideCardMove = Effect.fn("decideCardMove")(function* (input: {
   readonly command: Extract<OrchestrationCommand, { readonly cardId: CardId }>;
   readonly move: CardMove;
   readonly reason?: string;
+  readonly round?: CardFixRound;
 }): Effect.fn.Return<
   PlannedOrchestrationEvent,
   OrchestrationCommandInvariantError | PlatformError.PlatformError,
@@ -290,6 +308,7 @@ const decideCardMove = Effect.fn("decideCardMove")(function* (input: {
       to: result.status,
       move: input.move,
       ...(input.reason !== undefined ? { reason: input.reason } : {}),
+      ...(input.round !== undefined ? { round: input.round } : {}),
       updatedAt: occurredAt,
     },
   });
@@ -329,9 +348,9 @@ const decideCommandSequence = Effect.fn("decideCommandSequence")(function* ({
   return plannedEvents;
 });
 
-/** The card whose budget a card spends from: an attempt spends from its parent's. */
+/** The card whose budget a card spends from: an attempt or a builder's sub-card spends from its parent's. */
 const budgetCardOf = (readModel: OrchestrationReadModel, card: OrchestrationCard) =>
-  card.attemptGroupId !== null && card.parentCardId !== null
+  (card.attemptGroupId !== null || card.createdBy.kind === "agent") && card.parentCardId !== null
     ? (readModel.cards?.find((candidate) => candidate.id === card.parentCardId) ?? card)
     : card;
 
@@ -350,7 +369,24 @@ const SPEC_DECISION_TARGET = {
 } as const;
 const SECOND_WRITER_REASON =
   "The card already has a live session writing to it; one session writes at a time.";
-const sessionCapReason = `${DEFAULT_PROJECT_RUN_CAP} sessions are already live in this project.`;
+const FINISHED_CARD_WAITS_REASON = "A card that has landed or been abandoned waits on no one.";
+
+/** The project's orchestration policy, defaults included. */
+const policyOf = (readModel: OrchestrationReadModel, projectId: OrchestrationCard["projectId"]) =>
+  projectOrchestrationOf(readModel.projects.find((project) => project.id === projectId) ?? {});
+
+/** Refuses a session the project's own cap has no room for; the environment's cap is the scheduler's. */
+const refuseAtSessionCap = (
+  readModel: OrchestrationReadModel,
+  command: Pick<OrchestrationCommand, "type">,
+  projectId: OrchestrationCard["projectId"],
+) => {
+  const refusal = sessionCapRefusal(
+    policyOf(readModel, projectId),
+    projectLiveRunCount(readModel, projectId),
+  );
+  return refusal === null ? Effect.void : Effect.fail(refuse(command, refusal));
+};
 
 export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand")(function* ({
   command,
@@ -2292,6 +2328,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           );
         }
       }
+      if (command.criteria !== undefined && command.criteria.length > 0) {
+        const refusal = criteriaRefusal(command.criteria);
+        if (refusal !== null) {
+          return yield* refuse(command, refusal);
+        }
+      }
       return yield* planned(command, "card", command.cardId, command.createdAt, {
         type: "card.created",
         payload: {
@@ -2307,6 +2349,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           status: "triage",
           ownerHumanId: CHANNEL_HUMAN_AUTHOR_ID,
           baseBranch: command.baseBranch ?? null,
+          acceptance: { criteria: command.criteria ?? [], state: "draft" },
+          budgetCapUsd: policyOf(readModel, command.projectId).budgets.cardDefaultUsd,
           createdBy: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
@@ -2338,19 +2382,52 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "card.approve": {
-      if (command.delegateAgentId === undefined) {
-        return yield* decideCardMove({ readModel, command, move: "approve" });
-      }
-      // Approve & start, decided as one batch so a refused step leaves nothing half done. A ready
-      // card with no owner yet skips the approval. A draft spec is approved too: the person read it
-      // when they chose to start, and the owner waits behind a draft spec otherwise.
       const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      if (command.criteria !== undefined) {
+        const refusal = criteriaRefusal(command.criteria);
+        if (refusal !== null) {
+          return yield* refuse(command, refusal);
+        }
+      }
+      // Approving confirms the criteria the person saw: the ones sent, or the card's own.
+      const criteria = command.criteria ?? card.acceptance.criteria;
+      const confirms =
+        criteria.length > 0 &&
+        (command.criteria !== undefined || card.acceptance.state === "draft");
+      if (command.delegateAgentId === undefined) {
+        const move = yield* decideCardMove({ readModel, command, move: "approve" });
+        if (!confirms) {
+          return move;
+        }
+        return [
+          yield* planned(command, "card", card.id, move.occurredAt, {
+            type: "card.acceptance-set",
+            payload: {
+              cardId: card.id,
+              acceptance: { criteria, state: "confirmed" },
+              updatedAt: move.occurredAt,
+            },
+          }),
+          move,
+        ];
+      }
+      // Approve & start, decided as one batch so a refused step leaves nothing half done. Work
+      // starting needs criteria to hold it to. A ready card with no owner yet skips the approval
+      // but still confirms its criteria. A draft spec is approved too: the person read it when they
+      // chose to start, and the owner waits behind a draft spec otherwise.
+      if (criteria.length === 0) {
+        return yield* refuse(command, NO_CRITERIA_REASON);
+      }
       const { delegateAgentId, ...approve } = command;
       const step = { commandId: command.commandId, cardId: command.cardId };
       return yield* decideCommandSequence({
         readModel,
         commands: [
-          ...(card.status === "ready" && card.delegateAgentId === null ? [] : [approve]),
+          ...(card.status === "ready" && card.delegateAgentId === null
+            ? confirms
+              ? [{ ...step, type: "card.criteria.set" as const, criteria }]
+              : []
+            : [{ ...approve, criteria }]),
           ...(card.specState === "draft" ? [{ ...step, type: "card.spec.approve" as const }] : []),
           { ...step, type: "card.assign", agentId: delegateAgentId },
         ],
@@ -2376,13 +2453,22 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       return yield* decideCardMove({ readModel, command, move: "workStarted" });
     case "card.review.request":
       return yield* decideCardMove({ readModel, command, move: "requestReview" });
-    case "card.work.return":
+    case "card.work.return": {
+      if (command.round !== undefined) {
+        const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+        const refusal = fixRoundRefusal(card, policyOf(readModel, card.projectId), command.round);
+        if (refusal !== null) {
+          return yield* refuse(command, refusal);
+        }
+      }
       return yield* decideCardMove({
         readModel,
         command,
         move: "returnToWork",
         reason: command.reason,
+        ...(command.round !== undefined ? { round: command.round } : {}),
       });
+    }
     case "card.land":
       return yield* decideCardMove({ readModel, command, move: "landed" });
 
@@ -2548,6 +2634,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             status: "triage",
             ownerHumanId: CHANNEL_HUMAN_AUTHOR_ID,
             baseBranch: null,
+            acceptance: { criteria: [], state: "draft" },
             createdBy: { kind: "linear", id: command.issue.identifier },
             priority: command.issue.priority,
             createdAt: command.createdAt,
@@ -2588,6 +2675,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       if (agent.projectId !== command.projectId || agent.archivedAt !== null) {
         return yield* refuse(command, `@${agent.name} isn't an active agent of this project.`);
       }
+      if (command.premise?.getsThere === false) {
+        return yield* refuse(command, PREMISE_REASON);
+      }
       const channelId = command.channelId ?? null;
       const channel =
         channelId === null
@@ -2604,10 +2694,46 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         return yield* refuse(command, `@${agent.name} doesn't lead this channel.`);
       }
       const parentCardId = command.parentCardId ?? null;
-      if (parentCardId !== null) {
-        const parent = yield* requireCard({ readModel, command, cardId: parentCardId });
-        if (parent.projectId !== command.projectId || isFinishedCardStatus(parent.status)) {
-          return yield* refuse(command, "A sub-card needs a live card of the same project.");
+      const parent =
+        parentCardId === null
+          ? undefined
+          : yield* requireCard({ readModel, command, cardId: parentCardId });
+      if (
+        parent !== undefined &&
+        (parent.projectId !== command.projectId || isFinishedCardStatus(parent.status))
+      ) {
+        return yield* refuse(command, "A sub-card needs a live card of the same project.");
+      }
+      const criteria = command.criteria ?? [];
+      if (criteria.length > 0 || command.subCard === true) {
+        const refusal = criteriaRefusal(criteria);
+        if (refusal !== null) {
+          return yield* refuse(command, refusal);
+        }
+      }
+      // A builder's sub-card skips triage: it runs from the queue on its parent's budget and spec
+      // approval, owned by the builder that proposed it.
+      const subCardOf = command.subCard === true ? parent : undefined;
+      if (command.subCard === true) {
+        if (
+          parent === undefined ||
+          parent.delegateAgentId !== agent.id ||
+          parent.status === "triage"
+        ) {
+          return yield* refuse(
+            command,
+            "Only the agent working on an approved card adds sub-cards to it.",
+          );
+        }
+        const openSubCards = (readModel.cards ?? []).filter(
+          (card) =>
+            card.parentCardId === parent.id &&
+            card.attemptGroupId === null &&
+            !isFinishedCardStatus(card.status),
+        ).length;
+        const refusal = subCardRefusal(openSubCards, policyOf(readModel, command.projectId));
+        if (refusal !== null) {
+          return yield* refuse(command, refusal);
         }
       }
       const duplicateIds = [...new Set(lead?.likelyDuplicateCardIds ?? [])];
@@ -2639,18 +2765,34 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           parentCardId,
           title: command.title,
           spec: command.spec,
-          specState: "draft",
+          specState: subCardOf?.specState ?? "draft",
           tags: command.tags,
-          status: "triage",
+          status: subCardOf === undefined ? "triage" : "ready",
           ownerHumanId: CHANNEL_HUMAN_AUTHOR_ID,
           baseBranch: null,
+          acceptance: { criteria, state: subCardOf === undefined ? "draft" : "confirmed" },
+          estimate: command.estimate ?? null,
+          premise: command.premise ?? null,
+          budgetCapUsd: policyOf(readModel, command.projectId).budgets.cardDefaultUsd,
           createdBy: author,
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
       });
       if (lead === undefined) {
-        return created;
+        return subCardOf === undefined
+          ? created
+          : [
+              created,
+              yield* planned(command, "card", command.cardId, command.createdAt, {
+                type: "card.delegate-changed",
+                payload: {
+                  cardId: command.cardId,
+                  delegateAgentId: agent.id,
+                  updatedAt: command.createdAt,
+                },
+              }),
+            ];
       }
       // A lead's proposal carries why it was made and what it may duplicate, for triage to judge.
       const events: PlannedOrchestrationEvent[] = [
@@ -2770,6 +2912,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
               status: "ready",
               ownerHumanId: parent.ownerHumanId,
               baseBranch: parent.baseBranch,
+              acceptance: parent.acceptance,
               createdBy: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
               createdAt: command.createdAt,
               updatedAt: command.createdAt,
@@ -3102,9 +3245,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           `@${critic.name} isn't an active agent of this card's project.`,
         );
       }
-      if (projectLiveRunCount(readModel, card.projectId) >= DEFAULT_PROJECT_RUN_CAP) {
-        return yield* refuse(command, sessionCapReason);
-      }
+      yield* refuseAtSessionCap(readModel, command, card.projectId);
       const occurredAt = yield* nowIso;
       return yield* planned(command, "card", command.cardId, occurredAt, {
         type: "card.spec-submitted",
@@ -3131,9 +3272,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       if (liveOwnerRun(readModel, card.id) !== undefined) {
         return yield* refuse(command, SECOND_WRITER_REASON);
       }
-      if (projectLiveRunCount(readModel, card.projectId) >= DEFAULT_PROJECT_RUN_CAP) {
-        return yield* refuse(command, sessionCapReason);
+      if (card.paused !== null) {
+        return yield* refuse(command, PAUSED_REASON);
       }
+      const guardRefusal = sideEffectGuardRefusal(policyOf(readModel, card.projectId));
+      if (guardRefusal !== null) {
+        return yield* refuse(command, guardRefusal);
+      }
+      yield* refuseAtSessionCap(readModel, command, card.projectId);
       return yield* planned(command, "card", command.cardId, command.createdAt, {
         type: "card.session-requested",
         payload: {
@@ -3156,9 +3302,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       if (isFinishedCardStatus(card.status)) {
         return yield* refuse(command, FINISHED_CARD_SESSION_REASON);
       }
-      if (projectLiveRunCount(readModel, card.projectId) >= DEFAULT_PROJECT_RUN_CAP) {
-        return yield* refuse(command, sessionCapReason);
-      }
+      yield* refuseAtSessionCap(readModel, command, card.projectId);
       return [
         yield* planned(command, "card", command.cardId, command.createdAt, {
           type: "card.message-posted",
@@ -3238,6 +3382,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         if (card.specState === "draft") {
           return yield* refuse(command, PLAN_GATE_REASON);
         }
+        if (card.paused !== null) {
+          return yield* refuse(command, PAUSED_REASON);
+        }
+        const guardRefusal = sideEffectGuardRefusal(policyOf(readModel, card.projectId));
+        if (guardRefusal !== null) {
+          return yield* refuse(command, guardRefusal);
+        }
         const beyond = command.capabilities.filter(
           (capability) => !agent.capabilities.includes(capability),
         );
@@ -3248,9 +3399,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         // Invariant 11: helpers and critics are read-only.
         return yield* refuse(command, `A ${command.role} session is read-only.`);
       }
-      if (projectLiveRunCount(readModel, card.projectId) >= DEFAULT_PROJECT_RUN_CAP) {
-        return yield* refuse(command, sessionCapReason);
-      }
+      yield* refuseAtSessionCap(readModel, command, card.projectId);
       const overBudget = cardBudgetRefusal(budgetCardOf(readModel, card));
       if (overBudget !== null) {
         return yield* refuse(command, overBudget);
@@ -3297,6 +3446,306 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           status: command.status,
           threadId: command.threadId,
           updatedAt: command.updatedAt,
+        },
+      });
+    }
+
+    case "card.criteria.set": {
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        "A card that has landed or been abandoned keeps its criteria.",
+      );
+      const refusal = criteriaRefusal(command.criteria);
+      if (refusal !== null) {
+        return yield* refuse(command, refusal);
+      }
+      const occurredAt = yield* nowIso;
+      return yield* planned(command, "card", card.id, occurredAt, {
+        type: "card.acceptance-set",
+        payload: {
+          cardId: card.id,
+          // A draft until the card is approved; on an approved card a person's edit confirms it.
+          acceptance: {
+            criteria: command.criteria,
+            state: card.status === "triage" ? "draft" : "confirmed",
+          },
+          updatedAt: occurredAt,
+        },
+      });
+    }
+
+    case "card.criteria.confirm": {
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        "A card that has landed or been abandoned keeps its criteria.",
+      );
+      if (card.acceptance.criteria.length === 0) {
+        return yield* refuse(command, NO_CRITERIA_REASON);
+      }
+      if (card.acceptance.state === "confirmed") {
+        return yield* refuse(command, "The acceptance criteria are already confirmed.");
+      }
+      const occurredAt = yield* nowIso;
+      return yield* planned(command, "card", card.id, occurredAt, {
+        type: "card.acceptance-set",
+        payload: {
+          cardId: card.id,
+          acceptance: { criteria: card.acceptance.criteria, state: "confirmed" },
+          updatedAt: occurredAt,
+        },
+      });
+    }
+
+    // Written by session-bound tools and reactors; the author comes from the session, never the agent.
+    case "card.activity.record": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      if (command.kind === "status" || command.kind === "evidence" || command.kind === "landing") {
+        return yield* refuse(
+          command,
+          "Status, evidence and landing entries come from their own events.",
+        );
+      }
+      if (command.author.kind === "agent") {
+        const agent = yield* requireAgent({
+          readModel,
+          command,
+          agentId: AgentId.make(command.author.id),
+        });
+        const working =
+          card.delegateAgentId === agent.id ||
+          (readModel.liveRuns ?? []).some(
+            (run) => run.cardId === card.id && run.agentId === agent.id,
+          );
+        if (!working) {
+          return yield* refuse(
+            command,
+            `@${agent.name} isn't working on this card, so it can't write to its activity.`,
+          );
+        }
+      }
+      if (command.elicitation !== null) {
+        const refusal = elicitationRefusal(command.elicitation);
+        if (refusal !== null) {
+          return yield* refuse(command, refusal);
+        }
+      }
+      return yield* planned(command, "card", card.id, command.createdAt, {
+        type: "card.activity-recorded",
+        payload: {
+          activityId: command.activityId,
+          cardId: card.id,
+          kind: command.kind,
+          author: command.author,
+          body: command.body,
+          runThreadId: command.runThreadId,
+          deliverTo: command.deliverTo,
+          delivery: command.deliverTo === null ? null : "pending",
+          elicitation: command.elicitation,
+          answers: command.answers,
+          status: null,
+          evidenceId: command.evidenceId,
+          reason: command.reason,
+          createdAt: command.createdAt,
+        },
+      });
+    }
+
+    case "card.checkpoint.request": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      const refusal = checkpointRequestRefusal(card);
+      if (refusal !== null) {
+        return yield* refuse(command, refusal);
+      }
+      return yield* planned(command, "card", card.id, command.checkpoint.requestedAt, {
+        type: "card.checkpoint-requested",
+        payload: { cardId: card.id, checkpoint: command.checkpoint },
+      });
+    }
+
+    case "card.checkpoint.resolve": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      if (card.checkpoint === null) {
+        return yield* refuse(command, OPEN_CHECKPOINT_REASON);
+      }
+      const occurredAt = yield* nowIso;
+      const resolved = yield* planned(command, "card", card.id, occurredAt, {
+        type: "card.checkpoint-resolved",
+        payload: {
+          cardId: card.id,
+          checkpointId: card.checkpoint.checkpointId,
+          decision: command.decision,
+          note: command.note ?? null,
+          resolvedAt: occurredAt,
+        },
+      });
+      // Stopping at a checkpoint holds the card until a person resumes it.
+      return command.decision === "stop" && card.paused === null
+        ? [
+            resolved,
+            yield* planned(command, "card", card.id, occurredAt, {
+              type: "card.paused",
+              payload: {
+                cardId: card.id,
+                reason: { code: "checkpointStopped", text: "Stopped at a checkpoint." },
+                by: "human",
+                pausedAt: occurredAt,
+              },
+            }),
+          ]
+        : resolved;
+    }
+
+    case "card.evidence.record": {
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        "A card that has landed or been abandoned takes no new evidence.",
+      );
+      return yield* planned(command, "card", card.id, command.recordedAt, {
+        type: "card.evidence-recorded",
+        payload: {
+          cardId: card.id,
+          evidenceId: command.evidenceId,
+          headSha: command.headSha,
+          purpose: command.purpose,
+          items: command.items,
+          flags: command.flags,
+          risks: command.risks,
+          passed: evidencePassed(command.items),
+          recordedAt: command.recordedAt,
+        },
+      });
+    }
+
+    case "card.flags.acknowledge": {
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        "A card that has landed or been abandoned has nothing to acknowledge.",
+      );
+      const { evidence } = card;
+      if (
+        evidence === null ||
+        evidence.evidenceId !== command.evidenceId ||
+        evidence.flagsAcknowledgedAt !== null ||
+        !evidence.flags.some((flag) => flag.hard)
+      ) {
+        return yield* refuse(command, "There are no flagged changes to acknowledge.");
+      }
+      const occurredAt = yield* nowIso;
+      return yield* planned(command, "card", card.id, occurredAt, {
+        type: "card.flags-acknowledged",
+        payload: { cardId: card.id, evidenceId: evidence.evidenceId, acknowledgedAt: occurredAt },
+      });
+    }
+
+    // Invariant: review is entered by the server, only with passing evidence for the commit under review.
+    case "card.review.enter": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      const refusal = reviewEntryRefusal(
+        card,
+        policyOf(readModel, card.projectId),
+        command.headSha,
+      );
+      if (refusal !== null) {
+        return yield* refuse(command, refusal);
+      }
+      return yield* decideCardMove({ readModel, command, move: "requestReview" });
+    }
+
+    case "card.landing.begin": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      const parent =
+        card.parentCardId === null
+          ? undefined
+          : (readModel.cards ?? []).find((candidate) => candidate.id === card.parentCardId);
+      const refusal = landingBeginRefusal({
+        card,
+        parent,
+        policy: policyOf(readModel, card.projectId),
+        reason: command.reason,
+      });
+      if (refusal !== null) {
+        return yield* refuse(command, refusal);
+      }
+      return yield* decideCardMove({
+        readModel,
+        command,
+        move: "beginLanding",
+        reason:
+          command.reason === "planChild"
+            ? "Its checks and evidence passed, so it lands into its plan's branch."
+            : "Auto-merge is on and its checks and evidence passed.",
+      });
+    }
+
+    case "card.landing.link": {
+      yield* requireCard({ readModel, command, cardId: command.cardId });
+      return yield* planned(command, "card", command.cardId, command.landing.linkedAt, {
+        type: "card.landing-linked",
+        payload: { cardId: command.cardId, landing: command.landing },
+      });
+    }
+
+    case "card.fix-rounds.reset": {
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        "A card that has landed or been abandoned needs no more rounds.",
+      );
+      if (card.fixRounds.ci === 0 && card.fixRounds.review === 0) {
+        return yield* refuse(command, "The card hasn't used any fix rounds.");
+      }
+      const occurredAt = yield* nowIso;
+      return yield* planned(command, "card", card.id, occurredAt, {
+        type: "card.fix-rounds-reset",
+        payload: { cardId: card.id, resetAt: occurredAt },
+      });
+    }
+
+    case "card.pause":
+    case "card.pause.system": {
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        FINISHED_CARD_WAITS_REASON,
+      );
+      if (card.paused !== null) {
+        return yield* refuse(command, "The card is already paused.");
+      }
+      const occurredAt = yield* nowIso;
+      return yield* planned(command, "card", card.id, occurredAt, {
+        type: "card.paused",
+        payload: {
+          cardId: card.id,
+          ...(command.type === "card.pause"
+            ? { reason: { code: "pausedByPerson", text: "Paused by a person." }, by: "human" as const }
+            : { reason: command.reason, by: "system" as const }),
+          pausedAt: occurredAt,
+        },
+      });
+    }
+
+    case "card.resume": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      if (card.paused === null) {
+        return yield* refuse(command, "The card isn't paused.");
+      }
+      const occurredAt = yield* nowIso;
+      return yield* planned(command, "card", card.id, occurredAt, {
+        type: "card.resumed",
+        payload: { cardId: card.id, resumedAt: occurredAt },
+      });
+    }
+
+    case "card.wait.note": {
+      yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        FINISHED_CARD_WAITS_REASON,
+      );
+      return yield* planned(command, "card", command.cardId, command.notedAt, {
+        type: "card.wait-noted",
+        payload: {
+          cardId: command.cardId,
+          threadId: command.threadId,
+          reason: command.reason,
+          notedAt: command.notedAt,
         },
       });
     }
@@ -3702,6 +4151,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           `Channel '${command.channelId}' is archived and cannot receive messages.`,
         );
       }
+      if (command.elicitation !== undefined) {
+        const refusal = elicitationRefusal(command.elicitation);
+        if (refusal !== null) {
+          return yield* refuse(command, refusal);
+        }
+      }
       return yield* planned(command, "channel", command.channelId, command.createdAt, {
         type: "channel.message-posted",
         payload: {
@@ -3712,6 +4167,60 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           body: command.body,
           createdAt: command.createdAt,
           runThreadId: command.runThreadId,
+          ...(command.elicitation !== undefined ? { elicitation: command.elicitation } : {}),
+        },
+      });
+    }
+
+    case "channel.elicitation.answer": {
+      const channel = yield* requireChannel({ readModel, command, channelId: command.channelId });
+      const question = (channel.openElicitations ?? []).find(
+        (open) => open.messageId === command.questionMessageId,
+      );
+      if (question === undefined) {
+        return yield* refuse(command, ALREADY_ANSWERED_REASON);
+      }
+      if (command.optionId !== null && !question.optionIds.includes(command.optionId)) {
+        return yield* refuse(command, ANSWER_OPTION_REASON);
+      }
+      // Posted like any person's message, so it wakes the lead, and marked as the question's answer.
+      const decided = yield* decideOrchestrationCommand({
+        command: {
+          type: "channel.message.post",
+          commandId: command.commandId,
+          channelId: command.channelId,
+          messageId: command.messageId,
+          body: command.body,
+          createdAt: command.createdAt,
+        },
+        readModel,
+      });
+      const answers = { questionId: command.questionMessageId, optionId: command.optionId };
+      return (Array.isArray(decided) ? decided : [decided]).map((event) =>
+        event.type === "channel.message-posted" && event.payload.messageId === command.messageId
+          ? { ...event, payload: { ...event.payload, answers } }
+          : event,
+      );
+    }
+
+    // Only a person sends it: no board tool or reactor dispatches a project's policy.
+    case "project.orchestration.set": {
+      yield* requireProject({ readModel, command, projectId: command.projectId });
+      const { egress } = command.orchestration;
+      const both = egress.allow.filter((domain) => egress.deny.includes(domain));
+      if (both.length > 0) {
+        return yield* refuse(
+          command,
+          `A domain can't be both allowed and denied: ${both.join(", ")}.`,
+        );
+      }
+      const occurredAt = yield* nowIso;
+      return yield* planned(command, "project", command.projectId, occurredAt, {
+        type: "project.orchestration-set",
+        payload: {
+          projectId: command.projectId,
+          orchestration: command.orchestration,
+          updatedAt: occurredAt,
         },
       });
     }

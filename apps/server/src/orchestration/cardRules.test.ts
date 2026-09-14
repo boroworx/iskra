@@ -1,7 +1,27 @@
-import { CardId, type CardMove, type CardStatus, type OrchestrationCard } from "@iskra/contracts";
+import {
+  CardId,
+  type CardMove,
+  type CardStatus,
+  type OrchestrationCard,
+  type OrchestrationEvent,
+} from "@iskra/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  AUTO_MERGE_OFF_REASON,
+  BLOCKED_REASON,
+  NO_CHECKS_REASON,
+  PLAN_CHILD_LANDING_REASON,
+  REVIEW_EVIDENCE_REASON,
+  UNACKNOWLEDGED_FLAGS_REASON,
+  WORK_CRITERIA_REASON,
+  cardActivitiesOf,
+  criteriaRefusal,
+  elicitationRefusal,
+  evidencePassed,
+  fixRoundRefusal,
+  landingBeginRefusal,
+  reviewEntryRefusal,
   canChangeDelegate,
   cardBudgetRefusal,
   cardFactsOf,
@@ -27,6 +47,8 @@ const facts = (status: CardStatus, overrides: Partial<CardFacts> = {}): CardFact
   delegateAgentId: "agent-backend",
   openChildCount: 0,
   openBlockerCount: 0,
+  criteriaConfirmed: true,
+  unacknowledgedHardFlags: false,
   ...overrides,
 });
 
@@ -38,6 +60,7 @@ const ALLOWED: ReadonlyArray<readonly [CardMove, Partial<Record<CardStatus, Card
   ["requestReview", { inProgress: "inReview" }],
   ["returnToWork", { inReview: "inProgress", landing: "inProgress" }],
   ["approveMerge", { inReview: "landing" }],
+  ["beginLanding", { inReview: "landing" }],
   ["cancelLanding", { landing: "inReview" }],
   ["landed", { landing: "landed" }],
   [
@@ -106,6 +129,8 @@ describe("cardFactsOf", () => {
       delegateAgentId: null,
       parentCardId: null,
       relations: [],
+      acceptance: { criteria: [], state: "confirmed" },
+      evidence: null,
       ...overrides,
     }) as OrchestrationCard;
 
@@ -163,5 +188,177 @@ describe("cardBudgetRefusal", () => {
   it("holds an unpriced model until a person accepts running it uncapped", () => {
     expect(cardBudgetRefusal({ ...budget, unpricedTurns: 1 })).toContain("no known price");
     expect(cardBudgetRefusal({ ...budget, unpricedTurns: 1, acceptsUnpriced: true })).toBeNull();
+  });
+});
+
+describe("card contract gates", () => {
+  const evidence = {
+    evidenceId: "evidence-1",
+    headSha: "abc123",
+    purpose: "review" as const,
+    passed: true,
+    checkCount: 2,
+    failedChecks: [],
+    unavailable: [],
+    flags: [],
+    flagsAcknowledgedAt: null,
+    recordedAt: "2026-01-01T00:00:00.000Z",
+  };
+  const policy = {
+    checksWaived: false,
+    ciFixRounds: 2,
+    reviewFixRounds: 1,
+    autoMerge: { enabled: false, minSatisfaction: 0.9 },
+  };
+
+  it("starts work only on confirmed criteria and no open blocker, and merges only acknowledged flags", () => {
+    expect(nextCardStatus(facts("ready", { criteriaConfirmed: false }), "workStarted")).toEqual({
+      ok: false,
+      reason: WORK_CRITERIA_REASON,
+    });
+    expect(nextCardStatus(facts("ready", { openBlockerCount: 1 }), "workStarted")).toEqual({
+      ok: false,
+      reason: BLOCKED_REASON,
+    });
+    for (const move of ["approveMerge", "beginLanding"] as const) {
+      expect(nextCardStatus(facts("inReview", { unacknowledgedHardFlags: true }), move)).toEqual({
+        ok: false,
+        reason: UNACKNOWLEDGED_FLAGS_REASON,
+      });
+    }
+  });
+
+  it("passes evidence only when every check exited 0 in time, whatever the captures", () => {
+    const check = { kind: "check" as const, exitCode: 0, timedOut: false };
+    const capture = { kind: "screenshot" as const, exitCode: null, timedOut: false };
+    expect(evidencePassed([check, capture])).toBe(true);
+    expect(evidencePassed([check, { ...check, exitCode: 1 }])).toBe(false);
+    expect(evidencePassed([{ ...check, timedOut: true }])).toBe(false);
+    expect(evidencePassed([check, { ...check, exitCode: null }])).toBe(false);
+  });
+
+  it("enters review only on passing evidence for the commit, with checks or a waiver", () => {
+    expect(reviewEntryRefusal({ evidence }, policy, "abc123")).toBeNull();
+    expect(reviewEntryRefusal({ evidence: null }, policy, "abc123")).toBe(REVIEW_EVIDENCE_REASON);
+    expect(reviewEntryRefusal({ evidence }, policy, "def456")).toBe(REVIEW_EVIDENCE_REASON);
+    expect(reviewEntryRefusal({ evidence: { ...evidence, passed: false } }, policy, "abc123")).toBe(
+      REVIEW_EVIDENCE_REASON,
+    );
+    expect(
+      reviewEntryRefusal({ evidence: { ...evidence, purpose: "checkpoint" } }, policy, "abc123"),
+    ).toBe(REVIEW_EVIDENCE_REASON);
+    const unchecked = { evidence: { ...evidence, checkCount: 0 } };
+    expect(reviewEntryRefusal(unchecked, policy, "abc123")).toBe(NO_CHECKS_REASON);
+    expect(reviewEntryRefusal(unchecked, { checksWaived: true }, "abc123")).toBeNull();
+  });
+
+  it("counts CI and review rounds apart against the project's caps", () => {
+    expect(fixRoundRefusal({ fixRounds: { ci: 1, review: 0 } }, policy, "ci")).toBeNull();
+    expect(fixRoundRefusal({ fixRounds: { ci: 2, review: 0 } }, policy, "ci")).toBe(
+      "The card used its 2 CI fix rounds; a person can give it more.",
+    );
+    expect(fixRoundRefusal({ fixRounds: { ci: 2, review: 0 } }, policy, "review")).toBeNull();
+    expect(fixRoundRefusal({ fixRounds: { ci: 0, review: 1 } }, policy, "review")).toContain(
+      "1 review fix rounds",
+    );
+  });
+
+  it("lands without a person only a plan child into its plan's branch, or under auto-merge", () => {
+    const plan = { kind: "plan" as const, branch: "iskra/plan-limits" };
+    const child = { evidence, baseBranch: "iskra/plan-limits" };
+    const begin = (overrides: Partial<Parameters<typeof landingBeginRefusal>[0]>) =>
+      landingBeginRefusal({ card: child, parent: plan, policy, reason: "planChild", ...overrides });
+    expect(begin({})).toBeNull();
+    expect(begin({ parent: undefined })).toBe(PLAN_CHILD_LANDING_REASON);
+    expect(begin({ parent: { kind: "task", branch: plan.branch } })).toBe(PLAN_CHILD_LANDING_REASON);
+    expect(begin({ card: { ...child, baseBranch: "main" } })).toBe(PLAN_CHILD_LANDING_REASON);
+    expect(begin({ card: { ...child, evidence: { ...evidence, passed: false } } })).toBe(
+      PLAN_CHILD_LANDING_REASON,
+    );
+    expect(begin({ reason: "autoMergePolicy" })).toBe(AUTO_MERGE_OFF_REASON);
+    expect(
+      begin({
+        reason: "autoMergePolicy",
+        parent: undefined,
+        policy: { ...policy, autoMerge: { enabled: true, minSatisfaction: 0.9 } },
+      }),
+    ).toBeNull();
+  });
+
+  it("refuses criteria and questions that can't be held to", () => {
+    expect(criteriaRefusal([{ id: "a" }, { id: "b" }])).toBeNull();
+    expect(criteriaRefusal([])).toBe("Add at least one acceptance criterion.");
+    expect(criteriaRefusal([{ id: "a" }, { id: "a" }])).toContain("its own id");
+    const options = [{ id: "a" }, { id: "b" }];
+    expect(elicitationRefusal({ options, recommendedOptionId: "a" })).toBeNull();
+    expect(elicitationRefusal({ options: [{ id: "a" }], recommendedOptionId: null })).toContain(
+      "two or three",
+    );
+    expect(elicitationRefusal({ options, recommendedOptionId: "c" })).toContain("recommended");
+  });
+
+  it("maps legacy card messages, decisions and status moves into activities as migration 070 did", () => {
+    const base = {
+      sequence: 1,
+      eventId: "event-1",
+      aggregateKind: "card",
+      aggregateId: CardId.make("card-1"),
+      occurredAt: "2026-01-01T00:00:00.000Z",
+      commandId: null,
+      causationEventId: null,
+      correlationId: null,
+      metadata: {},
+    } as const;
+    const [message] = cardActivitiesOf({
+      ...base,
+      type: "card.message-posted",
+      payload: {
+        cardId: CardId.make("card-1"),
+        messageId: "message-1",
+        authorKind: "human",
+        authorId: "human",
+        body: "Also cap bursts.",
+        runThreadId: null,
+        forOwner: true,
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    } as OrchestrationEvent);
+    expect(message).toMatchObject({
+      activityId: "message-1",
+      kind: "message",
+      deliverTo: "builder",
+      delivery: "pending",
+    });
+    const [decision] = cardActivitiesOf({
+      ...base,
+      type: "card.decision-recorded",
+      payload: {
+        cardId: CardId.make("card-1"),
+        decisionId: "decision-1",
+        author: { kind: "lead", id: "agent-lead" },
+        text: "Asked for.",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    } as OrchestrationEvent);
+    expect(decision).toMatchObject({ kind: "decision", author: { kind: "agent", id: "agent-lead" } });
+    const [status] = cardActivitiesOf({
+      ...base,
+      type: "card.status-changed",
+      payload: {
+        cardId: CardId.make("card-1"),
+        from: "inReview",
+        to: "inProgress",
+        move: "returnToWork",
+        reason: "Checks failed.",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    } as OrchestrationEvent);
+    expect(status).toMatchObject({
+      activityId: "status:event-1",
+      author: { kind: "system", id: "system" },
+      body: "",
+      status: { from: "inReview", to: "inProgress" },
+      reason: { code: "returnToWork", text: "Checks failed." },
+    });
   });
 });

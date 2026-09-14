@@ -13,6 +13,7 @@ import {
   createCard,
   createChannel,
   createProject,
+  guardProject,
   createThread,
   decide,
   frontend,
@@ -30,6 +31,7 @@ const channelId = ChannelId.make("channel-backend");
 
 const setup: ReadonlyArray<OrchestrationCommand> = [
   createProject(),
+  guardProject(),
   createAgent(backend),
   createAgent(frontend),
   createCard(),

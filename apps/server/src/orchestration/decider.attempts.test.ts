@@ -11,6 +11,7 @@ import {
   createAgent,
   createCard,
   createProject,
+  guardProject,
   createThread,
   nextCommandId,
   now,
@@ -24,6 +25,7 @@ const attemptIds = ["attempt-one", "attempt-two", "attempt-three"].map((id) => C
 
 const setup = (options: { readonly skipSpec: boolean }): ReadonlyArray<OrchestrationCommand> => [
   createProject(),
+  guardProject(),
   ...agents.map((agentId) => createAgent(agentId)),
   createCard(cardId, { spec: "Limit each key.", tags: ["api"] }),
   onCard("card.approve"),

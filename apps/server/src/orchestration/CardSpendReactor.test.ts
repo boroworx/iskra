@@ -2,6 +2,7 @@ import {
   AgentId,
   CardId,
   CommandId,
+  DEFAULT_PROJECT_ORCHESTRATION,
   EventId,
   ProjectId,
   ProviderDriverKind,
@@ -126,6 +127,15 @@ const makeWorld = Effect.fn("makeWorld")(function* (name: string, model: string)
     createdAt: now,
   });
   yield* engine.dispatch({
+    type: "project.orchestration.set",
+    commandId: CommandId.make(`cmd-guard-${name}`),
+    projectId,
+    orchestration: {
+      ...DEFAULT_PROJECT_ORCHESTRATION,
+      sideEffectGuard: { acknowledgedAt: now, killSwitchEnv: null },
+    },
+  });
+  yield* engine.dispatch({
     type: "agent.create",
     commandId: CommandId.make(`cmd-agent-${name}`),
     agentId,
@@ -145,6 +155,7 @@ const makeWorld = Effect.fn("makeWorld")(function* (name: string, model: string)
     title: "Rate limiting",
     spec: "",
     tags: [],
+    criteria: [{ id: "limit", text: "Each key gets 100 requests a minute.", verification: "automated" }],
     createdAt: now,
   });
   for (const type of ["card.approve", "card.spec.skip"] as const) {

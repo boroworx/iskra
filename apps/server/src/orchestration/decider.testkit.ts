@@ -3,6 +3,7 @@ import {
   CardId,
   ChannelId,
   CommandId,
+  DEFAULT_PROJECT_ORCHESTRATION,
   MessageId,
   ProjectId,
   ProviderInstanceId,
@@ -109,7 +110,20 @@ export const createCard = (
   title: "Rate limiting",
   spec: fields.spec ?? "",
   tags: fields.tags ?? [],
+  // Approving the card confirms these, so work can start on it.
+  criteria: [{ id: "limit", text: "Each API key gets 100 requests a minute.", verification: "automated" }],
   createdAt: now,
+});
+
+/** A person reviewing the project's side-effect guard, which owner sessions wait for. */
+export const guardProject = (id: ProjectId = projectId): OrchestrationCommand => ({
+  type: "project.orchestration.set",
+  commandId: nextCommandId(),
+  projectId: id,
+  orchestration: {
+    ...DEFAULT_PROJECT_ORCHESTRATION,
+    sideEffectGuard: { acknowledgedAt: now, killSwitchEnv: null },
+  },
 });
 
 type CardOnlyCommandType =

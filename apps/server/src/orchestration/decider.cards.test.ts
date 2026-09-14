@@ -21,6 +21,7 @@ import {
   createAgent,
   createCard,
   createProject,
+  guardProject,
   decide,
   nextCommandId,
   now,
@@ -44,7 +45,7 @@ const relate = (
     otherCardId: CardId.make(otherCardId),
   }) as OrchestrationCommand;
 
-const setup = [createProject(), createAgent(backend)];
+const setup = [createProject(), guardProject(), createAgent(backend)];
 
 it.layer(NodeServices.layer)("decider cards", (it) => {
   it.effect("creates every card as a triage proposal owned by the local human", () =>
@@ -240,6 +241,7 @@ it.layer(NodeServices.layer)("decider cards", (it) => {
       const base = yield* applyCommands(proposed);
 
       expect((yield* decide(base, start("card"))).map((event) => event.type)).toEqual([
+        "card.acceptance-set",
         "card.status-changed",
         "card.spec-state-changed",
         "card.delegate-changed",

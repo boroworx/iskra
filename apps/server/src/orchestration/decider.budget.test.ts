@@ -19,6 +19,7 @@ import {
   createAgent,
   createCard,
   createProject,
+  guardProject,
   createThread,
   nextCommandId,
   now,
@@ -41,6 +42,7 @@ const readyCard = (id: CardId): ReadonlyArray<OrchestrationCommand> => [
 
 const setup: ReadonlyArray<OrchestrationCommand> = [
   createProject(),
+  guardProject(),
   createAgent(backend),
   ...readyCard(cardId),
   recordSession(ownerThreadId, backend),

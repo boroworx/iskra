@@ -2376,6 +2376,14 @@ const ProjectDeleteCommand = Schema.Struct({
   force: Schema.optional(Schema.Boolean),
 });
 
+/** A person replacing the project's whole orchestration policy; no tool or reactor sends it. */
+const ProjectOrchestrationSetCommand = Schema.Struct({
+  type: Schema.Literal("project.orchestration.set"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  orchestration: ProjectOrchestration,
+});
+
 const AgentCreateCommand = Schema.Struct({
   type: Schema.Literal("agent.create"),
   commandId: CommandId,
@@ -2419,6 +2427,8 @@ const CardCreateCommand = Schema.Struct({
   spec: Schema.String,
   tags: Schema.Array(TrimmedNonEmptyString),
   baseBranch: Schema.optional(TrimmedNonEmptyString),
+  // Draft acceptance criteria; approving the card confirms them.
+  criteria: Schema.optional(Schema.Array(CardCriterion)),
   createdAt: IsoDateTime,
 });
 
@@ -2440,7 +2450,40 @@ const CardApproveCommand = Schema.Struct({
   ...cardStatusCommand("card.approve").fields,
   // Approve & start: also approves a draft spec and assigns this agent, so its owner session starts.
   delegateAgentId: Schema.optional(AgentId),
+  // The acceptance criteria the person confirms by approving; absent confirms the card's own.
+  criteria: Schema.optional(Schema.Array(CardCriterion)),
 });
+
+/** A person writing the card's acceptance criteria: a draft in triage, confirmed once approved. */
+const CardCriteriaSetCommand = Schema.Struct({
+  type: Schema.Literal("card.criteria.set"),
+  commandId: CommandId,
+  cardId: CardId,
+  criteria: Schema.Array(CardCriterion),
+});
+const CardCriteriaConfirmCommand = cardStatusCommand("card.criteria.confirm");
+
+/** A person answering the owner's checkpoint: go on, go on differently, or stop and pause. */
+const CardCheckpointResolveCommand = Schema.Struct({
+  type: Schema.Literal("card.checkpoint.resolve"),
+  commandId: CommandId,
+  cardId: CardId,
+  decision: CardCheckpointDecision,
+  note: Schema.optional(TrimmedNonEmptyString),
+});
+
+/** A person accepting the hard scope flags on the card's latest evidence, so its merge can be approved. */
+const CardFlagsAcknowledgeCommand = Schema.Struct({
+  type: Schema.Literal("card.flags.acknowledge"),
+  commandId: CommandId,
+  cardId: CardId,
+  evidenceId: TrimmedNonEmptyString,
+});
+
+/** A person giving the card its fix rounds again. */
+const CardFixRoundsResetCommand = cardStatusCommand("card.fix-rounds.reset");
+const CardPauseCommand = cardStatusCommand("card.pause");
+const CardResumeCommand = cardStatusCommand("card.resume");
 const CardUnapproveCommand = cardStatusCommand("card.unapprove");
 const CardMergeApproveCommand = cardStatusCommand("card.merge.approve");
 const CardMergeCancelCommand = cardStatusCommand("card.merge.cancel");
@@ -2486,6 +2529,65 @@ const CardWorkReturnCommand = Schema.Struct({
   commandId: CommandId,
   cardId: CardId,
   reason: TrimmedNonEmptyString,
+  // An automatic return uses a fix round, refused once the project's rounds are used up.
+  round: Schema.optional(CardFixRound),
+});
+
+// Server-only: the card contract's reactor and tool commands.
+const CardActivityRecordCommand = Schema.Struct({
+  type: Schema.Literal("card.activity.record"),
+  commandId: CommandId,
+  ...Struct.omit(CardActivity.fields, ["delivery"]),
+});
+
+const CardCheckpointRequestCommand = Schema.Struct({
+  type: Schema.Literal("card.checkpoint.request"),
+  commandId: CommandId,
+  cardId: CardId,
+  checkpoint: CardCheckpoint,
+});
+
+/** Evidence the server captured; the decider decides whether it passed. */
+const CardEvidenceRecordCommand = Schema.Struct({
+  type: Schema.Literal("card.evidence.record"),
+  commandId: CommandId,
+  ...Struct.omit(CardEvidenceRecordedPayload.fields, ["passed"]),
+});
+
+/** Moves a card into review, refused without passing evidence for the commit `headSha`. */
+const CardReviewEnterCommand = Schema.Struct({
+  type: Schema.Literal("card.review.enter"),
+  commandId: CommandId,
+  cardId: CardId,
+  headSha: TrimmedNonEmptyString,
+});
+
+/** Lands a card with no person's merge approval: a plan child, or a project with auto-merge on. */
+const CardLandingBeginCommand = Schema.Struct({
+  type: Schema.Literal("card.landing.begin"),
+  commandId: CommandId,
+  cardId: CardId,
+  reason: CardLandingBeginReason,
+});
+
+const CardLandingLinkCommand = Schema.Struct({
+  type: Schema.Literal("card.landing.link"),
+  commandId: CommandId,
+  ...CardLandingLinkedPayload.fields,
+});
+
+const CardWaitNoteCommand = Schema.Struct({
+  type: Schema.Literal("card.wait.note"),
+  commandId: CommandId,
+  ...CardWaitNotedPayload.fields,
+});
+
+/** Iskra pausing a card itself, such as after repeated failed restarts. */
+const CardPauseSystemCommand = Schema.Struct({
+  type: Schema.Literal("card.pause.system"),
+  commandId: CommandId,
+  cardId: CardId,
+  reason: Reason,
 });
 
 const CardWorkspaceSetCommand = Schema.Struct({
@@ -2607,6 +2709,11 @@ const CardProposeCommand = Schema.Struct({
       suggestedAgentName: Schema.optional(TrimmedNonEmptyString),
     }),
   ),
+  criteria: Schema.optional(Schema.Array(CardCriterion)),
+  estimate: Schema.optional(CardEstimate),
+  premise: Schema.optional(CardPremise),
+  // A builder's sub-card of its own card: ready at once, on the parent's budget and spec approval.
+  subCard: Schema.optional(Schema.Boolean),
   createdAt: IsoDateTime,
 });
 
@@ -2777,6 +2884,20 @@ const ChannelMessageAgentPostCommand = Schema.Struct({
   agentId: AgentId,
   runThreadId: ThreadId,
   body: Schema.String,
+  // A lead's question with options for a person to pick from.
+  elicitation: Schema.optional(Elicitation),
+  createdAt: IsoDateTime,
+});
+
+/** A person answering a lead's question, with an offered option or their own words. */
+const ChannelElicitationAnswerCommand = Schema.Struct({
+  type: Schema.Literal("channel.elicitation.answer"),
+  commandId: CommandId,
+  channelId: ChannelId,
+  questionMessageId: MessageId,
+  messageId: MessageId,
+  optionId: Schema.NullOr(TrimmedNonEmptyString),
+  body: TrimmedNonEmptyString,
   createdAt: IsoDateTime,
 });
 
@@ -3131,11 +3252,20 @@ const IskraClientCommands = [
   CardUnpricedRefuseCommand,
   CardAttemptsStartCommand,
   CardAttemptPromoteCommand,
+  CardCriteriaSetCommand,
+  CardCriteriaConfirmCommand,
+  CardCheckpointResolveCommand,
+  CardFlagsAcknowledgeCommand,
+  CardFixRoundsResetCommand,
+  CardPauseCommand,
+  CardResumeCommand,
   ChannelCreateCommand,
   ChannelUpdateCommand,
   ChannelArchiveCommand,
   ChannelUnarchiveCommand,
   ChannelMessagePostCommand,
+  ChannelElicitationAnswerCommand,
+  ProjectOrchestrationSetCommand,
 ] as const;
 
 const DispatchableClientOrchestrationCommand = Schema.Union([
@@ -3319,6 +3449,14 @@ const ThreadPullRequestLinkSyncCommand = Schema.Struct({
 });
 
 const InternalOrchestrationCommand = Schema.Union([
+  CardActivityRecordCommand,
+  CardCheckpointRequestCommand,
+  CardEvidenceRecordCommand,
+  CardReviewEnterCommand,
+  CardLandingBeginCommand,
+  CardLandingLinkCommand,
+  CardWaitNoteCommand,
+  CardPauseSystemCommand,
   CardWorkStartCommand,
   CardReviewRequestCommand,
   CardWorkReturnCommand,

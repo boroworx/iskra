@@ -2,6 +2,7 @@ import {
   AgentId,
   CardId,
   CommandId,
+  DEFAULT_PROJECT_ORCHESTRATION,
   ProjectId,
   ProviderInstanceId,
   type ProjectScript,
@@ -52,6 +53,15 @@ const makeWorld = Effect.fn("makeWorld")(function* (
     createdAt: now,
   });
   yield* engine.dispatch({
+    type: "project.orchestration.set",
+    commandId: CommandId.make(`cmd-guard-${name}`),
+    projectId,
+    orchestration: {
+      ...DEFAULT_PROJECT_ORCHESTRATION,
+      sideEffectGuard: { acknowledgedAt: now, killSwitchEnv: null },
+    },
+  });
+  yield* engine.dispatch({
     type: "project.meta.update",
     commandId: CommandId.make(`cmd-scripts-${name}`),
     projectId,
@@ -86,6 +96,7 @@ const makeWorld = Effect.fn("makeWorld")(function* (
       title: `Card ${id}`,
       spec: "",
       tags: [],
+      criteria: [{ id: "works", text: "It works.", verification: "automated" }],
       createdAt: now,
     });
     yield* on("card.approve");

@@ -1,0 +1,635 @@
+import {
+  CardId,
+  ChannelId,
+  ClientOrchestrationCommand,
+  DEFAULT_PROJECT_ORCHESTRATION,
+  MessageId,
+  ThreadId,
+  type CardEvidenceItem,
+  type OrchestrationCommand,
+  type OrchestrationEvent,
+  type OrchestrationReadModel,
+  type ProjectOrchestration,
+} from "@iskra/contracts";
+import { expect, it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+
+import {
+  ALREADY_ANSWERED_REASON,
+  ANSWER_OPTION_REASON,
+  AUTO_MERGE_OFF_REASON,
+  NO_CHECKS_REASON,
+  NO_CRITERIA_REASON,
+  OPEN_CHECKPOINT_REASON,
+  PAUSED_REASON,
+  PLAN_CHILD_LANDING_REASON,
+  PREMISE_REASON,
+  REVIEW_EVIDENCE_REASON,
+  SIDE_EFFECT_GUARD_REASON,
+  UNACKNOWLEDGED_FLAGS_REASON,
+  WORK_CRITERIA_REASON,
+} from "./cardRules.ts";
+import { projectEvent } from "./projector.ts";
+import {
+  applyCommands,
+  applyTo,
+  assign,
+  backend,
+  cardId,
+  cardIn,
+  createAgent,
+  createCard,
+  createChannel,
+  createProject,
+  decide,
+  frontend,
+  nextCommandId,
+  now,
+  onCard,
+  projectId,
+  recordSession,
+  setWorkspace,
+} from "./decider.testkit.ts";
+
+const isClientCommand = Schema.is(ClientOrchestrationCommand);
+
+const criteria = [{ id: "c1", text: "Bursts over 100 get a 429.", verification: "automated" }] as const;
+const guardAcknowledged = { sideEffectGuard: { acknowledgedAt: now, killSwitchEnv: null } };
+
+const setPolicy = (patch: Partial<ProjectOrchestration> = {}): OrchestrationCommand => ({
+  type: "project.orchestration.set",
+  commandId: nextCommandId(),
+  projectId,
+  orchestration: { ...DEFAULT_PROJECT_ORCHESTRATION, ...guardAcknowledged, ...patch },
+});
+
+const approveAndStart = (
+  id: string = cardId,
+  withCriteria?: ReadonlyArray<(typeof criteria)[number]>,
+): OrchestrationCommand => ({
+  type: "card.approve",
+  commandId: nextCommandId(),
+  cardId: CardId.make(id),
+  delegateAgentId: backend,
+  ...(withCriteria === undefined ? {} : { criteria: withCriteria }),
+});
+
+const check = (name: string, exitCode: number): CardEvidenceItem => ({
+  itemId: name,
+  kind: "check",
+  source: "local",
+  name,
+  criterionId: null,
+  exitCode,
+  timedOut: false,
+  durationMs: 10,
+  logTail: "",
+  artifactPath: null,
+  unavailable: null,
+});
+
+const recordEvidence = (
+  headSha: string,
+  items: ReadonlyArray<CardEvidenceItem>,
+  options: { readonly id?: string; readonly hardFlag?: boolean } = {},
+): OrchestrationCommand => ({
+  type: "card.evidence.record",
+  commandId: nextCommandId(),
+  cardId: CardId.make(options.id ?? cardId),
+  evidenceId: `evidence-${nextCommandId()}`,
+  headSha,
+  purpose: "review",
+  items,
+  flags:
+    options.hardFlag === true
+      ? [{ kind: "deletedTest", path: "limits.test.ts", detail: "Deleted.", hard: true }]
+      : [],
+  risks: null,
+  recordedAt: now,
+});
+
+const enterReview = (headSha: string, id: string = cardId): OrchestrationCommand => ({
+  type: "card.review.enter",
+  commandId: nextCommandId(),
+  cardId: CardId.make(id),
+  headSha,
+});
+
+const returnToWork = (round: "ci" | "review"): OrchestrationCommand => ({
+  type: "card.work.return",
+  commandId: nextCommandId(),
+  cardId,
+  reason: "CI failed.",
+  round,
+});
+
+const refusal = (readModel: OrchestrationReadModel, command: OrchestrationCommand) =>
+  Effect.flip(decide(readModel, command)).pipe(
+    Effect.map((error) => ("detail" in error ? error.detail : String(error))),
+  );
+
+const setup = [createProject(), setPolicy(), createAgent(backend), createAgent(frontend)];
+
+/** A card proposed with no acceptance criteria written yet. */
+const bareCard = (id: string = cardId): OrchestrationCommand => {
+  const { criteria: _none, ...card } = createCard(id) as Extract<
+    OrchestrationCommand,
+    { type: "card.create" }
+  >;
+  return card;
+};
+
+/** A card with confirmed criteria, its agent assigned and its work started. */
+const cardInProgress = (id: string = cardId): ReadonlyArray<OrchestrationCommand> => [
+  createCard(id),
+  approveAndStart(id, criteria),
+  onCard("card.work.start", id),
+];
+
+it.layer(NodeServices.layer)("decider card contract", (it) => {
+  it.effect("Approve & start needs acceptance criteria and confirms the ones it is given", () =>
+    Effect.gen(function* () {
+      const triage = yield* applyCommands([...setup, bareCard()]);
+      expect(yield* refusal(triage, approveAndStart())).toBe(NO_CRITERIA_REASON);
+      expect(yield* refusal(triage, approveAndStart(cardId, [...criteria, ...criteria]))).toBe(
+        "Each acceptance criterion needs its own id.",
+      );
+
+      const started = yield* applyTo(triage, [approveAndStart(cardId, criteria)]);
+      expect(cardIn(started)).toMatchObject({
+        status: "ready",
+        delegateAgentId: backend,
+        specState: "approved",
+        acceptance: { criteria, state: "confirmed" },
+      });
+    }),
+  );
+
+  it.effect("work starts only once a person confirmed the card's criteria", () =>
+    Effect.gen(function* () {
+      // A plain approval of a card with no criteria leaves them to write.
+      const ready = yield* applyCommands([
+        ...setup,
+        bareCard(),
+        onCard("card.approve"),
+        assign(backend),
+      ]);
+      expect(cardIn(ready)?.acceptance).toEqual({ criteria: [], state: "draft" });
+      expect(yield* refusal(ready, onCard("card.work.start"))).toBe(WORK_CRITERIA_REASON);
+      expect(yield* refusal(ready, onCard("card.criteria.confirm"))).toBe(NO_CRITERIA_REASON);
+
+      // A person's edit on an approved card is its confirmation.
+      const confirmed = yield* applyTo(ready, [
+        { type: "card.criteria.set", commandId: nextCommandId(), cardId, criteria },
+        onCard("card.work.start"),
+      ]);
+      expect(cardIn(confirmed)).toMatchObject({
+        status: "inProgress",
+        acceptance: { state: "confirmed" },
+      });
+      expect(yield* refusal(confirmed, onCard("card.criteria.confirm"))).toBe(
+        "The acceptance criteria are already confirmed.",
+      );
+    }),
+  );
+
+  it.effect("criteria written in triage stay a draft until the card is approved", () =>
+    Effect.gen(function* () {
+      const drafted = yield* applyCommands([
+        ...setup,
+        createCard(),
+        { type: "card.criteria.set", commandId: nextCommandId(), cardId, criteria },
+      ]);
+      expect(cardIn(drafted)?.acceptance).toEqual({ criteria, state: "draft" });
+      const approved = yield* applyTo(drafted, [onCard("card.approve")]);
+      expect(cardIn(approved)?.acceptance).toEqual({ criteria, state: "confirmed" });
+    }),
+  );
+
+  it.effect("a card enters review only with passing evidence for its latest commit", () =>
+    Effect.gen(function* () {
+      const working = yield* applyCommands([...setup, ...cardInProgress()]);
+      expect(yield* refusal(working, enterReview("abc123"))).toBe(REVIEW_EVIDENCE_REASON);
+
+      const failing = yield* applyTo(working, [
+        recordEvidence("abc123", [check("typecheck", 0), check("test", 1)]),
+      ]);
+      expect(cardIn(failing)?.evidence).toMatchObject({ passed: false, failedChecks: ["test"] });
+      // Failing evidence sends the owner a fix while the card stays in progress: a CI round.
+      expect(cardIn(failing)?.fixRounds).toEqual({ ci: 1, review: 0 });
+      expect(yield* refusal(failing, enterReview("abc123"))).toBe(REVIEW_EVIDENCE_REASON);
+
+      const passing = yield* applyTo(failing, [recordEvidence("def456", [check("test", 0)])]);
+      expect(yield* refusal(passing, enterReview("abc123"))).toBe(REVIEW_EVIDENCE_REASON);
+      const inReview = yield* applyTo(passing, [enterReview("def456")]);
+      expect(cardIn(inReview)?.status).toBe("inReview");
+    }),
+  );
+
+  it.effect("a project without checks can't send cards to review until a person waives them", () =>
+    Effect.gen(function* () {
+      const unchecked = yield* applyCommands([
+        ...setup,
+        ...cardInProgress(),
+        recordEvidence("abc123", []),
+      ]);
+      expect(cardIn(unchecked)?.evidence?.passed).toBe(true);
+      expect(yield* refusal(unchecked, enterReview("abc123"))).toBe(NO_CHECKS_REASON);
+
+      const waived = yield* applyTo(unchecked, [setPolicy({ checksWaived: true })]);
+      const inReview = yield* applyTo(waived, [enterReview("abc123")]);
+      expect(cardIn(inReview)?.status).toBe("inReview");
+    }),
+  );
+
+  it.effect("automatic returns to work stop at the project's fix rounds until a person resets them", () =>
+    Effect.gen(function* () {
+      const reviewAgain = (headSha: string) => [
+        recordEvidence(headSha, [check("test", 0)]),
+        enterReview(headSha),
+      ];
+      const spent = yield* applyCommands([
+        ...setup,
+        ...cardInProgress(),
+        ...reviewAgain("sha-1"),
+        returnToWork("review"),
+        ...reviewAgain("sha-2"),
+        returnToWork("review"),
+        ...reviewAgain("sha-3"),
+      ]);
+      expect(cardIn(spent)?.fixRounds).toEqual({ ci: 0, review: 2 });
+      expect(yield* refusal(spent, returnToWork("review"))).toBe(
+        "The card used its 2 review fix rounds; a person can give it more.",
+      );
+      // CI rounds are counted apart, and a person's comment is never capped.
+      const ciReturn = yield* applyTo(spent, [returnToWork("ci")]);
+      expect(cardIn(ciReturn)).toMatchObject({ status: "inProgress", fixRounds: { ci: 1 } });
+
+      const reset = yield* applyTo(spent, [onCard("card.fix-rounds.reset")]);
+      expect(cardIn(reset)?.fixRounds).toEqual({ ci: 0, review: 0 });
+      expect(yield* refusal(reset, onCard("card.fix-rounds.reset"))).toBe(
+        "The card hasn't used any fix rounds.",
+      );
+      const returned = yield* applyTo(reset, [returnToWork("review")]);
+      expect(cardIn(returned)?.status).toBe("inProgress");
+    }),
+  );
+
+  it.effect("a merge waits for a person to acknowledge hard scope flags", () =>
+    Effect.gen(function* () {
+      const flagged = yield* applyCommands([
+        ...setup,
+        ...cardInProgress(),
+        recordEvidence("abc123", [check("test", 0)], { hardFlag: true }),
+        enterReview("abc123"),
+      ]);
+      expect(yield* refusal(flagged, onCard("card.merge.approve"))).toBe(
+        UNACKNOWLEDGED_FLAGS_REASON,
+      );
+      const acknowledge = (evidenceId: string): OrchestrationCommand => ({
+        type: "card.flags.acknowledge",
+        commandId: nextCommandId(),
+        cardId,
+        evidenceId,
+      });
+      expect(yield* refusal(flagged, acknowledge("evidence-other"))).toBe(
+        "There are no flagged changes to acknowledge.",
+      );
+      const evidenceId = cardIn(flagged)?.evidence?.evidenceId ?? "";
+      const merging = yield* applyTo(flagged, [
+        acknowledge(evidenceId),
+        onCard("card.merge.approve"),
+      ]);
+      expect(cardIn(merging)?.status).toBe("landing");
+    }),
+  );
+
+  it.effect("a card lands without a person only as a plan child into its plan's branch, or with auto-merge on", () =>
+    Effect.gen(function* () {
+      const landingBegin = (
+        id: string,
+        reason: "planChild" | "autoMergePolicy",
+      ): OrchestrationCommand => ({
+        type: "card.landing.begin",
+        commandId: nextCommandId(),
+        cardId: CardId.make(id),
+        reason,
+      });
+      const reviewed = yield* applyCommands([
+        ...setup,
+        ...cardInProgress(),
+        recordEvidence("abc123", [check("test", 0)]),
+        enterReview("abc123"),
+      ]);
+      expect(yield* refusal(reviewed, landingBegin(cardId, "planChild"))).toBe(
+        PLAN_CHILD_LANDING_REASON,
+      );
+      expect(yield* refusal(reviewed, landingBegin(cardId, "autoMergePolicy"))).toBe(
+        AUTO_MERGE_OFF_REASON,
+      );
+      const autoMerged = yield* applyTo(reviewed, [
+        setPolicy({ autoMerge: { enabled: true, minSatisfaction: 0.9 } }),
+        landingBegin(cardId, "autoMergePolicy"),
+      ]);
+      expect(cardIn(autoMerged)?.status).toBe("landing");
+
+      // No command creates plan cards yet, so the plan arrives as its events.
+      let withPlan = reviewed;
+      const planEvents: ReadonlyArray<Pick<OrchestrationEvent, "type" | "payload">> = [
+        {
+          type: "card.created",
+          payload: {
+            cardId: CardId.make("card-plan"),
+            kind: "plan",
+            projectId,
+            channelId: null,
+            parentCardId: null,
+            title: "Plan",
+            spec: "",
+            specState: "approved",
+            tags: [],
+            status: "inProgress",
+            ownerHumanId: "human",
+            baseBranch: null,
+            createdBy: { kind: "human", id: "human" },
+            createdAt: now,
+            updatedAt: now,
+          },
+        },
+        {
+          type: "card.workspace-set",
+          payload: {
+            cardId: CardId.make("card-plan"),
+            branch: "iskra/plan-limits",
+            worktreePath: "/tmp/worktrees/plan",
+            portBase: 42000,
+            updatedAt: now,
+          },
+        },
+      ];
+      for (const event of planEvents) {
+        withPlan = yield* projectEvent(withPlan, {
+          ...event,
+          sequence: withPlan.snapshotSequence + 1,
+          eventId: `event-${nextCommandId()}`,
+          aggregateKind: "card",
+          aggregateId: CardId.make("card-plan"),
+          occurredAt: now,
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+        } as OrchestrationEvent);
+      }
+      const child = (id: string, baseBranch: string): ReadonlyArray<OrchestrationCommand> => [
+        {
+          type: "card.create",
+          commandId: nextCommandId(),
+          cardId: CardId.make(id),
+          projectId,
+          parentCardId: CardId.make("card-plan"),
+          title: "Child",
+          spec: "",
+          tags: [],
+          baseBranch,
+          createdAt: now,
+        },
+        approveAndStart(id, criteria),
+        onCard("card.work.start", id),
+        recordEvidence("child-sha", [check("test", 0)], { id }),
+        enterReview("child-sha", id),
+      ];
+      const children = yield* applyTo(withPlan, [
+        ...child("card-child", "iskra/plan-limits"),
+        ...child("card-stray", "main"),
+      ]);
+      expect(yield* refusal(children, landingBegin("card-stray", "planChild"))).toBe(
+        PLAN_CHILD_LANDING_REASON,
+      );
+      const childLanding = yield* applyTo(children, [landingBegin("card-child", "planChild")]);
+      expect(cardIn(childLanding, "card-child")?.status).toBe("landing");
+    }),
+  );
+
+  it.effect("owner sessions wait for the project's side-effect guard and for a paused card to resume", () =>
+    Effect.gen(function* () {
+      const unguarded = yield* applyCommands([
+        createProject(),
+        createAgent(backend),
+        createAgent(frontend),
+        ...cardInProgress(),
+        setWorkspace(),
+      ]);
+      expect(yield* refusal(unguarded, recordSession("thread-owner", backend))).toBe(
+        SIDE_EFFECT_GUARD_REASON,
+      );
+      const start: OrchestrationCommand = {
+        type: "card.session.start",
+        commandId: nextCommandId(),
+        cardId,
+        createdAt: now,
+      };
+      expect(yield* refusal(unguarded, start)).toBe(SIDE_EFFECT_GUARD_REASON);
+      // A read-only helper answers questions without writing, so the guard doesn't hold it.
+      yield* applyTo(unguarded, [recordSession("thread-helper", frontend, "helper", ["read"])]);
+
+      const guarded = yield* applyTo(unguarded, [setPolicy()]);
+      const paused = yield* applyTo(guarded, [onCard("card.pause")]);
+      expect(cardIn(paused)?.paused).toMatchObject({ by: "human" });
+      expect(yield* refusal(paused, onCard("card.pause"))).toBe("The card is already paused.");
+      expect(yield* refusal(paused, recordSession("thread-owner", backend))).toBe(PAUSED_REASON);
+      expect(yield* refusal(paused, start)).toBe(PAUSED_REASON);
+
+      const resumed = yield* applyTo(paused, [onCard("card.resume")]);
+      expect(yield* refusal(resumed, onCard("card.resume"))).toBe("The card isn't paused.");
+      const owning = yield* applyTo(resumed, [recordSession("thread-owner", backend)]);
+      expect(owning.liveRuns).toHaveLength(1);
+    }),
+  );
+
+  it.effect("the project's session cap refuses sessions past it", () =>
+    Effect.gen(function* () {
+      const capped = yield* applyCommands([
+        ...setup,
+        setPolicy({ sessionCap: 1 }),
+        ...cardInProgress(),
+        setWorkspace(),
+        recordSession("thread-owner", backend),
+      ]);
+      expect(
+        yield* refusal(capped, recordSession("thread-helper", frontend, "helper", ["read"])),
+      ).toBe("All 1 session slots in this project are busy; the card starts when one frees.");
+    }),
+  );
+
+  it.effect("a builder's sub-cards skip triage, run as its own and stop at the project's cap", () =>
+    Effect.gen(function* () {
+      const working = yield* applyCommands([
+        ...setup,
+        setPolicy({ builderSubCardsMax: 1 }),
+        ...cardInProgress(),
+      ]);
+      const propose = (id: string, agentId = backend): OrchestrationCommand => ({
+        type: "card.propose",
+        commandId: nextCommandId(),
+        cardId: CardId.make(id),
+        agentId,
+        projectId,
+        parentCardId: cardId,
+        title: "Split out the limiter",
+        spec: "",
+        tags: [],
+        criteria,
+        subCard: true,
+        createdAt: now,
+      });
+      expect(yield* refusal(working, propose("card-sub", frontend))).toBe(
+        "Only the agent working on an approved card adds sub-cards to it.",
+      );
+      expect(yield* refusal(working, { ...propose("card-sub"), criteria: [] })).toBe(
+        NO_CRITERIA_REASON,
+      );
+      const withSubCard = yield* applyTo(working, [propose("card-sub")]);
+      expect(cardIn(withSubCard, "card-sub")).toMatchObject({
+        status: "ready",
+        delegateAgentId: backend,
+        specState: "approved",
+        acceptance: { state: "confirmed" },
+        createdBy: { kind: "agent", id: backend },
+      });
+      expect(yield* refusal(withSubCard, propose("card-sub-2"))).toBe(
+        "This card already has 1 open sub-cards; land or drop one first.",
+      );
+    }),
+  );
+
+  it.effect("a proposal that doesn't get to the requester's goal is refused", () =>
+    Effect.gen(function* () {
+      const readModel = yield* applyCommands(setup);
+      expect(
+        yield* refusal(readModel, {
+          type: "card.propose",
+          commandId: nextCommandId(),
+          cardId: CardId.make("card-proposed"),
+          agentId: backend,
+          projectId,
+          title: "Cache everything",
+          spec: "",
+          tags: [],
+          premise: { goal: "Faster pages", getsThere: false, pushback: "Caching hides the slow query." },
+          createdAt: now,
+        }),
+      ).toBe(PREMISE_REASON);
+    }),
+  );
+
+  it.effect("a checkpoint opens on work in progress and a stop pauses the card", () =>
+    Effect.gen(function* () {
+      const request = (id: string = cardId): OrchestrationCommand => ({
+        type: "card.checkpoint.request",
+        commandId: nextCommandId(),
+        cardId: CardId.make(id),
+        checkpoint: {
+          checkpointId: `checkpoint-${nextCommandId()}`,
+          whatToTry: "Open the limits page.",
+          question: null,
+          evidenceId: null,
+          requestedAt: now,
+        },
+      });
+      const resolve = (decision: "continue" | "redirect" | "stop"): OrchestrationCommand => ({
+        type: "card.checkpoint.resolve",
+        commandId: nextCommandId(),
+        cardId,
+        decision,
+      });
+      const triage = yield* applyCommands([...setup, createCard()]);
+      expect(yield* refusal(triage, request())).toBe(
+        "Only a card in progress can ask for a checkpoint.",
+      );
+      expect(yield* refusal(triage, resolve("continue"))).toBe(OPEN_CHECKPOINT_REASON);
+
+      const asking = yield* applyTo(triage, [
+        approveAndStart(cardId, criteria),
+        onCard("card.work.start"),
+        request(),
+      ]);
+      expect(yield* refusal(asking, request())).toBe("The card already has an open checkpoint.");
+      const stopped = yield* applyTo(asking, [resolve("stop")]);
+      expect(cardIn(stopped)).toMatchObject({
+        checkpoint: null,
+        paused: { reason: { code: "checkpointStopped" }, by: "human" },
+      });
+    }),
+  );
+
+  it.effect("only a person's command sets the orchestration policy, and it must be coherent", () =>
+    Effect.gen(function* () {
+      const command = setPolicy({ egress: { mode: "allowlist", allow: ["a.dev"], deny: ["a.dev"] } });
+      expect(isClientCommand(command)).toBe(true);
+      const readModel = yield* applyCommands([createProject()]);
+      expect(yield* refusal(readModel, command)).toBe(
+        "A domain can't be both allowed and denied: a.dev.",
+      );
+      const set = yield* applyTo(readModel, [setPolicy({ sessionCap: 2 })]);
+      expect(set.projects[0]?.orchestration).toMatchObject({ sessionCap: 2 });
+    }),
+  );
+
+  it.effect("a lead's question is answered once, with an offered option or a person's words", () =>
+    Effect.gen(function* () {
+      const general = ChannelId.make("channel-general");
+      const ask = (options: ReadonlyArray<{ id: string; label: string }>): OrchestrationCommand => ({
+        type: "channel.message.agent.post",
+        commandId: nextCommandId(),
+        channelId: general,
+        messageId: MessageId.make("message-question"),
+        agentId: backend,
+        runThreadId: ThreadId.make("thread-lead"),
+        body: "Which store?",
+        elicitation: { question: "Which store?", options, recommendedOptionId: "redis", allowText: true },
+        createdAt: now,
+      });
+      const answer = (optionId: string | null, messageId: string): OrchestrationCommand => ({
+        type: "channel.elicitation.answer",
+        commandId: nextCommandId(),
+        channelId: general,
+        questionMessageId: MessageId.make("message-question"),
+        messageId: MessageId.make(messageId),
+        optionId,
+        body: "Redis",
+        createdAt: now,
+      });
+      const channel = yield* applyCommands([
+        ...setup,
+        createChannel("channel-general", "channel", [backend], backend),
+      ]);
+      expect(yield* refusal(channel, ask([{ id: "redis", label: "Redis" }]))).toBe(
+        "A question offers two or three answers.",
+      );
+      const asked = yield* applyTo(channel, [
+        ask([
+          { id: "redis", label: "Redis" },
+          { id: "memory", label: "Memory" },
+        ]),
+      ]);
+      expect(yield* refusal(asked, answer("postgres", "message-answer"))).toBe(ANSWER_OPTION_REASON);
+
+      const events = yield* decide(asked, answer("redis", "message-answer"));
+      expect(events[0]).toMatchObject({
+        type: "channel.message-posted",
+        payload: { authorKind: "human", answers: { questionId: "message-question", optionId: "redis" } },
+      });
+      // Like any person's message in the channel, the answer wakes its lead.
+      expect(events.map((event) => event.type)).toContain("channel.agent-wake-requested");
+
+      const answered = yield* applyTo(asked, [answer(null, "message-answer")]);
+      expect(answered.channels?.[0]?.openElicitations).toEqual([]);
+      expect(yield* refusal(answered, answer("redis", "message-answer-2"))).toBe(
+        ALREADY_ANSWERED_REASON,
+      );
+    }),
+  );
+});

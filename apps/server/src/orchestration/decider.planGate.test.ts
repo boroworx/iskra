@@ -17,6 +17,7 @@ import {
   createAgent,
   createCard,
   createProject,
+  guardProject,
   decide,
   nextCommandId,
   now,
@@ -38,6 +39,7 @@ const editCard = (edit: {
 
 const setup: ReadonlyArray<OrchestrationCommand> = [
   createProject(),
+  guardProject(),
   createAgent(backend),
   createAgent(reviewer, { capabilities: ["read"] }),
   createCard(),
