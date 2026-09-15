@@ -83,6 +83,27 @@ export interface RunChecksInput {
   readonly checks?: ReadonlyArray<ProjectCheck> | undefined;
 }
 
+/**
+ * A journeys request: the project file's journeys, in order, stopping at the first failure, each
+ * with its own timeout and the ISKRA_PORT_* env of where it runs. Services are brought up (and
+ * waited on) first. `snapshot` runs them there; otherwise in the card's worktree. With no journeys
+ * declared nothing runs and the run passes: journeys are required only once declared. Heavy: call it
+ * inside HostAdmission.run with kind "journey".
+ */
+export interface RunJourneysInput {
+  readonly cardId: CardId;
+  readonly snapshot?: Pick<CardSnapshot, "path" | "portBase" | "ensureServices"> | undefined;
+}
+
+/** A service or the card's preview, and whether its port has a listener right now. */
+export interface CardServiceHealth {
+  readonly kind: "service" | "preview";
+  // The service's name, or the run script's id for the preview.
+  readonly name: string;
+  readonly port: number;
+  readonly up: boolean;
+}
+
 /** One check's outcome. `logTail` (≤2k, secrets scrubbed) is the only part agents see. */
 export interface CardCheckResult {
   readonly id: string;
@@ -175,6 +196,16 @@ export class CardWorkspace extends Context.Service<
       cardId: CardId,
     ) => Effect.Effect<{ readonly baseBranch: string; readonly diff: string }, CardWorkspaceError>;
     readonly runChecks: (input: RunChecksInput) => Effect.Effect<CardChecksRun, CardWorkspaceError>;
+    readonly runJourneys: (
+      input: RunJourneysInput,
+    ) => Effect.Effect<CardChecksRun, CardWorkspaceError>;
+    /**
+     * The card's services, and its preview once a run script started it in this process, with
+     * whether each port listens now. Empty for a card without a worktree.
+     */
+    readonly serviceHealth: (
+      cardId: CardId,
+    ) => Effect.Effect<ReadonlyArray<CardServiceHealth>, CardWorkspaceError>;
     /** Files the card changes against its base: committed, uncommitted and untracked. */
     readonly changedFiles: (
       cardId: CardId,
@@ -367,6 +398,8 @@ const make = Effect.gen(function* () {
   // Port blocks this process handed out, held until teardown or rollback so a block isn't given
   // twice while its card's workspace.set is still on the way.
   const reservedPortBases = new Set<number>();
+  // Cards whose run script (the preview) this process started, by that script's id.
+  const previewStarted = new Map<CardId, string>();
 
   const toError = (cardId: string, message: string) => (cause: unknown) =>
     new CardWorkspaceError({ cardId, message, cause });
@@ -968,24 +1001,49 @@ const make = Effect.gen(function* () {
         file: config.file,
         settings,
       });
-      const logDir = path.join(serverConfig.attachmentsDir, `card-evidence-${cardId}`, "checks");
+      return yield* runInOrder({
+        cardId,
+        steps: checks.map((check) => ({
+          check,
+          command:
+            input.scope === "targeted" && check.targetedCommand !== null
+              ? check.targetedCommand.replaceAll("{filter}", quoteShellArg(input.filter ?? ""))
+              : check.command,
+        })),
+        cwd: card.worktreePath,
+        env,
+        logFolder: "checks",
+        secrets,
+      });
+    });
+
+  /** Runs commands in order under the card's evidence logs, stopping at the first failure. */
+  const runInOrder = (input: {
+    readonly cardId: CardId;
+    readonly steps: ReadonlyArray<{ readonly check: ProjectCheck; readonly command: string }>;
+    readonly cwd: string;
+    readonly env: Record<string, string>;
+    readonly logFolder: "checks" | "journeys";
+    readonly secrets: ReadonlyArray<CardSecret>;
+  }) =>
+    Effect.gen(function* () {
+      const logDir = path.join(
+        serverConfig.attachmentsDir,
+        `card-evidence-${input.cardId}`,
+        input.logFolder,
+      );
       yield* fileSystem
         .makeDirectory(logDir, { recursive: true })
-        .pipe(Effect.mapError(toError(cardId, "Could not make the card's check log folder.")));
-
+        .pipe(Effect.mapError(toError(input.cardId, "Could not make the card's log folder.")));
       const results: Array<CardCheckResult> = [];
-      for (const check of checks) {
-        const command =
-          input.scope === "targeted" && check.targetedCommand !== null
-            ? check.targetedCommand.replaceAll("{filter}", quoteShellArg(input.filter ?? ""))
-            : check.command;
+      for (const { check, command } of input.steps) {
         const result = yield* runCheck({
           check,
           command,
-          cwd: card.worktreePath,
-          env,
+          cwd: input.cwd,
+          env: input.env,
           logDir,
-          secrets,
+          secrets: input.secrets,
         });
         results.push(result);
         if (!checkPassed(result)) {
@@ -1006,7 +1064,81 @@ const make = Effect.gen(function* () {
                     : `failed with exit code ${failed.exitCode}`
               }.\n\n${failed.logTail}`,
         results,
-      };
+      } satisfies CardChecksRun;
+    });
+
+  const runJourneys: CardWorkspace["Service"]["runJourneys"] = (input) =>
+    Effect.gen(function* () {
+      const { cardId } = input;
+      const { model, card, project } = yield* readCard(cardId);
+      const config = yield* loadProjectFile(cardId, model, card, project);
+      const journeys = config.file?.journeys ?? [];
+      if (journeys.length === 0) {
+        return { passed: true, summary: "The project declares no journeys.", results: [] };
+      }
+      const at =
+        input.snapshot ??
+        (card.worktreePath === null || card.portBase === null
+          ? null
+          : { path: card.worktreePath, portBase: card.portBase, ensureServices: ensureServices(cardId) });
+      if (at === null) {
+        return { passed: false, summary: "The card has no worktree to run journeys in.", results: [] };
+      }
+      // Journeys drive the running app, so its services must answer first.
+      yield* at.ensureServices;
+      const settings = yield* readSettings(cardId);
+      const secrets = yield* projectSecrets(cardId, project, settings).pipe(
+        Effect.orElseSucceed((): ReadonlyArray<CardSecret> => []),
+      );
+      return yield* runInOrder({
+        cardId,
+        steps: journeys.map((journey) => ({
+          check: {
+            ...journey,
+            source: "local" as const,
+            ciName: null,
+            targetedCommand: null,
+            heavy: true,
+          },
+          command: journey.command,
+        })),
+        cwd: at.path,
+        env: scriptEnv({
+          cardId,
+          project,
+          worktreePath: at.path,
+          portBase: at.portBase,
+          file: config.file,
+          settings,
+        }),
+        logFolder: "journeys",
+        secrets,
+      });
+    });
+
+  const serviceHealth: CardWorkspace["Service"]["serviceHealth"] = (cardId) =>
+    Effect.gen(function* () {
+      const { model, card, project } = yield* readCard(cardId);
+      if (card.worktreePath === null || card.portBase === null) return [];
+      const portBase = card.portBase;
+      const { file } = yield* loadProjectFile(cardId, model, card, project);
+      const preview = previewStarted.get(cardId);
+      const entries: ReadonlyArray<Omit<CardServiceHealth, "up">> = [
+        ...(file?.services ?? []).map((service) => ({
+          kind: "service" as const,
+          name: service.name,
+          port: portBase + (file?.ports[service.port] ?? 0),
+        })),
+        ...(preview === undefined
+          ? []
+          : [{ kind: "preview" as const, name: preview, port: portBase + (file?.ports["web"] ?? 0) }]),
+      ];
+      return yield* Effect.forEach(
+        entries,
+        (entry) =>
+          net.hasListenerOnHost(entry.port, "127.0.0.1").pipe(Effect.map((up) => ({ ...entry, up }))),
+        { concurrency: "unbounded" },
+      );
     });
 
   const changedFiles: CardWorkspace["Service"]["changedFiles"] = (cardId) =>
@@ -1113,6 +1245,20 @@ const make = Effect.gen(function* () {
                 : checks.summary,
             results: checks.results,
           };
+        }
+        // The rebased code is what lands, so declared journeys run again against it.
+        const journeys = yield* admission.run(
+          {
+            cardId,
+            projectId: project.id,
+            priority: card.priority,
+            label: `Journeys before landing ${card.title}`,
+            kind: "journey",
+          },
+          runJourneys({ cardId }),
+        );
+        if (!journeys.passed) {
+          return { kind: "checksFailed" as const, summary: journeys.summary, results: journeys.results };
         }
         const files = lines(yield* git(cardId, worktree, ["diff", "--name-only", baseRef, "HEAD"]));
 
@@ -1403,6 +1549,7 @@ const make = Effect.gen(function* () {
         })
         .pipe(Effect.mapError(toError(cardId, "Could not clear the card's workspace.")));
       reservedPortBases.delete(card.portBase);
+      previewStarted.delete(cardId);
     });
 
   const runScript: CardWorkspace["Service"]["runScript"] = ({ cardId, scriptId }) =>
@@ -1453,6 +1600,7 @@ const make = Effect.gen(function* () {
         command: script.command,
         label: script.name,
       });
+      if (script.role === "run") previewStarted.set(cardId, script.id);
       return { terminalId };
     });
 
@@ -1487,6 +1635,8 @@ const make = Effect.gen(function* () {
     ensureServices,
     diff,
     runChecks,
+    runJourneys,
+    serviceHealth,
     changedFiles,
     land: (cardId) => withLock(`card:${cardId}`)(landUnlocked(cardId)),
     withCardLock: (cardId, effect) => withLock(`card:${cardId}`)(effect),

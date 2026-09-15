@@ -770,6 +770,91 @@ it.live("restarts services a restart lost and leaves running ones alone", () => 
       });
       expect(terminals.opens).toHaveLength(2);
       expect(yield* listening(info.portBase)).toBe(true);
+      expect(yield* workspace.serviceHealth(cardId)).toEqual([
+        { kind: "service", name: "api", port: info.portBase, up: true },
+      ]);
     }),
   ).pipe(Effect.provide(cardWorkspaceTestLayer("iskra-card-services-", terminals.layer)));
 });
+
+const journeyHitsWeb = `node -e "require('http').get('http://127.0.0.1:'+process.env.ISKRA_PORT_WEB+'/',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(2))"`;
+
+it.live("runs journeys in order against running services, stopping at the first failure or timeout", () => {
+  const terminals = makeSpawningTerminals();
+  return Effect.scoped(
+    Effect.gen(function* () {
+      yield* Effect.addFinalizer(() => terminals.killAll);
+      const workspace = yield* CardWorkspace.CardWorkspace;
+      const world = yield* makeProject("journeys", []);
+      yield* world.commitProjectFile({
+        ports: { web: 0 },
+        services: [httpService],
+        journeys: [
+          { id: "health", name: "Health", command: journeyHitsWeb },
+          { id: "slow", name: "Slow", command: "echo waiting; sleep 30", timeoutMinutes: 0.02 },
+          { id: "never", name: "Never", command: "touch never.txt" },
+        ],
+      });
+      const cardId = CardId.make("card-journeys");
+      yield* world.createCard(cardId, "Journeys");
+      const info = yield* workspace.ensure(cardId);
+      // A restart lost the service: the journeys bring it back before they run.
+      terminals.killThread(CardWorkspace.cardTerminalThreadId(cardId));
+      yield* listening(info.portBase).pipe(
+        Effect.repeat({ until: (up) => !up, schedule: Schedule.spaced("20 millis") }),
+      );
+
+      const run = yield* workspace.runJourneys({ cardId });
+      expect(run.passed).toBe(false);
+      expect(run.results.map((result) => [result.id, result.exitCode, result.timedOut])).toEqual([
+        ["health", 0, false],
+        ["slow", null, true],
+      ]);
+      expect(run.results[1]!.logTail).toBe("waiting");
+      expect(run.summary).toContain("Slow timed out.");
+      expect(yield* world.fileSystem.exists(world.path.join(info.worktreePath, "never.txt"))).toBe(false);
+
+      const bare = yield* makeProject("no-journeys", []);
+      yield* bare.createCard("card-no-journeys", "None");
+      yield* workspace.ensure(CardId.make("card-no-journeys"));
+      expect(yield* workspace.runJourneys({ cardId: CardId.make("card-no-journeys") })).toEqual({
+        passed: true,
+        summary: "The project declares no journeys.",
+        results: [],
+      });
+    }),
+  ).pipe(Effect.provide(cardWorkspaceTestLayer("iskra-card-journeys-", terminals.layer)));
+});
+
+it.live("runs journeys again after the landing rebase and doesn't land when they fail", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const workspace = yield* CardWorkspace.CardWorkspace;
+      const world = yield* makeProject("land-journeys", []);
+      yield* world.commitProjectFile({
+        checks: [{ id: "unit", name: "Unit", command: "true" }],
+        journeys: [{ id: "clean", name: "Clean", command: "test ! -f broken.txt" }],
+      });
+      const good = CardId.make("card-land-good");
+      const bad = CardId.make("card-land-bad");
+      yield* world.createCard(good, "Good");
+      yield* world.createCard(bad, "Bad");
+      const goodInfo = yield* workspace.ensure(good);
+      const badInfo = yield* workspace.ensure(bad);
+      yield* world.fileSystem.writeFileString(world.path.join(goodInfo.worktreePath, "good.txt"), "ok\n");
+      yield* world.fileSystem.writeFileString(world.path.join(badInfo.worktreePath, "bad.txt"), "ok\n");
+      // Journeys pass in the card's worktree before landing.
+      expect((yield* workspace.runJourneys({ cardId: bad })).passed).toBe(true);
+
+      expect((yield* workspace.land(good)).kind).toBe("landed");
+      // The base moves on to something the journey rejects; only the rebase brings it in.
+      yield* world.fileSystem.writeFileString(world.path.join(world.root, "broken.txt"), "x\n");
+      yield* world.git("add", ".");
+      yield* world.git("commit", "-m", "break");
+
+      const landed = yield* workspace.land(bad);
+      expect(landed).toMatchObject({ kind: "checksFailed", results: [{ id: "clean", exitCode: 1 }] });
+      expect(yield* world.git("log", "-1", "--format=%s")).toBe("break");
+    }),
+  ).pipe(Effect.provide(cardWorkspaceTestLayer("iskra-card-land-journeys-", fakeTerminals))),
+);
