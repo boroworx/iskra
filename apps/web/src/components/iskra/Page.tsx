@@ -20,8 +20,8 @@ export type PageColumnWidth = keyof typeof COLUMN_CLASS;
  * composer alike so both share the same edges.
  */
 export function PageColumn(props: {
-  readonly width?: PageColumnWidth;
-  readonly className?: string;
+  readonly width?: PageColumnWidth | undefined;
+  readonly className?: string | undefined;
   readonly children: ReactNode;
 }) {
   return (
@@ -34,11 +34,14 @@ export function PageColumn(props: {
 /** A page's large title: 28/700, 32px below the toolbar row and 24px above the first section. */
 export function PageLargeTitle(props: {
   readonly children: ReactNode;
-  readonly accessory?: ReactNode;
-  readonly className?: string;
+  readonly accessory?: ReactNode | undefined;
+  readonly className?: string | undefined;
 }) {
   return (
-    <div className={cn("mt-8 mb-6 flex min-w-0 items-center gap-2.5", props.className)}>
+    <div
+      data-slot="page-large-title"
+      className={cn("mt-8 mb-6 flex min-w-0 items-center gap-2.5", props.className)}
+    >
       <h1 className="min-w-0 truncate text-[28px] leading-tight font-bold tracking-[-0.02em] text-foreground">
         {props.children}
       </h1>
@@ -53,10 +56,10 @@ export function PageLargeTitle(props: {
  */
 export function EmptyState(props: {
   readonly title: ReactNode;
-  readonly body?: ReactNode;
-  readonly icon?: ReactNode;
-  readonly actions?: ReactNode;
-  readonly className?: string;
+  readonly body?: ReactNode | undefined;
+  readonly icon?: ReactNode | undefined;
+  readonly actions?: ReactNode | undefined;
+  readonly className?: string | undefined;
 }) {
   return (
     <div
