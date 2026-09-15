@@ -38,6 +38,7 @@ import {
   renderCardBrief,
 } from "./cardBrief.ts";
 import { isFinishedCardStatus } from "./cardRules.ts";
+import { cardRunStartCommands } from "./cardRunStart.ts";
 import * as CardWorkspace from "./CardWorkspace.ts";
 import { liveOwnerRun } from "./decider.ts";
 import { runSessionChange } from "./RunReactor.ts";
@@ -204,56 +205,21 @@ const make = Effect.gen(function* () {
       worklog,
     });
     const rendered = renderCardBrief(context);
-    // Ids derive from the request, so a retried request cannot start a second session.
-    const threadId = ThreadId.make(`card-session-${input.key}`);
-    const startedAt = yield* nowIso;
-
-    yield* engine.dispatch({
-      type: "card.session.record",
-      commandId: CommandId.make(`card-session-record:${input.key}`),
-      threadId,
-      cardId: card.id,
-      agentId: agent.id,
+    for (const command of cardRunStartCommands({
+      key: input.key,
+      card: current,
+      agent,
       role: input.role,
+      modelSelection: agent.modelSelection,
       // A helper reads; the owner gets whatever its agent is allowed.
       capabilities: input.role === "owner" ? agent.capabilities : ["read"],
       context,
       rendered,
-      ...(restarts > 0 ? { restarts } : {}),
-      startedAt,
-    });
-    yield* engine.dispatch({
-      type: "thread.create",
-      commandId: CommandId.make(`card-session-thread:${input.key}`),
-      threadId,
-      projectId: card.projectId,
-      title:
-        input.role === "owner"
-          ? `@${agent.name} on ${card.title}`
-          : input.role === "critic"
-            ? `@${agent.name} reviewing ${card.title}`
-            : `@${agent.name} helping on ${card.title}`,
-      modelSelection: agent.modelSelection,
-      runtimeMode: "approval-required",
-      interactionMode: "default",
-      branch: current.branch,
-      worktreePath: current.worktreePath,
-      createdAt: startedAt,
-    });
-    yield* engine.dispatch({
-      type: "thread.turn.start",
-      commandId: CommandId.make(`card-session-turn:${input.key}`),
-      threadId,
-      message: {
-        messageId: MessageId.make(`card-session-message:${threadId}`),
-        role: "user",
-        text: rendered.firstMessage,
-        attachments: [],
-      },
-      runtimeMode: "approval-required",
-      interactionMode: "default",
-      createdAt: startedAt,
-    });
+      restarts,
+      startedAt: yield* nowIso,
+    })) {
+      yield* engine.dispatch(command);
+    }
     if (input.role === "owner" && card.status === "ready") {
       yield* engine.dispatch({
         type: "card.work.start",
