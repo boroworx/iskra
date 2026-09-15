@@ -6,7 +6,7 @@ const MARK_CLASS: Record<CriterionMark, string> = {
   passed: "bg-success",
   failed: "bg-destructive",
   needsYou: "bg-warning",
-  pending: "bg-muted-foreground/30",
+  pending: "bg-[rgb(120_120_128/18%)] dark:bg-[rgb(120_120_128/32%)]",
 };
 
 /** One short segment per acceptance criterion: green passed, red failed, orange for a person. */
@@ -43,7 +43,7 @@ export function SpendBar(props: {
       role="img"
       aria-label={`$${props.spentUsd.toFixed(2)} of $${props.capUsd.toFixed(0)} spent`}
       className={cn(
-        "relative h-1 w-11 shrink-0 overflow-hidden rounded-full bg-muted-foreground/25",
+        "relative h-1 w-11 shrink-0 overflow-hidden rounded-full bg-[rgb(120_120_128/18%)] dark:bg-[rgb(120_120_128/32%)]",
         props.className,
       )}
     >
@@ -77,7 +77,7 @@ export function RoundDots(props: {
           key={index}
           className={cn(
             "size-2 rounded-full",
-            index < used ? "bg-warning" : "ring-[1.5px] ring-inset ring-muted-foreground/40",
+            index < used ? "bg-warning" : "ring-[1.5px] ring-inset ring-foreground/32",
           )}
         />
       ))}

@@ -3,11 +3,11 @@ import type { PillTone } from "@iskra/client-runtime/card-face";
 import { cn } from "~/lib/utils";
 
 const TONE_CLASS: Record<PillTone, string> = {
-  gray: "bg-muted-foreground/15 text-muted-foreground",
-  blue: "bg-primary/15 text-info-foreground",
-  orange: "bg-warning/16 text-warning-foreground",
-  green: "bg-success/15 text-success-foreground",
-  red: "bg-destructive/15 text-destructive-foreground",
+  gray: "bg-secondary text-muted-foreground",
+  blue: "bg-primary/11 text-info-foreground dark:bg-primary/16",
+  orange: "bg-warning/15 text-warning-foreground dark:bg-warning/16",
+  green: "bg-success/15 text-success-foreground dark:bg-success/14",
+  red: "bg-destructive/14 text-destructive-foreground dark:bg-destructive/16",
 };
 
 /** A capsule naming a status, colored by what it means. */
