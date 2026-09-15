@@ -10,7 +10,6 @@ import { ActionButton, Body, ButtonRow, Group, Muted, Row, SparkGlyph, TONE_COLO
 import { CardQuestion, CheckpointControls } from "./questions";
 import {
   cardEnvironment,
-  channelEnvironment,
   useMinuteClock,
   useNeedsYou,
   useRefusableCommand,
@@ -47,8 +46,6 @@ export function NeedsYouRouteScreen() {
   const snooze = useRefusableCommand(cardEnvironment.snooze);
   const unsnooze = useRefusableCommand(cardEnvironment.unsnooze);
   const setBudget = useRefusableCommand(cardEnvironment.setBudget);
-  const approveLesson = useRefusableCommand(channelEnvironment.approveLesson);
-  const dismissLesson = useRefusableCommand(channelEnvironment.dismissLesson);
   const allowAccess = useRefusableCommand(cardEnvironment.allowAccess);
   const dismissAttention = useRefusableCommand(cardEnvironment.dismissAttention);
   const withItems = environments.filter((entry) => entry.items.length > 0);
@@ -219,30 +216,6 @@ export function NeedsYouRouteScreen() {
                             )
                           }
                         />
-                      ) : item.kind === "lessonProposed" && item.lessonId !== null ? (
-                        <>
-                          <ActionButton
-                            label="Approve lesson"
-                            kind="primary"
-                            onPress={() => {
-                              if (item.lessonId === null) return;
-                              void approveLesson(
-                                { environmentId, input: { projectId: item.projectId, lessonId: item.lessonId } },
-                                "The lesson was not approved",
-                              );
-                            }}
-                          />
-                          <ActionButton
-                            label="Dismiss"
-                            onPress={() => {
-                              if (item.lessonId === null) return;
-                              void dismissLesson(
-                                { environmentId, input: { projectId: item.projectId, lessonId: item.lessonId } },
-                                "The lesson was not dismissed",
-                              );
-                            }}
-                          />
-                        </>
                       ) : item.kind === "readyToMerge" ? (
                         <ActionButton
                           label="Approve merge"

@@ -8,7 +8,7 @@ import {
   type BoardColumn,
 } from "@iskra/client-runtime/cards";
 import type { EnvironmentId, OrchestrationAgentShell, OrchestrationCardShell } from "@iskra/contracts";
-import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
+import { useNavigation, useRoute, type StaticScreenProps } from "@react-navigation/native";
 import { memo, useMemo, useState } from "react";
 import { FlatList, Pressable, Text, View } from "react-native";
 
@@ -31,6 +31,24 @@ type BoardParams = StaticScreenProps<{ readonly environmentId: string; readonly 
 
 // The column a board opens on: where a person is most likely needed.
 const OPENING_ORDER: ReadonlyArray<BoardColumn> = ["inReview", "triage", "inProgress", "ready", "landing", "done"];
+
+/** The board's way to the project's wiki, which takes the board's own route params. */
+function WikiHeaderButton() {
+  const navigation = useNavigation();
+  const params = useRoute().params as { readonly environmentId: string; readonly projectId: string };
+  return (
+    <Pressable
+      accessibilityRole="button"
+      hitSlop={8}
+      onPress={() => navigation.navigate("IskraWiki", params)}
+    >
+      <Text style={{ color: TONE_COLOR.blue, fontSize: 17 }}>Wiki</Text>
+    </Pressable>
+  );
+}
+
+// native-stack calls headerRight as a plain function, so the button renders as an element.
+const renderWikiHeaderButton = () => <WikiHeaderButton />;
 
 /** A project's board as one column at a time, picked with a segmented control. */
 export function BoardRouteScreen(props: BoardParams) {
@@ -61,7 +79,9 @@ export function BoardRouteScreen(props: BoardParams) {
 
   return (
     <View className="flex-1 bg-screen">
-      <NativeStackScreenOptions options={{ title: project?.title ?? "Board" }} />
+      <NativeStackScreenOptions
+        options={{ title: project?.title ?? "Board", headerRight: renderWikiHeaderButton }}
+      />
       <FlatList
         data={columnCards}
         keyExtractor={(card) => card.id}

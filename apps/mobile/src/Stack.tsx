@@ -40,6 +40,7 @@ import { CardRouteScreen } from "./features/iskra/CardRouteScreen";
 import { AgentDmRouteScreen, ChannelRouteScreen } from "./features/iskra/ChannelRouteScreen";
 import { ChannelsRouteScreen } from "./features/iskra/ChannelsRouteScreen";
 import { NeedsYouRouteScreen } from "./features/iskra/NeedsYouRouteScreen";
+import { WikiPageRouteScreen, WikiRouteScreen } from "./features/iskra/WikiRouteScreen";
 import { AddProjectDestinationRoute } from "./features/projects/AddProjectDestinationRoute";
 import { AddProjectLocalRoute } from "./features/projects/AddProjectLocalRoute";
 import { AddProjectRepositoryRoute } from "./features/projects/AddProjectRepositoryRoute";
@@ -725,6 +726,17 @@ export const RootStack = createNativeStackNavigator({
     IskraCard: createNativeStackScreen({
       screen: CardRouteScreen,
       linking: "cards/:environmentId/:cardId",
+      options: GLASS_HEADER_OPTIONS,
+    }),
+    // The wiki reads on mobile; pages are written from the web and desktop apps.
+    IskraWiki: createNativeStackScreen({
+      screen: WikiRouteScreen,
+      linking: "wiki/:environmentId/:projectId",
+      options: { ...GLASS_HEADER_OPTIONS, title: "Wiki" },
+    }),
+    IskraWikiPage: createNativeStackScreen({
+      screen: WikiPageRouteScreen,
+      linking: "wiki/:environmentId/:projectId/:slug",
       options: GLASS_HEADER_OPTIONS,
     }),
     NotFound: createNativeStackScreen({
