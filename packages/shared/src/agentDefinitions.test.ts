@@ -1,4 +1,9 @@
-import { AgentId, ProviderInstanceId, type ModelSelection } from "@iskra/contracts";
+import {
+  AgentId,
+  DEFAULT_AGENT_BLUEPRINT,
+  ProviderInstanceId,
+  type ModelSelection,
+} from "@iskra/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -78,6 +83,38 @@ describe("parseAgentFile", () => {
     };
 
     expect(definition(parseAgentFile(serializeAgentFile(written), "frontend.md"))).toEqual(written);
+  });
+});
+
+describe("agent templates", () => {
+  const base: AgentDefinition = {
+    id: AgentId.make("agent-reviewer"),
+    name: "reviewer" as AgentDefinition["name"],
+    avatar: null,
+    tags: [],
+    modelSelection: { instanceId: ProviderInstanceId.make("opencode"), model: "openai/gpt-5" },
+    capabilities: ["read"],
+    rolePrompt: "Checks cards against their criteria.",
+  };
+
+  it("reads back roles, a verifier and a blueprint, and writes none of them when unset", () => {
+    const written: AgentDefinition = {
+      ...base,
+      roles: ["verifier", "critic"],
+      verifyWith: "auditor" as AgentDefinition["name"],
+      blueprint: { preflight: "targeted", uiCapture: "always", uiPaths: ["/limits"], verify: "always" },
+    };
+
+    expect(definition(parseAgentFile(serializeAgentFile(written), "reviewer.md"))).toEqual(written);
+    expect(serializeAgentFile(base)).not.toMatch(/roles|verifyWith|blueprint/);
+    expect(definition(parseAgentFile(serializeAgentFile(base), "reviewer.md"))).toEqual(base);
+  });
+
+  it("fills a partial blueprint with its defaults and rejects an unknown role", () => {
+    const parsed = definition(parseAgentFile("---\nblueprint:\n  verify: always\n---\n", "api.md"));
+
+    expect(parsed.blueprint).toEqual({ ...DEFAULT_AGENT_BLUEPRINT, verify: "always" });
+    expect(parseAgentFile("---\nroles: [deployer]\n---\n", "ops.md").ok).toBe(false);
   });
 });
 

@@ -1,6 +1,8 @@
 import {
+  AgentBlueprint,
   AgentId,
   AgentName,
+  AgentRoles,
   DEFAULT_MODEL,
   DEFAULT_MODEL_BY_PROVIDER,
   ModelSelection,
@@ -41,6 +43,9 @@ const AgentFileFrontmatter = Schema.Struct({
   model: Schema.optional(Schema.String),
   options: Schema.optional(Schema.Unknown),
   capabilities: Schema.optional(RunCapabilities),
+  roles: Schema.optional(AgentRoles),
+  verifyWith: Schema.optional(Schema.NullOr(AgentName)),
+  blueprint: Schema.optional(AgentBlueprint),
 });
 
 const decodeFrontmatter = Schema.decodeUnknownSync(AgentFileFrontmatter);
@@ -94,6 +99,10 @@ export function parseAgentFile(contents: string, fileName: string): AgentFileRes
           ...(frontmatter.options !== undefined ? { options: frontmatter.options } : {}),
         }),
         capabilities: frontmatter.capabilities ?? ["read"],
+        // Absent reads as the defaults wherever the definition is applied.
+        ...(frontmatter.roles !== undefined ? { roles: frontmatter.roles } : {}),
+        ...(frontmatter.verifyWith !== undefined ? { verifyWith: frontmatter.verifyWith } : {}),
+        ...(frontmatter.blueprint !== undefined ? { blueprint: frontmatter.blueprint } : {}),
         rolePrompt: split.body,
       },
     };
@@ -115,6 +124,9 @@ export function serializeAgentFile(definition: AgentDefinition): string {
       ? { options: definition.modelSelection.options }
       : {}),
     capabilities: definition.capabilities,
+    ...(definition.roles !== undefined ? { roles: definition.roles } : {}),
+    ...(definition.verifyWith != null ? { verifyWith: definition.verifyWith } : {}),
+    ...(definition.blueprint !== undefined ? { blueprint: definition.blueprint } : {}),
   };
   const body = definition.rolePrompt.trim();
   return `---\n${stringifyYaml(frontmatter).trimEnd()}\n---\n${body.length > 0 ? `\n${body}\n` : ""}`;

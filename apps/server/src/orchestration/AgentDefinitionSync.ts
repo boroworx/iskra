@@ -2,6 +2,8 @@ import {
   AgentDefinitionError,
   AgentId,
   CommandId,
+  DEFAULT_AGENT_BLUEPRINT,
+  DEFAULT_AGENT_ROLES,
   ProviderInstanceId,
   type ModelSelection,
   type OrchestrationAgent,
@@ -103,6 +105,12 @@ const definitionOfAgent = (agent: OrchestrationAgent): AgentDefinition => ({
   tags: agent.roleTags,
   modelSelection: agent.modelSelection,
   capabilities: agent.capabilities,
+  // Defaults stay out of the file, as a file without them reads as the defaults.
+  ...(canonical(agent.roles) !== canonical(DEFAULT_AGENT_ROLES) ? { roles: agent.roles } : {}),
+  ...(agent.verifyWith !== null ? { verifyWith: agent.verifyWith } : {}),
+  ...(canonical(agent.blueprint) !== canonical(DEFAULT_AGENT_BLUEPRINT)
+    ? { blueprint: agent.blueprint }
+    : {}),
   rolePrompt: agent.rolePrompt,
 });
 
@@ -210,6 +218,9 @@ const make = Effect.gen(function* () {
           rolePrompt: definition.rolePrompt,
           modelSelection: definition.modelSelection,
           capabilities: [...definition.capabilities],
+          ...(definition.roles !== undefined ? { roles: [...definition.roles] } : {}),
+          ...(definition.verifyWith !== undefined ? { verifyWith: definition.verifyWith } : {}),
+          ...(definition.blueprint !== undefined ? { blueprint: definition.blueprint } : {}),
           createdAt: yield* nowIso,
         });
         return;
@@ -221,6 +232,10 @@ const make = Effect.gen(function* () {
           agentId,
         });
       }
+      // A file without these fields means the defaults.
+      const roles = definition.roles ?? DEFAULT_AGENT_ROLES;
+      const verifyWith = definition.verifyWith ?? null;
+      const blueprint = definition.blueprint ?? DEFAULT_AGENT_BLUEPRINT;
       const changes = {
         ...(existing.name !== definition.name ? { name: definition.name } : {}),
         ...(existing.avatar !== definition.avatar ? { avatar: definition.avatar } : {}),
@@ -236,6 +251,9 @@ const make = Effect.gen(function* () {
         ...(canonical(existing.capabilities) !== canonical(definition.capabilities)
           ? { capabilities: [...definition.capabilities] }
           : {}),
+        ...(canonical(existing.roles) !== canonical(roles) ? { roles: [...roles] } : {}),
+        ...(existing.verifyWith !== verifyWith ? { verifyWith } : {}),
+        ...(canonical(existing.blueprint) !== canonical(blueprint) ? { blueprint } : {}),
       };
       if (Object.keys(changes).length > 0) {
         yield* dispatch({
@@ -391,6 +409,14 @@ const make = Effect.gen(function* () {
           });
         }
         const agentId = definition.id ?? (yield* newAgentId);
+        // A client from before templates sends no roles, verifier or blueprint: keep the agent's own.
+        const current = projectAgents.find((agent) => agent.id === agentId);
+        const toWrite: AgentDefinition = {
+          ...definition,
+          roles: definition.roles ?? current?.roles,
+          verifyWith: definition.verifyWith !== undefined ? definition.verifyWith : current?.verifyWith,
+          blueprint: definition.blueprint ?? current?.blueprint,
+        };
         if (files.some((file) => file.filePath === target && definedId(file) !== agentId)) {
           return yield* new AgentDefinitionError({
             message: `Another agent is already defined in ${AGENT_DEFINITIONS_DIR}/${definition.name}.md.`,
@@ -398,7 +424,7 @@ const make = Effect.gen(function* () {
         }
         yield* fileSystem.writeFileString(
           target,
-          serializeAgentFile({ ...definition, id: agentId }),
+          serializeAgentFile({ ...toWrite, id: agentId }),
         );
         // A rename leaves the old file behind; remove it so the agent is defined once.
         for (const file of files) {

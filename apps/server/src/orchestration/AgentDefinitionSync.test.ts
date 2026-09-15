@@ -250,6 +250,38 @@ it.layer(layer)("AgentDefinitionSync", (it) => {
     ),
   );
 
+  it.effect("keeps an agent's roles and blueprint when a client that doesn't send them saves it", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const world = yield* makeProject("templates");
+        const definition: AgentDefinition = {
+          id: null,
+          name: "reviewer" as AgentDefinition["name"],
+          avatar: null,
+          tags: [],
+          modelSelection: haiku,
+          capabilities: ["read"],
+          rolePrompt: "Checks cards.",
+        };
+        const blueprint = { preflight: "none", uiCapture: "auto", uiPaths: [], verify: "always" } as const;
+
+        const { agentId } = yield* world.sync.save({
+          projectId: world.projectId,
+          definition: { ...definition, roles: ["verifier"], blueprint },
+        });
+        expect(yield* world.agents).toMatchObject([{ id: agentId, roles: ["verifier"], blueprint }]);
+
+        yield* world.sync.save({
+          projectId: world.projectId,
+          definition: { ...definition, id: agentId, rolePrompt: "Checks cards closely." },
+        });
+        expect(yield* world.agents).toMatchObject([
+          { id: agentId, rolePrompt: "Checks cards closely.", roles: ["verifier"], blueprint },
+        ]);
+      }),
+    ),
+  );
+
   it.effect("imports Claude Code and Copilot agent definitions once", () =>
     Effect.scoped(
       Effect.gen(function* () {
