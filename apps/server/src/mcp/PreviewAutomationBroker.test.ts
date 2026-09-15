@@ -57,6 +57,28 @@ const requestsFrom = (
     }),
   );
 
+it.effect("announces each host connection to subscribers", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* makeBroker;
+      const announced = yield* broker.hostConnected.pipe(Stream.take(2), Stream.runCollect, Effect.forkScoped);
+      yield* Effect.yieldNow;
+      yield* Stream.runDrain(requestsFrom(yield* broker.connect(makeHost()))).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+      yield* Stream.runDrain(requestsFrom(yield* broker.connect(makeHost({ clientId: "client-2" })))).pipe(
+        Effect.forkScoped,
+      );
+
+      const hosts = Array.from(yield* Fiber.join(announced));
+      expect(hosts.map((host) => [host.environmentId, host.clientId])).toEqual([
+        [scope.environmentId, "client-1"],
+        [scope.environmentId, "client-2"],
+      ]);
+      expect(new Set(hosts.map((host) => host.connectionId)).size).toBe(2);
+    }),
+  ),
+);
+
 it.effect("atomically registers a connected host and correlates its response", () =>
   Effect.scoped(
     Effect.gen(function* () {

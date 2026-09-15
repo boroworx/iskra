@@ -31,6 +31,7 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -63,8 +64,16 @@ export class PreviewAutomationBroker extends Context.Service<
     readonly invoke: <A = unknown>(
       request: PreviewAutomationInvokeInput,
     ) => Effect.Effect<A, PreviewAutomationError>;
+    /** Every host connection from the moment a subscriber starts reading, reconnects included. */
+    readonly hostConnected: Stream.Stream<PreviewAutomationHostConnected>;
   }
 >()("@iskra/cli/mcp/PreviewAutomationBroker") {}
+
+export interface PreviewAutomationHostConnected {
+  readonly environmentId: PreviewAutomationHost["environmentId"];
+  readonly clientId: string;
+  readonly connectionId: string;
+}
 
 interface ClientConnection {
   readonly clientId: string;
@@ -322,6 +331,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
     requestSequence: 0,
     focusSequence: 0,
   });
+  const connections = yield* PubSub.unbounded<PreviewAutomationHostConnected>();
 
   const closeConnection = Effect.fn("PreviewAutomationBroker.closeConnection")(function* (
     queue: ClientConnection["queue"],
@@ -384,6 +394,11 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
     if (registration.previousConnection) {
       yield* closeConnection(registration.previousConnection.queue, registration.disconnected);
     }
+    yield* PubSub.publish(connections, {
+      environmentId: host.environmentId,
+      clientId,
+      connectionId,
+    });
     return registration.registeredConnection;
   });
 
@@ -611,7 +626,13 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
     return result;
   });
 
-  return PreviewAutomationBroker.of({ connect, focusHost, respond, invoke });
+  return PreviewAutomationBroker.of({
+    connect,
+    focusHost,
+    respond,
+    invoke,
+    hostConnected: Stream.fromPubSub(connections),
+  });
 }).pipe(Effect.withSpan("PreviewAutomationBroker.make"));
 
 export const layer = Layer.effect(PreviewAutomationBroker, make);

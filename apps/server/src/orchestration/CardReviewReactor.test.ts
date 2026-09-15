@@ -2,11 +2,13 @@ import {
   AgentId,
   CardId,
   CommandId,
+  DEFAULT_AGENT_BLUEPRINT,
   DEFAULT_PROJECT_ORCHESTRATION,
   EnvironmentId,
   PreviewAutomationNoAvailableHostError,
   ProjectId,
   ProviderInstanceId,
+  type AgentBlueprint,
   type ProjectScript,
 } from "@iskra/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -14,6 +16,9 @@ import { expect, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import type * as Cause from "effect/Cause";
+import * as Queue from "effect/Queue";
+import * as Stream from "effect/Stream";
 
 import { ServerConfig } from "../config.ts";
 import { ServerEnvironment } from "../environment/ServerEnvironment.ts";
@@ -81,6 +86,11 @@ const fakes = {
   previewHost: true,
   admitted: [] as Array<HostAdmission.HeavyJobKind>,
   locked: [] as Array<string>,
+  journeys: [] as ReadonlyArray<{ readonly id: string; readonly name: string }>,
+  journeysPass: true,
+  // The scope of each runChecks call, and the filter a targeted one got.
+  checkRuns: [] as Array<string>,
+  captured: [] as Array<string>,
 };
 
 const workspace = Layer.mock(CardWorkspace.CardWorkspace)({
@@ -90,13 +100,33 @@ const workspace = Layer.mock(CardWorkspace.CardWorkspace)({
       baseBranch: "base",
       baseRef: "base",
       file:
-        fakes.webPort === null
+        fakes.webPort === null && fakes.journeys.length === 0
           ? null
-          : ({ ports: { web: fakes.webPort } } as unknown as CardWorkspace.CardProjectFile["file"]),
+          : ({
+              ports: { web: fakes.webPort ?? 0 },
+              journeys: fakes.journeys,
+            } as unknown as CardWorkspace.CardProjectFile["file"]),
       checks: fakes.checks,
     })),
-  runChecks: (input) =>
+  ensureServices: () => Effect.void,
+  runJourneys: () =>
     Effect.sync(() => ({
+      passed: fakes.journeysPass,
+      summary: "",
+      results: fakes.journeys.map((journey) => ({
+        id: journey.id,
+        name: journey.name,
+        exitCode: fakes.journeysPass ? 0 : 7,
+        timedOut: false,
+        durationMs: 5,
+        logTail: fakes.journeysPass ? "ok" : "GET /health 500",
+        logArtifactPath: null,
+      })),
+    })),
+  runChecks: (input) =>
+    Effect.sync(() => {
+      fakes.checkRuns.push(`${input.scope}${input.filter === undefined ? "" : `:${input.filter}`}`);
+      return {
       passed: fakes.passes,
       summary: fakes.passes ? "test passed." : "test failed.",
       results: (input.checks ?? []).map((entry) => ({
@@ -108,7 +138,8 @@ const workspace = Layer.mock(CardWorkspace.CardWorkspace)({
         logTail: fakes.passes ? "ok" : "FAIL limits.test.ts",
         logArtifactPath: null,
       })),
-    })),
+      };
+    }),
   runScript: () => Effect.succeed({ terminalId: "terminal-dev" }),
   withCardLock: (_cardId, effect) => Effect.andThen(Effect.sync(() => fakes.locked.push("card")), effect),
 });
@@ -119,12 +150,28 @@ const admission = Layer.succeed(
     run: (job, effect) => Effect.andThen(Effect.sync(() => fakes.admitted.push(job.kind)), effect),
     snapshot: Effect.succeed({ running: [], waiting: [], memoryPressureSince: null }),
     cancelLowestPriority: Effect.succeed(null),
+    cancel: () => Effect.succeed(null),
   }),
 );
 
+type HostConnected = PreviewAutomationBroker.PreviewAutomationHostConnected;
+// Every reader of the fake broker's host connections; `connectHost` announces one to them all.
+const hostReaders = new Set<Queue.Queue<HostConnected, Cause.Done>>();
+const connectHost = (host: HostConnected) =>
+  Effect.forEach(hostReaders, (reader) => Queue.offer(reader, host), { discard: true });
+
 const broker = Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({
+  hostConnected: Stream.callback<HostConnected>((reader) =>
+    Effect.acquireRelease(
+      Effect.sync(() => hostReaders.add(reader)),
+      () => Effect.sync(() => hostReaders.delete(reader)),
+    ),
+  ),
   invoke: <A>(request: PreviewAutomationBroker.PreviewAutomationInvokeInput) =>
-    fakes.previewHost
+    (request.operation === "navigate" && fakes.previewHost
+      ? Effect.sync(() => fakes.captured.push((request.input as { url: string }).url))
+      : Effect.void
+    ).pipe(Effect.andThen(() => fakes.previewHost
       ? Effect.succeed(
           (request.operation === "snapshot"
             ? {
@@ -146,6 +193,7 @@ const broker = Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({
             providerInstanceId: request.scope.providerInstanceId,
           }),
         ),
+    )),
 });
 
 const environment = Layer.mock(ServerEnvironment)({
@@ -179,6 +227,7 @@ const makeWorld = Effect.fn("makeWorld")(function* (
     readonly checksWaived?: boolean;
     readonly startReactor?: boolean;
     readonly landing?: "pullRequest" | "local";
+    readonly blueprint?: Partial<AgentBlueprint>;
   } = {},
 ) {
   const engine = yield* OrchestrationEngineService;
@@ -231,6 +280,9 @@ const makeWorld = Effect.fn("makeWorld")(function* (
     rolePrompt: "",
     modelSelection: { instanceId: ProviderInstanceId.make("claudeAgent"), model: "claude-haiku-4-5" },
     capabilities: ["read", "write"],
+    ...(options.blueprint === undefined
+      ? {}
+      : { blueprint: { ...DEFAULT_AGENT_BLUEPRINT, ...options.blueprint } }),
     createdAt: now,
   });
   yield* engine.dispatch({
@@ -548,6 +600,123 @@ it.layer(layer)("CardReviewReactor", (it) => {
         status: "inProgress",
         checkpoint: { checkpointId: "checkpoint-1" },
       });
+    }),
+  );
+
+  it.effect("runs targeted checks first when the blueprint asks, and skips the full suite when they fail", () =>
+    Effect.gen(function* () {
+      const quick: ProjectCheck = { ...check("unit"), targetedCommand: "pnpm vitest related {filter}" };
+      yield* setFakes({ checks: [quick, check("lint")], passes: false, webPort: null, admitted: [], checkRuns: [] });
+      const world = yield* makeWorld("preflight", { blueprint: { preflight: "targeted" } });
+      yield* world.write("limits.ts", "export const LIMIT = 1;\n");
+      yield* world.requestReview();
+
+      const note = yield* world.feedback();
+      expect(note.payload.reason).toMatchObject({ code: "checksFailed" });
+      expect(fakes.checkRuns).toEqual(["targeted:limits.ts"]);
+
+      yield* setFakes({ passes: true, checkRuns: [] });
+      yield* world.write("limits.ts", "export const LIMIT = 2;\n");
+      yield* world.requestReview();
+      yield* world.enteredReview();
+      expect(fakes.checkRuns).toEqual(["targeted:limits.ts", "full"]);
+    }),
+  );
+
+  it.effect("runs declared journeys after passing checks, and sends a failing journey back as a fix round", () =>
+    Effect.gen(function* () {
+      yield* setFakes({
+        checks: [check("test")],
+        passes: true,
+        webPort: null,
+        admitted: [],
+        journeys: [{ id: "health", name: "Health" }],
+        journeysPass: false,
+      });
+      const world = yield* makeWorld("journeys");
+      yield* world.write("api.ts", "export const health = () => 'ok';\n");
+      yield* world.requestReview();
+
+      const evidence = yield* world.evidenceRecorded();
+      expect(evidence.payload).toMatchObject({
+        passed: false,
+        items: [
+          { kind: "check", name: "test", exitCode: 0 },
+          { itemId: "journey:health", kind: "journey", exitCode: 7 },
+        ],
+      });
+      const note = yield* world.feedback();
+      expect(note.payload.reason).toMatchObject({ code: "journeyFailed" });
+      expect(note.payload.body).toContain("The journeys failed");
+      expect(note.payload.body).toContain("GET /health 500");
+      expect(fakes.admitted.filter((kind) => kind === "journey")).toHaveLength(1);
+      yield* world.reactor.drain;
+      expect(yield* world.cardOf()).toMatchObject({ status: "inProgress", fixRounds: { ci: 1 } });
+
+      yield* setFakes({ journeysPass: true });
+      yield* world.write("api.ts", "export const health = () => ({ ok: true });\n");
+      yield* world.requestReview();
+      yield* world.enteredReview();
+      yield* setFakes({ journeys: [] });
+    }),
+  );
+
+  it.effect("captures the blueprint's UI paths even without UI changes when it says always, and never when it says never", () =>
+    Effect.gen(function* () {
+      yield* setFakes({ checks: [check("test")], passes: true, webPort: 3, previewHost: true, captured: [] });
+      const always = yield* makeWorld("ui-always", {
+        blueprint: { uiCapture: "always", uiPaths: ["/settings", "/billing"] },
+      });
+      yield* always.write("api.ts", "export const a = 1;\n");
+      yield* always.requestReview();
+      const shots = yield* always.evidenceRecorded();
+      expect(shots.payload.items.filter((item) => item.kind === "screenshot")).toHaveLength(2);
+      expect(fakes.captured).toEqual(["http://127.0.0.1:42003/settings", "http://127.0.0.1:42003/billing"]);
+
+      const never = yield* makeWorld("ui-never", { blueprint: { uiCapture: "never" } });
+      yield* never.write("Page.tsx", "export const Page = () => null;\n");
+      yield* never.requestReview();
+      const none = yield* never.evidenceRecorded();
+      expect(none.payload.items.map((item) => item.kind)).toEqual(["check"]);
+    }),
+  );
+
+  it.effect("captures screenshots again onto the same evidence once a desktop host connects", () =>
+    Effect.gen(function* () {
+      yield* setFakes({ checks: [check("test")], passes: true, webPort: 3, previewHost: false });
+      const world = yield* makeWorld("host-retry");
+      yield* world.write("Page.tsx", "export const Page = () => null;\n");
+      yield* world.requestReview();
+      const first = yield* world.evidenceRecorded();
+      expect(first.payload.items[1]).toMatchObject({ unavailable: { code: "noPreviewHost" } });
+      yield* world.enteredReview();
+      yield* world.reactor.drain;
+
+      yield* setFakes({ previewHost: true });
+      const retried = world.nextEvent(
+        "card.activity-recorded",
+        (event) =>
+          event.payload.cardId === world.cardId &&
+          event.payload.reason?.code === CardReviewReactor.PREVIEW_HOST_CONNECTED_CODE,
+      );
+      yield* connectHost({
+        environmentId: EnvironmentId.make("environment-review"),
+        clientId: "desktop",
+        connectionId: "connection-1",
+      });
+      const again = yield* world.evidenceRecorded();
+      expect(again.payload).toMatchObject({
+        evidenceId: first.payload.evidenceId,
+        headSha: first.payload.headSha,
+        passed: true,
+      });
+      expect(again.payload.items.map((item) => [item.kind, item.unavailable?.code ?? null])).toEqual([
+        ["check", null],
+        ["screenshot", null],
+      ]);
+      yield* retried;
+      yield* world.reactor.drain;
+      expect((yield* world.cardOf()).status).toBe("inReview");
     }),
   );
 });
