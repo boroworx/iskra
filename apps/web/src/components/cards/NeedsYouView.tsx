@@ -142,6 +142,16 @@ export function NeedsYouView() {
   );
   // Cards waiting on Iskra itself, such as machine capacity: shown, not counted as waiting on you.
   const waits = useMemo(() => cardWaitItems(cards), [cards]);
+  // One section per project, in the order of each project's most pressing item.
+  const itemGroups = useMemo(() => {
+    const groups = new Map<string, Array<(typeof items)[number]>>();
+    for (const item of items) {
+      const group = groups.get(item.projectId);
+      if (group) group.push(item);
+      else groups.set(item.projectId, [item]);
+    }
+    return [...groups];
+  }, [items]);
   const orchestrationSettingsSearch = (projectId: string) => {
     const project = environmentProjects.find((entry) => entry.id === projectId);
     return project === undefined
@@ -231,372 +241,401 @@ export function NeedsYouView() {
             />
           ) : null}
           <PageColumn width="wide" className="flex flex-col">
-            {items.length === 0 ? null : (
-              <ol className="flex flex-col gap-2.5">
-                {items.map((item) => {
-                  const itemCard = cardById.get(item.cardId);
-                  // The question or attention item this answers, from the card shell.
-                  const question = itemCard?.openElicitations.find(
-                    (open) => open.activityId === item.activityId,
-                  );
-                  const attention = itemCard?.attention.find(
-                    (entry) => entry.activityId === item.activityId,
-                  );
-                  const answersInPlace = question !== undefined && question.kind !== "refsChanged";
-                  const Icon = KIND_ICON[item.kind];
-                  const why =
-                    item.reason !== null &&
-                    item.kind !== "lessonProposed" &&
-                    item.kind !== "checkpoint" &&
-                    item.kind !== "sliceCheckpoint" &&
-                    item.activityId === null
-                      ? item.reason
-                      : item.kind === "triage"
-                        ? (itemCard?.proposalReasoning ?? null)
-                        : null;
-                  const suggested =
-                    item.kind === "triage" && itemCard !== undefined
-                      ? agentNameById.get(itemCard.suggestedAgentId ?? itemCard.delegateAgentId ?? "")
-                      : undefined;
-                  const marks =
-                    itemCard !== undefined &&
-                    (item.kind === "readyToMerge" ||
-                      item.kind === "triage" ||
-                      item.kind === "scopeFlags" ||
-                      item.kind === "evidenceMissing")
-                      ? criteriaMarks(itemCard)
-                      : [];
-                  const primary: ReactNode =
-                    attention !== undefined && itemCard !== undefined && environmentId !== null ? (
-                      <AttentionActions
-                        card={itemCard}
-                        item={attention}
-                        environmentId={environmentId}
-                      />
-                    ) : (item.kind === "awaitingInput" || item.kind === "criteriaChange") &&
-                      question === undefined ? (
-                      // A session waiting with no question on the card is answered in its sheet.
-                      <ActionButton tone="primary" render={boardLink(item.projectId, item.cardId)}>
-                        Answer
-                      </ActionButton>
-                    ) : item.kind === "triage" ? (
-                      <>
-                        <ActionButton
-                          onClick={() =>
-                            decideOn(item.cardId, "card.abandon", "The card was not dropped")
-                          }
-                        >
-                          Drop
-                        </ActionButton>
-                        {environmentId === null || itemCard === undefined ? null : (
-                          <ApproveAndStart
-                            card={itemCard}
-                            agents={agentsByProject.get(item.projectId) ?? NO_AGENTS}
-                            environmentId={environmentId}
-                            className="h-7 rounded-[7px] px-3.5 text-[13px] sm:h-7"
-                          />
-                        )}
-                      </>
-                    ) : item.kind === "spec" ? (
-                      <>
-                        <ActionButton
-                          onClick={() =>
-                            decideOn(item.cardId, "card.spec.skip", "The spec was not skipped")
-                          }
-                        >
-                          Skip spec
-                        </ActionButton>
-                        <ActionButton
-                          tone="primary"
-                          onClick={() =>
-                            decideOn(item.cardId, "card.spec.approve", "The spec was not approved")
-                          }
-                        >
-                          Approve spec
-                        </ActionButton>
-                      </>
-                    ) : item.kind === "budgetReached" ? (
-                      <ActionButton
-                        tone="primary"
-                        onClick={() => {
-                          const capUsd = (itemCard?.budgetCapUsd ?? 0) + DEFAULT_CARD_BUDGET_USD;
-                          if (environmentId !== null) {
-                            void setBudget({
-                              environmentId,
-                              input: { cardId: item.cardId, capUsd },
-                            }).then(refused("The cap was not raised"));
-                          }
-                        }}
-                      >
-                        Raise the cap by ${DEFAULT_CARD_BUDGET_USD}
-                      </ActionButton>
-                    ) : item.kind === "fixRoundsExhausted" ? (
-                      <ActionButton
-                        tone="primary"
-                        onClick={() =>
-                          decideOn(
-                            item.cardId,
-                            "card.fix-rounds.reset",
-                            "The fix rounds were not reset",
+            {itemGroups.map(([projectId, groupItems]) => (
+              <section
+                key={projectId}
+                aria-label={projectTitle(projectId) || "Other project"}
+                className="mt-7 flex flex-col gap-2 first:mt-0"
+              >
+                <h2 className="px-4 text-[13px] font-semibold text-muted-foreground">
+                  {projectTitle(projectId) || "Other project"}
+                </h2>
+                <ol className="flex flex-col gap-2.5">
+                  {groupItems.map((item) => {
+                    const itemCard = cardById.get(item.cardId);
+                    // The question or attention item this answers, from the card shell.
+                    const question = itemCard?.openElicitations.find(
+                      (open) => open.activityId === item.activityId,
+                    );
+                    const attention = itemCard?.attention.find(
+                      (entry) => entry.activityId === item.activityId,
+                    );
+                    const answersInPlace =
+                      question !== undefined && question.kind !== "refsChanged";
+                    const Icon = KIND_ICON[item.kind];
+                    const why =
+                      item.reason !== null &&
+                      item.kind !== "lessonProposed" &&
+                      item.kind !== "checkpoint" &&
+                      item.kind !== "sliceCheckpoint" &&
+                      item.activityId === null
+                        ? item.reason
+                        : item.kind === "triage"
+                          ? (itemCard?.proposalReasoning ?? null)
+                          : null;
+                    const suggested =
+                      item.kind === "triage" && itemCard !== undefined
+                        ? agentNameById.get(
+                            itemCard.suggestedAgentId ?? itemCard.delegateAgentId ?? "",
                           )
-                        }
-                      >
-                        Give it more rounds
-                      </ActionButton>
-                    ) : itemCard?.paused != null &&
-                      (item.kind === "paused" || item.kind === "sessionFailed") ? (
-                      <ActionButton
-                        tone="primary"
-                        onClick={() =>
-                          decideOn(item.cardId, "card.resume", "The card was not resumed")
-                        }
-                      >
-                        Resume
-                      </ActionButton>
-                    ) : (item.kind === "needsAgent" || item.kind === "criteria") &&
-                      environmentId !== null ? (
-                      <ActionButton
-                        tone="primary"
-                        render={boardLink(
-                          item.projectId,
-                          item.cardId,
-                          item.kind === "needsAgent" ? "agent" : "criteria",
-                        )}
-                      >
-                        {item.kind === "needsAgent" ? "Assign an agent" : "Open the criteria"}
-                      </ActionButton>
-                    ) : item.kind === "delegateReadOnly" &&
-                      environmentId !== null &&
-                      itemCard?.delegateAgentId != null ? (
-                      <ActionButton
-                        tone="primary"
-                        render={
-                          <Link
-                            to="/agents/$environmentId/$agentId"
-                            params={{ environmentId, agentId: itemCard.delegateAgentId }}
-                          />
-                        }
-                      >
-                        Open its agent
-                      </ActionButton>
-                    ) : item.kind === "sideEffectGuard" ? (
-                      <GuardLink search={orchestrationSettingsSearch(item.projectId)} />
-                    ) : item.kind === "lessonProposed" && item.lessonId !== null ? (
-                      <>
-                        <ActionButton
-                          onClick={() =>
-                            decideLesson(
-                              dismissLesson,
-                              item.projectId,
-                              item.lessonId!,
-                              "The lesson was not dismissed",
-                            )
-                          }
-                        >
-                          Dismiss
-                        </ActionButton>
-                        <ActionButton
-                          tone="primary"
-                          onClick={() =>
-                            decideLesson(
-                              approveLesson,
-                              item.projectId,
-                              item.lessonId!,
-                              "The lesson was not approved",
-                            )
-                          }
-                        >
-                          Approve lesson
-                        </ActionButton>
-                      </>
-                    ) : item.kind === "planApproval" && environmentId !== null ? (
-                      <ActionButton tone="primary" render={boardLink(item.projectId, item.cardId)}>
-                        Review the plan
-                      </ActionButton>
-                    ) : (item.kind === "readyToMerge" ||
+                        : undefined;
+                    const marks =
+                      itemCard !== undefined &&
+                      (item.kind === "readyToMerge" ||
+                        item.kind === "triage" ||
                         item.kind === "scopeFlags" ||
-                        item.kind === "evidenceMissing") &&
+                        item.kind === "evidenceMissing")
+                        ? criteriaMarks(itemCard)
+                        : [];
+                    const primary: ReactNode =
+                      attention !== undefined &&
+                      itemCard !== undefined &&
                       environmentId !== null ? (
-                      <ActionButton tone="primary" render={boardLink(item.projectId, item.cardId)}>
-                        Review
-                      </ActionButton>
-                    ) : item.kind === "budgetCap" ? (
-                      item.code === "environmentBudgetCap" ? (
+                        <AttentionActions
+                          card={itemCard}
+                          item={attention}
+                          environmentId={environmentId}
+                        />
+                      ) : (item.kind === "awaitingInput" || item.kind === "criteriaChange") &&
+                        question === undefined ? (
+                        // A session waiting with no question on the card is answered in its sheet.
                         <ActionButton
                           tone="primary"
-                          render={<Link to="/settings/connections" hash="card-runtime" />}
+                          render={boardLink(item.projectId, item.cardId)}
                         >
-                          Raise the machine budget
+                          Answer
                         </ActionButton>
-                      ) : orchestrationSettingsSearch(item.projectId) === null ? null : (
+                      ) : item.kind === "triage" ? (
+                        <>
+                          <ActionButton
+                            onClick={() =>
+                              decideOn(item.cardId, "card.abandon", "The card was not dropped")
+                            }
+                          >
+                            Drop
+                          </ActionButton>
+                          {environmentId === null || itemCard === undefined ? null : (
+                            <ApproveAndStart
+                              card={itemCard}
+                              agents={agentsByProject.get(item.projectId) ?? NO_AGENTS}
+                              environmentId={environmentId}
+                              className="h-7 rounded-[7px] px-3.5 text-[13px] sm:h-7"
+                            />
+                          )}
+                        </>
+                      ) : item.kind === "spec" ? (
+                        <>
+                          <ActionButton
+                            onClick={() =>
+                              decideOn(item.cardId, "card.spec.skip", "The spec was not skipped")
+                            }
+                          >
+                            Skip spec
+                          </ActionButton>
+                          <ActionButton
+                            tone="primary"
+                            onClick={() =>
+                              decideOn(
+                                item.cardId,
+                                "card.spec.approve",
+                                "The spec was not approved",
+                              )
+                            }
+                          >
+                            Approve spec
+                          </ActionButton>
+                        </>
+                      ) : item.kind === "budgetReached" ? (
+                        <ActionButton
+                          tone="primary"
+                          onClick={() => {
+                            const capUsd = (itemCard?.budgetCapUsd ?? 0) + DEFAULT_CARD_BUDGET_USD;
+                            if (environmentId !== null) {
+                              void setBudget({
+                                environmentId,
+                                input: { cardId: item.cardId, capUsd },
+                              }).then(refused("The cap was not raised"));
+                            }
+                          }}
+                        >
+                          Raise the cap by ${DEFAULT_CARD_BUDGET_USD}
+                        </ActionButton>
+                      ) : item.kind === "fixRoundsExhausted" ? (
+                        <ActionButton
+                          tone="primary"
+                          onClick={() =>
+                            decideOn(
+                              item.cardId,
+                              "card.fix-rounds.reset",
+                              "The fix rounds were not reset",
+                            )
+                          }
+                        >
+                          Give it more rounds
+                        </ActionButton>
+                      ) : itemCard?.paused != null &&
+                        (item.kind === "paused" || item.kind === "sessionFailed") ? (
+                        <ActionButton
+                          tone="primary"
+                          onClick={() =>
+                            decideOn(item.cardId, "card.resume", "The card was not resumed")
+                          }
+                        >
+                          Resume
+                        </ActionButton>
+                      ) : (item.kind === "needsAgent" || item.kind === "criteria") &&
+                        environmentId !== null ? (
+                        <ActionButton
+                          tone="primary"
+                          render={boardLink(
+                            item.projectId,
+                            item.cardId,
+                            item.kind === "needsAgent" ? "agent" : "criteria",
+                          )}
+                        >
+                          {item.kind === "needsAgent" ? "Assign an agent" : "Open the criteria"}
+                        </ActionButton>
+                      ) : item.kind === "delegateReadOnly" &&
+                        environmentId !== null &&
+                        itemCard?.delegateAgentId != null ? (
                         <ActionButton
                           tone="primary"
                           render={
                             <Link
-                              to="/settings/projects"
-                              search={orchestrationSettingsSearch(item.projectId)!}
-                              hash="project-budgets"
+                              to="/agents/$environmentId/$agentId"
+                              params={{ environmentId, agentId: itemCard.delegateAgentId }}
                             />
                           }
                         >
-                          Raise the budget
+                          Open its agent
                         </ActionButton>
-                      )
-                    ) : item.kind === "unpricedModel" ? (
-                      // Refusing is the standing state here; the card sheet takes an acceptance back.
-                      <ActionButton
-                        tone="primary"
-                        onClick={() =>
-                          decideOn(
-                            item.cardId,
-                            "card.unpriced.accept",
-                            "The card was not allowed to run uncapped",
-                          )
-                        }
-                      >
-                        Run uncapped
-                      </ActionButton>
-                    ) : null;
-
-                  return (
-                    <li
-                      key={item.key}
-                      className="grid min-w-0 grid-cols-[32px_minmax(0,1fr)] items-start gap-3.5 rounded-[14px] bg-card px-4 py-3.5 shadow-[0_0_0_0.5px_var(--border)] md:grid-cols-[32px_minmax(0,1fr)_auto]"
-                    >
-                      <span
-                        className={cn(
-                          "flex size-8 items-center justify-center rounded-full",
-                          item.kind === "sessionFailed"
-                            ? "bg-destructive/16 text-destructive-foreground"
-                            : "bg-warning/16 text-warning",
-                        )}
-                      >
-                        {Icon === undefined ? (
-                          <SparkGlyph state="needsYou" />
-                        ) : (
-                          <Icon aria-hidden className="size-4" strokeWidth={2} />
-                        )}
-                      </span>
-                      <div className="flex min-w-0 flex-col gap-2">
-                        <div className="flex min-h-8 min-w-0 items-center gap-x-2">
-                          <CardLink
-                            environmentId={environmentId}
-                            projectId={item.projectId}
-                            cardId={item.cardId}
-                            className="text-[15px] font-semibold tracking-[-0.005em]"
-                          >
-                            {item.title}
-                          </CardLink>
-                          <span className="shrink-0 text-[11px] font-medium tabular-nums text-tertiary-label">
-                            {cardShortId(itemCard ?? { id: item.cardId, linearIssue: null })}
-                          </span>
-                          {item.kind === "refsChanged" ? (
-                            <StatusPill label="Refs Moved" tone="orange" />
-                          ) : null}
-                          {marks.length > 0 ? (
-                            <CriteriaMarks marks={marks} className="ms-1" />
-                          ) : null}
-                          {suggested !== undefined ? (
-                            <AgentAvatar name={suggested} className="ms-1 size-[18px] text-[9px]" />
-                          ) : null}
-                          <span className="min-w-0 shrink-[4] truncate text-xs text-tertiary-label">
-                            {projectTitle(item.projectId)}
-                          </span>
-                        </div>
-                        {SELF_EVIDENT.has(item.kind) || answersInPlace || attention !== undefined ? null : (
-                          <DisabledReason reason={why} className="self-start">
-                            <span className="self-start text-[13px] text-muted-foreground">
-                              {needsYouLabel(item)}
-                            </span>
-                          </DisabledReason>
-                        )}
-                        {item.kind === "lessonProposed" && item.reason !== null ? (
-                          <p className="line-clamp-4 whitespace-pre-wrap break-words text-[13px] text-muted-foreground">
-                            {item.reason}
-                          </p>
-                        ) : null}
-                        {attention !== undefined ? (
-                          <p className="line-clamp-2 whitespace-pre-wrap break-words text-[13px] text-muted-foreground">
-                            {attention.text}
-                          </p>
-                        ) : null}
-                        {answersInPlace && environmentId !== null ? (
-                          <CardQuestion
-                            cardId={item.cardId}
-                            question={question}
-                            environmentId={environmentId}
-                            agentName={
-                              itemCard?.delegateAgentId == null
-                                ? undefined
-                                : agentNameById.get(itemCard.delegateAgentId)
+                      ) : item.kind === "sideEffectGuard" ? (
+                        <GuardLink search={orchestrationSettingsSearch(item.projectId)} />
+                      ) : item.kind === "lessonProposed" && item.lessonId !== null ? (
+                        <>
+                          <ActionButton
+                            onClick={() =>
+                              decideLesson(
+                                dismissLesson,
+                                item.projectId,
+                                item.lessonId!,
+                                "The lesson was not dismissed",
+                              )
                             }
-                          />
-                        ) : null}
-                        {(item.kind === "checkpoint" || item.kind === "sliceCheckpoint") &&
-                        environmentId !== null &&
-                        itemCard !== undefined ? (
-                          <CheckpointControls card={itemCard} environmentId={environmentId} />
-                        ) : null}
-                        {question?.kind === "refsChanged" && environmentId !== null ? (
-                          <RefsChangedControls
-                            cardId={item.cardId}
-                            report={question}
-                            environmentId={environmentId}
-                          />
-                        ) : null}
-                      </div>
-                      <div className="col-start-2 flex min-h-8 flex-wrap items-center justify-end gap-2 md:col-start-3">
-                        {primary}
-                        <span className="w-8 text-right text-xs tabular-nums text-tertiary-label">
-                          <span className="sr-only">Waiting </span>
-                          {waitingLabel(item.since, now)}
+                          >
+                            Dismiss
+                          </ActionButton>
+                          <ActionButton
+                            tone="primary"
+                            onClick={() =>
+                              decideLesson(
+                                approveLesson,
+                                item.projectId,
+                                item.lessonId!,
+                                "The lesson was not approved",
+                              )
+                            }
+                          >
+                            Approve lesson
+                          </ActionButton>
+                        </>
+                      ) : item.kind === "planApproval" && environmentId !== null ? (
+                        <ActionButton
+                          tone="primary"
+                          render={boardLink(item.projectId, item.cardId)}
+                        >
+                          Review the plan
+                        </ActionButton>
+                      ) : (item.kind === "readyToMerge" ||
+                          item.kind === "scopeFlags" ||
+                          item.kind === "evidenceMissing") &&
+                        environmentId !== null ? (
+                        <ActionButton
+                          tone="primary"
+                          render={boardLink(item.projectId, item.cardId)}
+                        >
+                          Review
+                        </ActionButton>
+                      ) : item.kind === "budgetCap" ? (
+                        item.code === "environmentBudgetCap" ? (
+                          <ActionButton
+                            tone="primary"
+                            render={<Link to="/settings/connections" hash="card-runtime" />}
+                          >
+                            Raise the machine budget
+                          </ActionButton>
+                        ) : orchestrationSettingsSearch(item.projectId) === null ? null : (
+                          <ActionButton
+                            tone="primary"
+                            render={
+                              <Link
+                                to="/settings/projects"
+                                search={orchestrationSettingsSearch(item.projectId)!}
+                                hash="project-budgets"
+                              />
+                            }
+                          >
+                            Raise the budget
+                          </ActionButton>
+                        )
+                      ) : item.kind === "unpricedModel" ? (
+                        // Refusing is the standing state here; the card sheet takes an acceptance back.
+                        <ActionButton
+                          tone="primary"
+                          onClick={() =>
+                            decideOn(
+                              item.cardId,
+                              "card.unpriced.accept",
+                              "The card was not allowed to run uncapped",
+                            )
+                          }
+                        >
+                          Run uncapped
+                        </ActionButton>
+                      ) : null;
+
+                    return (
+                      <li
+                        key={item.key}
+                        className="grid min-w-0 grid-cols-[32px_minmax(0,1fr)] items-start gap-3.5 rounded-[14px] bg-card px-4 py-3.5 shadow-[0_0_0_0.5px_var(--border)] md:grid-cols-[32px_minmax(0,1fr)_auto]"
+                      >
+                        <span
+                          className={cn(
+                            "flex size-8 items-center justify-center rounded-full",
+                            item.kind === "sessionFailed"
+                              ? "bg-destructive/16 text-destructive-foreground"
+                              : "bg-warning/16 text-warning",
+                          )}
+                        >
+                          {Icon === undefined ? (
+                            <SparkGlyph state="needsYou" />
+                          ) : (
+                            <Icon aria-hidden className="size-4" strokeWidth={2} />
+                          )}
                         </span>
-                        {item.snoozable ? (
-                          <Menu>
-                            <MenuTrigger
-                              render={
-                                <Button
-                                  size="icon-sm"
-                                  variant="ghost-muted"
-                                  aria-label={`Snooze ${item.title}`}
-                                />
-                              }
+                        <div className="flex min-w-0 flex-col gap-2">
+                          <div className="flex min-h-8 min-w-0 items-center gap-x-2">
+                            <CardLink
+                              environmentId={environmentId}
+                              projectId={item.projectId}
+                              cardId={item.cardId}
+                              className="text-[15px] font-semibold tracking-[-0.005em]"
                             >
-                              <EllipsisIcon />
-                            </MenuTrigger>
-                            <MenuPopup align="end">
-                              <MenuGroup>
-                                <MenuGroupLabel>Snooze</MenuGroupLabel>
-                                <MenuItem
-                                  onClick={() =>
-                                    snoozeCard(item.cardId, new Date(now + HOUR_MS).toISOString())
-                                  }
-                                >
-                                  1 hour
-                                </MenuItem>
-                                <MenuItem
-                                  onClick={() =>
-                                    snoozeCard(
-                                      item.cardId,
-                                      new Date(now + 24 * HOUR_MS).toISOString(),
-                                    )
-                                  }
-                                >
-                                  Tomorrow
-                                </MenuItem>
-                                <MenuItem onClick={() => snoozeCard(item.cardId, null)}>
-                                  Until it changes
-                                </MenuItem>
-                              </MenuGroup>
-                            </MenuPopup>
-                          </Menu>
-                        ) : null}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ol>
-            )}
+                              {item.title}
+                            </CardLink>
+                            <span className="shrink-0 text-[11px] font-medium tabular-nums text-tertiary-label">
+                              {cardShortId(itemCard ?? { id: item.cardId, linearIssue: null })}
+                            </span>
+                            {item.kind === "refsChanged" ? (
+                              <StatusPill label="Refs Moved" tone="orange" />
+                            ) : null}
+                            {marks.length > 0 ? (
+                              <CriteriaMarks marks={marks} className="ms-1" />
+                            ) : null}
+                            {suggested !== undefined ? (
+                              <AgentAvatar
+                                name={suggested}
+                                className="ms-1 size-[18px] text-[9px]"
+                              />
+                            ) : null}
+                          </div>
+                          {SELF_EVIDENT.has(item.kind) ||
+                          answersInPlace ||
+                          attention !== undefined ? null : (
+                            <DisabledReason reason={why} className="self-start">
+                              <span className="self-start text-[13px] text-muted-foreground">
+                                {needsYouLabel(item)}
+                              </span>
+                            </DisabledReason>
+                          )}
+                          {item.kind === "lessonProposed" && item.reason !== null ? (
+                            <p className="line-clamp-4 whitespace-pre-wrap break-words text-[13px] text-muted-foreground">
+                              {item.reason}
+                            </p>
+                          ) : null}
+                          {attention !== undefined ? (
+                            <p className="line-clamp-2 whitespace-pre-wrap break-words text-[13px] text-muted-foreground">
+                              {attention.text}
+                            </p>
+                          ) : null}
+                          {answersInPlace && environmentId !== null ? (
+                            <CardQuestion
+                              cardId={item.cardId}
+                              question={question}
+                              environmentId={environmentId}
+                              agentName={
+                                itemCard?.delegateAgentId == null
+                                  ? undefined
+                                  : agentNameById.get(itemCard.delegateAgentId)
+                              }
+                            />
+                          ) : null}
+                          {(item.kind === "checkpoint" || item.kind === "sliceCheckpoint") &&
+                          environmentId !== null &&
+                          itemCard !== undefined ? (
+                            <CheckpointControls card={itemCard} environmentId={environmentId} />
+                          ) : null}
+                          {question?.kind === "refsChanged" && environmentId !== null ? (
+                            <RefsChangedControls
+                              cardId={item.cardId}
+                              report={question}
+                              environmentId={environmentId}
+                            />
+                          ) : null}
+                        </div>
+                        <div className="col-start-2 flex min-h-8 flex-wrap items-center justify-end gap-2 md:col-start-3">
+                          {primary}
+                          <span className="w-8 text-right text-xs tabular-nums text-tertiary-label">
+                            <span className="sr-only">Waiting </span>
+                            {waitingLabel(item.since, now)}
+                          </span>
+                          {item.snoozable ? (
+                            <Menu>
+                              <MenuTrigger
+                                render={
+                                  <Button
+                                    size="icon-sm"
+                                    variant="ghost-muted"
+                                    aria-label={`Snooze ${item.title}`}
+                                  />
+                                }
+                              >
+                                <EllipsisIcon />
+                              </MenuTrigger>
+                              <MenuPopup align="end">
+                                <MenuGroup>
+                                  <MenuGroupLabel>Snooze</MenuGroupLabel>
+                                  <MenuItem
+                                    onClick={() =>
+                                      snoozeCard(item.cardId, new Date(now + HOUR_MS).toISOString())
+                                    }
+                                  >
+                                    1 hour
+                                  </MenuItem>
+                                  <MenuItem
+                                    onClick={() =>
+                                      snoozeCard(
+                                        item.cardId,
+                                        new Date(now + 24 * HOUR_MS).toISOString(),
+                                      )
+                                    }
+                                  >
+                                    Tomorrow
+                                  </MenuItem>
+                                  <MenuItem onClick={() => snoozeCard(item.cardId, null)}>
+                                    Until it changes
+                                  </MenuItem>
+                                </MenuGroup>
+                              </MenuPopup>
+                            </Menu>
+                          ) : null}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </section>
+            ))}
             {waits.length > 0 ? (
               <ListSection label="Waiting on Iskra">
                 {waits.map((wait) => (
