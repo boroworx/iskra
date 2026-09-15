@@ -34,6 +34,10 @@ type DecisionType = CardDecisionInput["type"];
  * Everything waiting on a person across environments, longest waiting first: questions answered
  * with their option buttons, checkpoints, and the one-tap decisions Needs you offers on web.
  */
+// native-stack calls headerRight as a plain function, so it renders the button as an element
+// rather than running the button's hooks inside SceneView once the options land.
+const renderChannelsHeaderButton = () => <ChannelsHeaderButton />;
+
 export function NeedsYouRouteScreen() {
   const navigation = useNavigation();
   const now = useMinuteClock();
@@ -59,7 +63,7 @@ export function NeedsYouRouteScreen() {
 
   return (
     <>
-      <NativeStackScreenOptions options={{ title: "Needs you", headerRight: () => <ChannelsHeaderButton /> }} />
+      <NativeStackScreenOptions options={{ title: "Needs you", headerRight: renderChannelsHeaderButton }} />
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         className="flex-1 bg-screen"
