@@ -4,6 +4,7 @@ import {
   CommandId,
   DEFAULT_PROJECT_ORCHESTRATION,
   MessageId,
+  ORPHANED_PROVIDER_SESSION_ERROR,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -283,6 +284,45 @@ it.layer(layer)("RunReactor", (it) => {
           (event) => event.payload.status === "undelivered",
         );
         expect(undelivered.payload.messageIds).toEqual(["failed-second"]);
+      }),
+    ),
+  );
+
+  it.effect("wakes the agent again for a message its run never read when a restart lost the run", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const world = yield* startChannel("lost");
+        yield* world.post("lost-first", "@lost what changed?");
+        const threadId = ThreadId.make(
+          (yield* world.nextEvent("thread.turn-start-requested")).aggregateId,
+        );
+        yield* world.setSession(threadId, "running", "turn-1");
+        yield* world.post("lost-second", "@lost and why?");
+        yield* world.answer(threadId, "turn-1", "The API.");
+        yield* world.setSession(threadId, "ready", null);
+        yield* world.nextEvent(
+          "thread.turn-start-requested",
+          (event) => event.aggregateId === threadId,
+        );
+
+        yield* world.setSession(threadId, "error", null, ORPHANED_PROVIDER_SESSION_ERROR);
+        const returned = yield* world.nextEvent(
+          "channel.delivery-updated",
+          (event) => event.payload.status === "pending" && event.payload.runThreadId === threadId,
+        );
+        expect(returned.payload.messageIds).toEqual(["lost-second"]);
+        const rerun = yield* world.nextEvent(
+          "channel.run-started",
+          (event) => event.payload.threadId !== threadId,
+        );
+        expect(rerun.payload.triggerMessageId).toBe("lost-second");
+
+        // Later tests share this database; leave no live runs behind.
+        yield* world.nextEvent(
+          "thread.turn-start-requested",
+          (event) => event.aggregateId === rerun.payload.threadId,
+        );
+        yield* world.setSession(rerun.payload.threadId, "stopped", null);
       }),
     ),
   );

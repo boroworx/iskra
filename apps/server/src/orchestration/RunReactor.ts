@@ -3,6 +3,7 @@ import * as NodeOS from "node:os";
 import {
   CommandId,
   MessageId,
+  ORPHANED_PROVIDER_SESSION_ERROR,
   ThreadId,
   isRunEndingSessionStatus,
   type AgentId,
@@ -57,7 +58,8 @@ import { budgetHold, environmentSpendUsd } from "./watchdogRules.ts";
  * turn ends with nothing waiting, the reply is posted and the session stopped,
  * so the next wake starts a fresh run. A run that ends with messages still
  * waiting wakes the agent again for them; a message whose turn never ran is
- * marked `undelivered` (invariant 10).
+ * marked `undelivered` (invariant 10), unless a server restart lost the run, when it waits for the
+ * agent's next run too.
  *
  * Every channel and DM gets its own run of an agent. A wake past the machine's session cap keeps
  * its messages pending and starts once a session ends (or on the minute tick), saying so in the
@@ -77,7 +79,7 @@ type RunRequest =
   | { readonly kind: "wake"; readonly event: WakeRequestedEvent }
   | { readonly kind: "settled"; readonly threadId: ThreadId }
   | { readonly kind: "running"; readonly threadId: ThreadId }
-  | { readonly kind: "ended"; readonly threadId: ThreadId }
+  | { readonly kind: "ended"; readonly threadId: ThreadId; readonly lost: boolean }
   | { readonly kind: "retry" }
   | { readonly kind: "pickUpQueued" };
 
@@ -448,19 +450,21 @@ const make = Effect.gen(function* () {
       );
   });
 
-  const endRun = Effect.fn("RunReactor.endRun")(function* (threadId: ThreadId) {
+  const endRun = Effect.fn("RunReactor.endRun")(function* (threadId: ThreadId, lost: boolean) {
     const run = yield* snapshotQuery.getRunByThreadId(threadId);
     if (Option.isNone(run) || run.value.channelId === null) {
       return;
     }
     const { channelId, agentId } = { ...run.value, channelId: run.value.channelId };
     const open = yield* channels.listOpenDeliveries({ agentId, channelId });
-    // Sent into a turn that never ran: the agent did not read them.
+    const unread = sentInto(open, threadId);
+    // Sent into a turn that never ran: the agent did not read them. A server restart lost the run,
+    // not the conversation, so they wait for the agent's next run instead.
     yield* updateDeliveries({
       channelId,
       agentId,
-      deliveries: sentInto(open, threadId),
-      status: "undelivered",
+      deliveries: unread,
+      status: lost ? "pending" : "undelivered",
       runThreadId: threadId,
     });
 
@@ -470,7 +474,10 @@ const make = Effect.gen(function* () {
       commandId: CommandId.make(`run-rewake:${threadId}`),
       channelId,
       agentId,
-      waiting: open.filter((delivery) => delivery.status === "pending"),
+      waiting: [
+        ...(lost ? unread : []),
+        ...open.filter((delivery) => delivery.status === "pending"),
+      ],
     });
   });
 
@@ -511,7 +518,7 @@ const make = Effect.gen(function* () {
       case "running":
         return markDelivered(request.threadId);
       case "ended":
-        return endRun(request.threadId);
+        return endRun(request.threadId, request.lost);
       case "retry":
         return retryWaiting();
       case "pickUpQueued":
@@ -537,9 +544,16 @@ const make = Effect.gen(function* () {
       case "channel.agent-wake-requested":
         return worker.enqueue({ kind: "wake", event });
       case "thread.session-set": {
-        const kind = runSessionChange(event.payload.session);
+        const { session, threadId } = event.payload;
+        const kind = runSessionChange(session);
         const handled =
-          kind === null ? Effect.void : worker.enqueue({ kind, threadId: event.payload.threadId });
+          kind === null
+            ? Effect.void
+            : worker.enqueue(
+                kind === "ended"
+                  ? { kind, threadId, lost: session.lastError === ORPHANED_PROVIDER_SESSION_ERROR }
+                  : { kind, threadId },
+              );
         // Any session going quiet, a card's included, may free the slot a wake waits for.
         return (kind === "settled" || kind === "ended") && waiting.size > 0
           ? Effect.andThen(handled, worker.enqueue({ kind: "retry" }))
