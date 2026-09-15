@@ -1098,7 +1098,8 @@ export function DiagnosticsSettingsPanel() {
         <DiagnosticsErrorRows
           errors={[
             processResourceError ? { message: processResourceError.message } : null,
-            resourceError ? { message: resourceError } : null,
+            // The same monitor failure already shows under Live processes; say it once.
+            resourceError && resourceError !== processError ? { message: resourceError } : null,
           ]}
         />
         <ProcessResourceHistoryChart buckets={resourceData?.buckets ?? []} />
