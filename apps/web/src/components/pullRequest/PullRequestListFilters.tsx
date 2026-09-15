@@ -106,7 +106,11 @@ export function PullRequestSearchInput({
   onChange: (value: string) => void;
 }) {
   return (
-    <InputGroup className="min-w-0 flex-1 **:[input]:h-9 sm:**:[input]:h-8">
+    // A filled field without a border, the same tinted fill in light and dark.
+    <InputGroup
+      variant="ghost"
+      className="min-w-0 flex-1 bg-[rgb(120_120_128/12%)] hover:bg-[rgb(120_120_128/16%)] **:[input]:h-9 sm:**:[input]:h-8 dark:bg-[rgb(120_120_128/24%)] dark:hover:bg-[rgb(120_120_128/28%)]"
+    >
       <InputGroupAddon>
         {busy ? <Spinner aria-hidden /> : <SearchIcon aria-hidden />}
       </InputGroupAddon>
@@ -507,7 +511,8 @@ export function PullRequestFiltersMenu({
         render={
           <Button
             className={filterCount > 0 ? "[--control-icon-color:currentColor]" : undefined}
-            variant="outline"
+            variant="ghost"
+            size="sm"
           />
         }
       >

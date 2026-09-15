@@ -111,7 +111,7 @@ import {
   WorkspaceBreadcrumbItem,
   WorkspaceBreadcrumbSeparator,
 } from "../components/WorkspaceBreadcrumb";
-import { WorkspacePageContainer } from "../components/WorkspacePageContainer";
+import { PageColumn, PageLargeTitle } from "../components/iskra/Page";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { isElectron } from "../env";
@@ -151,7 +151,6 @@ import { cn } from "~/lib/utils";
 import {
   SETTINGS_GROUP_CLASSNAME,
   SETTINGS_SECTION_HEAD_CLASSNAME,
-  SettingsLargeTitle,
 } from "~/components/settings/settingsLayout";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { getSourceControlPresentationForKind } from "~/sourceControlPresentation";
@@ -1757,7 +1756,7 @@ function PullRequestsRouteView() {
       label="Sort pull requests"
       triggerIcon={<ArrowDownUpIcon aria-hidden className="size-4" />}
       triggerLabel="Sort"
-      outlined
+      asButton
       value={sort}
       options={SORT_OPTIONS}
       onChange={(next) => updateListScope({ sort: next })}
@@ -2049,7 +2048,7 @@ function CompactFilterMenu<Value extends string>({
   label,
   triggerIcon,
   triggerLabel,
-  outlined = false,
+  asButton = false,
   iconOnly = false,
   value,
   options,
@@ -2059,7 +2058,8 @@ function CompactFilterMenu<Value extends string>({
   label: string;
   triggerIcon?: ReactNode;
   triggerLabel?: string;
-  outlined?: boolean;
+  /** A 28px ghost toolbar button instead of the quiet breadcrumb segment. */
+  asButton?: boolean;
   iconOnly?: boolean;
   value: Value;
   options: ReadonlyArray<PullRequestFilterOption<Value>>;
@@ -2074,10 +2074,10 @@ function CompactFilterMenu<Value extends string>({
         aria-label={triggerLabel || iconOnly ? `${label}: ${current.label}` : label}
         title={iconOnly ? `${label}: ${current.label}` : undefined}
         render={
-          outlined ? <Button variant="outline" size={iconOnly ? "icon" : "default"} /> : undefined
+          asButton ? <Button variant="ghost" size={iconOnly ? "icon-sm" : "sm"} /> : undefined
         }
         className={
-          outlined
+          asButton
             ? className
             : cn(
                 "inline-flex h-7 min-w-0 items-center gap-1 rounded-md px-1.5 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground",
@@ -2351,8 +2351,10 @@ function PullRequestsColumn({
           </WorkspaceBreadcrumb>
         ) : null}
         <div className="min-w-0 flex-1" />
-        {condensed ? (
-          <div className="flex shrink items-center gap-1.5">
+        {/* The toolbar holds the page's actions; the search stays in the column until it
+            scrolls away, then folds in here. */}
+        <div className="flex shrink items-center gap-1">
+          {condensed ? (
             <ExpandableSearch
               searchInput={searchInput}
               searchValue={searchValue}
@@ -2363,9 +2365,21 @@ function PullRequestsColumn({
                 topbarSearchFocusedRef.current = focused;
               }}
             />
-            <PullRequestRefreshControl compact refreshing={refreshing} onRefresh={onRefresh} />
-          </div>
-        ) : null}
+          ) : null}
+          {sortMenu}
+          {filtersMenu}
+          <CompactFilterMenu
+            label="Filter by provider"
+            asButton
+            iconOnly={host !== undefined}
+            triggerIcon={<Plug2Icon aria-hidden className="size-4" />}
+            triggerLabel="All"
+            value={host ?? ""}
+            options={hostMenuOptions}
+            onChange={(next) => onHost(next === "" ? undefined : next)}
+          />
+          <PullRequestRefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        </div>
         {rightPanelControl}
       </WorkspacePageHeader>
 
@@ -2376,53 +2390,33 @@ function PullRequestsColumn({
         {/* The top padding is the shared fade band's height, the same pairing the
             settings page makes: at rest the controls sit fully below the mask, and only
             content actually passing under the chrome fades. */}
-        <WorkspacePageContainer width="expanded" className="min-h-full gap-4 pt-2">
-          <SettingsLargeTitle>Pull Requests</SettingsLargeTitle>
-          <div className="flex flex-col gap-3">
-            <div ref={inFlowSearchRef} className="flex flex-wrap items-center gap-2">
-              <div className="min-w-0 basis-full @lg/pr-list:basis-0 @lg/pr-list:flex-1">
-                {searchInput}
-              </div>
-              {sortMenu}
-              {filtersMenu}
-              <CompactFilterMenu
-                label="Filter by provider"
-                outlined
-                iconOnly={host !== undefined}
-                triggerIcon={<Plug2Icon aria-hidden className="size-4" />}
-                triggerLabel="All"
-                value={host ?? ""}
-                options={hostMenuOptions}
-                onChange={(next) => onHost(next === "" ? undefined : next)}
-              />
-              {!condensed ? (
-                <PullRequestRefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-              ) : null}
+        <PageColumn width="wide" className="min-h-full pb-12">
+          <PageLargeTitle>Pull Requests</PageLargeTitle>
+          <div className="flex flex-col gap-7">
+            <div className="flex flex-col">
+              <div ref={inFlowSearchRef}>{searchInput}</div>
+              {/* Scrolled past this marker, the search is gone and the title takes over. */}
+              <div ref={markerRef} aria-hidden className="h-px w-full" />
             </div>
-            {/* Scrolled past this marker, the controls are gone and the title takes over. */}
-            <div ref={markerRef} aria-hidden className="-mt-3 h-px w-full" />
+            {listBody}
           </div>
-
-          {listBody}
-        </WorkspacePageContainer>
+        </PageColumn>
       </div>
     </div>
   );
 }
 
 function PullRequestRefreshControl({
-  compact = false,
   refreshing,
   onRefresh,
 }: {
-  compact?: boolean;
   refreshing: boolean;
   onRefresh: () => void;
 }) {
   return (
     <Button
-      size={compact ? "icon-sm" : "icon"}
-      variant={compact ? "ghost" : "outline"}
+      size="icon-sm"
+      variant="ghost"
       aria-label="Refresh pull requests"
       onClick={onRefresh}
       disabled={refreshing}
