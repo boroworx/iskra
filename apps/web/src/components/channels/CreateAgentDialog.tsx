@@ -1,5 +1,5 @@
 import type { EnvironmentProject } from "@iskra/client-runtime/state/models";
-import type { AgentId, ModelSelection } from "@iskra/contracts";
+import type { AgentId, ModelSelection, RunCapability } from "@iskra/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useId, useState } from "react";
 
@@ -24,7 +24,11 @@ import {
   resolveAgentModelSelection,
   useEnvironmentProviders,
 } from "./AgentModelPicker";
+import { CapabilityFields, orderedCapabilities } from "./AgentSettingsDialog";
 import { toAgentName } from "./channels.logic";
+
+// An agent is usually made to build, so card sessions can change files and run commands; network stays off.
+const NEW_AGENT_CAPABILITIES: ReadonlyArray<RunCapability> = ["read", "write", "shell"];
 
 /**
  * Creates an agent by writing its file to `.iskra/agents`, or imports agents
@@ -49,6 +53,8 @@ export function CreateAgentDialog(props: {
   const formId = useId();
   const agentName = toAgentName(name);
   const [chosenModel, setChosenModel] = useState<ModelSelection | null>(null);
+  const [capabilities, setCapabilities] =
+    useState<ReadonlyArray<RunCapability>>(NEW_AGENT_CAPABILITIES);
   const modelSelection =
     chosenModel ?? resolveAgentModelSelection(providers, props.project.defaultModelSelection);
 
@@ -79,7 +85,7 @@ export function CreateAgentDialog(props: {
           avatar: null,
           tags: [],
           modelSelection,
-          capabilities: ["read"],
+          capabilities: orderedCapabilities(capabilities),
           rolePrompt: role.trim(),
         },
       },
@@ -94,6 +100,7 @@ export function CreateAgentDialog(props: {
     setName("");
     setRole("");
     setChosenModel(null);
+    setCapabilities(NEW_AGENT_CAPABILITIES);
     props.onOpenChange(false);
     void navigate({ to: "/agents/$environmentId/$agentId", params: { environmentId, agentId } });
   };
@@ -179,6 +186,7 @@ export function CreateAgentDialog(props: {
                 onChange={setChosenModel}
               />
             )}
+            <CapabilityFields value={capabilities} onChange={setCapabilities} />
           </form>
         </DialogPanel>
         <DialogFooter>

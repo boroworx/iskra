@@ -39,6 +39,47 @@ const CAPABILITIES: ReadonlyArray<{ readonly value: RunCapability; readonly labe
   { value: "network", label: "Network" },
 ];
 
+/** The capabilities in their canonical order, as an agent file stores them. */
+export const orderedCapabilities = (capabilities: ReadonlyArray<RunCapability>) =>
+  CAPABILITIES.map((entry) => entry.value).filter((value) => capabilities.includes(value));
+
+/** An agent's capability checkboxes. Shell needs write, so dropping write drops shell too. */
+export function CapabilityFields(props: {
+  readonly value: ReadonlyArray<RunCapability>;
+  readonly onChange: (capabilities: ReadonlyArray<RunCapability>) => void;
+  readonly disabled?: boolean;
+}) {
+  const toggle = (capability: RunCapability, checked: boolean) => {
+    const next = checked
+      ? [...props.value, capability]
+      : props.value.filter((entry) => entry !== capability);
+    props.onChange(next.includes("write") ? next : next.filter((entry) => entry !== "shell"));
+  };
+  return (
+    <div className="space-y-1.5">
+      <span className="block text-xs font-medium text-muted-foreground">Capabilities</span>
+      <div className="flex flex-wrap gap-x-4 gap-y-2">
+        {CAPABILITIES.map((entry) => (
+          <label key={entry.value} className="flex items-center gap-2 text-sm">
+            <Checkbox
+              checked={props.value.includes(entry.value)}
+              disabled={
+                props.disabled === true ||
+                (entry.value === "shell" && !props.value.includes("write"))
+              }
+              onCheckedChange={(checked) => toggle(entry.value, checked)}
+            />
+            {entry.label}
+          </label>
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Card sessions only; conversations and DMs are always read-only. Shell needs write.
+      </p>
+    </div>
+  );
+}
+
 /** A project's agent definitions, archived ones included. Refresh after a save or archive. */
 export function useAgentDefinitions(environmentId: EnvironmentId, projectId: ProjectId | null) {
   return useEnvironmentQuery(
@@ -126,15 +167,6 @@ function AgentSettingsForm(props: {
   const formId = useId();
   const agentName = toAgentName(name);
 
-  const toggleCapability = (capability: RunCapability, checked: boolean) =>
-    setCapabilities((current) => {
-      const next = checked
-        ? [...current, capability]
-        : current.filter((entry) => entry !== capability);
-      // Shell needs write: dropping write drops shell too.
-      return next.includes("write") ? next : next.filter((entry) => entry !== "shell");
-    });
-
   const save = async () => {
     if (agentName.length === 0 || busy) {
       return;
@@ -150,9 +182,7 @@ function AgentSettingsForm(props: {
           .split(",")
           .map((tag) => tag.trim())
           .filter((tag) => tag.length > 0),
-        capabilities: CAPABILITIES.map((entry) => entry.value).filter((value) =>
-          capabilities.includes(value),
-        ),
+        capabilities: orderedCapabilities(capabilities),
       },
       "Agent not saved",
     );
@@ -253,26 +283,11 @@ function AgentSettingsForm(props: {
                 onChange={(event) => setTags(event.target.value)}
               />
             </label>
-            <div className="space-y-1.5">
-              <span className="block text-xs font-medium text-muted-foreground">Capabilities</span>
-              <div className="flex flex-wrap gap-x-4 gap-y-2">
-                {CAPABILITIES.map((entry) => (
-                  <label key={entry.value} className="flex items-center gap-2 text-sm">
-                    <Checkbox
-                      checked={capabilities.includes(entry.value)}
-                      disabled={
-                        props.archived || (entry.value === "shell" && !capabilities.includes("write"))
-                      }
-                      onCheckedChange={(checked) => toggleCapability(entry.value, checked)}
-                    />
-                    {entry.label}
-                  </label>
-                ))}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Card sessions only; conversations and DMs are always read-only. Shell needs write.
-              </p>
-            </div>
+            <CapabilityFields
+              value={capabilities}
+              onChange={setCapabilities}
+              disabled={props.archived}
+            />
           </fieldset>
         </form>
       </DialogPanel>
