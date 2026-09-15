@@ -285,8 +285,7 @@ export function BoardView(props: {
           <DndContext sensors={sensors} onDragEnd={(event) => void onDragEnd(event)}>
             <div
               key={props.projectId}
-              ref={boardScrollerRef}
-              className="relative flex min-h-0 flex-1 gap-4 overflow-x-auto px-5 py-4 data-[fade=both]:[mask-image:linear-gradient(to_right,transparent,#000_40px,#000_calc(100%-40px),transparent)] data-[fade=end]:[mask-image:linear-gradient(to_right,#000_calc(100%-40px),transparent)] data-[fade=start]:[mask-image:linear-gradient(to_right,transparent,#000_40px)]"
+              className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 py-4"
             >
               {BOARD_COLUMNS.map((column) => (
                 <BoardColumnView
@@ -300,43 +299,12 @@ export function BoardView(props: {
                   onOpen={openCard}
                 />
               ))}
-              {/* With the 16px gap, the canvas's 20px end padding, which a scroller drops. */}
-              <div aria-hidden className="w-1 shrink-0" />
             </div>
           </DndContext>
         )}
       </div>
     </SidebarInset>
   );
-}
-
-/**
- * The column scroller's ref. Columns scroll sideways, so the edge with more columns fades; and a
- * board whose visible columns are all empty opens scrolled to its first column with cards.
- */
-function boardScrollerRef(scroller: HTMLDivElement | null) {
-  if (scroller === null) return;
-  const sections = [...scroller.querySelectorAll<HTMLElement>(":scope > section")];
-  const withCards = sections.filter((section) => section.querySelector("li") !== null);
-  const visibleEnd = scroller.clientWidth;
-  if (!withCards.some((section) => section.offsetLeft + section.offsetWidth <= visibleEnd)) {
-    const first = withCards[0];
-    if (first !== undefined) scroller.scrollLeft = first.offsetLeft - 20;
-  }
-  const update = () => {
-    const start = scroller.scrollLeft > 1;
-    const end = scroller.scrollLeft + scroller.clientWidth < scroller.scrollWidth - 1;
-    const fade = start && end ? "both" : start ? "start" : end ? "end" : "";
-    if (scroller.dataset.fade !== fade) scroller.dataset.fade = fade;
-  };
-  update();
-  scroller.addEventListener("scroll", update, { passive: true });
-  const observer = new ResizeObserver(update);
-  observer.observe(scroller);
-  return () => {
-    scroller.removeEventListener("scroll", update);
-    observer.disconnect();
-  };
 }
 
 function BoardColumnView(props: {
@@ -354,7 +322,7 @@ function BoardColumnView(props: {
       ref={setNodeRef}
       aria-label={BOARD_COLUMN_LABEL[props.column]}
       className={cn(
-        "-m-1 flex w-[280px] shrink-0 flex-col gap-2.5 rounded-[14px] p-1",
+        "-m-1 flex shrink-0 flex-col gap-2.5 rounded-[14px] p-1",
         isOver && "bg-[rgb(120_120_128/10%)]",
       )}
     >
@@ -362,9 +330,10 @@ function BoardColumnView(props: {
         {BOARD_COLUMN_LABEL[props.column]}
         <span className="font-semibold tabular-nums text-tertiary-label">{props.cards.length}</span>
       </h2>
-      <ol className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto p-px pb-2">
+      {/* A group's cards run sideways, so every group stays in view down the page. */}
+      <ol className="flex min-w-0 gap-2.5 overflow-x-auto p-px pb-2">
         {props.cards.map((card) => (
-          <li key={card.id}>
+          <li key={card.id} className="w-[280px] shrink-0">
             <CardFace
               card={card}
               blocked={props.related.blocked.has(card.id)}
@@ -376,6 +345,10 @@ function BoardColumnView(props: {
             />
           </li>
         ))}
+        {/* An empty group still takes a drop, so a card can move into it. */}
+        {props.cards.length === 0 ? (
+          <li className="h-10 flex-1 rounded-[12px] border border-dashed border-border/70" />
+        ) : null}
       </ol>
     </section>
   );
