@@ -32,7 +32,7 @@ import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts"
 export const START_RETRY_MINUTES = [1, 5, 30] as const;
 
 /**
- * Starts card owner sessions from the queue. It re-plans when a card, a policy or a session changes
+ * Starts card owner (and plan coordinator) sessions from the queue. It re-plans when a card, a policy or a session changes
  * and once a minute, starts what `planStarts` picks with `card.session.start` (the decider re-checks
  * every gate), notes why the rest wait, and stops idle owners of cards in review so their slot frees.
  * A start that fails is retried after 1, 5 and 30 minutes, then the card is paused.
@@ -63,6 +63,8 @@ const REPLAN_EVENTS: ReadonlySet<OrchestrationEvent["type"]> = new Set([
   "card.activity-recorded",
   "card.landing-linked",
   "card.spend-recorded",
+  "card.plan-slice-released",
+  "project.spend-recorded",
   "project.orchestration-set",
 ]);
 
@@ -112,6 +114,7 @@ const make = Effect.gen(function* () {
     const result = planStarts({
       readModel,
       inFlightChangedFiles,
+      environmentMonthlyBudgetUsd: runtime.monthlyBudgetUsd,
       environmentSessionCap: environmentSessionCapOf({
         cores: NodeOS.availableParallelism(),
         totalMemBytes: NodeOS.totalmem(),
@@ -131,7 +134,11 @@ const make = Effect.gen(function* () {
           threadId,
           createdAt: yield* nowIso,
         })
-        .pipe(Effect.catch((error) => Effect.logWarning("idle owner was not stopped", { threadId, error: error.message })));
+        .pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("idle owner was not stopped", { threadId, error: error.message }),
+          ),
+        );
     }
     for (const { cardId, reason } of result.waits) {
       yield* engine
@@ -143,7 +150,11 @@ const make = Effect.gen(function* () {
           reason,
           notedAt: yield* nowIso,
         })
-        .pipe(Effect.catch((error) => Effect.logWarning("card wait was not noted", { cardId, error: error.message })));
+        .pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("card wait was not noted", { cardId, error: error.message }),
+          ),
+        );
     }
     for (const card of result.start) {
       starting.add(card.id);
@@ -179,7 +190,11 @@ const make = Effect.gen(function* () {
         cardId,
         reason,
       })
-      .pipe(Effect.catch((error) => Effect.logWarning("card was not paused", { cardId, error: error.message })));
+      .pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("card was not paused", { cardId, error: error.message }),
+        ),
+      );
   });
 
   let planQueued = false;
@@ -191,7 +206,10 @@ const make = Effect.gen(function* () {
       Effect.catchCause((cause) =>
         Cause.hasInterruptsOnly(cause)
           ? Effect.failCause(cause)
-          : Effect.logWarning("card scheduler request failed", { request, cause: Cause.pretty(cause) }),
+          : Effect.logWarning("card scheduler request failed", {
+              request,
+              cause: Cause.pretty(cause),
+            }),
       ),
     ),
   );
@@ -205,7 +223,7 @@ const make = Effect.gen(function* () {
   const processEvent = (event: OrchestrationEvent) => {
     switch (event.type) {
       case "card.session-started":
-        if (event.payload.role === "owner") {
+        if (event.payload.role === "owner" || event.payload.role === "coordinator") {
           starting.delete(event.payload.cardId);
           failures.delete(event.payload.cardId);
         }

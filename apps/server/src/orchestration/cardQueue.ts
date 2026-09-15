@@ -3,6 +3,7 @@ import * as DateTime from "effect/DateTime";
 import {
   delegateReadOnlyText,
   projectOrchestrationOf,
+  projectSpendOf,
   type CardId,
   type OrchestrationCard,
   type OrchestrationReadModel,
@@ -13,8 +14,11 @@ import {
 
 import {
   BLOCKED_REASON,
+  budgetWaitReason,
   cardBudgetRefusal,
   cardFactsOf,
+  environmentBudgetWaitReason,
+  HELD_BY_CHECKPOINT_WAIT,
   sessionCapRefusal,
   sideEffectGuardRefusal,
 } from "./cardRules.ts";
@@ -62,12 +66,17 @@ export const environmentSessionCapOf = (input: {
   input.override ??
   Math.min(
     6,
-    Math.max(1, Math.min(Math.floor(input.cores / 3), Math.floor(input.totalMemBytes / 1024 ** 3 / 8))),
+    Math.max(
+      1,
+      Math.min(Math.floor(input.cores / 3), Math.floor(input.totalMemBytes / 1024 ** 3 / 8)),
+    ),
   );
 
 export interface PlanStartsInput {
   readonly readModel: OrchestrationReadModel;
   readonly environmentSessionCap: number;
+  // This machine's monthly budget (settings), or null for none.
+  readonly environmentMonthlyBudgetUsd: number | null;
   // Cards whose start was dispatched and has not recorded a session or failed yet.
   readonly starting: ReadonlySet<CardId>;
   // Epoch millis before which a card that failed to start is not tried again.
@@ -86,7 +95,7 @@ export interface StartPlan {
   readonly start: ReadonlyArray<OrchestrationCard>;
   // Wait reasons that changed: set, or null to clear.
   readonly waits: ReadonlyArray<{ readonly cardId: CardId; readonly reason: Reason | null }>;
-  // Idle owners of cards in review or landing, stopped to give their slot back.
+  // Idle owners (and coordinators) of cards in review or landing, stopped to give their slot back.
   readonly stop: ReadonlyArray<ThreadId>;
 }
 
@@ -94,7 +103,9 @@ export interface StartPlan {
  * Which cards start now. A card is a candidate when a person approved it to run: an agent is
  * delegated, the spec is past the plan gate, criteria are confirmed, no checkpoint is open, the
  * side-effect guard is acknowledged, budget remains, no earlier start failure is waiting out its
- * backoff, and it is ready (or in progress with no owner, a restart). A blocked candidate waits.
+ * backoff, and it is ready (or in progress with no owner, a restart). A blocked candidate waits, and
+ * so does one held for its plan's slice checkpoint or past a monthly budget. A plan card starts its
+ * read-only coordinator; a migration card never starts a session (its children do the work).
  * Candidates start in order (restarts, priority, the project with fewest busy slots, time queued)
  * while the machine and project have room; the rest say why they wait.
  */
@@ -104,11 +115,19 @@ export function planStarts(input: PlanStartsInput): StartPlan {
   const busy = busyRunsOf(readModel);
   const ownedCardIds = new Set(
     (readModel.liveRuns ?? []).flatMap((run) =>
-      run.role === "owner" && run.cardId !== null ? [run.cardId] : [],
+      (run.role === "owner" || run.role === "coordinator") && run.cardId !== null
+        ? [run.cardId]
+        : [],
     ),
   );
   const projectById = new Map(readModel.projects.map((project) => [project.id, project] as const));
-  const policyOf = (projectId: ProjectId) => projectOrchestrationOf(projectById.get(projectId) ?? {});
+  const policyOf = (projectId: ProjectId) =>
+    projectOrchestrationOf(projectById.get(projectId) ?? {});
+  const nowIso = DateTime.formatIso(DateTime.makeUnsafe(input.now));
+  const environmentSpentUsd = readModel.projects.reduce(
+    (total, project) => total + projectSpendOf(project, nowIso).totalUsd,
+    0,
+  );
 
   /** The exclusive-path glob a card's likely areas share with another open card's changes, or null. */
   const busyExclusivePath = (card: OrchestrationCard): string | null => {
@@ -133,6 +152,7 @@ export function planStarts(input: PlanStartsInput): StartPlan {
     const runnable =
       // A ready card can already have its owner: work starts only once the session records.
       (card.status === "ready" || card.status === "inProgress") &&
+      card.kind !== "migration" &&
       !ownedCardIds.has(card.id) &&
       card.paused === null &&
       card.delegateAgentId !== null &&
@@ -147,14 +167,32 @@ export function planStarts(input: PlanStartsInput): StartPlan {
       desired.set(card.id, SIDE_EFFECT_GUARD_WAIT);
       continue;
     }
-    // A session that can't write can't do card work, so it isn't started at all.
+    // A session that can't write can't do card work, so it isn't started at all; a coordinator only reads.
     const delegate = (readModel.agents ?? []).find((agent) => agent.id === card.delegateAgentId);
-    if (delegate !== undefined && !delegate.capabilities.includes("write")) {
+    if (
+      card.kind !== "plan" &&
+      delegate !== undefined &&
+      !delegate.capabilities.includes("write")
+    ) {
       desired.set(card.id, { code: "delegateReadOnly", text: delegateReadOnlyText(delegate.name) });
       continue;
     }
     if (cardFactsOf(cards, card).openBlockerCount > 0) {
       desired.set(card.id, { code: "blocked", text: BLOCKED_REASON });
+      continue;
+    }
+    if (card.heldByCheckpoint) {
+      desired.set(card.id, HELD_BY_CHECKPOINT_WAIT);
+      continue;
+    }
+    const budgetWait =
+      budgetWaitReason(
+        policyOf(card.projectId),
+        projectSpendOf(projectById.get(card.projectId) ?? {}, nowIso),
+        delegate ?? null,
+      ) ?? environmentBudgetWaitReason(input.environmentMonthlyBudgetUsd, environmentSpentUsd);
+    if (budgetWait !== null) {
+      desired.set(card.id, budgetWait);
       continue;
     }
     // New work stays off an exclusive path another card is changing; a restart finishes what it began.
@@ -221,7 +259,11 @@ export function planStarts(input: PlanStartsInput): StartPlan {
       continue;
     }
     // Restarts finish work already under way; only new work waits for reviews.
-    if (card.status === "ready" && openAgentPrs(card.projectId) >= policy.openAgentPrCap) {
+    if (
+      card.status === "ready" &&
+      card.kind !== "plan" &&
+      openAgentPrs(card.projectId) >= policy.openAgentPrCap
+    ) {
       desired.set(card.id, {
         code: "reviewCapacity",
         text: `${policy.openAgentPrCap} of this project's pull requests are waiting for review; new work starts when one is merged or closed.`,
@@ -238,7 +280,9 @@ export function planStarts(input: PlanStartsInput): StartPlan {
     const next = desired.get(card.id) ?? null;
     const current = card.waitReason;
     if (next === null) {
-      return current !== null && schedulerCodes.has(current.code) ? [{ cardId: card.id, reason: null }] : [];
+      return current !== null && schedulerCodes.has(current.code)
+        ? [{ cardId: card.id, reason: null }]
+        : [];
     }
     return current?.code === next.code && current.text === next.text
       ? []
@@ -246,9 +290,11 @@ export function planStarts(input: PlanStartsInput): StartPlan {
   });
 
   const stop = (readModel.liveRuns ?? []).flatMap((run) => {
-    if (run.role !== "owner" || run.cardId === null) return [];
+    if ((run.role !== "owner" && run.role !== "coordinator") || run.cardId === null) return [];
     const card = cards.find((candidate) => candidate.id === run.cardId);
-    const idle = !holdsSlot(readModel.threads.find((thread) => thread.id === run.threadId)?.session);
+    const idle = !holdsSlot(
+      readModel.threads.find((thread) => thread.id === run.threadId)?.session,
+    );
     // A question asked a while ago frees the slot; the answer restarts the card from its brief.
     const waitingOnPerson =
       card !== undefined &&

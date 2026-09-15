@@ -50,7 +50,11 @@ const makeQueue = Effect.gen(function* () {
       readonly openAgentPrCap?: number;
       readonly guardAcknowledged?: boolean;
       readonly agents?: OrchestrationReadModel["agents"];
-      readonly exclusivePaths?: NonNullable<OrchestrationReadModel["projects"][number]["orchestration"]>["exclusivePaths"];
+      readonly exclusivePaths?: NonNullable<
+        OrchestrationReadModel["projects"][number]["orchestration"]
+      >["exclusivePaths"];
+      readonly projectBudgetUsd?: number;
+      readonly spentUsd?: number;
     } = {},
   ) => {
     const readModel: OrchestrationReadModel = {
@@ -58,11 +62,21 @@ const makeQueue = Effect.gen(function* () {
       agents: options.agents ?? base.agents,
       projects: base.projects.map((project) => ({
         ...project,
+        // `now` is 0, so this month is January 1970.
+        ...(options.spentUsd === undefined
+          ? {}
+          : { spend: { month: "1970-01", totalUsd: options.spentUsd, byAgent: [] } }),
         orchestration: {
           ...project.orchestration!,
+          budgets: {
+            ...project.orchestration!.budgets,
+            projectUsd: options.projectBudgetUsd ?? null,
+          },
           sessionCap: options.sessionCap ?? null,
           openAgentPrCap: options.openAgentPrCap ?? 5,
-          ...(options.exclusivePaths === undefined ? {} : { exclusivePaths: options.exclusivePaths }),
+          ...(options.exclusivePaths === undefined
+            ? {}
+            : { exclusivePaths: options.exclusivePaths }),
           ...(options.guardAcknowledged === false
             ? { sideEffectGuard: { acknowledgedAt: null, killSwitchEnv: null } }
             : {}),
@@ -75,6 +89,7 @@ const makeQueue = Effect.gen(function* () {
     const result = planStarts({
       readModel,
       environmentSessionCap: options.environmentSessionCap ?? 3,
+      environmentMonthlyBudgetUsd: options.environmentMonthlyBudgetUsd ?? null,
       starting: options.starting ?? new Set(),
       retryAt: options.retryAt ?? new Map(),
       memoryPressure: options.memoryPressure ?? false,
@@ -92,6 +107,11 @@ const makeQueue = Effect.gen(function* () {
 
   return { card, plan };
 });
+
+const makeQueueAgents = Effect.map(
+  applyCommands([createProject(), createAgent(backend)]),
+  (model) => model.agents ?? [],
+);
 
 /** An owner run on `cardId`; a turn id means it is mid-turn, null that it sits settled. */
 const ownerRun = (cardId: string, turnId: string | null) => {
@@ -133,58 +153,73 @@ describe("environmentSessionCapOf", () => {
 });
 
 it.layer(NodeServices.layer)("planStarts", (it) => {
-  it.effect("holds new work whose likely areas touch an exclusive path another card is changing; restarts go on", () =>
-    Effect.gen(function* () {
-      const { card, plan } = yield* makeQueue;
-      const estimate = (likelyAreas: ReadonlyArray<string>) =>
-        ({ likelyAreas }) as unknown as OrchestrationCard["estimate"];
-      const result = plan(
-        [
-          card("migrating", { status: "inProgress", estimate: estimate(["packages/db"]) }),
-          card("next-migration", { estimate: estimate(["packages/db/migrations/0043.sql"]) }),
-          card("schema", { estimate: estimate(["packages/db"]) }),
-          card("web", { estimate: estimate(["apps/web/**"]) }),
-          card("restart", { status: "inProgress", estimate: estimate(["packages/db/migrations"]) }),
-        ],
-        {
-          exclusivePaths: [{ glob: "packages/db/migrations/**", afterRebase: null }],
-          inFlightChangedFiles: [
-            { cardId: CardId.make("migrating"), files: ["packages/db/migrations/0042.sql"] },
-            { cardId: CardId.make("restart"), files: [] },
+  it.effect(
+    "holds new work whose likely areas touch an exclusive path another card is changing; restarts go on",
+    () =>
+      Effect.gen(function* () {
+        const { card, plan } = yield* makeQueue;
+        const estimate = (likelyAreas: ReadonlyArray<string>) =>
+          ({ likelyAreas }) as unknown as OrchestrationCard["estimate"];
+        const result = plan(
+          [
+            card("migrating", { status: "inProgress", estimate: estimate(["packages/db"]) }),
+            card("next-migration", { estimate: estimate(["packages/db/migrations/0043.sql"]) }),
+            card("schema", { estimate: estimate(["packages/db"]) }),
+            card("web", { estimate: estimate(["apps/web/**"]) }),
+            card("restart", {
+              status: "inProgress",
+              estimate: estimate(["packages/db/migrations"]),
+            }),
           ],
-          environmentSessionCap: 10,
-        },
-      );
-      expect(result.reasons).toMatchObject({
-        "next-migration": "exclusivePathBusy",
-        schema: "exclusivePathBusy",
-      });
-      expect(result.started.toSorted()).toEqual(["migrating", "restart", "web"]);
+          {
+            exclusivePaths: [{ glob: "packages/db/migrations/**", afterRebase: null }],
+            inFlightChangedFiles: [
+              { cardId: CardId.make("migrating"), files: ["packages/db/migrations/0042.sql"] },
+              { cardId: CardId.make("restart"), files: [] },
+            ],
+            environmentSessionCap: 10,
+          },
+        );
+        expect(result.reasons).toMatchObject({
+          "next-migration": "exclusivePathBusy",
+          schema: "exclusivePathBusy",
+        });
+        expect(result.started.toSorted()).toEqual(["migrating", "restart", "web"]);
 
-      // Once nothing in flight touches the path, the wait clears.
-      const cleared = plan([card("next-migration", { estimate: estimate(["packages/db/migrations/0043.sql"]), waitReason: { code: "exclusivePathBusy", text: "busy", since: now } })], {
-        exclusivePaths: [{ glob: "packages/db/migrations/**", afterRebase: null }],
-      });
-      expect(cleared.started).toEqual(["next-migration"]);
-      expect(cleared.reasons).toEqual({ "next-migration": null });
-    }),
+        // Once nothing in flight touches the path, the wait clears.
+        const cleared = plan(
+          [
+            card("next-migration", {
+              estimate: estimate(["packages/db/migrations/0043.sql"]),
+              waitReason: { code: "exclusivePathBusy", text: "busy", since: now },
+            }),
+          ],
+          {
+            exclusivePaths: [{ glob: "packages/db/migrations/**", afterRebase: null }],
+          },
+        );
+        expect(cleared.started).toEqual(["next-migration"]);
+        expect(cleared.reasons).toEqual({ "next-migration": null });
+      }),
   );
 
-  it.effect("starts by priority, urgent first and unprioritised last, until the machine is full", () =>
-    Effect.gen(function* () {
-      const { card, plan } = yield* makeQueue;
-      const result = plan(
-        [
-          card("none", { priority: 0, queuedAt: "2026-01-01T00:00:01.000Z" }),
-          card("low", { priority: 4 }),
-          card("urgent", { priority: 1, queuedAt: "2026-01-01T00:00:09.000Z" }),
-          card("urgent-earlier", { priority: 1, queuedAt: "2026-01-01T00:00:02.000Z" }),
-        ],
-        { environmentSessionCap: 3 },
-      );
-      expect(result.started).toEqual(["urgent-earlier", "urgent", "low"]);
-      expect(result.reasons).toEqual({ none: "waitingForSlot" });
-    }),
+  it.effect(
+    "starts by priority, urgent first and unprioritised last, until the machine is full",
+    () =>
+      Effect.gen(function* () {
+        const { card, plan } = yield* makeQueue;
+        const result = plan(
+          [
+            card("none", { priority: 0, queuedAt: "2026-01-01T00:00:01.000Z" }),
+            card("low", { priority: 4 }),
+            card("urgent", { priority: 1, queuedAt: "2026-01-01T00:00:09.000Z" }),
+            card("urgent-earlier", { priority: 1, queuedAt: "2026-01-01T00:00:02.000Z" }),
+          ],
+          { environmentSessionCap: 3 },
+        );
+        expect(result.started).toEqual(["urgent-earlier", "urgent", "low"]);
+        expect(result.reasons).toEqual({ none: "waitingForSlot" });
+      }),
   );
 
   it.effect("restarts a card in progress with no owner before new work", () =>
@@ -260,7 +295,11 @@ it.layer(NodeServices.layer)("planStarts", (it) => {
         card("draft", { specState: "draft" }),
         card("unconfirmed", { acceptance: { criteria: [], state: "draft" } }),
         card("paused", {
-          paused: { reason: { code: "pausedByPerson", text: "Paused." }, by: "human", pausedAt: now },
+          paused: {
+            reason: { code: "pausedByPerson", text: "Paused." },
+            by: "human",
+            pausedAt: now,
+          },
         }),
         card("unassigned", { delegateAgentId: null }),
         card("broke", { spentUsd: 11, budgetCapUsd: 10 }),
@@ -272,73 +311,131 @@ it.layer(NodeServices.layer)("planStarts", (it) => {
     }),
   );
 
-  it.effect("waits out a failed start's backoff, and defers every start under memory pressure", () =>
-    Effect.gen(function* () {
-      const { card, plan } = yield* makeQueue;
-      const cards = [card("retry")];
-      const retryAt = new Map([[CardId.make("retry"), 60_000]]);
-      expect(plan(cards, { retryAt, now: 59_999 }).started).toEqual([]);
-      expect(plan(cards, { retryAt, now: 60_000 }).started).toEqual(["retry"]);
-      expect(plan(cards, { memoryPressure: true }).reasons).toEqual({ retry: "waitingForMemory" });
-    }),
+  it.effect(
+    "waits out a failed start's backoff, and defers every start under memory pressure",
+    () =>
+      Effect.gen(function* () {
+        const { card, plan } = yield* makeQueue;
+        const cards = [card("retry")];
+        const retryAt = new Map([[CardId.make("retry"), 60_000]]);
+        expect(plan(cards, { retryAt, now: 59_999 }).started).toEqual([]);
+        expect(plan(cards, { retryAt, now: 60_000 }).started).toEqual(["retry"]);
+        expect(plan(cards, { memoryPressure: true }).reasons).toEqual({
+          retry: "waitingForMemory",
+        });
+      }),
   );
 
-  it.effect("notes a wait only when it changes, and clears its own once the card no longer waits", () =>
-    Effect.gen(function* () {
-      const { card, plan } = yield* makeQueue;
-      const waiting = {
-        code: "waitingForSlot",
-        text: "All 1 session slots on this machine are busy; the card starts when one frees.",
-        since: now,
-      };
-      const busy = ownerRun("working", "turn-1");
-      const cards = [
-        card("working", { status: "inProgress" }),
-        card("queued", { waitReason: waiting }),
-      ];
-      expect(plan(cards, { environmentSessionCap: 1, runs: [busy] }).waits).toEqual([]);
-      expect(plan(cards, { environmentSessionCap: 2, runs: [busy] }).reasons).toEqual({
-        queued: null,
-      });
-      // Someone else's wait, such as machine capacity for its checks, is left alone.
-      const checks = card("checks", {
-        status: "inReview",
-        waitReason: { code: "waitingForCapacity", text: "Waiting for machine capacity", since: now },
-      });
-      expect(plan([checks]).waits).toEqual([]);
-    }),
+  it.effect(
+    "notes a wait only when it changes, and clears its own once the card no longer waits",
+    () =>
+      Effect.gen(function* () {
+        const { card, plan } = yield* makeQueue;
+        const waiting = {
+          code: "waitingForSlot",
+          text: "All 1 session slots on this machine are busy; the card starts when one frees.",
+          since: now,
+        };
+        const busy = ownerRun("working", "turn-1");
+        const cards = [
+          card("working", { status: "inProgress" }),
+          card("queued", { waitReason: waiting }),
+        ];
+        expect(plan(cards, { environmentSessionCap: 1, runs: [busy] }).waits).toEqual([]);
+        expect(plan(cards, { environmentSessionCap: 2, runs: [busy] }).reasons).toEqual({
+          queued: null,
+        });
+        // Someone else's wait, such as machine capacity for its checks, is left alone.
+        const checks = card("checks", {
+          status: "inReview",
+          waitReason: {
+            code: "waitingForCapacity",
+            text: "Waiting for machine capacity",
+            since: now,
+          },
+        });
+        expect(plan([checks]).waits).toEqual([]);
+      }),
   );
 
-  it.effect("says a card waits for the side-effect guard or for its agent to get write access, and clears it once fixed", () =>
+  it.effect(
+    "says a card waits for the side-effect guard or for its agent to get write access, and clears it once fixed",
+    () =>
+      Effect.gen(function* () {
+        const { card, plan } = yield* makeQueue;
+        const guarded = plan([card("go")], { guardAcknowledged: false });
+        expect(guarded.started).toEqual([]);
+        expect(guarded.waits.map((wait) => wait.reason)).toEqual([
+          {
+            code: "sideEffectGuard",
+            text: "Review this project's side-effect guard in project settings before agents start work.",
+          },
+        ]);
+
+        const readOnlyAgents = (yield* applyCommands([
+          createProject(),
+          createAgent(backend, { capabilities: ["read"] }),
+        ])).agents;
+        const readOnly = plan([card("go")], { agents: readOnlyAgents });
+        expect(readOnly.started).toEqual([]);
+        expect(readOnly.waits.map((wait) => wait.reason)).toEqual([
+          {
+            code: "delegateReadOnly",
+            text: "@backend can only read; give it write access in its agent settings to work on cards.",
+          },
+        ]);
+
+        // Once the guard is reviewed and the agent can write, the card starts and its wait clears.
+        const waiting = card("go", { waitReason: { ...readOnly.waits[0]!.reason!, since: now } });
+        const fixed = plan([waiting]);
+        expect(fixed.started).toEqual(["go"]);
+        expect(fixed.reasons).toEqual({ go: null });
+      }),
+  );
+  it.effect(
+    "starts a plan's read-only coordinator but never a migration card, and holds checkpoint and budget waits",
+    () =>
+      Effect.gen(function* () {
+        const { card, plan } = yield* makeQueue;
+        const readOnly = (yield* makeQueueAgents).map((agent) => ({
+          ...agent,
+          capabilities: ["read" as const],
+        }));
+        const cards = [
+          card("plan", { kind: "plan" }),
+          card("migration", { kind: "migration" }),
+          card("held", { heldByCheckpoint: true, delegateAgentId: null }),
+        ];
+        const coordinating = plan(cards, { agents: readOnly });
+        expect(coordinating.started).toEqual(["plan"]);
+        expect(coordinating.reasons).toEqual({});
+
+        const result = plan([card("go"), card("held", { heldByCheckpoint: true })], {
+          projectBudgetUsd: 50,
+          spentUsd: 50,
+        });
+        expect(result.started).toEqual([]);
+        expect(result.reasons).toEqual({ go: "budgetCap", held: "heldByCheckpoint" });
+        expect(
+          plan([card("go")], { spentUsd: 50, environmentMonthlyBudgetUsd: 40 }).reasons,
+        ).toEqual({ go: "environmentBudgetCap" });
+        expect(plan([card("go")], { projectBudgetUsd: 50, spentUsd: 49 }).started).toEqual(["go"]);
+      }),
+  );
+
+  it.effect("stops an idle coordinator once its plan is in review", () =>
     Effect.gen(function* () {
       const { card, plan } = yield* makeQueue;
-      const guarded = plan([card("go")], { guardAcknowledged: false });
-      expect(guarded.started).toEqual([]);
-      expect(guarded.waits.map((wait) => wait.reason)).toEqual([
-        {
-          code: "sideEffectGuard",
-          text: "Review this project's side-effect guard in project settings before agents start work.",
-        },
-      ]);
-
-      const readOnlyAgents = (yield* applyCommands([
-        createProject(),
-        createAgent(backend, { capabilities: ["read"] }),
-      ])).agents;
-      const readOnly = plan([card("go")], { agents: readOnlyAgents });
-      expect(readOnly.started).toEqual([]);
-      expect(readOnly.waits.map((wait) => wait.reason)).toEqual([
-        {
-          code: "delegateReadOnly",
-          text: "@backend can only read; give it write access in its agent settings to work on cards.",
-        },
-      ]);
-
-      // Once the guard is reviewed and the agent can write, the card starts and its wait clears.
-      const waiting = card("go", { waitReason: { ...readOnly.waits[0]!.reason!, since: now } });
-      const fixed = plan([waiting]);
-      expect(fixed.started).toEqual(["go"]);
-      expect(fixed.reasons).toEqual({ go: null });
+      const coordinatorRun = ownerRun("plan", null);
+      const result = plan([card("plan", { kind: "plan", status: "inReview" })], {
+        runs: [
+          {
+            ...coordinatorRun,
+            run: { ...coordinatorRun.run, role: "coordinator" },
+          } as unknown as ReturnType<typeof ownerRun>,
+        ],
+      });
+      expect(result.stop).toEqual([coordinatorRun.run.threadId]);
     }),
   );
 });
