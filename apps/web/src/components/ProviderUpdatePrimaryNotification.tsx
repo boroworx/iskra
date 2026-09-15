@@ -9,6 +9,7 @@ import { usePrimaryEnvironment } from "../state/environments";
 import { useDismissedProviderUpdateNotificationKeys } from "../providerUpdateDismissal";
 import { PROVIDER_ICON_BY_PROVIDER } from "./chat/providerIconUtils";
 import {
+  PROVIDER_UPDATE_PROMPT_VISIBLE_MS,
   canOneClickUpdateProviderCandidate,
   collectProviderUpdateCandidates,
   collectUpdatedProviderSnapshots,
@@ -289,6 +290,7 @@ export function ProviderUpdatePrimaryNotification() {
             ) : undefined,
           hideCopyButton: true,
           onClose: dismissPrompt,
+          dismissAfterVisibleMs: PROVIDER_UPDATE_PROMPT_VISIBLE_MS,
           ...(oneClickProviders.length > 0
             ? {
                 secondaryActionProps: {

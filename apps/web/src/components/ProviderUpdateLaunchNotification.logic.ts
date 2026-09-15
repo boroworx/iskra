@@ -65,6 +65,11 @@ interface ProviderUpdateSidebarPillOptions {
 }
 
 const PROVIDER_UPDATE_SUCCESS_VISIBLE_MS = 3_000;
+/**
+ * An update prompt leaves on its own after this long in view, so it never sits over page controls;
+ * Settings → Providers keeps the update actions reachable.
+ */
+export const PROVIDER_UPDATE_PROMPT_VISIBLE_MS = 12_000;
 
 function formatVersion(value: string): string {
   return value.startsWith("v") ? value : `v${value}`;

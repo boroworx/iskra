@@ -8,6 +8,7 @@ import { useDismissedProviderUpdateNotificationKeys } from "../providerUpdateDis
 import { ProviderUpdateEnvironmentRows } from "./ProviderUpdateEnvironmentRows";
 import { useLocalEnvironmentUpdateGroups } from "./ProviderUpdateLaunchNotification.environments";
 import {
+  PROVIDER_UPDATE_PROMPT_VISIBLE_MS,
   collectProviderUpdateCandidates,
   environmentGroupsWithUpdates,
   getProviderUpdateInitialToastView,
@@ -157,6 +158,11 @@ function ProviderUpdateEnvironmentsNotification() {
       activeToastRef.current = null;
     };
 
+    const promptData = {
+      hideCopyButton: true,
+      leadingIcon: <DownloadIcon aria-hidden="true" className="size-4 text-success" />,
+      onClose: dismissPrompt,
+    };
     const toastId = toastManager.add(
       stackedThreadToast({
         type: "warning",
@@ -168,6 +174,9 @@ function ProviderUpdateEnvironmentsNotification() {
           <ProviderUpdateEnvironmentRows
             onInteract={() => {
               hasInteractedRef.current = true;
+              // Once an update runs, the prompt stays so its progress rows aren't torn down.
+              const active = activeToastRef.current;
+              if (active !== null) toastManager.update(active.toastId, { data: promptData });
             }}
           />
         ),
@@ -177,11 +186,7 @@ function ProviderUpdateEnvironmentsNotification() {
           onClick: openProviderSettings,
         },
         actionVariant: "outline",
-        data: {
-          hideCopyButton: true,
-          leadingIcon: <DownloadIcon aria-hidden="true" className="size-4 text-success" />,
-          onClose: dismissPrompt,
-        },
+        data: { ...promptData, dismissAfterVisibleMs: PROVIDER_UPDATE_PROMPT_VISIBLE_MS },
       }),
     );
     activeToastRef.current = { toastId, key: notificationKey };
