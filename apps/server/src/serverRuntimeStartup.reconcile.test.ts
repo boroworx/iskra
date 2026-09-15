@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   type OrchestrationCommand,
   type OrchestrationSessionStatus,
+  ORPHANED_PROVIDER_SESSION_ERROR,
   ProviderDriverKind,
   ProviderInstanceId,
   type ProviderSendTurnInput,
@@ -114,6 +115,62 @@ const runReconciliation = (input: {
       ),
     ),
   );
+
+it.effect("settles idle card owners and plan coordinators as lost, and leaves other runs alone", () => {
+  const dispatched: OrchestrationCommand[] = [];
+  const idle = ["owner", "coordinator", "helper", "channel"].map((id) => makeThread(id, "ready"));
+  const busy = makeThread("busy-owner", "running", TurnId.make("turn-busy"));
+  const run = (id: string, role: string, cardId: string | null) => ({
+    threadId: ThreadId.make(id),
+    role,
+    cardId,
+    channelId: cardId === null ? "channel-1" : null,
+  });
+  return ServerRuntimeStartup.markStaleCardOwners.pipe(
+    Effect.provideService(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+      getCommandReadModel: () =>
+        Effect.succeed({
+          threads: [...idle, busy],
+          liveRuns: [
+            run("owner", "owner", "card-1"),
+            run("coordinator", "coordinator", "card-plan"),
+            run("helper", "helper", "card-1"),
+            run("channel", "conversation", null),
+            run("busy-owner", "owner", "card-2"),
+          ],
+        } as never),
+    } as unknown as ProjectionSnapshotQuery.ProjectionSnapshotQuery["Service"]),
+    Effect.provideService(OrchestrationEngine.OrchestrationEngineService, {
+      readEvents: () => Stream.empty,
+      readThreadEvents: () => Stream.empty,
+      getThreadReplayStats: () => Effect.die("unused thread replay stats"),
+      dispatch: (command) =>
+        Effect.sync(() => dispatched.push(command)).pipe(Effect.as({ sequence: dispatched.length })),
+      streamDomainEvents: Stream.empty,
+      subscribeDomainEvents: Effect.succeed(Stream.empty),
+      latestSequence: Effect.succeed(0),
+    }),
+    Effect.provide(NodeServices.layer),
+    Effect.tap(() =>
+      Effect.sync(() => {
+        assert.deepStrictEqual(
+          dispatched.map(
+            (command) =>
+              command.type === "thread.session.set" && [
+                command.threadId,
+                command.session.status,
+                command.session.lastError,
+              ],
+          ),
+          [
+            ["owner", "error", ORPHANED_PROVIDER_SESSION_ERROR],
+            ["coordinator", "error", ORPHANED_PROVIDER_SESSION_ERROR],
+          ],
+        );
+      }),
+    ),
+  );
+});
 
 it.effect("marks active running sessions that have persisted resume state", () => {
   const active = makeThread("thread-mark-active", "running", TurnId.make("turn-mark-active"));

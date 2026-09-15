@@ -403,6 +403,69 @@ it.effect(
     ),
 );
 
+it.effect("starts a verifier lost to a server restart again instead of asking a person", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const commands: Array<OrchestrationCommand> = [];
+      const lost = {
+        ...card,
+        paused: null,
+        verification: { ...card.verification, state: "running" },
+      } as unknown as OrchestrationCard;
+      const doubles = Layer.mergeAll(
+        Layer.mock(OrchestrationEngineService)({
+          dispatch: (command) =>
+            Effect.sync(() => {
+              commands.push(command);
+              return { sequence: commands.length };
+            }),
+          subscribeDomainEvents: Effect.succeed(Stream.empty),
+        }),
+        Layer.mock(ProjectionSnapshotQuery)({
+          getCommandReadModel: () =>
+            Effect.succeed({ ...readModel, cards: [lost] } as unknown as OrchestrationReadModel),
+        }),
+        Layer.mock(CardWorkspace.CardWorkspace)({
+          snapshot: () =>
+            Effect.succeed({
+              path: "/tmp/card-health-verify",
+              portBase: 43_000,
+              ports: {},
+              ensureServices: Effect.void,
+              release: Effect.void,
+            }),
+          diff: () => Effect.succeed({ baseBranch: "main", diff: "" }),
+        }),
+        Layer.mock(HostAdmission)({ run: (_job, effect) => effect }),
+        Layer.mock(ProcessRunner)({}),
+        Layer.mock(ProviderRegistry)({
+          getProviders: Effect.succeed([provider("claudeAgent", ["claude-a", "claude-b"], "ready")]),
+        }),
+        Layer.mock(HoldoutStore)({ list: () => Effect.succeed([]) }),
+      );
+      const layer = CardVerifierReactor.layer.pipe(
+        Layer.provide(doubles),
+        Layer.provide(SqlitePersistenceMemory),
+        Layer.provide(NodeServices.layer),
+      );
+
+      yield* Effect.gen(function* () {
+        const reactor = yield* CardVerifierReactor.CardVerifierReactor;
+        yield* reactor.start();
+        yield* reactor.drain;
+        expect(commands.filter((command) => command.type === "card.session.record")).toMatchObject([
+          { cardId, role: "verifier" },
+        ]);
+        expect(
+          commands.some(
+            (command) => command.type === "card.activity.record" && command.reason?.code === "verifierError",
+          ),
+        ).toBe(false);
+      }).pipe(Effect.provide(layer));
+    }),
+  ),
+);
+
 // A real verifier paraphrased a hidden scenario in a diff concern; redaction can't catch that.
 it("keeps the verifier's diff concerns out of the builder's feedback", () => {
   const { headline, body } = CardVerifierReactor.verifierFeedback({

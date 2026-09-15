@@ -475,9 +475,9 @@ const clearProviderSessionContinuationMarkers = (threadIds: ReadonlyArray<Thread
   }).pipe(Effect.mapError(toServerUpdateThreadContinuationError));
 
 /**
- * A card owner idle when the server stopped has no provider session left, and sessions never
- * resume: its next turn would start without the card's brief. It is settled as lost instead, so
- * the card session reactor restarts it from the brief like any other stale owner.
+ * A card owner or plan coordinator idle when the server stopped has no provider session left, and
+ * sessions never resume: its next turn would start without its brief. It is settled as lost
+ * instead, so the scheduler starts a fresh one from the brief like any other lost session.
  */
 export const markStaleCardOwners = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService;
@@ -487,7 +487,12 @@ export const markStaleCardOwners = Effect.gen(function* () {
   const sessions = new Map(readModel.threads.map((thread) => [thread.id, thread.session] as const));
   for (const run of readModel.liveRuns ?? []) {
     const session = sessions.get(run.threadId);
-    if (run.cardId === null || run.role !== "owner" || session == null || session.status !== "ready") {
+    if (
+      run.cardId === null ||
+      (run.role !== "owner" && run.role !== "coordinator") ||
+      session == null ||
+      session.status !== "ready"
+    ) {
       continue;
     }
     const settledAt = DateTime.formatIso(yield* DateTime.now);

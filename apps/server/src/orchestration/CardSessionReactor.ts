@@ -61,6 +61,7 @@ import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts"
  * ended, so a card never has two writers. An owner lost to an error or a server restart returns
  * its unread messages to the card and is restarted by the scheduler, until repeated losses pause
  * the card. A helper answers a question read-only; its answer joins the card's activity for the owner.
+ * A helper or critic lost before it answered is asked once more.
  *
  * Messages for the owner go in as its next turn once it is idle, never into a
  * running turn, and are `delivered` only once that turn runs. A message whose
@@ -597,6 +598,39 @@ const make = Effect.gen(function* () {
   });
 
   /**
+   * A helper or critic that failed before it answered is asked once more, from the same question. A
+   * second loss, or one on a paused card, leaves a note on the card instead; a card past its budget
+   * refuses the new session, and the start failure note says so.
+   */
+  const restartAssist = Effect.fn("CardSessionReactor.restartAssist")(function* (input: {
+    readonly threadId: ThreadId;
+    readonly cardId: CardId;
+    readonly agentId: AgentId;
+    readonly role: "helper" | "critic";
+    readonly question: string | null;
+  }) {
+    const card = (yield* readModel()).cards?.find((candidate) => candidate.id === input.cardId);
+    if (card === undefined || isFinishedCardStatus(card.status)) {
+      return;
+    }
+    const key = `${input.threadId}:restart`;
+    if (card.paused !== null || input.threadId.endsWith(":restart")) {
+      return yield* postSystem(
+        input.cardId,
+        key,
+        `A ${input.role}'s session ended before it answered; ask again if it's still needed.`,
+      );
+    }
+    yield* startSession({
+      cardId: input.cardId,
+      agentId: input.agentId,
+      role: input.role,
+      key,
+      question: input.question,
+    });
+  });
+
+  /**
    * An owner session ended. A reassignment waiting for it is the scheduler's to start. One lost to
    * an error or a restart hands its unread messages back to the card, and the scheduler restarts
    * the card from its brief, unless the owner failed more than MAX_OWNER_RESTARTS_PER_HOUR times
@@ -618,10 +652,24 @@ const make = Effect.gen(function* () {
         "coordinator",
       );
     }
-    if (Option.isNone(run) || run.value.cardId === null || run.value.role !== "owner") {
+    if (Option.isNone(run) || run.value.cardId === null) {
       return;
     }
-    const { cardId } = run.value;
+    const { cardId, role, agentId, context } = run.value;
+    if (role === "helper" || role === "critic") {
+      return failed
+        ? yield* restartAssist({
+            threadId,
+            cardId,
+            agentId,
+            role,
+            question: "question" in context ? context.question : null,
+          })
+        : undefined;
+    }
+    if (role !== "owner") {
+      return;
+    }
     const card = (yield* readModel()).cards?.find((candidate) => candidate.id === cardId);
     const lost = failed && card !== undefined && !isFinishedCardStatus(card.status);
     yield* updateThreadDeliveries(cardId, threadId, lost ? "pending" : "undelivered");

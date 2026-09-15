@@ -480,20 +480,19 @@ const make = Effect.gen(function* () {
     );
   });
 
-  /** After a restart no verifier session survives: verify what waits, and flag what was lost. */
+  /**
+   * After a restart no verifier session survives: verify what waits, and start again what was lost.
+   * A paused card's lost verifier starts when the card resumes.
+   */
   const recover = Effect.fn("CardVerifierReactor.recover")(function* () {
     const model = yield* readModel();
     const trigger = `recover-${yield* nowIso}`;
     for (const card of model.cards ?? []) {
       if (card.status !== "inReview") continue;
-      if (card.verification.state === "running") {
-        yield* raiseError(
-          card.id,
-          `lost:${card.verification.headSha ?? "none"}`,
-          "The verifier was lost to a server restart; rerun it.",
-        );
-      } else {
+      if (card.verification.state !== "running") {
         yield* verify(card.id, trigger);
+      } else if (card.paused === null) {
+        yield* verify(card.id, trigger, true);
       }
     }
   });

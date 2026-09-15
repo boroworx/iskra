@@ -716,6 +716,112 @@ it.layer(layer)("CardSessionReactor", (it) => {
       ),
   );
 
+  it.effect(
+    "keeps an owner lost to a restart down at its budget cap, and restarts it with the unread message once the cap is raised",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const world = yield* makeWorld("lost-budget");
+          yield* world.assign("backend");
+          const first = yield* world.nextSession();
+          yield* world.setSession(first.payload.threadId, "running", "turn-1");
+          yield* world.engine.dispatch({
+            type: "card.spend.record",
+            commandId: CommandId.make("cmd-lost-budget-spend"),
+            cardId: world.cardId,
+            threadId: first.payload.threadId,
+            agentId: world.agent("backend"),
+            turnId: TurnId.make("turn-1"),
+            costUsd: 10,
+            costSource: "providerReported",
+            recordedAt: now,
+          });
+          // A message for the busy owner waits for its next turn, which the restart takes away.
+          yield* world.engine.dispatch({
+            type: "card.message.post",
+            commandId: CommandId.make("cmd-lost-budget-message"),
+            cardId: world.cardId,
+            messageId: MessageId.make("message-lost-budget"),
+            body: "Also handle bursts.",
+            createdAt: now,
+          });
+          yield* world.setSession(
+            first.payload.threadId,
+            "error",
+            null,
+            ORPHANED_PROVIDER_SESSION_ERROR,
+          );
+          yield* world.reactor.drain;
+
+          const raised = yield* world.engine.dispatch({
+            type: "card.budget.set",
+            commandId: CommandId.make("cmd-lost-budget-raise"),
+            cardId: world.cardId,
+            capUsd: 20,
+          });
+          const second = yield* world.nextSession();
+          // Nothing started while the card was at its cap.
+          expect(second.sequence).toBeGreaterThan(raised.sequence);
+          expect(second.payload).toMatchObject({ role: "owner", restarts: 1 });
+          expect(second.payload.rendered.firstMessage).toContain(
+            "Your previous session on this card ended",
+          );
+          yield* world.setSession(second.payload.threadId, "ready", null);
+          const sent = yield* world.nextEvent(
+            "card.delivery-updated",
+            (event) => event.payload.status === "sent",
+          );
+          expect(sent.payload).toMatchObject({
+            threadId: second.payload.threadId,
+            messageIds: ["message-lost-budget"],
+          });
+        }),
+      ),
+  );
+
+  it.effect("asks a helper lost before it answered once more, then notes a second loss", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const world = yield* makeWorld("lost-helper");
+        yield* world.assign("backend");
+        const owner = yield* world.nextSession();
+        yield* world.setSession(owner.payload.threadId, "ready", null);
+        yield* world.engine.dispatch({
+          type: "card.helper.request",
+          commandId: CommandId.make("cmd-lost-helper-question"),
+          cardId: world.cardId,
+          agentId: world.agent("reviewer"),
+          messageId: MessageId.make("message-lost-helper-question"),
+          question: "Is the limit per key or per user?",
+          createdAt: now,
+        });
+        const helper = yield* world.nextSession();
+        yield* world.setSession(helper.payload.threadId, "running", "turn-helper");
+        yield* world.setSession(
+          helper.payload.threadId,
+          "error",
+          null,
+          ORPHANED_PROVIDER_SESSION_ERROR,
+        );
+
+        const again = yield* world.nextSession();
+        expect(again.payload).toMatchObject({ role: "helper", agentId: world.agent("reviewer") });
+        expect(again.payload.rendered.firstMessage).toContain(
+          "## Question\n\nIs the limit per key or per user?",
+        );
+
+        yield* world.setSession(again.payload.threadId, "error", null, ORPHANED_PROVIDER_SESSION_ERROR);
+        const note = yield* world.nextEvent(
+          "card.activity-recorded",
+          (event) => event.payload.author.kind === "system" && event.payload.kind === "error",
+        );
+        expect(note.payload.body).toBe(
+          "A helper's session ended before it answered; ask again if it's still needed.",
+        );
+      }),
+    ),
+  );
+
   it.effect("nudges an owner idle on a card in progress with a message for its next turn", () =>
     Effect.scoped(
       Effect.gen(function* () {
