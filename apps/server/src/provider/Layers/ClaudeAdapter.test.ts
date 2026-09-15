@@ -6867,6 +6867,7 @@ describe("ClaudeAdapterLive", () => {
         "mcp__iskra__request_review",
         "mcp__iskra__request_checkpoint",
         "mcp__iskra__ask_owner",
+        "mcp__iskra__request_access",
         "mcp__iskra__propose_criteria_change",
         "mcp__iskra__request_help",
         "mcp__iskra__request_critique",
