@@ -311,7 +311,7 @@ function RunQuestion(props: {
                   type="button"
                   aria-pressed={answers[question.id] === option.label}
                   className={cn(
-                    "inline-flex h-[30px] items-center rounded-lg px-3 text-[13px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    "inline-flex min-h-[30px] items-center rounded-lg px-3 py-1.5 text-left text-[13px] leading-snug font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     answers[question.id] === option.label
                       ? "bg-primary/18 text-info-foreground"
                       : "bg-secondary hover:bg-secondary/80",

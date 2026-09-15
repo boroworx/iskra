@@ -244,8 +244,10 @@ export function ElicitationOptions(props: {
               type="button"
               disabled={props.disabled}
               className={cn(
-                "inline-flex h-[30px] items-center gap-1.5 rounded-lg px-3 text-[13px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
-                recommended ? "bg-primary/18 text-info-foreground" : "bg-secondary hover:bg-secondary/80",
+                "inline-flex min-h-[30px] items-center gap-1.5 rounded-lg px-3 py-1.5 text-left text-[13px] leading-snug font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
+                recommended
+                  ? "bg-primary/18 text-info-foreground"
+                  : "bg-secondary hover:bg-secondary/80",
               )}
               onClick={() => {
                 const answer = elicitationAnswer(elicitation, { optionId: option.id });
@@ -426,11 +428,11 @@ export function CardCriteria(props: {
     <>
       {criteria.length === 0 ? null : (
         <p className="px-4 text-xs text-muted-foreground">
-        {card.status === "triage"
-          ? "A draft until you approve the card; Approve & Start confirms them."
-          : draft
-            ? "Not confirmed: work starts only once you confirm them."
-            : "Confirmed. Checks and review hold the work to these."}
+          {card.status === "triage"
+            ? "A draft until you approve the card; Approve & Start confirms them."
+            : draft
+              ? "Not confirmed: work starts only once you confirm them."
+              : "Confirmed. Checks and review hold the work to these."}
         </p>
       )}
       <CriteriaEditor criteria={criteria} onChange={setDraft} disabled={!open} />
