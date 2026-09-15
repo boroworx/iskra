@@ -2601,6 +2601,7 @@ const makeWsRpcLayer = (
             createSampleProject(input).pipe(
               Effect.provideService(AgentDefinitionSync.AgentDefinitionSync, agentDefinitionSync),
               Effect.provideService(OrchestrationEngine.OrchestrationEngineService, orchestrationEngine),
+              Effect.provideService(ProjectionSnapshotQuery.ProjectionSnapshotQuery, projectionSnapshotQuery),
               Effect.provideService(Crypto.Crypto, crypto),
               Effect.provide(ProcessRunner.layer),
               Effect.mapError(

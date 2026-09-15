@@ -1,6 +1,6 @@
 import * as NodeOS from "node:os";
 
-import { CardId, CommandId, ProjectId } from "@iskra/contracts";
+import { CardId, CommandId, ProjectId, projectOrchestrationOf } from "@iskra/contracts";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -12,6 +12,7 @@ import { ProcessRunner } from "../processRunner.ts";
 import { AgentDefinitionSync } from "./AgentDefinitionSync.ts";
 import { SAMPLE_PROJECT_CARD, SAMPLE_PROJECT_FILES } from "./sampleProject/files.ts";
 import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
+import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
 
 export class SampleProjectError extends Schema.TaggedError<SampleProjectError>()("SampleProjectError", {
   message: Schema.String,
@@ -87,6 +88,21 @@ export const createSampleProject = Effect.fn("createSampleProject")(function* (i
   yield* git("add", ".");
   yield* git("-c", "user.name=Iskra", "-c", "user.email=sample@iskra.invalid", "commit", "--quiet", "-m", "Sample project");
 
+  const model = yield* (yield* ProjectionSnapshotQuery).getCommandReadModel();
+  const project = model.projects.find((candidate) => candidate.id === projectId);
+  // The sample shows a verifier checking the work: a stricter gate that grants agents nothing.
+  if (project !== undefined) {
+    yield* engine
+      .dispatch({
+        type: "project.orchestration.set",
+        commandId: CommandId.make(`server:sample-policy:${projectId}`),
+        projectId,
+        orchestration: { ...projectOrchestrationOf(project), verifier: { mode: "on" } },
+      })
+      .pipe(Effect.mapError(failWith("The sample project's verifier couldn't be turned on.")));
+  }
+  const builder = (model.agents ?? []).find((agent) => agent.projectId === projectId && agent.name === "builder");
+
   const cardId = CardId.make(`card-${yield* uuid}`);
   yield* engine
     .dispatch({
@@ -98,6 +114,7 @@ export const createSampleProject = Effect.fn("createSampleProject")(function* (i
       spec: SAMPLE_PROJECT_CARD.spec,
       tags: [],
       criteria: SAMPLE_PROJECT_CARD.criteria,
+      suggestedAgentId: builder?.id ?? null,
       createdAt,
     })
     .pipe(Effect.mapError(failWith("The sample project's first card couldn't be added.")));

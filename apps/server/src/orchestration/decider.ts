@@ -2472,6 +2472,21 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       if (command.kind === "migration" && command.migration === undefined) {
         return yield* refuse(command, MIGRATION_ENUMERATE_COMMAND_REASON);
       }
+      const suggestedAgentId = command.suggestedAgentId ?? null;
+      if (
+        suggestedAgentId !== null &&
+        !(readModel.agents ?? []).some(
+          (agent) =>
+            agent.id === suggestedAgentId &&
+            agent.projectId === command.projectId &&
+            agent.archivedAt === null,
+        )
+      ) {
+        return yield* refuse(
+          command,
+          `Agent '${suggestedAgentId}' is not an active agent of this card's project.`,
+        );
+      }
       return yield* planned(command, "card", command.cardId, command.createdAt, {
         type: "card.created",
         payload: {
@@ -2479,6 +2494,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           projectId: command.projectId,
           channelId,
           parentCardId,
+          ...(suggestedAgentId !== null ? { suggestedAgentId } : {}),
           ...(command.kind !== undefined ? { kind: command.kind } : {}),
           ...(command.kind === "migration" && command.migration !== undefined
             ? {

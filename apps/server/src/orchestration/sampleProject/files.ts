@@ -71,6 +71,7 @@ capabilities:
   - read
   - write
   - shell
+verifyWith: verifier
 ---
 
 You build this project's cards. Keep changes small and leave the tests passing.

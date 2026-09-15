@@ -3115,6 +3115,8 @@ const CardCreateCommand = Schema.Struct({
   migration: Schema.optional(
     Schema.Struct({ enumerateCommand: TrimmedNonEmptyString, instructions: Schema.String }),
   ),
+  // The owner Approve & start suggests; only a person makes it the delegate.
+  suggestedAgentId: Schema.optional(Schema.NullOr(AgentId)),
   createdAt: IsoDateTime,
 });
 
