@@ -102,7 +102,7 @@ export function ChannelView(props: {
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <WorkspacePageHeader className="border-b border-border">
+        <WorkspacePageHeader>
           {channel === null ? null : (
             <div className="flex min-w-0 flex-1 items-center gap-1.5">
               <span aria-hidden className="text-[15px] font-semibold text-muted-foreground/75">
@@ -604,7 +604,7 @@ export function MessageComposer(props: {
             id={listboxId}
             role="listbox"
             aria-label="Mention an agent"
-            className="dropdown-glass absolute bottom-full left-6 z-10 mb-2 flex w-60 flex-col rounded-lg p-1 text-popover-foreground shadow-[0_16px_40px_-18px_rgb(0_0_0/55%)] dark:shadow-[0_18px_44px_-18px_rgb(0_0_0/80%)]"
+            className="dropdown-glass absolute bottom-full left-6 z-10 mb-2 flex w-60 flex-col rounded-[10px] p-1 text-popover-foreground shadow-[0_10px_32px_-8px_rgb(0_0_0/24%)] dark:shadow-[0_12px_36px_-8px_rgb(0_0_0/56%)]"
           >
             {candidates.map((agent, index) => (
               <li
