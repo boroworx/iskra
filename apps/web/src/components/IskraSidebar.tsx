@@ -31,7 +31,7 @@ import { ChannelSettingsDialog } from "./channels/ChannelSettingsDialog";
 import { CreateAgentDialog } from "./channels/CreateAgentDialog";
 import { CreateChannelDialog } from "./channels/CreateChannelDialog";
 import { useProjectRailMemory, useRouteProject } from "./channels/IskraCreateDialogs";
-import { projectKey, railClickTarget } from "./projectRail.logic";
+import { projectKey, projectRailInitials, railClickTarget } from "./projectRail.logic";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import {
   SidebarContent,
@@ -73,13 +73,6 @@ function NeedsYouEntry() {
   );
 }
 
-function projectInitials(title: string): string {
-  const words = title.split(/[\s/_.-]+/).filter((word) => word.length > 0);
-  const initials =
-    words.length > 1 ? `${words[0]?.[0] ?? ""}${words[1]?.[0] ?? ""}` : title.slice(0, 2);
-  return initials.toUpperCase();
-}
-
 /**
  * The Iskra sidebar: a rail of projects, and the selected project's channels
  * and agents. The URL decides the selected project (see `useRouteProject`); a
@@ -99,6 +92,10 @@ export default function IskraSidebar() {
   const selected = useRouteProject();
   const selectedKey = selected === null ? null : projectKey(selected);
   const [memory] = useProjectRailMemory();
+  const railInitials = useMemo(
+    () => projectRailInitials(projects.map((project) => project.title)),
+    [projects],
+  );
   const openProject = (project: EnvironmentProject) => {
     const { environmentId, id: projectId } = project;
     // Read once on click: subscribing every rail square to its environment's channels would re-render the rail.
@@ -125,7 +122,7 @@ export default function IskraSidebar() {
           aria-label="Projects"
           className="flex w-14 shrink-0 flex-col items-center gap-2 overflow-y-auto border-r border-sidebar-border py-2"
         >
-          {projects.map((project) => {
+          {projects.map((project, index) => {
             const key = projectKey(project);
             const active = key === selectedKey;
             return (
@@ -138,13 +135,13 @@ export default function IskraSidebar() {
                       aria-current={active ? "true" : undefined}
                       onClick={() => openProject(project)}
                       className={cn(
-                        "flex size-10 shrink-0 items-center justify-center rounded-xl text-xs font-semibold outline-hidden ring-ring focus-visible:ring-2",
+                        "flex size-9 shrink-0 items-center justify-center rounded-lg text-xs font-semibold outline-hidden ring-ring focus-visible:ring-2",
                         active
-                          ? "bg-primary text-primary-foreground"
+                          ? "bg-primary/15 text-primary"
                           : "bg-sidebar-accent text-sidebar-foreground hover:bg-sidebar-accent/70",
                       )}
                     >
-                      {projectInitials(project.title)}
+                      {railInitials[index]}
                     </button>
                   }
                 />
@@ -159,7 +156,7 @@ export default function IskraSidebar() {
                   type="button"
                   aria-label="Add project"
                   onClick={() => openCommandPalette({ open: "add-project" })}
-                  className="flex size-10 shrink-0 items-center justify-center rounded-xl text-sidebar-muted-foreground outline-hidden ring-ring hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-2 [&>svg]:size-4"
+                  className="flex size-9 shrink-0 items-center justify-center rounded-lg text-sidebar-muted-foreground outline-hidden ring-ring hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-2 [&>svg]:size-4"
                 >
                   <PlusIcon />
                 </button>

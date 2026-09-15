@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   EMPTY_PROJECT_RAIL_MEMORY,
+  projectRailInitials,
   railClickTarget,
   rememberRailRoute,
   resolveRailProject,
@@ -123,6 +124,23 @@ describe("railClickTarget", () => {
     expect(railClickTarget(channels, "archived")).toEqual({ kind: "channel", channelId: "one" });
     expect(railClickTarget(channels, undefined)).toEqual({ kind: "channel", channelId: "one" });
     expect(railClickTarget([], "two")).toEqual({ kind: "board" });
+  });
+});
+
+describe("projectRailInitials", () => {
+  it("tells apart projects whose initials would match", () => {
+    expect(
+      projectRailInitials(["iskra-m1-demo", "iskra-m1-demo2", "iskra-m2-fixture", "server"]),
+    ).toEqual(["IM", "I2", "IF", "SE"]);
+  });
+
+  it("leaves distinct initials alone and never reuses another tile's letters", () => {
+    expect(projectRailInitials(["Iskra web", "docs"])).toEqual(["IW", "DO"]);
+    expect(projectRailInitials(["app-one", "app-oak", "an"])).toEqual(["AE", "AA", "AN"]);
+  });
+
+  it("numbers projects with the same title", () => {
+    expect(projectRailInitials(["api", "api", "api"])).toEqual(["AP", "A2", "A3"]);
   });
 });
 

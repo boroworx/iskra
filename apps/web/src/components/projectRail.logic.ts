@@ -85,6 +85,53 @@ export function rememberRailRoute(
   };
 }
 
+/** A rail tile's letters: the first letters of the title's first two words, or its first two letters. */
+export function projectInitials(title: string): string {
+  const words = title.split(/[\s/_.-]+/).filter((word) => word.length > 0);
+  const initials =
+    words.length > 1 ? `${words[0]?.[0] ?? ""}${words[1]?.[0] ?? ""}` : title.slice(0, 2);
+  return initials.toUpperCase();
+}
+
+const commonPrefixLength = (left: string, right: string) => {
+  let length = 0;
+  while (length < left.length && left[length] === right[length]) length++;
+  return length;
+};
+
+/**
+ * Each rail tile's letters, in rail order. Titles that would share initials keep the first letter
+ * and take the first character where they part from their look-alikes (`iskra-m1-demo2` → `I2`),
+ * then that character's successors, then a number, so no two tiles read the same.
+ */
+export function projectRailInitials(titles: ReadonlyArray<string>): ReadonlyArray<string> {
+  const bases = titles.map(projectInitials);
+  const shared = (base: string) => bases.indexOf(base) !== bases.lastIndexOf(base);
+  const used = new Set(bases.filter((base) => !shared(base)));
+  const keys = titles.map((title) => title.toLowerCase().replace(/[^\p{L}\p{N}]/gu, ""));
+  return bases.map((base, index) => {
+    if (!shared(base)) return base;
+    const key = keys[index] ?? "";
+    const common = Math.max(
+      ...keys.map((other, otherIndex) =>
+        otherIndex === index || bases[otherIndex] !== base ? 0 : commonPrefixLength(key, other),
+      ),
+    );
+    const first = base.slice(0, 1);
+    // A title that is a prefix of a look-alike has no character of its own, so it keeps its initials.
+    const candidates =
+      common >= key.length
+        ? [base]
+        : Array.from(key.slice(common), (char) => `${first}${char.toUpperCase()}`);
+    let pick = candidates.find((candidate) => !used.has(candidate));
+    for (let number = 2; pick === undefined; number++) {
+      if (!used.has(`${first}${number}`)) pick = `${first}${number}`;
+    }
+    used.add(pick);
+    return pick;
+  });
+}
+
 /** Where a rail click goes: the project's last channel if it still exists, else its first, else its board. */
 export function railClickTarget(
   channelIds: ReadonlyArray<ChannelId>,
