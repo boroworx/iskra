@@ -1,5 +1,4 @@
 import type { EnvironmentId, UnifiedSettings } from "@iskra/contracts";
-import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 
 import { useUpdateEnvironmentSettings } from "../../hooks/useSettings";
@@ -15,7 +14,12 @@ import {
 import { Button } from "../ui/button";
 import { AddUsageLimitSourceDialog } from "./AddUsageLimitSourceDialog";
 import { searchableSetting } from "./settingsSearch";
-import { SettingsRow, SettingsSection } from "./settingsLayout";
+import {
+  SettingsAddButton,
+  SettingsEmptyRow,
+  SettingsRow,
+  SettingsSection,
+} from "./settingsLayout";
 
 /** Hub management follows the selected device and access rules of provider settings. */
 export function UsageProviderSettings({
@@ -39,15 +43,12 @@ export function UsageProviderSettings({
         {...searchableSetting("usage-providers")}
         headerAction={
           !readOnly ? (
-            <Button size="xs" variant="outline" onClick={() => setAdding(true)}>
-              <PlusIcon className="size-3" aria-hidden />
-              Add hub
-            </Button>
+            <SettingsAddButton onClick={() => setAdding(true)}>Add hub</SettingsAddButton>
           ) : null
         }
       >
         {entries.length === 0 ? (
-          <SettingsRow title="No usage providers configured." />
+          <SettingsEmptyRow>No usage providers configured.</SettingsEmptyRow>
         ) : (
           entries.map(([id, source]) => {
             const label = source.label?.trim() || source.url;
@@ -97,7 +98,7 @@ function RemoveUsageProviderButton({
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button size="xs" variant="ghost" onClick={() => setOpen(true)}>
+      <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>
         Remove
       </Button>
       <AlertDialog open={open} onOpenChange={setOpen}>

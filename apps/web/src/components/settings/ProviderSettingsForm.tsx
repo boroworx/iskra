@@ -17,7 +17,11 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import type { ProviderClientDefinition } from "./providerDriverMeta";
-import { SettingsRow } from "./settingsLayout";
+import {
+  SETTINGS_SELECT_WIDTH_CLASSNAME,
+  SETTINGS_TEXT_INPUT_WIDTH_CLASSNAME,
+  SettingsRow,
+} from "./settingsLayout";
 
 export interface ProviderSettingsFieldModel {
   readonly key: string;
@@ -265,7 +269,7 @@ function ProviderSettingsFieldRow({
           value={value}
           inputId={inputId}
           size="sm"
-          className="w-full sm:w-56"
+          className={SETTINGS_SELECT_WIDTH_CLASSNAME}
           onChange={onChange}
         />
       ) : field.control === "textarea" ? (
@@ -285,7 +289,7 @@ function ProviderSettingsFieldRow({
           id={inputId}
           aria-describedby={descriptionId}
           size="sm"
-          className="w-full sm:w-56"
+          className={SETTINGS_TEXT_INPUT_WIDTH_CLASSNAME}
           type={field.control === "password" ? "password" : undefined}
           autoComplete={field.control === "password" ? "off" : undefined}
           value={readProviderConfigString(value, field.key)}

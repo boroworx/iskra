@@ -4,11 +4,12 @@ import { Spinner } from "~/components/ui/spinner";
 
 import {
   ArrowUpCircleIcon,
+  ChevronRightIcon,
   CopyIcon,
+  InfoIcon,
   DownloadIcon,
   LockIcon,
   LockOpenIcon,
-  PlusIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react";
@@ -35,7 +36,6 @@ import { cn } from "../../lib/utils";
 import { StatusPill } from "../iskra/StatusPill";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { normalizeProviderAccentColor } from "../../providerInstances";
-import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { DraftInput } from "../ui/draft-input";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
@@ -48,7 +48,12 @@ import { ProviderModelsSection } from "./ProviderModelsSection";
 import { ProviderInstanceIcon, providerInstanceInitials } from "../chat/ProviderInstanceIcon";
 import { ProviderAccentColorPicker } from "./ProviderAccentColorPicker";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
-import { SettingsRow, SettingsSection } from "./settingsLayout";
+import {
+  SETTINGS_TEXT_INPUT_WIDTH_CLASSNAME,
+  SettingsAddButton,
+  SettingsRow,
+  SettingsSection,
+} from "./settingsLayout";
 import {
   getProviderVersionAdvisoryPresentation,
   getProviderSummary,
@@ -256,10 +261,9 @@ function ProviderEnvironmentSection(props: {
       title="Variables"
       description="API keys, base URLs, and other per-instance CLI settings."
       control={
-        <Button type="button" size="sm" variant="outline" onClick={addVariable}>
-          <PlusIcon className="size-3" />
+        <SettingsAddButton type="button" onClick={addVariable}>
           Add variable
-        </Button>
+        </SettingsAddButton>
       }
     >
       {rows.length > 0 ? (
@@ -296,7 +300,7 @@ function ProviderEnvironmentSection(props: {
                   render={
                     <Button
                       type="button"
-                      size="icon-micro"
+                      size="icon"
                       variant="ghost-muted"
                       className={cn(
                         "[--control-icon-color:currentColor]",
@@ -328,7 +332,7 @@ function ProviderEnvironmentSection(props: {
               </Tooltip>
               <Button
                 type="button"
-                size="icon-micro"
+                size="icon"
                 variant="ghost-muted"
                 className="[--control-icon-color:currentColor] hover:text-destructive"
                 onClick={() => removeVariable(variable.id)}
@@ -581,13 +585,13 @@ export function ProviderInstanceCard({
   const statusPillNode = (
     <StatusPill label={pillLabel ?? summary.headline} tone={PROVIDER_STATUS_TONES[statusKey]} />
   );
-  const listCaption = [...headlineRest, needsAttention ? summary.detail : null]
+  const listCaption = [...headlineRest, needsAttention && !selected ? summary.detail : null]
     .filter(Boolean)
     .join(" · ");
+  // The list row above carries the status pill; the editor adds only what the row can't fit.
   const editorStatusNode =
     isAuthenticated && authEmail ? (
       <>
-        {needsAttention ? statusPillNode : null}
         <span>Authenticated as</span>
         <ProviderAuthEmail email={authEmail} />
         {authLabel ? <span>· {authLabel}</span> : null}
@@ -595,15 +599,9 @@ export function ProviderInstanceCard({
           <span className="min-w-0 [overflow-wrap:anywhere]">· {summary.detail}</span>
         ) : null}
       </>
-    ) : (
-      <>
-        {statusPillNode}
-        {headlineRest.length > 0 ? <span>{headlineRest.join(" · ")}</span> : null}
-        {summary.detail ? (
-          <span className="min-w-0 [overflow-wrap:anywhere]">{summary.detail}</span>
-        ) : null}
-      </>
-    );
+    ) : summary.detail ? (
+      <span className="min-w-0 [overflow-wrap:anywhere]">{summary.detail}</span>
+    ) : null;
   if (mode === "list") {
     return (
       <div
@@ -628,8 +626,9 @@ export function ProviderInstanceCard({
           />
           {titleIconNode}
           <span className="min-w-0 flex-1">
-            <span className="flex min-w-0 items-center gap-2">
-              <span className="truncate text-sm font-medium text-foreground">{displayName}</span>
+            <span className="flex min-h-5 min-w-0 items-center gap-2">
+              <span className="truncate text-[13px] text-foreground">{displayName}</span>
+              {statusPillNode}
               {String(instanceId) !== String(instance.driver) ? (
                 <code className="min-w-0 truncate rounded bg-muted/60 px-1 py-0.5 text-[10px] text-muted-foreground">
                   {instanceId}
@@ -647,7 +646,7 @@ export function ProviderInstanceCard({
                       render={
                         <Button
                           type="button"
-                          size="icon-micro"
+                          size="icon"
                           variant="ghost-muted"
                           className="pointer-events-auto relative shrink-0"
                           aria-label={`Copy ${displayName} update command`}
@@ -668,10 +667,11 @@ export function ProviderInstanceCard({
                 )
               ) : null}
             </span>
-            <span className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-              {statusPillNode}
-              {listCaption ? <span className="min-w-0 truncate">{listCaption}</span> : null}
-            </span>
+            {listCaption ? (
+              <span className="mt-0.5 block min-w-0 truncate text-xs text-muted-foreground">
+                {listCaption}
+              </span>
+            ) : null}
           </span>
         </div>
         <span className="flex h-5 shrink-0 items-center">
@@ -682,17 +682,21 @@ export function ProviderInstanceCard({
             aria-label={`Enable ${displayName}`}
           />
         </span>
+        {/* Points at the detail below; turns down while this provider is the one shown. */}
+        <ChevronRightIcon
+          aria-hidden
+          className={cn(
+            "size-4 shrink-0 text-tertiary-label transition-transform",
+            selected && "rotate-90 text-muted-foreground",
+          )}
+        />
       </div>
     );
   }
 
   const editorHeaderAction = (
     <div className="flex shrink-0 items-center gap-1.5">
-      {driverOption?.badgeLabel ? (
-        <Badge variant="warning" size="sm" className="shrink-0">
-          {driverOption.badgeLabel}
-        </Badge>
-      ) : null}
+      {driverOption?.badgeLabel ? <StatusPill label={driverOption.badgeLabel} tone="gray" /> : null}
       {versionCodeNode}
       <span
         inert={readOnly}
@@ -705,7 +709,7 @@ export function ProviderInstanceCard({
               render={
                 <Button
                   type="button"
-                  size="icon-xs"
+                  size="icon-sm"
                   variant="ghost"
                   className={cn(
                     "[--control-icon-color:currentColor]",
@@ -743,7 +747,7 @@ export function ProviderInstanceCard({
                 {onRunUpdate ? (
                   <Button
                     type="button"
-                    size="xs"
+                    size="sm"
                     variant="outline"
                     className="w-full"
                     disabled={isUpdating}
@@ -754,9 +758,9 @@ export function ProviderInstanceCard({
                   </Button>
                 ) : null}
                 {onRunUpdate && updateCommand ? (
-                  <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
                     <span aria-hidden className="h-px flex-1 bg-border" />
-                    or, update manually using
+                    Or update manually
                     <span aria-hidden className="h-px flex-1 bg-border" />
                   </div>
                 ) : null}
@@ -770,7 +774,7 @@ export function ProviderInstanceCard({
                         render={
                           <Button
                             type="button"
-                            size="icon-xs"
+                            size="icon-sm"
                             variant="ghost"
                             className="shrink-0 text-muted-foreground hover:text-foreground"
                             onClick={() =>
@@ -794,7 +798,7 @@ export function ProviderInstanceCard({
         {onDelete ? (
           <Button
             type="button"
-            size="icon-xs"
+            size="icon-sm"
             variant="ghost-muted"
             disabled={readOnly}
             className="[--control-icon-color:currentColor] hover:text-destructive"
@@ -814,33 +818,41 @@ export function ProviderInstanceCard({
         <SettingsRow
           title="Display name"
           status={
-            <div className="flex min-w-0 flex-wrap items-center gap-x-1.5">{editorStatusNode}</div>
+            editorStatusNode ? (
+              <div className="flex min-w-0 flex-wrap items-center gap-x-1.5">
+                {editorStatusNode}
+              </div>
+            ) : undefined
           }
           control={
             <div
               inert={readOnly}
               aria-disabled={readOnly || undefined}
               className={cn(
-                "flex w-full items-center justify-end gap-2 sm:w-auto",
+                "relative flex items-center",
+                SETTINGS_TEXT_INPUT_WIDTH_CLASSNAME,
                 readOnly && "opacity-50 select-none",
               )}
             >
-              <ProviderAccentColorPicker
-                layout="inline"
-                displayName={displayName}
-                value={accentColor}
-                onCommit={updateAccentColor}
-                commitDelayMs={120}
-              />
               <DraftInput
                 id={`provider-instance-${instanceId}-display-name`}
                 size="sm"
-                className="min-w-0 flex-1 sm:w-56 sm:flex-none"
+                className="w-full [&_input]:ps-8"
                 value={instance.displayName ?? ""}
                 onCommit={updateDisplayName}
                 placeholder={driverOption?.label ?? "Instance label"}
                 spellCheck={false}
               />
+              {/* The accent swatch sits inside the name field it colors. */}
+              <span className="absolute inset-y-0 left-0 flex items-center">
+                <ProviderAccentColorPicker
+                  layout="inline"
+                  displayName={displayName}
+                  value={accentColor}
+                  onCommit={updateAccentColor}
+                  commitDelayMs={120}
+                />
+              </span>
             </div>
           }
         />
@@ -894,12 +906,24 @@ export function ProviderInstanceCard({
           inert={readOnly}
           aria-disabled={readOnly || undefined}
           className={readOnly ? "opacity-50 select-none" : undefined}
+          headerAction={
+            <Tooltip>
+              <TooltipTrigger
+                delay={200}
+                render={
+                  <Button size="icon-sm" variant="ghost-muted" aria-label="Where models are saved">
+                    <InfoIcon className="size-3.5" />
+                  </Button>
+                }
+              />
+              <TooltipPopup side="top" className="max-w-72">
+                Favorites, visibility, and ordering are saved on this device. Custom models are
+                saved on the selected environment.
+              </TooltipPopup>
+            </Tooltip>
+          }
         >
           <div className="px-3 py-3 sm:px-4">
-            <p className="mb-3 text-xs text-muted-foreground">
-              Favorites, visibility, and ordering are saved on this device. Custom models are saved
-              on the selected environment.
-            </p>
             <ProviderModelsSection
               instanceId={instanceId}
               driverKind={driverKind}

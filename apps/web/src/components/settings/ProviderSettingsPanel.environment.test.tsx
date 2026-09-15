@@ -145,18 +145,7 @@ function renderPanel(options?: {
 }
 
 function isRefreshButton(element: ReactElement<Record<string, unknown>>): boolean {
-  const children = element.props.children;
-  return (
-    Array.isArray(children) &&
-    children.some(
-      (child) =>
-        typeof child === "object" &&
-        child !== null &&
-        (child as ReactElement<Record<string, unknown>>).props?.className === "sr-only" &&
-        (child as ReactElement<Record<string, unknown>>).props?.children ===
-          "Refresh provider status",
-    )
-  );
+  return element.props["aria-label"] === "Refresh provider status";
 }
 
 function isAddProviderButton(element: ReactElement<Record<string, unknown>>): boolean {

@@ -16,7 +16,7 @@ import { normalizeProviderAccentColor } from "../../providerInstances";
 import { Button } from "../ui/button";
 import { ACPRegistryIcon, Gemini, GithubCopilotIcon, PiAgentIcon, type Icon } from "../Icons";
 import { Dialog } from "../ui/dialog";
-import { Badge } from "../ui/badge";
+import { StatusPill } from "../iskra/StatusPill";
 import { Input } from "../ui/input";
 import { RadioGroup } from "../ui/radio-group";
 import { toastManager } from "../ui/toast";
@@ -226,12 +226,7 @@ export function AddProviderInstanceDialog({
       <WizardPopup>
         <WizardHeader
           title="Add provider instance"
-          description={
-            <>
-              Configure an additional provider instance on {environmentLabel} — for example, a
-              second Codex install pointed at a different workspace.
-            </>
-          }
+          description={`Add another provider install on ${environmentLabel}.`}
         >
           <AddProviderInstanceWizardSteps
             currentStep={wizardStep}
@@ -271,9 +266,7 @@ export function AddProviderInstanceDialog({
                       <CheckIcon className="size-3.5 shrink-0" />
                     </RadioPrimitive.Indicator>
                     {option.badgeLabel ? (
-                      <Badge variant="warning" size="sm">
-                        {option.badgeLabel}
-                      </Badge>
+                      <StatusPill label={option.badgeLabel} tone="gray" />
                     ) : null}
                   </RadioPrimitive.Root>
                 );
@@ -293,9 +286,7 @@ export function AddProviderInstanceDialog({
                     <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
                       {option.label}
                     </span>
-                    <Badge variant="warning" size="sm">
-                      Coming Soon
-                    </Badge>
+                    <StatusPill label="Coming soon" tone="gray" />
                   </RadioPrimitive.Root>
                 );
               })}
@@ -330,7 +321,7 @@ export function AddProviderInstanceDialog({
               <span className="text-[11px] text-destructive">{instanceIdError}</span>
             ) : (
               <span className="text-[11px] text-muted-foreground">
-                Routing key used by threads and sessions. Letters, digits, '-', or '_'.
+                Routing key used by agents and sessions. Letters, digits, '-', or '_'.
               </span>
             )}
           </label>

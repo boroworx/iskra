@@ -94,6 +94,7 @@ import {
 } from "./SettingsPanels.logic";
 import {
   SETTINGS_GROUP_CLASSNAME,
+  SETTINGS_NUMBER_WIDTH_CLASSNAME,
   PolicyTooltip,
   SettingResetButton,
   SettingsPageContainer,
@@ -154,7 +155,7 @@ function ProviderLastChecked({ lastCheckedAt }: { lastCheckedAt: string | null }
     <span>
       {lastCheckedRelative.suffix ? (
         <>
-          Checked <span className="font-mono tabular-nums">{lastCheckedRelative.value}</span>{" "}
+          Checked <span className="tabular-nums">{lastCheckedRelative.value}</span>{" "}
           {lastCheckedRelative.suffix}
         </>
       ) : (
@@ -275,7 +276,7 @@ export function ProviderSettingsPanel({
   ...target
 }: ProviderSettingsTarget & { readonly children?: ReactNode }) {
   return (
-    <SettingsPageContainer className="gap-8">
+    <SettingsPageContainer>
       <ProviderSettingsPanelContent
         key={`${target.environmentId ?? ""}:${target.instanceId ?? ""}`}
         {...target}
@@ -994,35 +995,32 @@ export function EnvironmentProviderSettings({
 
   return (
     <>
-      <SettingsSection {...searchableSetting("providers")} hideTitle variant="plain">
-        <div className="flex min-h-11 min-w-0 items-center gap-2 px-3 sm:px-4">
-          {deviceTabs}
-          <div className="ml-auto flex min-w-0 shrink-0 items-center gap-2">
-            {readOnly ? (
-              <span className="min-w-0 truncate text-xs text-muted-foreground">
+      <SettingsSection
+        {...searchableSetting("providers")}
+        variant="plain"
+        headerAction={
+          <div className="flex min-w-0 items-center gap-1">
+            <span className="hidden min-w-0 truncate pr-1 text-xs text-tertiary-label sm:inline">
+              {isRefreshingProviders ? (
+                "Refreshing"
+              ) : (
                 <ProviderLastChecked lastCheckedAt={lastCheckedAt} />
-              </span>
-            ) : (
+              )}
+            </span>
+            {readOnly ? null : (
               <>
                 <Tooltip>
                   <TooltipTrigger
                     render={
                       <Button
-                        size="xs"
+                        size="icon-sm"
                         variant="ghost-muted"
                         disabled={isRefreshingProviders}
                         aria-busy={isRefreshingProviders}
+                        aria-label="Refresh provider status"
                         onClick={() => void refreshProviders()}
                       >
                         <RefreshIcon refreshing={isRefreshingProviders} />
-                        <span className="sr-only">Refresh provider status</span>
-                        <span className="hidden min-w-0 truncate sm:inline">
-                          {isRefreshingProviders ? (
-                            "Refreshing providers"
-                          ) : (
-                            <ProviderLastChecked lastCheckedAt={lastCheckedAt} />
-                          )}
-                        </span>
                       </Button>
                     }
                   />
@@ -1032,7 +1030,7 @@ export function EnvironmentProviderSettings({
                   <TooltipTrigger
                     render={
                       <Button
-                        size="icon-xs"
+                        size="icon-sm"
                         variant="ghost-muted"
                         onClick={() => setIsAddInstanceDialogOpen(true)}
                         aria-label="Add provider"
@@ -1046,7 +1044,11 @@ export function EnvironmentProviderSettings({
               </>
             )}
           </div>
-        </div>
+        }
+      >
+        {deviceTabs ? (
+          <div className="flex min-h-11 min-w-0 items-center px-3 sm:px-4">{deviceTabs}</div>
+        ) : null}
         {readOnly ? (
           <div className={cn(providerCardClassName, "overflow-hidden")}>
             <SettingsRow
@@ -1086,13 +1088,13 @@ export function EnvironmentProviderSettings({
             <span className="inline-flex items-center gap-1.5">
               {searchableSetting("provider-health-check-interval").title}
               <PolicyTooltip>
-                This interval is configured here, then the shared Background activity policy decides
-                whether provider probes may run when the timer fires. Custom intervals appear as
-                Advanced in General settings.
+                Refreshes provider status, versions, and models in the background. The shared
+                Background activity policy decides whether probes run when the timer fires; custom
+                intervals appear as Advanced in General settings.
               </PolicyTooltip>
             </span>
           }
-          description="Refresh provider status, versions, and models in the background. Set to 0 to disable."
+          description="Refresh provider status in the background. 0 turns it off."
           resetAction={
             providerHealthRefreshIntervalSeconds !== defaultProviderHealthRefreshIntervalSeconds ? (
               <span inert={readOnly} className={readOnly ? "opacity-50" : undefined}>
@@ -1125,7 +1127,7 @@ export function EnvironmentProviderSettings({
                 min={0}
                 step={PROVIDER_HEALTH_INTERVAL_STEP_SECONDS}
                 size="sm"
-                className="w-32"
+                className={SETTINGS_NUMBER_WIDTH_CLASSNAME}
                 onValueChange={(value) =>
                   updateSettings(
                     backgroundActivityOverrideSettings(

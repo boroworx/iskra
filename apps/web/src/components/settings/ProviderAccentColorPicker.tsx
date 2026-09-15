@@ -1,6 +1,6 @@
 "use client";
 
-import { PipetteIcon, XIcon } from "lucide-react";
+import { XIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 
 import { Button } from "../ui/button";
@@ -177,22 +177,29 @@ function ProviderCustomColorPicker(props: {
   readonly onCommit: (value: string) => void;
   readonly onClear: () => void;
 }) {
-  const normalized = normalizeProviderAccentColor(props.value) ?? FALLBACK_ACCENT_COLOR;
+  const chosen = normalizeProviderAccentColor(props.value);
+  const normalized = chosen ?? FALLBACK_ACCENT_COLOR;
 
   return (
     <Popover>
       <PopoverTrigger
         render={
+          // A small swatch with a 28px hit area; no color yet reads as an empty ring.
           <button
             type="button"
-            className={cn(
-              "flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md border border-input text-white shadow-xs transition-transform duration-200 active:scale-95",
-              "hover:scale-105 hover:border-ring/60",
-            )}
-            style={{ backgroundColor: normalized }}
+            className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label={`Choose accent color for ${props.displayName}`}
           >
-            <PipetteIcon className="size-3 text-white/70 drop-shadow-sm" aria-hidden />
+            <span
+              aria-hidden
+              className={cn(
+                "size-3.5 rounded-full",
+                chosen
+                  ? "shadow-[inset_0_0_0_0.5px_rgb(0_0_0/20%)]"
+                  : "border border-dashed border-muted-foreground/60",
+              )}
+              style={chosen ? { backgroundColor: chosen } : undefined}
+            />
           </button>
         }
       />

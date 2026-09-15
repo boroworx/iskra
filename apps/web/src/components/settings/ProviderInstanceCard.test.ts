@@ -121,7 +121,7 @@ describe("deriveProviderModelsForDisplay", () => {
     expect(markup).toContain("blur-[2px]");
     expect(markup).not.toContain("developer@example.com");
   });
-  it("surfaces a failed probe message in both the list row and the editor", () => {
+  it("surfaces a failed probe message in both the list row and the editor, with the status pill once", () => {
     const instanceId = ProviderInstanceId.make("codex_work");
     const driver = ProviderDriverKind.make("codex");
     const message =
@@ -156,8 +156,10 @@ describe("deriveProviderModelsForDisplay", () => {
 
     for (const mode of ["list", "editor"] as const) {
       const markup = renderToStaticMarkup(createElement(ProviderInstanceCard, { ...props, mode }));
-      expect(markup).toContain("Unavailable");
       expect(markup).toContain("is not a symlink");
+      // The list row carries the status pill; the editor below it does not repeat it.
+      if (mode === "list") expect(markup).toContain("Unavailable");
+      else expect(markup).not.toContain(">Unavailable<");
     }
   });
 });

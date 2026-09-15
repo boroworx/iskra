@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDownIcon, ArrowUpIcon, PencilIcon, PlusIcon, StarIcon, XIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, PencilIcon, StarIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ProviderDriverKind,
@@ -17,6 +17,7 @@ import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { CustomModelEditor } from "./CustomModelEditor";
+import { SettingsAddButton } from "./settingsLayout";
 
 /**
  * Placeholder text for the "add a custom model" input, keyed by driver
@@ -311,7 +312,7 @@ export function ProviderModelsSection({
       <TooltipTrigger
         render={
           <Button
-            size="icon-micro"
+            size="icon"
             variant="ghost"
             className={cn(
               "[--control-icon-color:currentColor]",
@@ -344,14 +345,14 @@ export function ProviderModelsSection({
       readonly canMoveDown: boolean;
     },
   ) => (
-    <span className="flex shrink-0 items-center justify-end gap-0.5">
+    <span className="flex shrink-0 items-center justify-end">
       {!options.isHidden && !isFiltering ? (
         <>
           <Tooltip>
             <TooltipTrigger
               render={
                 <Button
-                  size="icon-micro"
+                  size="icon"
                   variant="ghost-muted"
                   disabled={!options.canMoveUp}
                   onClick={() => handleMove(model.slug, -1)}
@@ -367,7 +368,7 @@ export function ProviderModelsSection({
             <TooltipTrigger
               render={
                 <Button
-                  size="icon-micro"
+                  size="icon"
                   variant="ghost-muted"
                   disabled={!options.canMoveDown}
                   onClick={() => handleMove(model.slug, 1)}
@@ -387,7 +388,7 @@ export function ProviderModelsSection({
             <TooltipTrigger
               render={
                 <Button
-                  size="icon-micro"
+                  size="icon"
                   variant="ghost-muted"
                   aria-label={`Edit ${model.slug}`}
                   onClick={() =>
@@ -404,7 +405,7 @@ export function ProviderModelsSection({
             <TooltipTrigger
               render={
                 <Button
-                  size="icon-micro"
+                  size="icon"
                   variant="ghost-muted"
                   aria-label={`Remove ${model.slug}`}
                   onClick={() => handleRemove(model.slug)}
@@ -468,7 +469,7 @@ export function ProviderModelsSection({
         className={cn(
           // Actions column is at least wide enough for the four custom-row
           // buttons so capability labels line up across built-in and custom rows.
-          "grid h-7 grid-cols-[1.5rem_minmax(0,1fr)_auto_minmax(5.5rem,auto)_auto] items-center gap-2 rounded-md px-2 transition-colors hover:bg-muted/30",
+          "grid h-8 grid-cols-[1.75rem_minmax(0,1fr)_auto_minmax(7rem,auto)_auto] items-center gap-2 rounded-md px-2 transition-colors hover:bg-muted/30",
           isHidden && "opacity-50",
         )}
       >
@@ -523,7 +524,7 @@ export function ProviderModelsSection({
           {builtInModels.length > 0 ? (
             <Button
               type="button"
-              size="xs"
+              size="sm"
               variant="ghost-muted"
               onClick={() =>
                 onHiddenModelsChange(nextHiddenModelsForBulkToggle(models, hiddenModels))
@@ -541,16 +542,9 @@ export function ProviderModelsSection({
           </span>
         </div>
         {driverKind !== "antigravity" && !isAdding ? (
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost-muted"
-            className="ml-auto"
-            onClick={() => setIsAdding(true)}
-          >
-            <PlusIcon className="size-3" />
+          <SettingsAddButton type="button" className="ml-auto" onClick={() => setIsAdding(true)}>
             Add custom model
-          </Button>
+          </SettingsAddButton>
         ) : null}
       </div>
       <div
@@ -623,11 +617,11 @@ export function ProviderModelsSection({
             spellCheck={false}
           />
           <div className="flex shrink-0 gap-2">
-            <Button size="sm" variant="outline" onClick={handleAdd}>
-              Add
-            </Button>
-            <Button size="sm" variant="ghost" onClick={cancelAdd}>
+            <Button size="sm" variant="secondary" onClick={cancelAdd}>
               Cancel
+            </Button>
+            <Button size="sm" onClick={handleAdd}>
+              Add
             </Button>
           </div>
         </div>

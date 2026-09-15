@@ -180,7 +180,7 @@ export function CustomModelEditor({
         Default
       </label>
       <Button
-        size="icon-micro"
+        size="icon"
         variant="ghost-muted"
         aria-label="Remove choice"
         onClick={() =>
@@ -258,7 +258,7 @@ export function CustomModelEditor({
           </SelectPopup>
         </Select>
         <Button
-          size="icon-micro"
+          size="icon"
           variant="ghost-muted"
           aria-label={`Remove option ${index + 1}`}
           onClick={() => removeDescriptor(descriptor.key)}
@@ -271,7 +271,7 @@ export function CustomModelEditor({
           {descriptor.choices.map((choice) => renderChoice(descriptor, choice))}
           <Button
             type="button"
-            size="xs"
+            size="sm"
             variant="ghost-muted"
             className="-ml-2 self-start"
             onClick={() =>
@@ -351,7 +351,7 @@ export function CustomModelEditor({
               <Button
                 key={preset.id}
                 type="button"
-                size="xs"
+                size="sm"
                 variant="ghost-muted"
                 className={cn("-ml-2 first:ml-0")}
                 onClick={() => addDescriptor(descriptorFromPreset(preset))}
@@ -362,7 +362,7 @@ export function CustomModelEditor({
             ))}
           <Button
             type="button"
-            size="xs"
+            size="sm"
             variant="ghost-muted"
             onClick={() => addDescriptor(emptyEditorDescriptor())}
           >
@@ -375,11 +375,11 @@ export function CustomModelEditor({
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
 
       <div className="flex gap-2">
-        <Button size="sm" variant="outline" onClick={handleSave}>
-          Save
-        </Button>
-        <Button size="sm" variant="ghost" onClick={onCancel}>
+        <Button size="sm" variant="secondary" onClick={onCancel}>
           Cancel
+        </Button>
+        <Button size="sm" onClick={handleSave}>
+          Save
         </Button>
       </div>
     </div>
