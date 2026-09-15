@@ -56,7 +56,9 @@ export class CardVerifierReactor extends Context.Service<
 >()("@iskra/cli/orchestration/CardVerifierReactor") {}
 
 type VerifierRequest =
-  | { readonly kind: "verify"; readonly cardId: CardId }
+  // `trigger` names what asked (an event id), so a rerun at the same commit starts a new run
+  // instead of replaying the first run's commands.
+  | { readonly kind: "verify"; readonly cardId: CardId; readonly trigger: string }
   | { readonly kind: "verdict"; readonly verdict: CardVerdict }
   | { readonly kind: "session"; readonly threadId: ThreadId }
   | { readonly kind: "release"; readonly cardId: CardId }
@@ -66,6 +68,7 @@ type VerifierRequest =
 interface Verifying {
   readonly headSha: string;
   readonly threadId: ThreadId;
+  readonly trigger: string;
   readonly attempt: number;
   readonly release: Effect.Effect<void>;
 }
@@ -217,12 +220,13 @@ const make = Effect.gen(function* () {
     readonly builder: OrchestrationAgent;
     readonly agents: ReadonlyArray<OrchestrationAgent>;
     readonly headSha: string;
+    readonly trigger: string;
     readonly attempt: number;
   }) {
     const { card, headSha, attempt } = input;
     const evidence = card.evidence;
     if (evidence === null) return;
-    const key = `verify-${card.id}-${headSha.slice(0, 12)}-${attempt}`;
+    const key = `verify-${card.id}-${headSha.slice(0, 12)}-${input.trigger}-${attempt}`;
     yield* release(card.id);
 
     const choice = selectVerifier({
@@ -261,6 +265,7 @@ const make = Effect.gen(function* () {
       verifying.set(card.id, {
         headSha,
         threadId: cardRunThreadId(key),
+        trigger: input.trigger,
         attempt,
         release: snapshot.release,
       });
@@ -328,7 +333,7 @@ const make = Effect.gen(function* () {
     );
   });
 
-  const verify = Effect.fn("CardVerifierReactor.verify")(function* (cardId: CardId) {
+  const verify = Effect.fn("CardVerifierReactor.verify")(function* (cardId: CardId, trigger: string) {
     const model = yield* readModel();
     const card = model.cards?.find((candidate) => candidate.id === cardId);
     const project = model.projects.find((candidate) => candidate.id === card?.projectId);
@@ -350,7 +355,7 @@ const make = Effect.gen(function* () {
     ) {
       return;
     }
-    yield* startVerifier({ card, builder, agents, headSha, attempt: 0 });
+    yield* startVerifier({ card, builder, agents, headSha, trigger, attempt: 0 });
   });
 
   const onVerdict = Effect.fn("CardVerifierReactor.onVerdict")(function* (verdict: CardVerdict) {
@@ -424,6 +429,7 @@ const make = Effect.gen(function* () {
         builder,
         agents,
         headSha: current.headSha,
+        trigger: current.trigger,
         attempt: current.attempt + 1,
       });
     }
@@ -437,6 +443,7 @@ const make = Effect.gen(function* () {
   /** After a restart no verifier session survives: verify what waits, and flag what was lost. */
   const recover = Effect.fn("CardVerifierReactor.recover")(function* () {
     const model = yield* readModel();
+    const trigger = `recover-${yield* nowIso}`;
     for (const card of model.cards ?? []) {
       if (card.status !== "inReview") continue;
       if (card.verification.state === "running") {
@@ -446,7 +453,7 @@ const make = Effect.gen(function* () {
           "The verifier was lost to a server restart; rerun it.",
         );
       } else {
-        yield* verify(card.id);
+        yield* verify(card.id, trigger);
       }
     }
   });
@@ -454,7 +461,7 @@ const make = Effect.gen(function* () {
   const handle = (request: VerifierRequest) => {
     switch (request.kind) {
       case "verify":
-        return verify(request.cardId);
+        return verify(request.cardId, request.trigger);
       case "verdict":
         return onVerdict(request.verdict);
       case "session":
@@ -483,13 +490,13 @@ const make = Effect.gen(function* () {
     switch (event.type) {
       case "card.status-changed":
         return event.payload.to === "inReview"
-          ? worker.enqueue({ kind: "verify", cardId: event.payload.cardId })
+          ? worker.enqueue({ kind: "verify", cardId: event.payload.cardId, trigger: event.eventId })
           : verifying.has(event.payload.cardId)
             ? worker.enqueue({ kind: "release", cardId: event.payload.cardId })
             : Effect.void;
       case "card.evidence-recorded":
       case "card.verifier-rerun-requested":
-        return worker.enqueue({ kind: "verify", cardId: event.payload.cardId });
+        return worker.enqueue({ kind: "verify", cardId: event.payload.cardId, trigger: event.eventId });
       case "card.verdict-recorded":
         return worker.enqueue({ kind: "verdict", verdict: event.payload.verdict });
       case "thread.session-set": {
