@@ -1,11 +1,13 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import { SnapShotSettings } from "../components/settings/SnapShotSettings";
-
-function SettingsSnapShotRoute() {
-  return <SnapShotSettings />;
-}
-
+// SnapShots moved into Integrations; old links land on its section there.
 export const Route = createFileRoute("/settings/snap-shot")({
-  component: SettingsSnapShotRoute,
+  beforeLoad: () => {
+    throw redirect({
+      to: "/settings/integrations",
+      hash: "snap-shot",
+      search: true,
+      replace: true,
+    });
+  },
 });

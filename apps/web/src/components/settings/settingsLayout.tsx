@@ -338,7 +338,14 @@ export function SettingsUnavailableGroup({
         <p>{message}</p>
       </div>
       {/* The whole row reads unavailable, not just its disabled control. */}
-      <div className="[&_h3]:text-muted-foreground [&_p]:text-tertiary-label">{children}</div>
+      <div
+        className={cn(
+          "[&_h3]:text-muted-foreground [&_p]:text-tertiary-label",
+          SETTINGS_GROUP_ROWS_CLASSNAME,
+        )}
+      >
+        {children}
+      </div>
     </div>
   );
 }

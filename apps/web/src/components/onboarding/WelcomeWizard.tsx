@@ -74,6 +74,8 @@ import { WizardPanel, WizardSteps, WizardPopup, WizardHeader } from "../ui/wizar
 import { Dialog } from "../ui/dialog";
 import { toastManager } from "../ui/toast";
 import { cn } from "../../lib/utils";
+import { StatusPill } from "../iskra/StatusPill";
+import { SETTINGS_GROUP_CLASSNAME } from "../settings/settingsLayout";
 import { formatRelativeTime } from "../../timestampFormat";
 
 /**
@@ -185,7 +187,14 @@ export function WelcomeWizard({
       <WizardPopup
         bottomStickOnMobile={false}
         showCloseButton={false}
-        initialFocus={() => document.getElementById("onboarding-pairing-url") ?? true}
+        data-onboarding-wizard=""
+        // Focus the dialog itself unless a pairing field waits for input, so opening with the
+        // mouse paints no ring on the first row.
+        initialFocus={() =>
+          document.getElementById("onboarding-pairing-url") ??
+          document.querySelector<HTMLElement>("[data-onboarding-wizard]") ??
+          true
+        }
       >
         <WizardHeader
           title="Set up Iskra"
@@ -298,7 +307,7 @@ function ConnectionStep({
       (document.activeElement === document.body ||
         document.activeElement?.getAttribute("role") === "dialog")
     ) {
-      continueRef.current?.focus();
+      continueRef.current?.focus({ focusVisible: false } as FocusOptions);
     }
   }, [ready]);
   return (
@@ -307,44 +316,47 @@ function ConnectionStep({
       <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
         Choose one or more computers. We’ll set up providers and projects on each.
       </p>
-      {directEnvironments.length > 0 ? (
-        <fieldset className="mt-5 space-y-2">
-          <legend className="sr-only">Computers to set up</legend>
-          {directEnvironments.map((environment) => (
-            <label
-              key={environment.environmentId}
-              className="flex cursor-pointer items-center gap-3 rounded-lg border border-border bg-background px-3 py-3"
-            >
-              <Checkbox
-                checked={selectedIds.has(environment.environmentId)}
-                onCheckedChange={(checked) => {
-                  const next = new Set(selectedIds);
-                  if (checked) next.add(environment.environmentId);
-                  else next.delete(environment.environmentId);
-                  onSelectionChange(next);
-                }}
-              />
-              <MonitorIcon className="size-4 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1">
-                <span className="flex items-baseline justify-between gap-3">
-                  <span className="min-w-0 text-sm font-medium break-words">
-                    {environment.label}
+      {/* Computers and the ways to add one read as one grouped list. */}
+      <div className={cn("mt-5 overflow-hidden", SETTINGS_GROUP_CLASSNAME)}>
+        {directEnvironments.length > 0 ? (
+          <fieldset>
+            <legend className="sr-only">Computers to set up</legend>
+            {directEnvironments.map((environment) => (
+              <label
+                key={environment.environmentId}
+                className="flex min-h-11 cursor-pointer items-center gap-3 px-4 py-2.5"
+              >
+                <Checkbox
+                  checked={selectedIds.has(environment.environmentId)}
+                  onCheckedChange={(checked) => {
+                    const next = new Set(selectedIds);
+                    if (checked) next.add(environment.environmentId);
+                    else next.delete(environment.environmentId);
+                    onSelectionChange(next);
+                  }}
+                />
+                <MonitorIcon className="size-4 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-baseline justify-between gap-3">
+                    <span className="min-w-0 text-sm font-medium break-words">
+                      {environment.label}
+                    </span>
+                    {environment.connection.phase === "connected" ? (
+                      <StatusPill label="Connected" tone="green" />
+                    ) : (
+                      <StatusPill label="Connecting…" tone="gray" />
+                    )}
                   </span>
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    {environment.connection.phase === "connected" ? "Connected" : "Connecting…"}
-                  </span>
+                  {environment.displayUrl ? (
+                    <span className="mt-0.5 block text-xs break-all text-muted-foreground">
+                      {environment.displayUrl}
+                    </span>
+                  ) : null}
                 </span>
-                {environment.displayUrl ? (
-                  <span className="mt-0.5 block text-xs break-all text-muted-foreground">
-                    {environment.displayUrl}
-                  </span>
-                ) : null}
-              </span>
-            </label>
-          ))}
-        </fieldset>
-      ) : null}
-      <div className="mt-4 space-y-2">
+              </label>
+            ))}
+          </fieldset>
+        ) : null}
         {cloudEnabled ? (
           <ConnectAccountOption
             autoSelectedComputers={autoSelectedComputers}
@@ -353,17 +365,13 @@ function ConnectionStep({
             onToggleEnvironment={onToggleEnvironment}
           />
         ) : null}
-        <Collapsible
-          open={pairingOpen}
-          onOpenChange={setPairingOpen}
-          className="rounded-lg border border-border bg-background"
-        >
+        <Collapsible open={pairingOpen} onOpenChange={setPairingOpen}>
           <CollapsibleTrigger
             disabled={isPairing}
             render={
               <Button
                 variant="ghost"
-                className="h-auto min-h-14 w-full justify-start gap-3 px-3 py-3 text-left whitespace-normal sm:h-auto"
+                className="h-auto min-h-11 w-full justify-start gap-3 rounded-none px-4 py-2.5 text-left whitespace-normal sm:h-auto"
               />
             }
           >
@@ -374,14 +382,16 @@ function ConnectionStep({
             />
           </CollapsibleTrigger>
           <CollapsiblePanel>
-            <div className="px-3 pb-3">
+            <div className="px-4 pb-3">
               <PairingForm
                 isPairing={isPairing}
                 setIsPairing={setIsPairing}
                 onPaired={(environmentId) => {
                   setPairingOpen(false);
                   onPaired(environmentId);
-                  requestAnimationFrame(() => continueRef.current?.focus());
+                  requestAnimationFrame(() =>
+                    continueRef.current?.focus({ focusVisible: false } as FocusOptions),
+                  );
                 }}
               />
             </div>
@@ -389,12 +399,7 @@ function ConnectionStep({
         </Collapsible>
       </div>
       <div className="mt-6 flex items-center justify-end gap-3">
-        <Button
-          ref={continueRef}
-          autoFocus={!expandPairingInitially}
-          disabled={!ready || isPairing}
-          onClick={onContinue}
-        >
+        <Button ref={continueRef} disabled={!ready || isPairing} onClick={onContinue}>
           Continue
           <ArrowRightIcon className="size-3.5" />
         </Button>
@@ -422,11 +427,7 @@ function ConnectAccountOption({
   const onDiscoveryReady = useCallback(() => setDiscoveryReady(true), []);
 
   return (
-    <Collapsible
-      open={expanded && !!isSignedIn && discoveryReady}
-      onOpenChange={setExpanded}
-      className="rounded-lg border border-border bg-background"
-    >
+    <Collapsible open={expanded && !!isSignedIn && discoveryReady} onOpenChange={setExpanded}>
       <CollapsibleTrigger
         disabled={disabled || !isLoaded}
         onClick={(event) => {
@@ -439,7 +440,7 @@ function ConnectAccountOption({
         render={
           <Button
             variant="ghost"
-            className="h-auto min-h-14 w-full justify-start gap-3 px-3 py-3 text-left whitespace-normal sm:h-auto"
+            className="h-auto min-h-11 w-full justify-start gap-3 rounded-none px-4 py-2.5 text-left whitespace-normal sm:h-auto"
           />
         }
       >
@@ -788,7 +789,7 @@ function AgentCard({
           <span className="text-xs text-muted-foreground">{summary.headline}</span>
         ) : (
           <Button
-            size="xs"
+            size="sm"
             variant="ghost"
             onClick={onOpenTerminal}
             disabled={terminalOpen || !terminalAvailable}
@@ -920,11 +921,11 @@ function AgentInstallTerminal({
         </span>
         <div className="flex items-center gap-1">
           {setupState === "openFailed" ? (
-            <Button size="xs" variant="ghost" onClick={() => setSetupAttempt((value) => value + 1)}>
+            <Button size="sm" variant="ghost" onClick={() => setSetupAttempt((value) => value + 1)}>
               Retry
             </Button>
           ) : null}
-          <Button size="xs" variant="ghost-muted" onClick={onClose}>
+          <Button size="sm" variant="ghost-muted" onClick={onClose}>
             Close
           </Button>
         </div>
@@ -1195,7 +1196,7 @@ function ImportStep({
           <div className="flex items-center gap-1">
             <Button
               variant="ghost"
-              size="xs"
+              size="sm"
               disabled={isImporting || selected.length === candidates.length}
               onClick={() => setSelectedPaths(new Set(candidates.map((item) => item.key)))}
             >
@@ -1203,7 +1204,7 @@ function ImportStep({
             </Button>
             <Button
               variant="ghost"
-              size="xs"
+              size="sm"
               disabled={isImporting || selected.length === 0}
               onClick={() => setSelectedPaths(new Set())}
             >
@@ -1557,7 +1558,7 @@ function CommandBlock({
         {command}
       </span>
       <Button
-        size="icon-xs"
+        size="icon-sm"
         variant="ghost"
         aria-label="Copy command"
         onClick={() => copyToClipboard(command, undefined)}

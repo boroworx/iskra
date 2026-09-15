@@ -6,6 +6,7 @@ import {
   MinusIcon,
   PlusIcon,
   SearchIcon,
+  InfoIcon,
   TriangleAlertIcon,
   XIcon,
 } from "lucide-react";
@@ -126,7 +127,7 @@ function ExpandableHeaderSearch({
             render={
               <Button
                 type="button"
-                size="icon-xs"
+                size="icon-sm"
                 variant="ghost-muted"
                 onClick={() => onOpenChange(true)}
                 aria-label="Search keybindings"
@@ -906,7 +907,7 @@ function WhenClauseControl({
           <Button
             variant={expression ? "ghost" : "ghost-muted"}
             size="micro"
-            className="min-w-0 shrink font-mono"
+            className={cn("min-w-0 shrink", expression && "font-mono")}
           />
         }
         aria-label={`Edit when clause for ${label}`}
@@ -1035,7 +1036,7 @@ function KeybindingSettingsRow(props: KeybindingRowProps) {
 
   return (
     <SettingsRow
-      className="group/row min-h-10 rounded-none py-1.5"
+      className="group/row rounded-none py-1.5"
       title={
         <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5">
           <KeybindingRowTitle row={row} />
@@ -1319,13 +1320,20 @@ function KeybindingsList(props: KeybindingsListProps) {
 /** Shown in the browser build only; the desktop app receives every shortcut. */
 function BrowserKeybindingNotice() {
   return (
-    <div className="flex min-h-10 items-center gap-2 px-4 py-2 text-xs text-muted-foreground">
-      <TriangleAlertIcon className="size-3.5 shrink-0 text-warning" aria-hidden />
-      <span>
+    <Tooltip>
+      <TooltipTrigger
+        delay={200}
+        render={
+          <Button size="icon-sm" variant="ghost-muted" aria-label="About browser shortcuts">
+            <InfoIcon />
+          </Button>
+        }
+      />
+      <TooltipPopup side="top" className="max-w-72">
         Some shortcuts may be claimed by the browser before Iskra sees them. Use the desktop app for
         better keybinding support.
-      </span>
-    </div>
+      </TooltipPopup>
+    </Tooltip>
   );
 }
 
@@ -1504,8 +1512,10 @@ export function KeybindingsSettingsPanel() {
     <SettingsPageContainer>
       <SettingsSection
         {...searchableSetting("keybindings")}
+        hideTitle
         headerAction={
           <div className="flex items-center gap-1.5">
+            {!isElectron ? <BrowserKeybindingNotice /> : null}
             <ExpandableHeaderSearch
               query={query}
               onChange={setQuery}
@@ -1519,7 +1529,7 @@ export function KeybindingsSettingsPanel() {
                 render={
                   <Button
                     type="button"
-                    size="icon-xs"
+                    size="icon-sm"
                     variant="ghost-muted"
                     onClick={() => setIsAddingBinding(true)}
                     aria-label="Add keybinding"
@@ -1535,7 +1545,7 @@ export function KeybindingsSettingsPanel() {
                 render={
                   <Button
                     type="button"
-                    size="icon-xs"
+                    size="icon-sm"
                     variant="ghost-muted"
                     disabled={!keybindingsConfigPath}
                     onClick={openKeybindingsFile}
@@ -1550,8 +1560,6 @@ export function KeybindingsSettingsPanel() {
           </div>
         }
       >
-        {!isElectron ? <BrowserKeybindingNotice /> : null}
-
         <KeybindingsList {...listProps} />
       </SettingsSection>
     </SettingsPageContainer>

@@ -290,7 +290,7 @@ describe("searchSettings", () => {
     ["default model", "default-model", "/settings/providers"],
     ["new threads", "new-threads", "/settings/providers"],
     ["card runtime", "card-runtime", "/settings/providers"],
-    ["diff layout", "diff-layout", "/settings/archived"],
+    ["diff layout", "diff-layout", "/settings/general"],
     ["time format", "time-format", "/settings/general"],
     ["diagnostics", "diagnostics", "/settings/diagnostics"],
     ["agent browser access", "agent-browser-access", "/settings/integrations"],

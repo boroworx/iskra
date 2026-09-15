@@ -274,8 +274,17 @@ export function buildKeybindingCommandOptions(
   );
 }
 
+/** Commands whose ids predate Iskra's vocabulary read by what they do now. */
+const COMMAND_LABEL_OVERRIDES: Partial<Record<string, string>> = {
+  "chat.new": "Agent: New Conversation",
+  "chat.newLocal": "Agent: New Local Conversation",
+  "composer.stash": "Composer: Stash Draft",
+};
+
 export function commandLabel(command: KeybindingCommand): string {
   const raw = String(command);
+  const override = COMMAND_LABEL_OVERRIDES[raw];
+  if (override) return override;
   if (raw.startsWith("script.") && raw.endsWith(".run")) {
     return `Run Script: ${titleCaseCommandSegment(raw.slice("script.".length, -".run".length))}`;
   }

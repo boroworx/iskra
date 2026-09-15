@@ -16,6 +16,17 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { SettingsPageContainer, SettingsSection } from "./settingsLayout";
 
+/** Package manifests sometimes shout ("SEE LICENSE IN README"); chrome reads in sentence case. */
+function formatLicenseName(license: string): string {
+  return license === license.toUpperCase() && /\s/.test(license)
+    ? license.charAt(0) +
+        license
+          .slice(1)
+          .toLowerCase()
+          .replace(/\breadme\b/, "README")
+    : license;
+}
+
 type LicenseManifestState =
   | { readonly status: "loading" }
   | { readonly status: "error"; readonly message: string }
@@ -44,8 +55,8 @@ function LicenseNoticeRow({
   return (
     <Collapsible open={open} onOpenChange={onOpenChange}>
       <article>
-        <div className="flex min-h-10 items-center hover:bg-muted/35 sm:min-h-9">
-          <CollapsibleTrigger className="group flex min-h-10 min-w-0 flex-1 items-center gap-2.5 px-3 text-left sm:min-h-9 sm:px-4">
+        <div className="flex min-h-11 items-center hover:bg-muted/35">
+          <CollapsibleTrigger className="group flex min-h-11 min-w-0 flex-1 items-center gap-2.5 px-4 text-left">
             <ChevronRightIcon
               aria-hidden
               className="size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 group-data-panel-open:rotate-90"
@@ -57,7 +68,7 @@ function LicenseNoticeRow({
               ) : null}
             </span>
             <span className="max-w-[42%] shrink-0 truncate text-xs text-muted-foreground">
-              {entry.license} · {formatLicenseBundles(entry.bundles)}
+              {formatLicenseName(entry.license)} · {formatLicenseBundles(entry.bundles)}
             </span>
           </CollapsibleTrigger>
           {entry.sourceUrl ? (
@@ -183,7 +194,7 @@ function LicenseManifestError({ message, onRetry }: { message: string; onRetry: 
           {message}
         </p>
       </div>
-      <Button type="button" size="xs" variant="outline" onClick={onRetry}>
+      <Button type="button" size="sm" variant="outline" onClick={onRetry}>
         Try again
       </Button>
     </div>
@@ -224,6 +235,7 @@ export function OpenSourceLicensesPanel() {
     <SettingsPageContainer>
       <SettingsSection
         title="Third-party notices"
+        hideTitle
         headerAction={
           state.status === "ready" ? (
             <LicenseHeaderAction

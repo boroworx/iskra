@@ -1,6 +1,5 @@
-import { Spinner } from "~/components/ui/spinner";
 import { NotificationSettings } from "./NotificationSettings";
-import { ArchiveIcon, ArchiveX, ChevronRightIcon, SettingsIcon } from "lucide-react";
+import { ArchiveX, ChevronRightIcon, SettingsIcon } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import type { CSSProperties, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -91,7 +90,7 @@ import {
   sortProviderInstanceEntries,
 } from "../../providerInstances";
 import { ensureLocalApi, readLocalApi } from "../../localApi";
-import { isMacPlatform } from "../../lib/utils";
+import { cn, isMacPlatform } from "../../lib/utils";
 import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
@@ -160,6 +159,9 @@ import {
 import {
   PolicyTooltip,
   SETTINGS_GROUP_CLASSNAME,
+  SETTINGS_SECTION_HEAD_CLASSNAME,
+  SETTINGS_TEXT_INPUT_WIDTH_CLASSNAME,
+  SettingsEmptyRow,
   SETTINGS_PICKER_TRIGGER_CLASSNAME,
   SettingResetButton,
   SettingsPageContainer,
@@ -448,7 +450,7 @@ function AboutVersionSection() {
             >
               <SelectTrigger
                 size="sm"
-                className="w-full sm:w-40"
+                className="w-full sm:w-44"
                 aria-label="Update track"
                 disabled={isChangingUpdateChannel}
               >
@@ -482,7 +484,7 @@ function AboutVersionSection() {
                 window.location.assign(channelUrl);
               }}
             >
-              <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Update track">
+              <SelectTrigger size="sm" className="w-full sm:w-44" aria-label="Update track">
                 <SelectValue>{HOSTED_APP_CHANNEL_LABEL}</SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -907,7 +909,7 @@ function BackgroundActivityAdvancedDialog({
               >
                 <SelectTrigger
                   size="sm"
-                  className="w-full sm:w-40"
+                  className="w-full sm:w-44"
                   aria-label="Shared background policy"
                 >
                   <SelectValue>{BACKGROUND_ACTIVITY_PROFILE_LABELS[activeProfile]}</SelectValue>
@@ -1199,7 +1201,7 @@ export function AppearanceSettingsPanel() {
           control={
             <div className="flex w-full items-center gap-3 sm:w-52">
               <output
-                className="min-w-12 rounded-md bg-muted px-2 py-1 text-center font-mono text-xs font-medium tabular-nums text-foreground"
+                className="min-w-12 rounded-md bg-muted px-2 py-1 text-center text-[13px] tabular-nums text-foreground"
                 htmlFor="appearance-contrast"
               >
                 {settings.appearanceContrast}%
@@ -1245,7 +1247,7 @@ export function AppearanceSettingsPanel() {
           control={
             <div className="flex w-full items-center gap-3 sm:w-52">
               <output
-                className="min-w-12 rounded-md bg-muted px-2 py-1 text-center font-mono text-xs font-medium tabular-nums text-foreground"
+                className="min-w-12 rounded-md bg-muted px-2 py-1 text-center text-[13px] tabular-nums text-foreground"
                 htmlFor="glass-opacity"
               >
                 {settings.glassOpacity}%
@@ -1302,7 +1304,7 @@ export function AppearanceSettingsPanel() {
               >
                 <SelectTrigger
                   size="sm"
-                  className="w-full sm:w-40"
+                  className="w-full sm:w-44"
                   aria-label="Environment identification"
                 >
                   <SelectValue>
@@ -1334,7 +1336,7 @@ export function AppearanceSettingsPanel() {
             ) : null
           }
           control={
-            <div className="w-full sm:w-40">
+            <div className="w-full sm:w-44">
               <Select
                 value={settings.diffColorScheme}
                 onValueChange={(value) => {
@@ -1377,7 +1379,7 @@ export function AppearanceSettingsPanel() {
               <PanelAnimationsPreview durationMs={settings.panelAnimationDurationMs} />
               <div className="flex w-full items-center gap-3">
                 <output
-                  className="min-w-16 rounded-md bg-muted px-2 py-1 text-center font-mono text-xs font-medium tabular-nums text-foreground"
+                  className="min-w-16 rounded-md bg-muted px-2 py-1 text-center text-[13px] tabular-nums text-foreground"
                   htmlFor="panel-animation-duration"
                 >
                   {settings.panelAnimationDurationMs} ms
@@ -2026,18 +2028,19 @@ function LegacyFeaturesSection() {
   }, [searchTargetId]);
 
   return (
-    <section id="legacy-features" ref={targetRef} tabIndex={-1} className="space-y-2.5">
+    <section id="legacy-features" ref={targetRef} tabIndex={-1} className="space-y-2">
+      <div data-settings-scroll-target className="flex min-h-7 items-end px-4">
+        <h2 className={SETTINGS_SECTION_HEAD_CLASSNAME}>Advanced</h2>
+      </div>
       <Collapsible open={open} onOpenChange={setOpen}>
-        <CollapsibleTrigger className="group flex min-h-8 w-full items-center gap-2 px-4">
-          <h2 className="text-[13px] font-semibold text-muted-foreground transition-colors group-hover:text-foreground">
-            Legacy features
-          </h2>
-          <ChevronRightIcon className="size-4 text-muted-foreground transition-transform duration-200 group-data-panel-open:rotate-90" />
-        </CollapsibleTrigger>
-        <CollapsiblePanel>
-          <div
-            className={`relative overflow-visible text-foreground [&>[data-slot=settings-row]]:rounded-none ${SETTINGS_GROUP_CLASSNAME}`}
-          >
+        <div
+          className={`relative overflow-visible text-foreground [&>[data-slot=settings-row]]:rounded-none ${SETTINGS_GROUP_CLASSNAME}`}
+        >
+          <CollapsibleTrigger className="group flex min-h-11 w-full items-center gap-2 rounded-xl px-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <span className="min-w-0 flex-1 text-[13px] text-foreground">Legacy features</span>
+            <ChevronRightIcon className="size-4 text-muted-foreground transition-transform duration-200 group-data-panel-open:rotate-90" />
+          </CollapsibleTrigger>
+          <CollapsiblePanel className="[&>[data-slot=settings-row]]:rounded-none">
             <SettingsRow
               {...searchableSetting("legacy-plan-mode")}
               description="Restore Build/Plan, /plan, /default, and Shift+Tab. Off uses build mode."
@@ -2053,7 +2056,7 @@ function LegacyFeaturesSection() {
             />
             <SettingsRow
               {...searchableSetting("legacy-context-window-indicator")}
-              description="Shows context window usage as a circular indicator in the composer."
+              description="Show context window usage as a ring in the composer."
               control={
                 <Switch
                   checked={settings.contextWindowMeterEnabled}
@@ -2066,7 +2069,7 @@ function LegacyFeaturesSection() {
             />
             <SettingsRow
               {...searchableSetting("legacy-sidebar")}
-              description="Restore per-project thread trees instead of the default flat sidebar."
+              description="Restore the older sidebar with a tree per project."
               control={
                 <Switch
                   checked={settings.legacySidebarEnabled}
@@ -2077,8 +2080,8 @@ function LegacyFeaturesSection() {
                 />
               }
             />
-          </div>
-        </CollapsiblePanel>
+          </CollapsiblePanel>
+        </div>
       </Collapsible>
     </section>
   );
@@ -2100,9 +2103,6 @@ function GeneralSettingsSections({ page }: { readonly page: "general" | "agents"
   const [backgroundActivityDialogOpen, setBackgroundActivityDialogOpen] = useState(false);
   const [tokenStreamingWarningOpen, setTokenStreamingWarningOpen] = useState(false);
   const mixedResponseStreamingMode = useScopedSettingsMixed(["responseStreamingMode"]);
-  const lastEnabledProjectGroupingMode = useRef<SidebarProjectGroupingMode>(
-    readLastEnabledProjectGroupingMode(),
-  );
   const serverProviders = environment?.serverConfig?.providers ?? EMPTY_SERVER_PROVIDERS;
   const supportsAutoSettlement =
     connectedEnvironments.length > 0 &&
@@ -2154,7 +2154,6 @@ function GeneralSettingsSections({ page }: { readonly page: "general" | "agents"
   const activeBackgroundActivityProfile = resolvedBackgroundActivity.profile;
   const backgroundActivityProfileOption = resolveBackgroundActivityProfileOption(settings);
   const mixedBackgroundActivity = useScopedSettingsMixed(["backgroundActivity"]);
-  const mixedAddProjectBaseDirectory = useScopedSettingsMixed(["addProjectBaseDirectory"]);
   const mixedTextGenerationModel = useScopedSettingsMixed(["textGenerationModelSelection"]);
   const backgroundActivityDescription =
     backgroundActivityProfileOption === "advanced"
@@ -2171,12 +2170,12 @@ function GeneralSettingsSections({ page }: { readonly page: "general" | "agents"
     return (
       <>
         <ProjectDefaultsSettings category="general" />
-        <SettingsSection id="agent-threads" title="Agent threads">
+        <SettingsSection id="agent-threads" title="Agent sessions">
           <SettingsRow
             serverScoped
             settingKeys={["newWorktreesStartFromOrigin"]}
             {...searchableSetting("start-from-origin")}
-            description="Creates the worktree from the latest matching branch on origin instead of your local branch."
+            description="New worktrees start from the latest branch on origin."
             resetAction={
               settings.newWorktreesStartFromOrigin !==
               DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin ? (
@@ -2240,7 +2239,7 @@ function GeneralSettingsSections({ page }: { readonly page: "general" | "agents"
                 >
                   <SelectTrigger
                     size="sm"
-                    className="w-full sm:w-56"
+                    className="w-full sm:w-44"
                     aria-label="Response streaming"
                   >
                     <SelectValue>
@@ -2280,7 +2279,7 @@ function GeneralSettingsSections({ page }: { readonly page: "general" | "agents"
             {...searchableSetting("continue-threads-after-server-update")}
             serverScoped
             settingKeys={["continueThreadsAfterServerUpdate"]}
-            description="Automatically resume interrupted threads after an update, crash, or machine restart on the selected environments. Update older servers first."
+            description="Resume interrupted agents after an update, crash, or restart."
             status={
               !supportsRestartContinuation
                 ? "All selected connected environments must support restart continuation."
@@ -2317,7 +2316,7 @@ function GeneralSettingsSections({ page }: { readonly page: "general" | "agents"
             serverScoped
             settingKeys={["textGenerationModelSelection"]}
             {...searchableSetting("text-generation-model")}
-            description="Used for thread titles and other generated text on connected devices with this provider. Source control can override it."
+            description="Writes titles and other generated text. Source control can override it."
             resetAction={
               hasServerTargets && isTextGenerationModelDirty ? (
                 <SettingResetButton
@@ -2499,7 +2498,7 @@ function GeneralSettingsSections({ page }: { readonly page: "general" | "agents"
                   serverScoped
                   settingKeys={["sidebarAutoSettleAfterDays"]}
                   {...searchableSetting("auto-settle-inactive-threads")}
-                  description="Sidebar threads with no activity for this long settle automatically."
+                  description="Settle threads that have had no activity for a while."
                   resetAction={
                     settings.sidebarAutoSettleAfterDays !==
                     DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays ? (
@@ -2548,7 +2547,7 @@ function GeneralSettingsSections({ page }: { readonly page: "general" | "agents"
         <SettingsSection id="confirmations" title="Confirmations">
           <SettingsRow
             {...searchableSetting("unpin-confirmation")}
-            description="Ask before unpinning a thread from the pinned section."
+            description="Ask before unpinning a thread."
             resetAction={
               settings.confirmThreadUnpin !== DEFAULT_UNIFIED_SETTINGS.confirmThreadUnpin ? (
                 <SettingResetButton
@@ -2573,7 +2572,7 @@ function GeneralSettingsSections({ page }: { readonly page: "general" | "agents"
           />
           <SettingsRow
             {...searchableSetting("archive-confirmation")}
-            description="Require a second click on the inline archive action before a thread is archived."
+            description="Require a second click before archiving a thread."
             resetAction={
               settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive ? (
                 <SettingResetButton
@@ -2598,7 +2597,7 @@ function GeneralSettingsSections({ page }: { readonly page: "general" | "agents"
           />
           <SettingsRow
             {...searchableSetting("delete-confirmation")}
-            description="Ask before deleting a thread and its chat history."
+            description="Ask before deleting a thread and its messages."
             resetAction={
               settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete ? (
                 <SettingResetButton
@@ -2622,193 +2621,6 @@ function GeneralSettingsSections({ page }: { readonly page: "general" | "agents"
             }
           />
         </SettingsSection>
-        <SettingsSection id="diffs" title="Diffs">
-          <SettingsRow
-            {...searchableSetting("hide-whitespace-changes")}
-            description="Set whether the diff panel ignores whitespace-only edits by default."
-            resetAction={
-              settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace ? (
-                <SettingResetButton
-                  label="diff whitespace changes"
-                  onClick={() =>
-                    updateSettings({
-                      diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
-                    })
-                  }
-                />
-              ) : null
-            }
-            control={
-              <Switch
-                checked={settings.diffIgnoreWhitespace}
-                onCheckedChange={(checked) =>
-                  updateSettings({ diffIgnoreWhitespace: Boolean(checked) })
-                }
-                aria-label="Hide whitespace changes by default"
-              />
-            }
-          />
-          <SettingsRow
-            {...searchableSetting("default-diff-file-state")}
-            description="Start with files expanded or collapsed when opening diffs or a pull request's Code tab."
-            resetAction={
-              settings.diffFilesCollapsed !== DEFAULT_UNIFIED_SETTINGS.diffFilesCollapsed ? (
-                <SettingResetButton
-                  label="default diff file state"
-                  onClick={() =>
-                    updateSettings({
-                      diffFilesCollapsed: DEFAULT_UNIFIED_SETTINGS.diffFilesCollapsed,
-                    })
-                  }
-                />
-              ) : null
-            }
-            control={
-              <Select
-                value={settings.diffFilesCollapsed ? "collapsed" : "expanded"}
-                onValueChange={(value) => {
-                  if (value === "expanded" || value === "collapsed") {
-                    updateSettings({ diffFilesCollapsed: value === "collapsed" });
-                  }
-                }}
-              >
-                <SelectTrigger
-                  size="sm"
-                  className="w-full sm:w-40"
-                  aria-label="Default diff file state"
-                >
-                  <SelectValue>
-                    {settings.diffFilesCollapsed ? "Collapsed" : "Expanded"}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  <SelectItem hideIndicator value="expanded">
-                    Expanded
-                  </SelectItem>
-                  <SelectItem hideIndicator value="collapsed">
-                    Collapsed
-                  </SelectItem>
-                </SelectPopup>
-              </Select>
-            }
-          />
-          <SettingsRow
-            {...searchableSetting("diff-layout")}
-            description="Show diffs stacked or side by side. The toggle in the diff toolbar changes this too."
-            resetAction={
-              settings.diffLayout !== DEFAULT_UNIFIED_SETTINGS.diffLayout ? (
-                <SettingResetButton
-                  label="diff layout"
-                  onClick={() =>
-                    updateSettings({ diffLayout: DEFAULT_UNIFIED_SETTINGS.diffLayout })
-                  }
-                />
-              ) : null
-            }
-            control={
-              <Select
-                value={settings.diffLayout}
-                onValueChange={(value) => {
-                  if (value === "stacked" || value === "split") {
-                    updateSettings({ diffLayout: value });
-                  }
-                }}
-              >
-                <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Diff layout">
-                  <SelectValue>{DIFF_LAYOUT_LABELS[settings.diffLayout]}</SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  <SelectItem hideIndicator value="stacked">
-                    {DIFF_LAYOUT_LABELS.stacked}
-                  </SelectItem>
-                  <SelectItem hideIndicator value="split">
-                    {DIFF_LAYOUT_LABELS.split}
-                  </SelectItem>
-                </SelectPopup>
-              </Select>
-            }
-          />
-          <SettingsRow
-            {...searchableSetting("proactive-panels")}
-            description="Open linked pull requests when found and turn diffs when work changes files."
-            resetAction={
-              settings.proactivePanelsEnabled !==
-              DEFAULT_UNIFIED_SETTINGS.proactivePanelsEnabled ? (
-                <SettingResetButton
-                  label="proactive panels"
-                  onClick={() =>
-                    updateSettings({
-                      proactivePanelsEnabled: DEFAULT_UNIFIED_SETTINGS.proactivePanelsEnabled,
-                    })
-                  }
-                />
-              ) : null
-            }
-            control={
-              <Switch
-                checked={settings.proactivePanelsEnabled}
-                onCheckedChange={(checked) =>
-                  updateSettings({ proactivePanelsEnabled: Boolean(checked) })
-                }
-                aria-label="Proactive panels"
-              />
-            }
-          />
-        </SettingsSection>
-        <SettingsSection id="composer" title="Composer">
-          <SettingsRow
-            {...searchableSetting("skills-in-slash-menu")}
-            description="Also include skills in the / command menu. Skills always appear when you type $."
-            resetAction={
-              settings.showSkillsInSlashMenu !== DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu ? (
-                <SettingResetButton
-                  label="skills in slash menu"
-                  onClick={() =>
-                    updateSettings({
-                      showSkillsInSlashMenu: DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu,
-                    })
-                  }
-                />
-              ) : null
-            }
-            control={
-              <Switch
-                checked={settings.showSkillsInSlashMenu}
-                onCheckedChange={(checked) =>
-                  updateSettings({ showSkillsInSlashMenu: Boolean(checked) })
-                }
-                aria-label="Show skills in slash menu"
-              />
-            }
-          />
-          <SettingsRow
-            {...searchableSetting("composer-collapse")}
-            description="Rest the composer of an existing thread into a single line when you scroll the conversation. Focus the composer or start typing to expand it again."
-            resetAction={
-              settings.composerCollapseOnScroll !==
-              DEFAULT_UNIFIED_SETTINGS.composerCollapseOnScroll ? (
-                <SettingResetButton
-                  label="collapse composer on scroll"
-                  onClick={() =>
-                    updateSettings({
-                      composerCollapseOnScroll: DEFAULT_UNIFIED_SETTINGS.composerCollapseOnScroll,
-                    })
-                  }
-                />
-              ) : null
-            }
-            control={
-              <Switch
-                checked={settings.composerCollapseOnScroll}
-                onCheckedChange={(checked) =>
-                  updateSettings({ composerCollapseOnScroll: Boolean(checked) })
-                }
-                aria-label="Collapse composer on scroll"
-              />
-            }
-          />
-        </SettingsSection>
-        <LegacyFeaturesSection />
       </>
     );
   }
@@ -2829,7 +2641,7 @@ function GeneralSettingsSections({ page }: { readonly page: "general" | "agents"
           }
         />
       </SettingsSection>
-      <SettingsSection id="app" title="App">
+      <SettingsSection id="app" title="System">
         <SettingsRow
           {...searchableSetting("time-format")}
           description="System default follows your browser or OS clock preference."
@@ -2854,7 +2666,7 @@ function GeneralSettingsSections({ page }: { readonly page: "general" | "agents"
                 }
               }}
             >
-              <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Timestamp format">
+              <SelectTrigger size="sm" className="w-full sm:w-44" aria-label="Timestamp format">
                 <SelectValue>{TIMESTAMP_FORMAT_LABELS[settings.timestampFormat]}</SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -2869,71 +2681,6 @@ function GeneralSettingsSections({ page }: { readonly page: "general" | "agents"
                 </SelectItem>
               </SelectPopup>
             </Select>
-          }
-        />
-        <SettingsRow
-          {...searchableSetting("project-grouping")}
-          description="Combine matching repositories across environments."
-          resetAction={
-            settings.sidebarProjectGroupingMode !==
-            DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode ? (
-              <SettingResetButton
-                label="project grouping"
-                onClick={() =>
-                  updateSettings({
-                    sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={isProjectGroupingEnabled(settings.sidebarProjectGroupingMode)}
-              onCheckedChange={(checked) => {
-                if (!checked && settings.sidebarProjectGroupingMode !== "separate") {
-                  lastEnabledProjectGroupingMode.current = settings.sidebarProjectGroupingMode;
-                  rememberEnabledProjectGroupingMode(settings.sidebarProjectGroupingMode);
-                }
-                updateSettings({
-                  sidebarProjectGroupingMode: projectGroupingModeFromToggle(
-                    checked,
-                    lastEnabledProjectGroupingMode.current,
-                  ),
-                });
-              }}
-              aria-label="Project grouping"
-            />
-          }
-        />
-        <SettingsRow
-          serverScoped
-          settingKeys={["addProjectBaseDirectory"]}
-          {...searchableSetting("add-project-starts-in")}
-          description='Leave empty to use "~/" when the Add Project browser opens.'
-          resetAction={
-            settings.addProjectBaseDirectory !==
-            DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory ? (
-              <SettingResetButton
-                label="add project base directory"
-                onClick={() =>
-                  updateSettings({
-                    addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <DraftInput
-              size="sm"
-              className="w-full sm:w-72"
-              value={mixedAddProjectBaseDirectory ? "" : settings.addProjectBaseDirectory}
-              onCommit={(next) => updateSettings({ addProjectBaseDirectory: next })}
-              placeholder={mixedAddProjectBaseDirectory ? "Mixed" : "~/"}
-              spellCheck={false}
-              aria-label="Add project base directory"
-            />
           }
         />
         <SettingsRow
@@ -2978,7 +2725,7 @@ function GeneralSettingsSections({ page }: { readonly page: "general" | "agents"
               >
                 <SelectTrigger
                   size="sm"
-                  className="w-full sm:w-40"
+                  className="w-full sm:w-44"
                   aria-label="Background activity profile"
                 >
                   <SelectValue>
@@ -3053,7 +2800,7 @@ function GeneralSettingsSections({ page }: { readonly page: "general" | "agents"
               >
                 <SelectTrigger
                   size="sm"
-                  className="w-full sm:w-40"
+                  className="w-full sm:w-44"
                   aria-label="Quit shortcut behavior"
                 >
                   <SelectValue>{QUIT_CONFIRMATION_MODE_LABELS[settings.confirmQuit]}</SelectValue>
@@ -3069,22 +2816,280 @@ function GeneralSettingsSections({ page }: { readonly page: "general" | "agents"
             }
           />
         ) : null}
-      </SettingsSection>
-      <SettingsSection id="about" title="About">
         {isElectron || HOSTED_APP_CHANNEL ? (
           <AboutVersionSection />
         ) : (
           <SettingsRow
             title={<AboutVersionTitle />}
-            description="Current version of the application."
+            description="The version of Iskra running here."
           />
         )}
       </SettingsSection>
+      <SettingsSection id="diffs" title="Diffs">
+        <SettingsRow
+          {...searchableSetting("hide-whitespace-changes")}
+          description="Set whether the diff panel ignores whitespace-only edits by default."
+          resetAction={
+            settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace ? (
+              <SettingResetButton
+                label="diff whitespace changes"
+                onClick={() =>
+                  updateSettings({
+                    diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.diffIgnoreWhitespace}
+              onCheckedChange={(checked) =>
+                updateSettings({ diffIgnoreWhitespace: Boolean(checked) })
+              }
+              aria-label="Hide whitespace changes by default"
+            />
+          }
+        />
+        <SettingsRow
+          {...searchableSetting("default-diff-file-state")}
+          description="Open diff files expanded or collapsed."
+          resetAction={
+            settings.diffFilesCollapsed !== DEFAULT_UNIFIED_SETTINGS.diffFilesCollapsed ? (
+              <SettingResetButton
+                label="default diff file state"
+                onClick={() =>
+                  updateSettings({
+                    diffFilesCollapsed: DEFAULT_UNIFIED_SETTINGS.diffFilesCollapsed,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.diffFilesCollapsed ? "collapsed" : "expanded"}
+              onValueChange={(value) => {
+                if (value === "expanded" || value === "collapsed") {
+                  updateSettings({ diffFilesCollapsed: value === "collapsed" });
+                }
+              }}
+            >
+              <SelectTrigger
+                size="sm"
+                className="w-full sm:w-44"
+                aria-label="Default diff file state"
+              >
+                <SelectValue>{settings.diffFilesCollapsed ? "Collapsed" : "Expanded"}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="expanded">
+                  Expanded
+                </SelectItem>
+                <SelectItem hideIndicator value="collapsed">
+                  Collapsed
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+        <SettingsRow
+          {...searchableSetting("diff-layout")}
+          description="Show diffs stacked or side by side. The toggle in the diff toolbar changes this too."
+          resetAction={
+            settings.diffLayout !== DEFAULT_UNIFIED_SETTINGS.diffLayout ? (
+              <SettingResetButton
+                label="diff layout"
+                onClick={() => updateSettings({ diffLayout: DEFAULT_UNIFIED_SETTINGS.diffLayout })}
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.diffLayout}
+              onValueChange={(value) => {
+                if (value === "stacked" || value === "split") {
+                  updateSettings({ diffLayout: value });
+                }
+              }}
+            >
+              <SelectTrigger size="sm" className="w-full sm:w-44" aria-label="Diff layout">
+                <SelectValue>{DIFF_LAYOUT_LABELS[settings.diffLayout]}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="stacked">
+                  {DIFF_LAYOUT_LABELS.stacked}
+                </SelectItem>
+                <SelectItem hideIndicator value="split">
+                  {DIFF_LAYOUT_LABELS.split}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+        <SettingsRow
+          {...searchableSetting("proactive-panels")}
+          description="Open linked pull requests when found and turn diffs when work changes files."
+          resetAction={
+            settings.proactivePanelsEnabled !== DEFAULT_UNIFIED_SETTINGS.proactivePanelsEnabled ? (
+              <SettingResetButton
+                label="proactive panels"
+                onClick={() =>
+                  updateSettings({
+                    proactivePanelsEnabled: DEFAULT_UNIFIED_SETTINGS.proactivePanelsEnabled,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.proactivePanelsEnabled}
+              onCheckedChange={(checked) =>
+                updateSettings({ proactivePanelsEnabled: Boolean(checked) })
+              }
+              aria-label="Proactive panels"
+            />
+          }
+        />
+      </SettingsSection>
+      <SettingsSection id="composer" title="Composer">
+        <SettingsRow
+          {...searchableSetting("skills-in-slash-menu")}
+          description="Also include skills in the / command menu. Skills always appear when you type $."
+          resetAction={
+            settings.showSkillsInSlashMenu !== DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu ? (
+              <SettingResetButton
+                label="skills in slash menu"
+                onClick={() =>
+                  updateSettings({
+                    showSkillsInSlashMenu: DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.showSkillsInSlashMenu}
+              onCheckedChange={(checked) =>
+                updateSettings({ showSkillsInSlashMenu: Boolean(checked) })
+              }
+              aria-label="Show skills in slash menu"
+            />
+          }
+        />
+        <SettingsRow
+          {...searchableSetting("composer-collapse")}
+          description="Shrink the composer to one line while you scroll. Focus it or type to expand it."
+          resetAction={
+            settings.composerCollapseOnScroll !==
+            DEFAULT_UNIFIED_SETTINGS.composerCollapseOnScroll ? (
+              <SettingResetButton
+                label="collapse composer on scroll"
+                onClick={() =>
+                  updateSettings({
+                    composerCollapseOnScroll: DEFAULT_UNIFIED_SETTINGS.composerCollapseOnScroll,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.composerCollapseOnScroll}
+              onCheckedChange={(checked) =>
+                updateSettings({ composerCollapseOnScroll: Boolean(checked) })
+              }
+              aria-label="Collapse composer on scroll"
+            />
+          }
+        />
+      </SettingsSection>
+      <LegacyFeaturesSection />
     </>
   );
 }
 
-/** App-wide settings: notifications, time, the sidebar, this computer, and the app version. */
+/** How the project list behaves: shown above the projects on the Projects page. */
+export function ProjectListSettings() {
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  const mixedAddProjectBaseDirectory = useScopedSettingsMixed(["addProjectBaseDirectory"]);
+  const lastEnabledProjectGroupingMode = useRef<SidebarProjectGroupingMode>(
+    readLastEnabledProjectGroupingMode(),
+  );
+  return (
+    <SettingsSection id="project-list" title="Project list">
+      <SettingsRow
+        {...searchableSetting("project-grouping")}
+        description="Combine matching repositories across environments."
+        resetAction={
+          settings.sidebarProjectGroupingMode !==
+          DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode ? (
+            <SettingResetButton
+              label="project grouping"
+              onClick={() =>
+                updateSettings({
+                  sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
+                })
+              }
+            />
+          ) : null
+        }
+        control={
+          <Switch
+            checked={isProjectGroupingEnabled(settings.sidebarProjectGroupingMode)}
+            onCheckedChange={(checked) => {
+              if (!checked && settings.sidebarProjectGroupingMode !== "separate") {
+                lastEnabledProjectGroupingMode.current = settings.sidebarProjectGroupingMode;
+                rememberEnabledProjectGroupingMode(settings.sidebarProjectGroupingMode);
+              }
+              updateSettings({
+                sidebarProjectGroupingMode: projectGroupingModeFromToggle(
+                  checked,
+                  lastEnabledProjectGroupingMode.current,
+                ),
+              });
+            }}
+            aria-label="Project grouping"
+          />
+        }
+      />
+      <SettingsRow
+        serverScoped
+        settingKeys={["addProjectBaseDirectory"]}
+        {...searchableSetting("add-project-starts-in")}
+        description='Leave empty to use "~/" when the Add Project browser opens.'
+        resetAction={
+          settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory ? (
+            <SettingResetButton
+              label="add project base directory"
+              onClick={() =>
+                updateSettings({
+                  addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
+                })
+              }
+            />
+          ) : null
+        }
+        control={
+          <DraftInput
+            size="sm"
+            className={cn("w-full", SETTINGS_TEXT_INPUT_WIDTH_CLASSNAME)}
+            value={mixedAddProjectBaseDirectory ? "" : settings.addProjectBaseDirectory}
+            onCommit={(next) => updateSettings({ addProjectBaseDirectory: next })}
+            placeholder={mixedAddProjectBaseDirectory ? "Mixed" : "~/"}
+            spellCheck={false}
+            aria-label="Add project base directory"
+          />
+        }
+      />
+    </SettingsSection>
+  );
+}
+
+/** App-wide settings: notifications, system, diffs, the composer, and the app version. */
 export function GeneralSettingsPanel() {
   return (
     <SettingsPageContainer>
@@ -3093,7 +3098,7 @@ export function GeneralSettingsPanel() {
   );
 }
 
-/** Defaults for the agent threads Iskra starts, shown under Agents & Providers. */
+/** Defaults for the agents Iskra starts, shown under Agents & Providers. */
 export function AgentThreadDefaultsSettings() {
   return <GeneralSettingsSections page="agents" />;
 }
@@ -3215,27 +3220,13 @@ export function ArchivedThreadsPanel() {
           id={isLoadingArchive ? undefined : searchableSetting("archive").id}
           title={searchableSetting("archive").title}
         >
-          <SettingsRow
-            title={
-              <span className="inline-flex items-center gap-2">
-                {isLoadingArchive ? (
-                  <Spinner className="size-3.5 text-muted-foreground" />
-                ) : (
-                  <ArchiveIcon className="size-3.5 text-muted-foreground" />
-                )}
-                {isLoadingArchive
-                  ? "Loading archived threads"
-                  : archiveError
-                    ? "Could not load archived threads"
-                    : "No archived threads"}
-              </span>
-            }
-            description={
-              isLoadingArchive
-                ? "Checking connected environments."
-                : (archiveError ?? "Archived threads will appear here.")
-            }
-          />
+          <SettingsEmptyRow>
+            {isLoadingArchive
+              ? "Loading archived threads…"
+              : archiveError
+                ? `Could not load archived threads. ${archiveError}`
+                : "No archived threads."}
+          </SettingsEmptyRow>
         </SettingsSection>
       ) : (
         archivedGroups.map(({ project, threads: projectThreads }, index) => (
@@ -3284,8 +3275,8 @@ export function ArchivedThreadsPanel() {
                 control={
                   <Button
                     type="button"
-                    variant="outline"
-                    size="xs"
+                    variant="secondary"
+                    size="sm"
                     className="shrink-0"
                     onClick={() => {
                       void (async () => {

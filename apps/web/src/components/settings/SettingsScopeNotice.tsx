@@ -10,6 +10,7 @@ import type { SettingsScopeSearch } from "./settingsScope";
 import { useSettingsProjectGroups } from "./useSettingsProjectGroups";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import type { EnvironmentId } from "@iskra/contracts";
+import type { ReactNode } from "react";
 
 /** Offer an explicit target change when a category has no settings at this scope. */
 export function SettingsScopeNotice({
@@ -17,11 +18,14 @@ export function SettingsScopeNotice({
   target,
   targetId,
   eligibleEnvironmentIds,
+  leading,
 }: {
   children: string;
   target: "environment" | "all" | "project" | "checkout";
   targetId?: string;
   eligibleEnvironmentIds?: readonly EnvironmentId[];
+  /** Sections shown above the project list (the Projects page's own settings). */
+  leading?: ReactNode;
 }) {
   const { selectScope, search } = useSettingsScope();
   const navigate = useNavigate({ from: "/settings" });
@@ -72,6 +76,7 @@ export function SettingsScopeNotice({
   if (target === "project" && choices.length > 0) {
     return (
       <SettingsPageContainer>
+        {leading}
         <SettingsSection
           title="Choose a project"
           headerAction={
@@ -99,7 +104,10 @@ export function SettingsScopeNotice({
                 choose({ label: group.displayName, search: { project: group.projectKey } })
               }
             >
-              <ProjectFavicon project={group} className="size-4 text-muted-foreground" />
+              {/* Automatic project glyphs carry a hue; settings chrome keeps them neutral. */}
+              <span className="inline-flex shrink-0 [&_*]:text-muted-foreground!">
+                <ProjectFavicon project={group} className="size-4" />
+              </span>
               <span className="min-w-0 flex-1 truncate">{group.displayName}</span>
               <ChevronRightIcon
                 aria-hidden

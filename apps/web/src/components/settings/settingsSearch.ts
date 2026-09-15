@@ -42,7 +42,8 @@ export interface SettingsSearchItem {
   readonly targetId?: string;
   /** Descriptions, option labels, and aliases people may remember instead of the title. */
   readonly searchTerms?: ReadonlyArray<string>;
-  readonly scope?: SettingsSearchScope;
+  /** `null` marks a device-local row on a page whose other rows need a scope. */
+  readonly scope?: SettingsSearchScope | null;
   // Its row only renders in the desktop app, so a browser result would land on
   // an anchor that isn't there.
   readonly desktopOnly?: boolean;
@@ -83,7 +84,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/connections": "Environments",
   "/settings/integrations": "Integrations",
   "/settings/snap-shot": "SnapShots",
-  "/settings/archived": "Agent threads",
+  "/settings/archived": "Conversations",
   "/settings/diagnostics": "Diagnostics",
   "/settings/open-source-licenses": "Licenses",
 };
@@ -91,7 +92,6 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
 /** The large title of the settings page at `pathname`, or null outside settings pages. */
 export function settingsPageTitle(pathname: string): string | null {
   const normalized = pathname.replace(/\/+$/, "");
-  if (normalized === "/settings/open-source-licenses") return "Open source licenses";
   return Object.hasOwn(SETTINGS_SECTION_LABELS, normalized)
     ? SETTINGS_SECTION_LABELS[normalized as SettingsPath]
     : null;
@@ -110,12 +110,7 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<{
   { label: "Connections", paths: ["/settings/connections", "/settings/integrations"] },
   {
     label: "Advanced",
-    paths: [
-      "/settings/snap-shot",
-      "/settings/archived",
-      "/settings/diagnostics",
-      "/settings/open-source-licenses",
-    ],
+    paths: ["/settings/archived", "/settings/diagnostics", "/settings/open-source-licenses"],
   },
 ];
 
@@ -244,14 +239,15 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "project-grouping",
     title: "Project grouping",
-    to: "/settings/general",
-    searchTerms: ["combine matching repositories environments sidebar"],
+    to: "/settings/projects",
+    scope: null,
+    searchTerms: ["combine matching repositories environments sidebar project list"],
   },
   {
     id: "auto-settle-inactive-threads",
     title: "Auto-settle inactive threads",
     to: "/settings/archived",
-    searchTerms: ["sidebar inactivity days no activity automatically"],
+    searchTerms: ["conversation inactivity days no activity automatically"],
     requiresThreadAutoSettlement: true,
     scope: "project-defaults",
   },
@@ -259,7 +255,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "auto-settle-merged-threads",
     title: "Auto-settle merged threads",
     to: "/settings/archived",
-    searchTerms: ["pull request merge closed automatically sidebar"],
+    searchTerms: ["pull request merge closed automatically conversation"],
     requiresThreadAutoSettlement: true,
     scope: "project-defaults",
   },
@@ -268,7 +264,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Days of inactivity before auto-settle",
     to: "/settings/archived",
     targetId: "auto-settle-inactive-threads",
-    searchTerms: ["thread timeout activity sidebar"],
+    searchTerms: ["thread timeout activity conversation"],
     requiresThreadAutoSettlement: true,
     scope: "project-defaults",
   },
@@ -304,37 +300,37 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "hide-whitespace-changes",
     title: "Hide whitespace changes",
-    to: "/settings/archived",
+    to: "/settings/general",
     searchTerms: ["diff ignore spaces edits default"],
   },
   {
     id: "default-diff-file-state",
     title: "Default diff file state",
-    to: "/settings/archived",
+    to: "/settings/general",
     searchTerms: ["collapsed expanded collapse expand files pull request pr code tab"],
   },
   {
     id: "diff-layout",
     title: "Diff layout",
-    to: "/settings/archived",
+    to: "/settings/general",
     searchTerms: ["stacked split side by side unified inline view"],
   },
   {
     id: "proactive-panels",
     title: "Proactive panels",
-    to: "/settings/archived",
+    to: "/settings/general",
     searchTerms: ["automatically open diff pull request pr right panel agent completion"],
   },
   {
     id: "skills-in-slash-menu",
     title: "Show skills in slash menu",
-    to: "/settings/archived",
+    to: "/settings/general",
     searchTerms: ["command menu dollar $ slash /"],
   },
   {
     id: "composer-collapse",
     title: "Collapse composer on scroll",
-    to: "/settings/archived",
+    to: "/settings/general",
     searchTerms: ["composer rest resting scroll wheel conversation timeline shrink minimize"],
   },
   {
@@ -346,7 +342,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "continue-threads-after-server-update",
-    title: "Continue threads after restarts",
+    title: "Resume after restarts",
     to: "/settings/providers",
     scope: "project-defaults",
     searchTerms: [
@@ -379,7 +375,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "add-project-starts-in",
     title: "Add project starts in",
-    to: "/settings/general",
+    to: "/settings/projects",
     scope: "environment-defaults",
     searchTerms: ["base directory folder browser path home"],
   },
@@ -399,7 +395,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "delete-confirmation",
     title: "Delete confirmation",
     to: "/settings/archived",
-    searchTerms: ["ask before thread chat history"],
+    searchTerms: ["ask before thread messages history"],
   },
   {
     id: "quit-confirmation",
@@ -429,19 +425,19 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "legacy-plan-mode",
     title: "Plan mode (legacy)",
-    to: "/settings/archived",
+    to: "/settings/general",
     searchTerms: ["build plan composer old"],
   },
   {
     id: "legacy-context-window-indicator",
     title: "Context window indicator (legacy)",
-    to: "/settings/archived",
+    to: "/settings/general",
     searchTerms: ["composer meter usage tokens circle old"],
   },
   {
     id: "legacy-sidebar",
     title: "Sidebar (legacy)",
-    to: "/settings/archived",
+    to: "/settings/general",
     searchTerms: ["project thread tree old flat list"],
   },
   {
@@ -454,12 +450,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "snap-shot-enabled",
     title: "SnapShots",
     searchTerms: ["window capture screenshot"],
-    to: "/settings/snap-shot",
+    to: "/settings/integrations",
   },
   {
     id: "snap-shot-accessibility",
     title: "Include app text",
-    to: "/settings/snap-shot",
+    to: "/settings/integrations",
     targetId: "snap-shot-enabled",
     searchTerms: [
       "capture accessibility data text UI structure elements privacy omit agent context",
@@ -468,25 +464,25 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "snap-shot-shortcut",
     title: "Capture shortcut",
-    to: "/settings/snap-shot",
+    to: "/settings/integrations",
     targetId: "snap-shot-enabled",
   },
   {
     id: "snap-shot-sound",
     title: "Capture sound",
-    to: "/settings/snap-shot",
+    to: "/settings/integrations",
     targetId: "snap-shot-enabled",
   },
   {
     id: "snap-shot-flash",
     title: "Capture flash",
-    to: "/settings/snap-shot",
+    to: "/settings/integrations",
     targetId: "snap-shot-enabled",
   },
   {
     id: "snap-shot-animations",
     title: "Capture animations",
-    to: "/settings/snap-shot",
+    to: "/settings/integrations",
     targetId: "snap-shot-enabled",
   },
   {
@@ -855,7 +851,7 @@ export function getSettingsSearchTargetScope(targetId: string) {
   return item
     ? {
         title: item.title,
-        scope: item.scope ?? SETTINGS_CATEGORY_SCOPES[item.to],
+        scope: item.scope === undefined ? SETTINGS_CATEGORY_SCOPES[item.to] : item.scope,
         ...(item.requiresThreadAutoSettlement ? { requiresThreadAutoSettlement: true } : {}),
       }
     : null;

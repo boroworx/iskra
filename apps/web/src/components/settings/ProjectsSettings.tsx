@@ -3,6 +3,7 @@ import { EnvironmentId } from "@iskra/contracts";
 import { ProjectSettingsPanel } from "./ProjectSettingsPanel";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { SettingsScopeNotice } from "./SettingsScopeNotice";
+import { ProjectListSettings } from "./SettingsPanels";
 
 /** Project identity and checkout management for the selected project. */
 export function ProjectsSettings() {
@@ -24,7 +25,7 @@ export function ProjectsSettings() {
       ) : scope.kind === "unavailable" ? (
         <p className="p-8 text-sm text-muted-foreground">{scope.message}</p>
       ) : (
-        <SettingsScopeNotice target="project">
+        <SettingsScopeNotice target="project" leading={<ProjectListSettings />}>
           Each project has its own name, agent rules, budgets, triggers and actions.
         </SettingsScopeNotice>
       )}

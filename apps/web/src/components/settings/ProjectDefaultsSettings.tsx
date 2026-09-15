@@ -44,6 +44,49 @@ import {
   useUpdateScopedSettings,
 } from "./useScopedSettings";
 
+/** Agent browser access: the first Browser row on Integrations; it works on web too. */
+export function AgentBrowserAccessRow() {
+  const { scope } = useSettingsScope();
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  const mixedBrowser = useScopedSettingsMixed(["enableAgentBrowserAccess"]);
+  const isProjectScope = scope.kind === "project" || scope.kind === "checkout";
+  return (
+    <SettingsRow
+      serverScoped
+      settingKeys={["enableAgentBrowserAccess"]}
+      mixed={mixedBrowser}
+      id={searchableSetting("agent-browser-access").id}
+      title="Agent browser access"
+      description={
+        isProjectScope
+          ? "Allow agents in this project to use the shared browser. Applies when the agent session next starts."
+          : "Allow agents to use the shared browser. Projects can override it."
+      }
+      resetAction={
+        settings.enableAgentBrowserAccess !== DEFAULT_SERVER_SETTINGS.enableAgentBrowserAccess ? (
+          <SettingResetButton
+            label="default browser access"
+            onClick={() =>
+              updateSettings({
+                enableAgentBrowserAccess: DEFAULT_SERVER_SETTINGS.enableAgentBrowserAccess,
+              })
+            }
+          />
+        ) : null
+      }
+      control={
+        <Switch
+          aria-label="Agent browser access"
+          mixed={mixedBrowser}
+          checked={mixedBrowser ? false : settings.enableAgentBrowserAccess}
+          onCheckedChange={(enabled) => updateSettings({ enableAgentBrowserAccess: enabled })}
+        />
+      }
+    />
+  );
+}
+
 /**
  * Rows for the settings a project may override. The same rows edit
  * environment defaults at an environment scope and project overrides at a
@@ -74,7 +117,6 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   const mixedPermissions = useScopedSettingsMixed(["defaultRuntimeMode"]);
   const PermissionIcon = runtimeModeConfig[settings.defaultRuntimeMode].icon;
   const mixedWorkspace = useScopedSettingsMixed(["defaultThreadEnvMode"]);
-  const mixedBrowser = useScopedSettingsMixed(["enableAgentBrowserAccess"]);
   const mixedLinearTeam = useScopedSettingsMixed(["linearTeamId"]);
   const mixedLinearLabel = useScopedSettingsMixed(["linearLabel"]);
   const mixedAutoPull = useScopedSettingsMixed(["defaultAutoPull"]);
@@ -143,14 +185,14 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
         category === "general"
           ? "project-defaults"
           : category === "integrations"
-            ? "browser-access"
+            ? "linear"
             : "source-control-defaults"
       }
       title={
         category === "general"
           ? "Defaults for new agents"
           : category === "integrations"
-            ? "Agent access & Linear"
+            ? "Linear"
             : "Repositories"
       }
     >
@@ -426,47 +468,14 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
         <>
           <SettingsRow
             serverScoped
-            settingKeys={["enableAgentBrowserAccess"]}
-            mixed={mixedBrowser}
-            id={searchableSetting("agent-browser-access").id}
-            title="Agent browser access"
-            description={
-              isProjectScope
-                ? "Allow agents in this project to use the shared browser. Applies when the agent session next starts."
-                : "Allow agents to use the shared browser. Projects can override it."
-            }
-            resetAction={
-              settings.enableAgentBrowserAccess !==
-              DEFAULT_SERVER_SETTINGS.enableAgentBrowserAccess ? (
-                <SettingResetButton
-                  label="default browser access"
-                  onClick={() =>
-                    updateSettings({
-                      enableAgentBrowserAccess: DEFAULT_SERVER_SETTINGS.enableAgentBrowserAccess,
-                    })
-                  }
-                />
-              ) : null
-            }
-            control={
-              <Switch
-                aria-label="Agent browser access"
-                mixed={mixedBrowser}
-                checked={mixedBrowser ? false : settings.enableAgentBrowserAccess}
-                onCheckedChange={(enabled) => updateSettings({ enableAgentBrowserAccess: enabled })}
-              />
-            }
-          />
-          <SettingsRow
-            serverScoped
             settingKeys={["linearTeamId"]}
             mixed={mixedLinearTeam}
             id={searchableSetting("linear-team").id}
             title="Linear team"
             description={
               isProjectScope
-                ? "Syncs this project's cards with a Linear team. Enter the team ID, or leave it empty to not sync."
-                : "The Linear team whose issues sync with cards. Projects can set their own."
+                ? "Sync this project's cards with a Linear team. Leave empty to not sync."
+                : "The team whose issues sync with cards. Projects can set their own."
             }
             control={
               <Input
@@ -504,14 +513,14 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
             }
           />
           {isProjectScope ? null : (
-            <SettingsRow
-              serverScoped
-              settingKeys={["linearClientId", "linearClientSecret"]}
-              id={searchableSetting("linear-app").id}
-              title="Linear app"
-              description="The Linear OAuth app Iskra signs in as. Use its client ID and secret, with client credentials turned on. The secret stays on this server."
-              control={
-                <div className="flex flex-col items-end gap-1.5">
+            <>
+              <SettingsRow
+                serverScoped
+                settingKeys={["linearClientId"]}
+                id={searchableSetting("linear-app").id}
+                title="Linear client ID"
+                description="The Linear OAuth app Iskra signs in as. Turn on client credentials for it."
+                control={
                   <Input
                     key={settings.linearClientId}
                     aria-label="Linear client ID"
@@ -525,30 +534,44 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
                       }
                     }}
                   />
-                  <Input
-                    key={settings.linearClientSecret}
-                    type="password"
-                    aria-label="Linear client secret"
-                    className={SETTINGS_TEXT_INPUT_WIDTH_CLASSNAME}
-                    placeholder={settings.linearClientSecret.length > 0 ? "Saved" : "Client secret"}
-                    defaultValue=""
-                    onBlur={(event) => {
-                      const linearClientSecret = event.currentTarget.value.trim();
-                      if (linearClientSecret.length > 0) updateSettings({ linearClientSecret });
-                    }}
-                  />
-                  {settings.linearClientSecret.length > 0 ? (
-                    <Button
-                      size="compact"
-                      variant="ghost-muted"
-                      onClick={() => updateSettings({ linearClientId: "", linearClientSecret: "" })}
-                    >
-                      Disconnect
-                    </Button>
-                  ) : null}
-                </div>
-              }
-            />
+                }
+              />
+              <SettingsRow
+                serverScoped
+                settingKeys={["linearClientSecret"]}
+                title="Linear client secret"
+                description="Stays on this server."
+                control={
+                  <>
+                    {settings.linearClientSecret.length > 0 ? (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() =>
+                          updateSettings({ linearClientId: "", linearClientSecret: "" })
+                        }
+                      >
+                        Disconnect
+                      </Button>
+                    ) : null}
+                    <Input
+                      key={settings.linearClientSecret}
+                      type="password"
+                      aria-label="Linear client secret"
+                      className={SETTINGS_TEXT_INPUT_WIDTH_CLASSNAME}
+                      placeholder={
+                        settings.linearClientSecret.length > 0 ? "Saved" : "Client secret"
+                      }
+                      defaultValue=""
+                      onBlur={(event) => {
+                        const linearClientSecret = event.currentTarget.value.trim();
+                        if (linearClientSecret.length > 0) updateSettings({ linearClientSecret });
+                      }}
+                    />
+                  </>
+                }
+              />
+            </>
           )}
         </>
       )}
