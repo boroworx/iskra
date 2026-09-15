@@ -14,6 +14,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { toastManager } from "../ui/toast";
 import { EnvironmentRow, environmentTransportLabel } from "./EnvironmentRow";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
+import { SETTINGS_SELECT_WIDTH_CLASSNAME } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 
 const options: ReadonlyArray<{ value: GitHubRoutingPermission; label: string }> = [
@@ -106,8 +107,8 @@ export function GitHubRoutingSettings({
             }}
           >
             <SelectTrigger
-              size="xs"
-              className="w-32"
+              size="sm"
+              className={SETTINGS_SELECT_WIDTH_CLASSNAME}
               aria-label={`${environment.label} GitHub routing`}
             >
               <SelectValue />

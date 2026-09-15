@@ -61,6 +61,11 @@ import {
   selectQrEndpointOption,
 } from "./ConnectionsSettings.logic";
 import {
+  SETTINGS_GROUP_CLASSNAME,
+  SETTINGS_SELECT_WIDTH_CLASSNAME,
+  SETTINGS_TEXT_INPUT_WIDTH_CLASSNAME,
+  SettingsAddButton,
+  SettingsEmptyRow,
   SettingsPageContainer,
   SettingsRow,
   SettingsSection,
@@ -118,7 +123,6 @@ import { Switch } from "../ui/switch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { Button } from "../ui/button";
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
 import { AnimatedHeight } from "../AnimatedHeight";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import { Textarea } from "../ui/textarea";
@@ -782,7 +786,7 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
         <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
           {shareablePairingUrl && canCopyToClipboard ? (
             <Button
-              size="xs"
+              size="sm"
               variant="outline"
               aria-expanded={isQrPanelOpen}
               aria-controls={qrPanelId}
@@ -801,12 +805,12 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
           >
             {!credential ? null : canCopyToClipboard ? (
               shareablePairingUrl ? null : (
-                <Button size="xs" variant="outline" onClick={handleCopyCode}>
+                <Button size="sm" variant="outline" onClick={handleCopyCode}>
                   Copy code
                 </Button>
               )
             ) : (
-              <DialogTrigger render={<Button size="xs" variant="outline" />}>
+              <DialogTrigger render={<Button size="sm" variant="outline" />}>
                 {shareablePairingUrl ? "Show link" : "Show code"}
               </DialogTrigger>
             )}
@@ -861,7 +865,7 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
             </DialogPopup>
           </Dialog>
           <Button
-            size="xs"
+            size="sm"
             variant="destructive-outline"
             disabled={revokingPairingLinkId === pairingLink.id}
             onClick={() => void onRevoke(pairingLink.id)}
@@ -929,7 +933,7 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
                 </TooltipPopup>
               </Tooltip>
               <Button
-                size="xs"
+                size="sm"
                 variant="ghost"
                 className="shrink-0"
                 onClick={() => copyPairingValue(qrPairingUrl, copyKindForUrl(qrPairingUrl))}
@@ -937,7 +941,7 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
                 Copy link
               </Button>
             </div>
-            <Button size="xs" variant="ghost" onClick={handleCopyCode}>
+            <Button size="sm" variant="ghost" onClick={handleCopyCode}>
               Copy code only
             </Button>
           </div>
@@ -1031,7 +1035,7 @@ const ConnectedClientListRow = memo(function ConnectedClientListRow({
         <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
           {!clientSession.current ? (
             <Button
-              size="xs"
+              size="sm"
               variant="destructive-outline"
               disabled={revokingClientSessionId === clientSession.sessionId}
               onClick={() => void onRevokeSession(clientSession.sessionId)}
@@ -1099,7 +1103,7 @@ const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderActio
   return (
     <div className="flex items-center gap-2">
       <Button
-        size="xs"
+        size="sm"
         variant="destructive-outline"
         disabled={
           isRevokingOtherClients || clientSessions.every((clientSession) => clientSession.current)
@@ -1120,7 +1124,7 @@ const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderActio
       >
         <DialogTrigger
           render={
-            <Button size="xs" variant="default">
+            <Button size="sm" variant="default">
               <PlusIcon className="size-3" />
               Create link
             </Button>
@@ -1157,7 +1161,7 @@ const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderActio
                 </div>
                 <div className="flex gap-1">
                   <Button
-                    size="xs"
+                    size="sm"
                     variant="outline"
                     disabled={isCreatingPairingLink}
                     onClick={() => setPairingScopes([AuthOrchestrationReadScope])}
@@ -1165,7 +1169,7 @@ const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderActio
                     Read only
                   </Button>
                   <Button
-                    size="xs"
+                    size="sm"
                     variant="outline"
                     disabled={isCreatingPairingLink}
                     onClick={() => setPairingScopes([...AuthStandardClientScopes])}
@@ -1352,7 +1356,7 @@ const AdvertisedEndpointListRow = memo(function AdvertisedEndpointListRow({
           ) : null}
           {needsTailscaleSetup ? (
             <Button
-              size="xs"
+              size="sm"
               variant="outline"
               onClick={() => onSetupTailscaleServe(endpoint)}
               disabled={isUpdatingTailscaleServe}
@@ -1362,7 +1366,7 @@ const AdvertisedEndpointListRow = memo(function AdvertisedEndpointListRow({
           ) : null}
           {canDisableTailscaleServe ? (
             <Button
-              size="xs"
+              size="sm"
               variant="destructive-outline"
               onClick={() => onDisableTailscaleServe(endpoint)}
               disabled={isUpdatingTailscaleServe}
@@ -1371,7 +1375,7 @@ const AdvertisedEndpointListRow = memo(function AdvertisedEndpointListRow({
             </Button>
           ) : null}
           {!needsTailscaleSetup && !isDefault ? (
-            <Button size="xs" variant="outline" onClick={() => onSetDefault(endpoint)}>
+            <Button size="sm" variant="outline" onClick={() => onSetDefault(endpoint)}>
               Set as default
             </Button>
           ) : null}
@@ -1598,7 +1602,7 @@ function SavedBackendListRow({
             <Button
               type="button"
               variant="ghost"
-              size="icon-xs"
+              size="icon-sm"
               className="text-muted-foreground hover:text-foreground"
               disabled={isRemoving}
               aria-label={`More actions for ${environment.label}`}
@@ -1720,8 +1724,8 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
           title={searchableSetting("iskra-connect").title}
           description={
             managedTunnelActive
-              ? "This environment is available to your other devices through Iskra Connect."
-              : "Make this environment available to your other devices through Iskra Connect."
+              ? "Your other devices can reach this environment through Iskra Connect."
+              : "Let your other devices reach this environment through Iskra Connect."
           }
           status={operationError ?? primaryCloudLinkState.error}
           control={
@@ -1736,7 +1740,7 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
       ) : null}
       <SettingsRow
         title={searchableSetting("publish-agent-activity").title}
-        description="Send activity to mobile notifications and Live Activities without Iskra Connect."
+        description="Send mobile notifications and Live Activities without Iskra Connect."
         control={
           <CloudLinkSwitch
             ariaLabel="Publish agent activity to mobile clients"
@@ -1755,22 +1759,8 @@ function CloudLinkRow({ canManageRelay }: { readonly canManageRelay: boolean }) 
   return hasCloudPublicConfig() ? <ConfiguredCloudLinkRow canManageRelay={canManageRelay} /> : null;
 }
 
-function EmptyRemoteEnvironments({ cloudEnabled = true }: { readonly cloudEnabled?: boolean }) {
-  return (
-    <Empty className="min-h-52">
-      <EmptyMedia variant="icon">
-        <ChevronsLeftRightEllipsisIcon />
-      </EmptyMedia>
-      <EmptyHeader>
-        <EmptyTitle>No saved remote environments</EmptyTitle>
-        <EmptyDescription>
-          {cloudEnabled
-            ? "Click “Add environment” to pair another environment, or connect one from Iskra Connect."
-            : "Click “Add environment” to pair another environment."}
-        </EmptyDescription>
-      </EmptyHeader>
-    </Empty>
-  );
+function EmptyRemoteEnvironments() {
+  return <SettingsEmptyRow>No other environments</SettingsEmptyRow>;
 }
 
 function CloudRemoteEnvironmentRows({
@@ -1787,7 +1777,7 @@ function CloudRemoteEnvironmentRows({
       empty={<EmptyRemoteEnvironments />}
     />
   ) : savedEnvironments.length === 0 ? (
-    <EmptyRemoteEnvironments cloudEnabled={false} />
+    <EmptyRemoteEnvironments />
   ) : null;
 }
 
@@ -2613,11 +2603,12 @@ export function ConnectionsSettings() {
   };
 
   const renderRemoteFields = () => (
-    <div className="space-y-3">
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
-        <label className="block">
-          <span className="mb-1.5 block text-xs font-medium text-foreground">Host</span>
+    <div className="space-y-2">
+      <div className={SETTINGS_GROUP_CLASSNAME}>
+        <label className="flex min-h-11 items-center justify-between gap-4 px-4 py-1.5">
+          <span className="text-[13px] text-foreground">Host</span>
           <Input
+            className={SETTINGS_TEXT_INPUT_WIDTH_CLASSNAME}
             value={savedBackendHost}
             onChange={(event) => handleSavedBackendHostChange(event.target.value)}
             placeholder="backend.example.com"
@@ -2625,9 +2616,10 @@ export function ConnectionsSettings() {
             spellCheck={false}
           />
         </label>
-        <label className="block">
-          <span className="mb-1.5 block text-xs font-medium text-foreground">Pairing code</span>
+        <label className="flex min-h-11 items-center justify-between gap-4 px-4 py-1.5">
+          <span className="text-[13px] text-foreground">Pairing code</span>
           <Input
+            className={SETTINGS_TEXT_INPUT_WIDTH_CLASSNAME}
             value={savedBackendPairingCode}
             onChange={(event) => setSavedBackendPairingCode(event.target.value)}
             placeholder="PAIRCODE"
@@ -2636,26 +2628,17 @@ export function ConnectionsSettings() {
           />
         </label>
       </div>
-      <div>
-        <span className="mt-1 block text-[11px] text-muted-foreground">
-          Paste a full pairing URL here to fill both fields automatically.
-        </span>
-      </div>
+      <p className="px-4 text-xs text-muted-foreground">
+        Paste a full pairing URL into Host to fill both fields.
+      </p>
     </div>
   );
   const renderRemoteModeBody = () => (
     <div className="space-y-4">
       {renderRemoteFields()}
-      {savedBackendError ? <p className="text-xs text-destructive">{savedBackendError}</p> : null}
-      <Button
-        variant="outline"
-        className="w-full"
-        disabled={isAddingSavedBackend}
-        onClick={() => void handleAddSavedBackend()}
-      >
-        <PlusIcon className="size-3.5" />
-        {isAddingSavedBackend ? "Adding…" : "Add environment"}
-      </Button>
+      {savedBackendError ? (
+        <p className="px-4 text-xs text-destructive">{savedBackendError}</p>
+      ) : null}
     </div>
   );
   const renderSshFields = () => (
@@ -2768,15 +2751,6 @@ export function ConnectionsSettings() {
             {savedBackendError ?? discoveredSshHostsError}
           </div>
         ) : null}
-        <Button
-          variant="outline"
-          className="w-full"
-          disabled={isAddingSavedBackend}
-          onClick={() => void handleAddSavedBackend()}
-        >
-          <PlusIcon className="size-3.5" />
-          {isAddingSavedBackend ? "Adding…" : "Add environment"}
-        </Button>
       </div>
     </div>
   );
@@ -3078,7 +3052,7 @@ export function ConnectionsSettings() {
             >
               <SelectTrigger
                 size="sm"
-                className="w-full sm:w-56"
+                className={SETTINGS_SELECT_WIDTH_CLASSNAME}
                 aria-label="WSL backend"
                 disabled={isUpdatingWslBackend}
               >
@@ -3130,7 +3104,7 @@ export function ConnectionsSettings() {
         tailscaleHttpsEndpoint
           ? tailscaleHttpsEndpoint.status === "available"
             ? tailscaleHttpsEndpoint.httpBaseUrl
-            : "Use Tailscale Serve to expose this backend through a MagicDNS HTTPS URL."
+            : "Serve this environment over a MagicDNS HTTPS URL with Tailscale."
           : "Start Tailscale to set up HTTPS access through MagicDNS."
       }
       control={
@@ -3264,7 +3238,7 @@ export function ConnectionsSettings() {
                       <Button
                         type="button"
                         variant="ghost"
-                        size="icon-xs"
+                        size="icon-sm"
                         className="text-muted-foreground hover:text-foreground"
                         aria-label="More actions for this machine"
                       />
@@ -3647,7 +3621,7 @@ export function ConnectionsSettings() {
         <SettingsSection {...searchableSetting("connections-environment")}>
           <SettingsRow
             title="Administrative access"
-            description="Pairing links and client-session management require the access:write scope for this backend."
+            description="Pairing links and session management need administrative access."
           />
           <CloudLinkRow canManageRelay={canManageRelay} />
         </SettingsSection>
@@ -3656,7 +3630,7 @@ export function ConnectionsSettings() {
   );
 
   return (
-    <SettingsPageContainer width="wide">
+    <SettingsPageContainer>
       {primarySettings}
       <SettingsSection
         {...searchableSetting("remote-environments")}
@@ -3679,55 +3653,50 @@ export function ConnectionsSettings() {
                 }
               }}
             >
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <DialogTrigger
-                      render={
-                        <Button
-                          size="xs"
-                          variant="ghost"
-                          className="font-normal text-muted-foreground/60 hover:text-muted-foreground"
-                          aria-label="Add environment"
-                        >
-                          <PlusIcon className="size-3" />
-                          <span>Add environment</span>
-                        </Button>
-                      }
-                    />
-                  }
-                />
-                <TooltipPopup side="top">Add environment</TooltipPopup>
-              </Tooltip>
-              <DialogPopup className="max-h-[80dvh] sm:max-w-3xl">
+              <DialogTrigger render={<SettingsAddButton />}>Add environment</DialogTrigger>
+              <DialogPopup className="max-h-[80dvh] sm:max-w-xl">
                 <DialogHeader>
-                  <DialogTitle>Add Environment</DialogTitle>
+                  <DialogTitle>Add environment</DialogTitle>
                   <DialogDescription>Pair another environment to this client.</DialogDescription>
                 </DialogHeader>
                 <DialogPanel>
                   <div className="space-y-4">
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {renderConnectionModeCard({
-                        mode: "remote",
-                        title: "Remote link",
-                        description: "Enter a backend host and pairing code.",
-                        icon: <ChevronsLeftRightEllipsisIcon aria-hidden className="size-4" />,
-                      })}
-                      {desktopBridge
-                        ? renderConnectionModeCard({
-                            mode: "ssh",
-                            title: "SSH",
-                            description:
-                              "Use local SSH config, agent, and tunnels for the backend.",
-                            icon: <TerminalIcon aria-hidden className="size-4" />,
-                          })
-                        : null}
-                    </div>
+                    {/* The method choice only appears when there is more than one method. */}
+                    {desktopBridge ? (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {renderConnectionModeCard({
+                          mode: "remote",
+                          title: "Remote link",
+                          description: "Enter a backend host and pairing code.",
+                          icon: <ChevronsLeftRightEllipsisIcon aria-hidden className="size-4" />,
+                        })}
+                        {renderConnectionModeCard({
+                          mode: "ssh",
+                          title: "SSH",
+                          description: "Use local SSH config, agent, and tunnels for the backend.",
+                          icon: <TerminalIcon aria-hidden className="size-4" />,
+                        })}
+                      </div>
+                    ) : null}
                     <AnimatedHeight>
                       {savedBackendMode === "ssh" ? renderSshFields() : renderRemoteModeBody()}
                     </AnimatedHeight>
                   </div>
                 </DialogPanel>
+                <DialogFooter>
+                  <DialogClose
+                    disabled={isAddingSavedBackend}
+                    render={<Button variant="secondary" disabled={isAddingSavedBackend} />}
+                  >
+                    Cancel
+                  </DialogClose>
+                  <Button
+                    disabled={isAddingSavedBackend}
+                    onClick={() => void handleAddSavedBackend()}
+                  >
+                    {isAddingSavedBackend ? "Adding…" : "Add environment"}
+                  </Button>
+                </DialogFooter>
               </DialogPopup>
             </Dialog>
           </div>

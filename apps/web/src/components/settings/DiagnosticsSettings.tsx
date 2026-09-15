@@ -33,9 +33,15 @@ import { ScrollArea } from "../ui/scroll-area";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
+import { StatusPill } from "../iskra/StatusPill";
 import { ExpandableText } from "./ExpandableText";
 import { ResourceTelemetryDiagnostics } from "./ResourceTelemetryDiagnostics";
-import { SettingsPageContainer, SettingsSection, useRelativeTimeTick } from "./settingsLayout";
+import {
+  SettingsEmptyRow,
+  SettingsPageContainer,
+  SettingsSection,
+  useRelativeTimeTick,
+} from "./settingsLayout";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useSettingsScope } from "./SettingsScopeContext";
 
@@ -80,21 +86,26 @@ function isStaleProcessSignalMessage(message: string | undefined): boolean {
   return message?.includes("not a live descendant") ?? false;
 }
 
+/** A count with its label; a failing count names itself with a red pill instead of red digits. */
 function StatBlock({
   label,
   value,
   tooltip,
-  tone = "default",
+  failing = false,
 }: {
   label: string;
   value: string;
   tooltip?: ReactNode;
-  tone?: "default" | "warning" | "danger";
+  failing?: boolean;
 }) {
   return (
-    <div className="min-w-0 border-border/60 px-4 py-3 sm:px-5">
-      <div className="flex min-w-0 items-center gap-1.5 text-[11px] font-medium text-muted-foreground/70">
-        <span className="min-w-0 truncate">{label}</span>
+    <div className="min-w-0 px-4 py-3">
+      <div className="flex min-h-5 min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+        {failing ? (
+          <StatusPill label={label} tone="red" />
+        ) : (
+          <span className="min-w-0 truncate">{label}</span>
+        )}
         {tooltip ? (
           <Tooltip>
             <TooltipTrigger
@@ -117,13 +128,7 @@ function StatBlock({
           </Tooltip>
         ) : null}
       </div>
-      <div
-        className={cn(
-          "mt-1 truncate text-lg font-semibold tabular-nums text-foreground",
-          tone === "warning" && "text-amber-600 dark:text-amber-400",
-          tone === "danger" && "text-destructive",
-        )}
-      >
+      <div className="mt-1 truncate text-[17px] font-semibold tabular-nums text-foreground">
         {value}
       </div>
     </div>
@@ -131,31 +136,70 @@ function StatBlock({
 }
 
 function StatsGrid({ children }: { children: ReactNode }) {
+  return <div className="grid grid-cols-2 sm:grid-cols-4">{children}</div>;
+}
+
+function EmptyRows({ label }: { label: string }) {
+  return <SettingsEmptyRow>{label}</SettingsEmptyRow>;
+}
+
+/** Error lines inside a group: one row each, a glyph and the message. */
+function DiagnosticsErrorRows({
+  errors,
+}: {
+  errors: ReadonlyArray<{ readonly message: string; readonly partial?: boolean } | null>;
+}) {
+  const shown = errors.filter((error) => error !== null);
+  if (shown.length === 0) return null;
   return (
-    <div className="relative grid grid-cols-2 sm:grid-cols-4">
-      <span
-        className="pointer-events-none absolute inset-y-0 left-1/2 w-px bg-border/60"
-        aria-hidden
-      />
-      <span
-        className="pointer-events-none absolute inset-x-0 top-1/2 h-px bg-border/60 sm:hidden"
-        aria-hidden
-      />
-      <span
-        className="pointer-events-none absolute inset-y-0 left-1/4 hidden w-px bg-border/60 sm:block"
-        aria-hidden
-      />
-      <span
-        className="pointer-events-none absolute inset-y-0 left-3/4 hidden w-px bg-border/60 sm:block"
-        aria-hidden
-      />
-      {children}
+    <div className="border-t border-border/60">
+      {shown.map((error) => (
+        <div
+          key={error.message}
+          className="flex min-h-11 items-center gap-2 px-4 py-2 text-[13px] text-foreground"
+        >
+          <AlertTriangleIcon
+            className={cn(
+              "size-4 shrink-0",
+              error.partial ? "text-muted-foreground" : "text-destructive",
+            )}
+          />
+          <span className="min-w-0">{error.message}</span>
+        </div>
+      ))}
     </div>
   );
 }
 
-function EmptyRows({ label }: { label: string }) {
-  return <div className="px-4 py-4 text-xs text-muted-foreground sm:px-5">{label}</div>;
+const FOLDED_ROW_LIMIT = 5;
+
+/** Long tables show their first rows; the rest sit behind "Show all". */
+function FoldedRows<T>({
+  items,
+  children,
+}: {
+  items: ReadonlyArray<T>;
+  children: (visible: ReadonlyArray<T>) => ReactNode;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const foldable = items.length > FOLDED_ROW_LIMIT;
+  return (
+    <>
+      {children(expanded || !foldable ? items : items.slice(0, FOLDED_ROW_LIMIT))}
+      {foldable ? (
+        <div className="flex justify-center border-t border-border/60 py-1.5">
+          <Button size="sm" variant="ghost-muted" onClick={() => setExpanded((value) => !value)}>
+            {expanded ? "Show fewer" : `Show all ${formatCount(items.length)}`}
+          </Button>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function formatLogLevel(level: string): string {
+  const lower = level.toLowerCase();
+  return lower.charAt(0).toUpperCase() + lower.slice(1);
 }
 
 function DiagnosticsTable({
@@ -278,7 +322,7 @@ function ProcessNameCell({
 
   return (
     <div
-      className="grid min-w-0 grid-cols-[1.25rem_0.375rem_minmax(0,1fr)] items-center gap-2"
+      className="grid min-w-0 grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-2"
       style={{ paddingLeft: `${Math.min(process.depth, 6) * 10}px` }}
     >
       {hasChildren ? (
@@ -293,7 +337,6 @@ function ProcessNameCell({
       ) : (
         <span className="size-5 shrink-0" aria-hidden="true" />
       )}
-      <span className="size-1.5 shrink-0 rounded-full bg-emerald-500/80" />
       <Tooltip>
         <TooltipTrigger
           render={<span className="min-w-0 truncate font-medium text-foreground">{name}</span>}
@@ -512,17 +555,11 @@ function ResourceHistoryProcessNameCell({
 
   return (
     <div
-      className="grid min-w-0 grid-cols-[1.25rem_0.375rem_minmax(0,1fr)] items-center gap-2"
+      className="grid min-w-0 grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-2"
       style={{ paddingLeft: `${Math.min(visualDepth, 6) * 10}px` }}
       aria-label={`${process.isServerRoot ? "Root" : "Child"} process ${name}`}
     >
       <span className="size-5 shrink-0" aria-hidden="true" />
-      <span
-        className={cn(
-          "size-1.5 shrink-0 rounded-full",
-          process.isServerRoot ? "bg-amber-500/90" : "bg-emerald-500/80",
-        )}
-      />
       <Tooltip>
         <TooltipTrigger
           render={<span className="min-w-0 truncate font-medium text-foreground">{name}</span>}
@@ -648,11 +685,11 @@ function ProcessResourceHistoryTable({
         <thead className="sticky top-0 z-10 border-b border-border/60 bg-card text-xs font-medium text-muted-foreground">
           <tr>
             <th className="px-4 py-2 font-semibold sm:pl-5">Process</th>
-            <th className="px-3 py-2 text-right font-semibold">CPU Time</th>
+            <th className="px-3 py-2 text-right font-semibold">CPU time</th>
             <th className="px-3 py-2 text-right font-semibold">Current</th>
             <th className="px-3 py-2 text-right font-semibold">Average</th>
             <th className="px-3 py-2 text-right font-semibold">Peak</th>
-            <th className="px-3 py-2 text-right font-semibold">Max Mem</th>
+            <th className="px-3 py-2 text-right font-semibold">Max memory</th>
             <th className="px-3 py-2 font-semibold">Command</th>
             <th className="px-3 py-2 text-right font-semibold sm:pr-5">PID</th>
           </tr>
@@ -755,7 +792,7 @@ function DiagnosticsRefreshButton({
       <TooltipTrigger
         render={
           <Button
-            size="icon-xs"
+            size="icon-sm"
             variant="ghost-muted"
             disabled={isPending}
             onClick={onClick}
@@ -967,11 +1004,11 @@ export function DiagnosticsSettingsPanel() {
     : false;
 
   return (
-    <SettingsPageContainer width="expanded" className="gap-10">
+    <SettingsPageContainer width="wide">
       <ResourceTelemetryDiagnostics environmentId={environmentId} />
 
       <SettingsSection
-        title="Live Processes"
+        title="Live processes"
         headerAction={
           <div className="flex items-center gap-1.5">
             <DiagnosticsLastChecked checkedAt={processData?.readAt ?? null} />
@@ -985,7 +1022,7 @@ export function DiagnosticsSettingsPanel() {
       >
         <StatsGrid>
           <StatBlock
-            label="Child Processes"
+            label="Child processes"
             value={processData ? formatCount(processData.processCount) : "..."}
           />
           <StatBlock
@@ -1003,22 +1040,12 @@ export function DiagnosticsSettingsPanel() {
             value={processData ? String(processData.serverPid) : "..."}
           />
         </StatsGrid>
-        {processDiagnosticsError || processError ? (
-          <div className="space-y-2 border-t border-border/60 px-4 py-3 text-xs text-muted-foreground sm:px-5">
-            {processDiagnosticsError ? (
-              <div className="flex items-start gap-2 text-destructive">
-                <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
-                <span>{processDiagnosticsError.message}</span>
-              </div>
-            ) : null}
-            {processError ? (
-              <div className="flex items-start gap-2 text-destructive">
-                <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
-                <span>{processError}</span>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
+        <DiagnosticsErrorRows
+          errors={[
+            processDiagnosticsError ? { message: processDiagnosticsError.message } : null,
+            processError ? { message: processError } : null,
+          ]}
+        />
         <ProcessDiagnosticsTable
           processes={processData?.processes ?? []}
           signalingPid={signalingPid}
@@ -1032,7 +1059,7 @@ export function DiagnosticsSettingsPanel() {
       </SettingsSection>
 
       <SettingsSection
-        title="Resource History"
+        title="Resource history"
         headerAction={
           <div className="flex items-center gap-1.5">
             <ResourceHistoryWindowSelector
@@ -1050,7 +1077,7 @@ export function DiagnosticsSettingsPanel() {
       >
         <StatsGrid>
           <StatBlock
-            label="CPU Time"
+            label="CPU time"
             value={resourceData ? formatCpuTime(resourceData.totalCpuSecondsApprox) : "..."}
             tooltip="Approximate active CPU time for the Iskra server root process and its descendants during the selected window. It grows only while sampled processes use CPU and older samples leave as the window moves."
           />
@@ -1068,22 +1095,12 @@ export function DiagnosticsSettingsPanel() {
             value={resourceData ? formatCount(resourceData.topProcesses.length) : "..."}
           />
         </StatsGrid>
-        {processResourceError || resourceError ? (
-          <div className="space-y-2 border-t border-border/60 px-4 py-3 text-xs text-muted-foreground sm:px-5">
-            {processResourceError ? (
-              <div className="flex items-start gap-2 text-destructive">
-                <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
-                <span>{processResourceError.message}</span>
-              </div>
-            ) : null}
-            {resourceError ? (
-              <div className="flex items-start gap-2 text-destructive">
-                <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
-                <span>{resourceError}</span>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
+        <DiagnosticsErrorRows
+          errors={[
+            processResourceError ? { message: processResourceError.message } : null,
+            resourceError ? { message: resourceError } : null,
+          ]}
+        />
         <ProcessResourceHistoryChart buckets={resourceData?.buckets ?? []} />
         <ProcessResourceHistoryTable
           processes={resourceData?.topProcesses ?? []}
@@ -1096,7 +1113,7 @@ export function DiagnosticsSettingsPanel() {
       </SettingsSection>
 
       <SettingsSection
-        title="Trace Diagnostics"
+        title="Trace diagnostics"
         headerAction={
           <div className="flex items-center gap-1.5">
             <DiagnosticsLastChecked checkedAt={data?.readAt ?? null} />
@@ -1104,7 +1121,7 @@ export function DiagnosticsSettingsPanel() {
               <TooltipTrigger
                 render={
                   <Button
-                    size="icon-xs"
+                    size="icon-sm"
                     variant="ghost-muted"
                     disabled={!observability?.logsDirectoryPath || isOpeningLogsDirectory}
                     onClick={openLogsDirectory}
@@ -1129,105 +1146,94 @@ export function DiagnosticsSettingsPanel() {
           <StatBlock
             label="Failures"
             value={data ? formatCount(data.failureCount) : "..."}
-            tone={data && data.failureCount > 0 ? "danger" : "default"}
+            failing={data !== null && data.failureCount > 0}
           />
           <StatBlock
-            label="Slow Spans"
+            label="Slow spans"
             value={data ? formatCount(data.slowSpanCount) : "..."}
             tooltip={
               data
                 ? `Spans with a duration of ${formatDuration(data.slowSpanThresholdMs)} or longer.`
                 : "Spans at or above the configured slow-span threshold."
             }
-            tone={data && data.slowSpanCount > 0 ? "warning" : "default"}
           />
           <StatBlock
-            label="Parse Errors"
+            label="Parse errors"
             value={data ? formatCount(data.parseErrorCount) : "..."}
-            tone={data && data.parseErrorCount > 0 ? "warning" : "default"}
           />
         </StatsGrid>
-        {openLogsDirectoryError || traceDiagnosticsError || error ? (
-          <div className="space-y-2 border-t border-border/60 px-4 py-3 text-xs text-muted-foreground sm:px-5">
-            {openLogsDirectoryError ? (
-              <div className="flex items-start gap-2 text-destructive">
-                <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
-                <span>{openLogsDirectoryError}</span>
-              </div>
-            ) : null}
-            {traceDiagnosticsError ? (
-              <div
-                className={cn(
-                  "flex items-start gap-2",
-                  traceDiagnosticsPartialFailure
-                    ? "text-amber-600 dark:text-amber-400"
-                    : "text-destructive",
-                )}
-              >
-                <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
-                <span>
-                  {traceDiagnosticsPartialFailure
-                    ? `Some trace files could not be read, so diagnostics may be incomplete. ${traceDiagnosticsError.message}`
-                    : traceDiagnosticsError.message}
-                </span>
-              </div>
-            ) : null}
-            {error ? (
-              <div className="flex items-start gap-2 text-destructive">
-                <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
-                <span>{error}</span>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
+        <DiagnosticsErrorRows
+          errors={[
+            openLogsDirectoryError ? { message: openLogsDirectoryError } : null,
+            traceDiagnosticsError
+              ? traceDiagnosticsPartialFailure
+                ? {
+                    message: `Some trace files could not be read, so diagnostics may be incomplete. ${traceDiagnosticsError.message}`,
+                    partial: true,
+                  }
+                : { message: traceDiagnosticsError.message }
+              : null,
+            error ? { message: error } : null,
+          ]}
+        />
       </SettingsSection>
 
-      <SettingsSection title="Latest Failures">
+      <SettingsSection title="Latest failures">
         {data && data.latestFailures.length > 0 ? (
-          <DiagnosticsTable headers={["Span", "Cause", "Duration", "Ended"]}>
-            {data.latestFailures.map((failure) => (
-              <tr key={`${failure.traceId}:${failure.spanId}`}>
-                <td className="px-4 py-3 align-top text-xs font-medium text-foreground first:sm:pl-5">
-                  {failure.name}
-                </td>
-                <td className="max-w-[360px] px-4 py-3 align-top text-muted-foreground">
-                  <ExpandableText text={failure.cause} />
-                </td>
-                <td className="px-4 py-3 align-top tabular-nums">
-                  {formatDuration(failure.durationMs)}
-                </td>
-                <td className="whitespace-nowrap px-4 py-3 align-top tabular-nums text-muted-foreground last:sm:pr-5">
-                  {formatRelativeNoWrap(failure.endedAt)}
-                </td>
-              </tr>
-            ))}
-          </DiagnosticsTable>
+          <FoldedRows items={data.latestFailures}>
+            {(latestFailures) => (
+              <DiagnosticsTable headers={["Span", "Cause", "Duration", "Ended"]}>
+                {latestFailures.map((failure) => (
+                  <tr key={`${failure.traceId}:${failure.spanId}`}>
+                    <td className="px-4 py-3 align-top text-xs font-medium text-foreground first:sm:pl-5">
+                      {failure.name}
+                    </td>
+                    <td className="max-w-[360px] px-4 py-3 align-top text-muted-foreground">
+                      <ExpandableText text={failure.cause} />
+                    </td>
+                    <td className="px-4 py-3 align-top tabular-nums">
+                      {formatDuration(failure.durationMs)}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 align-top tabular-nums text-muted-foreground last:sm:pr-5">
+                      {formatRelativeNoWrap(failure.endedAt)}
+                    </td>
+                  </tr>
+                ))}
+              </DiagnosticsTable>
+            )}
+          </FoldedRows>
         ) : (
           <EmptyRows label={isInitialLoading ? "Loading failures..." : "No failed spans found."} />
         )}
       </SettingsSection>
 
-      <SettingsSection title="Most Common Failures">
+      <SettingsSection title="Most common failures">
         {data && data.commonFailures.length > 0 ? (
-          <DiagnosticsTable
-            headers={["Span", "Count", "Cause", "Last Seen"]}
-            minTableWidth="min-w-[760px]"
-          >
-            {data.commonFailures.map((failure) => (
-              <tr key={`${failure.name}:${failure.cause}`}>
-                <td className="px-4 py-3 align-top text-xs font-medium text-foreground first:sm:pl-5">
-                  {failure.name}
-                </td>
-                <td className="px-4 py-3 align-top tabular-nums">{formatCount(failure.count)}</td>
-                <td className="max-w-[360px] px-4 py-3 align-top text-muted-foreground">
-                  <ExpandableText text={failure.cause} />
-                </td>
-                <td className="w-px whitespace-nowrap px-4 py-3 align-top tabular-nums text-muted-foreground last:sm:pr-5">
-                  {formatRelativeNoWrap(failure.lastSeenAt)}
-                </td>
-              </tr>
-            ))}
-          </DiagnosticsTable>
+          <FoldedRows items={data.commonFailures}>
+            {(commonFailures) => (
+              <DiagnosticsTable
+                headers={["Span", "Count", "Cause", "Last seen"]}
+                minTableWidth="min-w-[760px]"
+              >
+                {commonFailures.map((failure) => (
+                  <tr key={`${failure.name}:${failure.cause}`}>
+                    <td className="px-4 py-3 align-top text-xs font-medium text-foreground first:sm:pl-5">
+                      {failure.name}
+                    </td>
+                    <td className="px-4 py-3 align-top tabular-nums">
+                      {formatCount(failure.count)}
+                    </td>
+                    <td className="max-w-[360px] px-4 py-3 align-top text-muted-foreground">
+                      <ExpandableText text={failure.cause} />
+                    </td>
+                    <td className="w-px whitespace-nowrap px-4 py-3 align-top tabular-nums text-muted-foreground last:sm:pr-5">
+                      {formatRelativeNoWrap(failure.lastSeenAt)}
+                    </td>
+                  </tr>
+                ))}
+              </DiagnosticsTable>
+            )}
+          </FoldedRows>
         ) : (
           <EmptyRows
             label={isInitialLoading ? "Loading failure groups..." : "No repeated failures found."}
@@ -1235,92 +1241,103 @@ export function DiagnosticsSettingsPanel() {
         )}
       </SettingsSection>
 
-      <SettingsSection title="Slowest Spans">
+      <SettingsSection title="Slowest spans">
         {data && data.slowestSpans.length > 0 ? (
-          <DiagnosticsTable
-            headers={["Span", "Duration", "Ended", "Trace"]}
-            minTableWidth="min-w-[900px]"
-            columnWidths={["w-[44%]", "w-[14%]", "w-[12%]", "w-[30%]"]}
-          >
-            {data.slowestSpans.map((span) => (
-              <tr key={`${span.traceId}:${span.spanId}`}>
-                <td className="px-4 py-3 align-top text-xs font-medium text-foreground first:sm:pl-5">
-                  {span.name}
-                </td>
-                <td className="px-4 py-3 align-top tabular-nums">
-                  {formatDuration(span.durationMs)}
-                </td>
-                <td className="w-px whitespace-nowrap px-4 py-3 align-top tabular-nums text-muted-foreground">
-                  {formatRelativeNoWrap(span.endedAt)}
-                </td>
-                <td className="min-w-0 whitespace-nowrap px-4 py-3 align-top text-muted-foreground last:sm:pr-5">
-                  <TraceIdCell traceId={span.traceId} />
-                </td>
-              </tr>
-            ))}
-          </DiagnosticsTable>
+          <FoldedRows items={data.slowestSpans}>
+            {(slowestSpans) => (
+              <DiagnosticsTable
+                headers={["Span", "Duration", "Ended", "Trace"]}
+                minTableWidth="min-w-[900px]"
+                columnWidths={["w-[44%]", "w-[14%]", "w-[12%]", "w-[30%]"]}
+              >
+                {slowestSpans.map((span) => (
+                  <tr key={`${span.traceId}:${span.spanId}`}>
+                    <td className="px-4 py-3 align-top text-xs font-medium text-foreground first:sm:pl-5">
+                      {span.name}
+                    </td>
+                    <td className="px-4 py-3 align-top tabular-nums">
+                      {formatDuration(span.durationMs)}
+                    </td>
+                    <td className="w-px whitespace-nowrap px-4 py-3 align-top tabular-nums text-muted-foreground">
+                      {formatRelativeNoWrap(span.endedAt)}
+                    </td>
+                    <td className="min-w-0 whitespace-nowrap px-4 py-3 align-top text-muted-foreground last:sm:pr-5">
+                      <TraceIdCell traceId={span.traceId} />
+                    </td>
+                  </tr>
+                ))}
+              </DiagnosticsTable>
+            )}
+          </FoldedRows>
         ) : (
           <EmptyRows label={isInitialLoading ? "Loading slow spans..." : "No spans found."} />
         )}
       </SettingsSection>
 
-      <SettingsSection title="Span Logs">
+      <SettingsSection title="Span logs">
         {data && data.latestWarningAndErrorLogs.length > 0 ? (
-          <ScrollArea
-            chainVerticalScroll
-            scrollFade
-            hideScrollbars
-            className="w-full max-w-full rounded-none"
-          >
-            <table className="w-full min-w-[920px] table-fixed text-left text-xs">
-              <colgroup>
-                <col className="w-[11%]" />
-                <col className="w-[9%]" />
-                <col className="w-[24%]" />
-                <col className="w-[26%]" />
-                <col className="w-[30%]" />
-              </colgroup>
-              <thead className="border-b border-border/60 text-xs font-medium text-muted-foreground">
-                <tr>
-                  <th className="whitespace-nowrap px-4 py-2.5 font-semibold sm:pl-5">Time</th>
-                  <th className="whitespace-nowrap px-4 py-2.5 font-semibold">Level</th>
-                  <th className="whitespace-nowrap px-4 py-2.5 font-semibold">Span</th>
-                  <th className="whitespace-nowrap px-4 py-2.5 font-semibold">Message</th>
-                  <th className="whitespace-nowrap px-4 py-2.5 font-semibold sm:pr-5">Trace</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/60">
-                {data.latestWarningAndErrorLogs.map((event) => (
-                  <tr
-                    key={`${event.traceId}:${event.spanId}:${DateTime.formatIso(event.seenAt)}:${event.message}`}
-                    className="hover:bg-muted/15"
-                  >
-                    <td className="whitespace-nowrap px-4 py-3 align-top tabular-nums text-muted-foreground sm:pl-5">
-                      {formatRelativeNoWrap(event.seenAt)}
-                    </td>
-                    <td className="px-4 py-3 align-top">
-                      <span className="inline-flex rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] font-medium text-foreground/80">
-                        {event.level}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 align-top">
-                      <div className="truncate font-medium text-foreground">{event.spanName}</div>
-                    </td>
-                    <td className="px-4 py-3 align-top text-muted-foreground">
-                      <ExpandableText
-                        collapsedClassName="line-clamp-2"
-                        expandLabel="Show full message"
-                        text={event.message}
-                      />
-                    </td>
-                    <td className="min-w-0 whitespace-nowrap px-4 py-3 align-top text-muted-foreground sm:pr-5">
-                      <TraceIdCell traceId={event.traceId} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </ScrollArea>
+          <FoldedRows items={data.latestWarningAndErrorLogs}>
+            {(spanLogs) => (
+              <ScrollArea
+                chainVerticalScroll
+                scrollFade
+                hideScrollbars
+                className="w-full max-w-full rounded-none"
+              >
+                <table className="w-full min-w-[920px] table-fixed text-left text-xs">
+                  <colgroup>
+                    <col className="w-[11%]" />
+                    <col className="w-[9%]" />
+                    <col className="w-[24%]" />
+                    <col className="w-[26%]" />
+                    <col className="w-[30%]" />
+                  </colgroup>
+                  <thead className="border-b border-border/60 text-xs font-medium text-muted-foreground">
+                    <tr>
+                      <th className="whitespace-nowrap px-4 py-2.5 font-semibold sm:pl-5">Time</th>
+                      <th className="whitespace-nowrap px-4 py-2.5 font-semibold">Level</th>
+                      <th className="whitespace-nowrap px-4 py-2.5 font-semibold">Span</th>
+                      <th className="whitespace-nowrap px-4 py-2.5 font-semibold">Message</th>
+                      <th className="whitespace-nowrap px-4 py-2.5 font-semibold sm:pr-5">Trace</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {spanLogs.map((event) => (
+                      <tr
+                        key={`${event.traceId}:${event.spanId}:${DateTime.formatIso(event.seenAt)}:${event.message}`}
+                        className="hover:bg-muted/15"
+                      >
+                        <td className="whitespace-nowrap px-4 py-3 align-top tabular-nums text-muted-foreground sm:pl-5">
+                          {formatRelativeNoWrap(event.seenAt)}
+                        </td>
+                        <td className="px-4 py-3 align-top">
+                          <StatusPill
+                            label={formatLogLevel(event.level)}
+                            tone={/^(error|fatal)$/i.test(event.level) ? "red" : "gray"}
+                          />
+                        </td>
+                        <td className="px-4 py-3 align-top">
+                          <div className="truncate font-medium text-foreground">
+                            {event.spanName}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 align-top text-muted-foreground">
+                          <ExpandableText
+                            collapsedClassName="line-clamp-2"
+                            expandLabel="Show full message"
+                            text={event.message}
+                          />
+                        </td>
+                        <td className="min-w-0 whitespace-nowrap px-4 py-3 align-top text-muted-foreground sm:pr-5">
+                          <TraceIdCell traceId={event.traceId} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </ScrollArea>
+            )}
+          </FoldedRows>
         ) : (
           <EmptyRows
             label={isInitialLoading ? "Loading recent logs..." : "No warnings or errors found."}
@@ -1328,33 +1345,37 @@ export function DiagnosticsSettingsPanel() {
         )}
       </SettingsSection>
 
-      <SettingsSection title="Top Span Names">
+      <SettingsSection title="Top span names">
         {data && data.topSpansByCount.length > 0 ? (
-          <DiagnosticsTable
-            headers={["Span", "Count", "Failures", "Average", "Max"]}
-            minTableWidth="min-w-[760px]"
-            columnWidths={["w-[48%]", "w-[13%]", "w-[13%]", "w-[13%]", "w-[13%]"]}
-          >
-            {data.topSpansByCount.map((span) => (
-              <tr key={span.name}>
-                <td className="px-4 py-3 align-top text-xs font-medium text-foreground first:sm:pl-5">
-                  {span.name}
-                </td>
-                <td className="whitespace-nowrap px-4 py-3 align-top tabular-nums">
-                  {formatCount(span.count)}
-                </td>
-                <td className="whitespace-nowrap px-4 py-3 align-top tabular-nums">
-                  {formatCount(span.failureCount)}
-                </td>
-                <td className="whitespace-nowrap px-4 py-3 align-top tabular-nums">
-                  {formatDuration(span.averageDurationMs)}
-                </td>
-                <td className="whitespace-nowrap px-4 py-3 align-top tabular-nums last:sm:pr-5">
-                  {formatDuration(span.maxDurationMs)}
-                </td>
-              </tr>
-            ))}
-          </DiagnosticsTable>
+          <FoldedRows items={data.topSpansByCount}>
+            {(topSpans) => (
+              <DiagnosticsTable
+                headers={["Span", "Count", "Failures", "Average", "Max"]}
+                minTableWidth="min-w-[760px]"
+                columnWidths={["w-[48%]", "w-[13%]", "w-[13%]", "w-[13%]", "w-[13%]"]}
+              >
+                {topSpans.map((span) => (
+                  <tr key={span.name}>
+                    <td className="px-4 py-3 align-top text-xs font-medium text-foreground first:sm:pl-5">
+                      {span.name}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 align-top tabular-nums">
+                      {formatCount(span.count)}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 align-top tabular-nums">
+                      {formatCount(span.failureCount)}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 align-top tabular-nums">
+                      {formatDuration(span.averageDurationMs)}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 align-top tabular-nums last:sm:pr-5">
+                      {formatDuration(span.maxDurationMs)}
+                    </td>
+                  </tr>
+                ))}
+              </DiagnosticsTable>
+            )}
+          </FoldedRows>
         ) : (
           <EmptyRows label={isInitialLoading ? "Loading span names..." : "No spans found."} />
         )}

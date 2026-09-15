@@ -10,6 +10,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Switch } from "../ui/switch";
 import { EnvironmentRow, environmentTransportLabel } from "./EnvironmentRow";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
+import { SETTINGS_SELECT_WIDTH_CLASSNAME } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 
 const preferences = [
@@ -113,8 +114,8 @@ export function LoadBalancingSettings({
             }}
           >
             <SelectTrigger
-              size="xs"
-              className="w-32"
+              size="sm"
+              className={SETTINGS_SELECT_WIDTH_CLASSNAME}
               aria-label={`${environment.label} load preference`}
             >
               <SelectValue />

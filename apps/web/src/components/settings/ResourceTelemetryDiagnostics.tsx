@@ -1,16 +1,5 @@
 import { RefreshIcon } from "~/components/ui/refresh-icon";
-import {
-  ActivityIcon,
-  AlertTriangleIcon,
-  BatteryIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
-  CpuIcon,
-  DatabaseIcon,
-  GaugeIcon,
-  HardDriveIcon,
-  MemoryStickIcon,
-} from "lucide-react";
+import { AlertTriangleIcon, ChevronDownIcon, ChevronRightIcon } from "lucide-react";
 import type {
   BackgroundBooleanState,
   EnvironmentId,
@@ -42,6 +31,7 @@ import { ensureLocalApi } from "../../localApi";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { formatRelativeTime } from "../../timestampFormat";
+import { StatusPill } from "../iskra/StatusPill";
 import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
@@ -140,13 +130,6 @@ function categoryLabel(category: ResourceTelemetryProcessCategory): string {
   }
 }
 
-function categoryDotClass(category: ResourceTelemetryProcessCategory): string {
-  if (category === "resource-monitor") return "bg-amber-500";
-  if (category.startsWith("electron-")) return "bg-sky-500";
-  if (category === "server") return "bg-violet-500";
-  return "bg-emerald-500";
-}
-
 function ioSemanticsLabel(semantics: ResourceTelemetryIoSemantics): string {
   switch (semantics) {
     case "storage":
@@ -169,50 +152,28 @@ function booleanStateLabel(
   return "Unknown";
 }
 
-function sourceStatusTone(status: ResourceTelemetrySourceStatus): "default" | "warning" | "danger" {
-  if (status === "healthy") return "default";
-  if (status === "starting" || status === "degraded") return "warning";
-  return "danger";
+function sourceStatusTone(status: ResourceTelemetrySourceStatus): "green" | "gray" | "red" {
+  if (status === "healthy") return "green";
+  if (status === "starting") return "gray";
+  return "red";
 }
 
+/** A collector's state as a pill: "Native healthy", or a neutral override such as "Desktop only". */
 function SourceStatusBadge({
   label,
   status,
-  presentation,
+  neutralLabel,
 }: {
-  label: string;
+  label?: string;
   status: ResourceTelemetrySourceStatus;
-  presentation?:
-    | {
-        readonly label: string;
-        readonly tone: "neutral";
-      }
-    | undefined;
+  neutralLabel?: string | undefined;
 }) {
-  const tone = presentation?.tone ?? sourceStatusTone(status);
+  const text = [label, neutralLabel ?? status].filter(Boolean).join(" ");
   return (
-    <span
-      className={cn(
-        "inline-flex h-5 items-center gap-1.5 rounded-full px-2 text-[11px] font-semibold",
-        tone === "neutral" && "border-border/70 bg-muted/45 text-muted-foreground",
-        tone === "default" &&
-          "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-        tone === "warning" &&
-          "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
-        tone === "danger" && "border-destructive/30 bg-destructive/10 text-destructive",
-      )}
-    >
-      <span
-        className={cn(
-          "size-1.5 rounded-full",
-          tone === "neutral" && "bg-muted-foreground/55",
-          tone === "default" && "bg-emerald-500",
-          tone === "warning" && "bg-amber-500",
-          tone === "danger" && "bg-destructive",
-        )}
-      />
-      {label} {presentation?.label ?? status}
-    </span>
+    <StatusPill
+      label={text.charAt(0).toUpperCase() + text.slice(1)}
+      tone={neutralLabel ? "gray" : sourceStatusTone(status)}
+    />
   );
 }
 
@@ -233,38 +194,29 @@ function LastSampleLabel({ sampledAt }: { sampledAt: DateTime.Utc | null }) {
   );
 }
 
-function IconStat({
-  icon,
+/** A headline number; a notable reading adds a pill beside the label instead of coloring the digits. */
+function Stat({
   label,
   value,
   detail,
-  tone = "default",
+  pill,
 }: {
-  icon: ReactNode;
   label: string;
   value: string;
   detail?: string | undefined;
-  tone?: "default" | "warning" | "danger";
+  pill?: { readonly label: string; readonly tone: "gray" | "red" } | null | undefined;
 }) {
   return (
-    <div className="group min-w-0 px-4 py-4 sm:px-5">
-      <div className="flex items-center gap-2 text-[11px] font-semibold text-muted-foreground/70">
-        <span className="text-muted-foreground/55 transition-colors group-hover:text-foreground/65">
-          {icon}
-        </span>
+    <div className="min-w-0 px-4 py-4">
+      <div className="flex min-h-5 items-center gap-2 text-xs text-muted-foreground">
         <span className="truncate">{label}</span>
+        {pill ? <StatusPill label={pill.label} tone={pill.tone} /> : null}
       </div>
-      <div
-        className={cn(
-          "mt-2.5 truncate text-2xl font-semibold tabular-nums text-foreground",
-          tone === "warning" && "text-amber-600 dark:text-amber-300",
-          tone === "danger" && "text-destructive",
-        )}
-      >
+      <div className="mt-1.5 truncate text-[22px] leading-tight font-bold tabular-nums text-foreground">
         {value}
       </div>
       {detail ? (
-        <div className="mt-1.5 truncate text-[11px] text-muted-foreground/60">{detail}</div>
+        <div className="mt-1 truncate text-[11px] text-muted-foreground">{detail}</div>
       ) : null}
     </div>
   );
@@ -272,21 +224,19 @@ function IconStat({
 
 function AggregateCard({
   label,
-  accentClass,
   aggregate,
 }: {
   label: string;
-  accentClass: string;
   aggregate: ResourceTelemetryAggregate;
 }) {
   return (
-    <div className="relative overflow-hidden border-t border-border/60 px-4 py-4 first:border-t-0 md:border-t-0 md:border-l md:first:border-l-0 sm:px-5">
-      <span className={cn("absolute inset-x-5 top-0 h-0.5 rounded-full opacity-75", accentClass)} />
+    <div className="border-t border-border/60 px-4 py-4 first:border-t-0 md:border-t-0 md:border-l md:first:border-l-0">
       <div className="flex items-center justify-between gap-3">
-        <div className="text-[11px] font-semibold text-muted-foreground/75">{label}</div>
-        <div className="rounded-md bg-muted/55 px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground/70">
-          {aggregate.processCount} {aggregate.processCount === 1 ? "process" : "processes"}
-        </div>
+        <div className="text-[13px] font-semibold text-muted-foreground">{label}</div>
+        <StatusPill
+          label={`${aggregate.processCount} ${aggregate.processCount === 1 ? "process" : "processes"}`}
+          tone="gray"
+        />
       </div>
       <div className="mt-3.5 grid grid-cols-2 gap-x-4 gap-y-2.5">
         <MetricPair label="CPU" value={`${aggregate.currentCpuPercent.toFixed(1)}%`} />
@@ -301,7 +251,7 @@ function AggregateCard({
 function MetricPair({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <div className="text-[11px] font-semibold text-muted-foreground/45">{label}</div>
+      <div className="text-[11px] text-muted-foreground">{label}</div>
       <div className="truncate text-xs font-medium tabular-nums text-foreground/90">{value}</div>
     </div>
   );
@@ -325,16 +275,8 @@ function HealthSource({ label, health }: { label: string; health: ResourceTeleme
         </div>
       </div>
       <SourceStatusBadge
-        label=""
         status={health.status}
-        presentation={
-          expectedInBrowser
-            ? {
-                label: "Desktop only",
-                tone: "neutral",
-              }
-            : undefined
-        }
+        neutralLabel={expectedInBrowser ? "Desktop only" : undefined}
       />
     </div>
   );
@@ -408,7 +350,7 @@ function ResourceHistoryChart({
           <span className="h-1.5 w-3 rounded-full bg-sky-500/70" /> I/O reads
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-1.5 w-3 rounded-full bg-amber-500/80" /> I/O writes
+          <span className="h-1.5 w-3 rounded-full bg-violet-500/70" /> I/O writes
         </span>
       </div>
       <div className="flex h-32 items-end gap-1 overflow-hidden rounded-lg border border-border/40 bg-muted/8 px-2 pt-3 pb-2">
@@ -442,7 +384,7 @@ function ResourceHistoryChart({
                       style={{ height: `${readHeight}%` }}
                     />
                     <span
-                      className="block rounded-t-sm bg-amber-500/80"
+                      className="block rounded-t-sm bg-violet-500/70"
                       style={{ height: `${writeHeight}%` }}
                     />
                   </div>
@@ -476,7 +418,7 @@ function ProcessTreeName({
   const ChevronIcon = collapsed ? ChevronRightIcon : ChevronDownIcon;
   return (
     <div
-      className="grid min-w-0 grid-cols-[1.25rem_0.375rem_minmax(0,1fr)] items-center gap-2"
+      className="grid min-w-0 grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-2"
       style={{ paddingLeft: `${Math.min(process.depth, 7) * 10}px` }}
     >
       {hasChildren ? (
@@ -491,7 +433,6 @@ function ProcessTreeName({
       ) : (
         <span className="size-5" aria-hidden />
       )}
-      <span className={cn("size-1.5 rounded-full", categoryDotClass(process.category))} />
       <Tooltip>
         <TooltipTrigger
           render={<span className="min-w-0 truncate font-medium text-foreground">{name}</span>}
@@ -603,12 +544,12 @@ function ProcessTable({
             <th className="px-4 py-2 font-semibold sm:pl-5">Process</th>
             <th className="px-3 py-2 font-semibold">Category</th>
             <th className="px-3 py-2 text-right font-semibold">CPU</th>
-            <th className="px-3 py-2 text-right font-semibold">CPU Time</th>
+            <th className="px-3 py-2 text-right font-semibold">CPU time</th>
             <th className="px-3 py-2 text-right font-semibold">Memory</th>
             <th className="px-3 py-2 text-right font-semibold">Read/s</th>
             <th className="px-3 py-2 text-right font-semibold">Write/s</th>
-            <th className="px-3 py-2 text-right font-semibold">Read Total</th>
-            <th className="px-3 py-2 text-right font-semibold">Write Total</th>
+            <th className="px-3 py-2 text-right font-semibold">Read total</th>
+            <th className="px-3 py-2 text-right font-semibold">Write total</th>
             <th className="px-3 py-2 text-right font-semibold">PID</th>
             <th className="px-2 py-2 text-right font-semibold sm:pr-4">Kill</th>
           </tr>
@@ -642,10 +583,10 @@ function ProcessTable({
               <td className="px-3 py-2 text-right tabular-nums">
                 {formatBytes(process.residentBytes)}
               </td>
-              <td className="px-3 py-2 text-right tabular-nums text-sky-700 dark:text-sky-300">
+              <td className="px-3 py-2 text-right tabular-nums">
                 {formatRate(process.ioReadBytesPerSecond)}
               </td>
-              <td className="px-3 py-2 text-right tabular-nums text-amber-700 dark:text-amber-300">
+              <td className="px-3 py-2 text-right tabular-nums">
                 {formatRate(process.ioWriteBytesPerSecond)}
               </td>
               <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
@@ -703,9 +644,9 @@ function HistoryProcessTable({
           <tr>
             <th className="px-4 py-2 font-semibold sm:pl-5">Process</th>
             <th className="px-3 py-2 font-semibold">Category</th>
-            <th className="px-3 py-2 text-right font-semibold">CPU Time</th>
+            <th className="px-3 py-2 text-right font-semibold">CPU time</th>
             <th className="px-3 py-2 text-right font-semibold">Peak CPU</th>
-            <th className="px-3 py-2 text-right font-semibold">Peak Mem</th>
+            <th className="px-3 py-2 text-right font-semibold">Peak memory</th>
             <th className="px-3 py-2 text-right font-semibold">Read</th>
             <th className="px-3 py-2 text-right font-semibold">Write</th>
             <th className="px-3 py-2 text-right font-semibold">Samples</th>
@@ -751,10 +692,10 @@ function HistoryProcessTable({
               <td className="px-3 py-2 text-right tabular-nums">
                 {formatBytes(process.peakRssBytes)}
               </td>
-              <td className="px-3 py-2 text-right tabular-nums text-sky-700 dark:text-sky-300">
+              <td className="px-3 py-2 text-right tabular-nums">
                 {formatBytes(process.ioReadBytes)}
               </td>
-              <td className="px-3 py-2 text-right tabular-nums text-amber-700 dark:text-amber-300">
+              <td className="px-3 py-2 text-right tabular-nums">
                 {formatBytes(process.ioWriteBytes)}
               </td>
               <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
@@ -787,8 +728,8 @@ function AttributionTable({ entries }: { entries: ReadonlyArray<ResourceAttribut
           <tr>
             <th className="px-4 py-2 font-semibold sm:pl-5">Component</th>
             <th className="px-3 py-2 font-semibold">Operation</th>
-            <th className="px-3 py-2 text-right font-semibold">Logical Read</th>
-            <th className="px-3 py-2 text-right font-semibold">Logical Write</th>
+            <th className="px-3 py-2 text-right font-semibold">Logical read</th>
+            <th className="px-3 py-2 text-right font-semibold">Logical write</th>
             <th className="px-3 py-2 text-right font-semibold">Count</th>
             <th className="px-3 py-2 text-right font-semibold sm:pr-5">Time</th>
           </tr>
@@ -807,10 +748,10 @@ function AttributionTable({ entries }: { entries: ReadonlyArray<ResourceAttribut
                 {entry.component}
               </td>
               <td className="truncate px-3 py-2 text-muted-foreground">{entry.operation}</td>
-              <td className="px-3 py-2 text-right tabular-nums text-sky-700 dark:text-sky-300">
+              <td className="px-3 py-2 text-right tabular-nums">
                 {formatBytes(entry.logicalReadBytes)}
               </td>
-              <td className="px-3 py-2 text-right tabular-nums text-amber-700 dark:text-amber-300">
+              <td className="px-3 py-2 text-right tabular-nums">
                 {formatBytes(entry.logicalWriteBytes)}
               </td>
               <td className="px-3 py-2 text-right tabular-nums">{entry.count}</td>
@@ -964,12 +905,17 @@ export function ResourceTelemetryDiagnostics({
       snapshot.power.idle !== "unknown" ||
       snapshot.power.locked !== "unknown" ||
       snapshot.power.thermalState !== "unknown");
+  const retryButton = (
+    <Button size="sm" variant="secondary" disabled={isRetrying} onClick={retryCollector}>
+      <RefreshIcon className="size-3" refreshing={isRetrying} />
+      Retry monitor
+    </Button>
+  );
 
   return (
     <>
       <SettingsSection
         title="Resource monitor"
-        icon={<ActivityIcon className="size-4 text-muted-foreground" />}
         headerAction={
           <div className="flex items-center gap-2">
             {snapshot ? (
@@ -980,7 +926,7 @@ export function ResourceTelemetryDiagnostics({
               <TooltipTrigger
                 render={
                   <Button
-                    size="icon-micro"
+                    size="icon-sm"
                     variant="ghost"
                     disabled={telemetry.isPending}
                     onClick={telemetry.refresh}
@@ -996,32 +942,26 @@ export function ResourceTelemetryDiagnostics({
         }
       >
         <div className="overflow-hidden rounded-xl bg-card">
-          <div className="flex flex-col gap-3 border-b border-border/60 bg-linear-to-r from-muted/45 via-muted/20 to-transparent px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-            <div>
-              <div className="text-[11px] font-semibold text-muted-foreground/70">
-                Iskra system footprint
-              </div>
-              <p className="mt-1 max-w-xl text-xs leading-relaxed text-muted-foreground">
-                Live native counters for the server, providers, terminals, desktop processes, and
-                the monitor itself.
-              </p>
-            </div>
-            <div className="flex items-center gap-2 text-[11px] text-muted-foreground/65">
-              <span className="size-1.5 rounded-full bg-emerald-500" />
-              Sampling every {snapshot ? formatSampleInterval(snapshot.sampleIntervalMs) : "..."}
-            </div>
+          <div className="flex min-h-11 items-center justify-between gap-3 border-b border-border/60 px-4 py-2">
+            <p className="min-w-0 text-xs text-muted-foreground">
+              Native counters for the server, providers, terminals, desktop and the monitor.
+            </p>
+            {snapshot ? (
+              <StatusPill
+                label={`Every ${formatSampleInterval(snapshot.sampleIntervalMs)}`}
+                tone="gray"
+              />
+            ) : null}
           </div>
-          <div className="grid grid-cols-2 divide-x divide-y divide-border/55 md:grid-cols-3">
-            <IconStat
-              icon={<CpuIcon className="size-3.5" />}
+          <div className="grid grid-cols-2 md:grid-cols-3">
+            <Stat
               label="Current CPU"
               value={allIskra ? `${allIskra.currentCpuPercent.toFixed(1)}%` : "..."}
               detail={
                 allIskra ? `${formatCpuTime(allIskra.cpuTimeMs)} observed CPU time` : undefined
               }
             />
-            <IconStat
-              icon={<MemoryStickIcon className="size-3.5" />}
+            <Stat
               label="Resident memory"
               value={allIskra ? formatBytes(allIskra.currentRssBytes) : "..."}
               detail={
@@ -1030,8 +970,7 @@ export function ResourceTelemetryDiagnostics({
                   : undefined
               }
             />
-            <IconStat
-              icon={<ActivityIcon className="size-3.5" />}
+            <Stat
               label="Process count"
               value={allIskra ? String(allIskra.processCount) : "..."}
               detail={
@@ -1040,58 +979,45 @@ export function ResourceTelemetryDiagnostics({
                   : undefined
               }
             />
-            <IconStat
-              icon={<HardDriveIcon className="size-3.5" />}
+            <Stat
               label="Read throughput"
               value={allIskra ? formatRate(allIskra.ioReadBytesPerSecond) : "..."}
               detail={allIskra ? `${formatBytes(allIskra.ioReadBytes)} observed` : undefined}
             />
-            <IconStat
-              icon={<DatabaseIcon className="size-3.5" />}
+            <Stat
               label="Write throughput"
               value={allIskra ? formatRate(allIskra.ioWriteBytesPerSecond) : "..."}
               detail={allIskra ? `${formatBytes(allIskra.ioWriteBytes)} observed` : undefined}
-              tone={
+              pill={
                 allIskra && allIskra.ioWriteBytesPerSecond >= 10 * 1_024 * 1_024
-                  ? "danger"
-                  : allIskra && allIskra.ioWriteBytesPerSecond >= 1_024 * 1_024
-                    ? "warning"
-                    : "default"
+                  ? { label: "High", tone: "red" }
+                  : null
               }
             />
-            <IconStat
-              icon={<GaugeIcon className="size-3.5" />}
+            <Stat
               label="CPU speed limit"
               value={
                 snapshot ? (speedLimit === null ? "Unknown" : `${speedLimit.toFixed(0)}%`) : "..."
               }
               detail={snapshot ? `${snapshot.power.thermalState} thermal state` : undefined}
-              tone={speedLimit !== null && speedLimit < 80 ? "warning" : "default"}
+              pill={
+                speedLimit !== null && speedLimit < 80 ? { label: "Throttled", tone: "gray" } : null
+              }
             />
           </div>
+          {/* The monitor's error shows once, here, with its one action. */}
           {telemetry.error ? (
-            <div className="flex items-start gap-2 border-t border-destructive/20 bg-destructive/5 px-4 py-3 text-xs text-destructive sm:px-5">
-              <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
-              <span>{telemetry.error}</span>
+            <div className="flex min-h-11 items-center gap-2 border-t border-border/60 px-4 py-2 text-[13px] text-foreground">
+              <AlertTriangleIcon className="size-4 shrink-0 text-destructive" />
+              <span className="min-w-0 flex-1">{telemetry.error}</span>
+              {collectorNeedsRetry ? retryButton : null}
             </div>
           ) : null}
           {snapshot ? (
-            <div className="grid border-t border-border/60 bg-muted/10 md:grid-cols-3">
-              <AggregateCard
-                label="Backend + agents"
-                accentClass="bg-emerald-500/80"
-                aggregate={snapshot.groups.backend}
-              />
-              <AggregateCard
-                label="Desktop"
-                accentClass="bg-sky-500/80"
-                aggregate={snapshot.groups.electron}
-              />
-              <AggregateCard
-                label="Monitor overhead"
-                accentClass="bg-amber-500/80"
-                aggregate={snapshot.groups.monitor}
-              />
+            <div className="grid border-t border-border/60 md:grid-cols-3">
+              <AggregateCard label="Backend + agents" aggregate={snapshot.groups.backend} />
+              <AggregateCard label="Desktop" aggregate={snapshot.groups.electron} />
+              <AggregateCard label="Monitor overhead" aggregate={snapshot.groups.monitor} />
             </div>
           ) : null}
         </div>
@@ -1099,24 +1025,11 @@ export function ResourceTelemetryDiagnostics({
 
       <SettingsSection
         title="Host & collection"
-        icon={<GaugeIcon className="size-4 text-muted-foreground" />}
-        headerAction={
-          collectorNeedsRetry ? (
-            <Button size="xs" variant="outline" disabled={isRetrying} onClick={retryCollector}>
-              <RefreshIcon className="size-3" refreshing={isRetrying} />
-              Retry monitor
-            </Button>
-          ) : null
-        }
+        headerAction={collectorNeedsRetry && !telemetry.error ? retryButton : null}
       >
         <div className="grid overflow-hidden rounded-xl bg-card md:grid-cols-2 md:divide-x md:divide-border/60">
-          <div className="px-4 py-4 sm:px-5">
-            <div className="mb-3 flex items-center gap-2 text-[11px] font-semibold text-muted-foreground/70">
-              <span className="flex size-6 items-center justify-center rounded-md bg-muted/60">
-                <BatteryIcon className="size-3.5" />
-              </span>
-              Host state
-            </div>
+          <div className="px-4 py-4">
+            <div className="mb-2 text-[13px] font-semibold text-muted-foreground">Host state</div>
             {hasHostPowerSignal && snapshot ? (
               <>
                 <DetailRow
@@ -1167,22 +1080,18 @@ export function ResourceTelemetryDiagnostics({
                 />
               </>
             ) : (
-              <div className="rounded-xl bg-card px-4 py-5">
-                <div className="text-[13px] font-medium text-foreground">
+              <div className="py-2">
+                <div className="text-[13px] text-foreground">
                   Desktop host signals not connected
                 </div>
-                <p className="mt-1.5 max-w-sm text-[11px] leading-relaxed text-muted-foreground/70">
-                  Power, idle, lock, and thermal state are supplied by the desktop host. Process
-                  telemetry remains fully active in this browser session.
+                <p className="mt-1 max-w-sm text-xs text-muted-foreground">
+                  Power, idle, lock and thermal state come from the desktop app.
                 </p>
               </div>
             )}
           </div>
-          <div className="border-t border-border/60 px-4 py-4 md:border-t-0 sm:px-5">
-            <div className="mb-3 flex items-center gap-2 text-[11px] font-semibold text-muted-foreground/70">
-              <span className="flex size-6 items-center justify-center rounded-md bg-muted/60">
-                <GaugeIcon className="size-3.5" />
-              </span>
+          <div className="border-t border-border/60 px-4 py-4 md:border-t-0">
+            <div className="mb-2 text-[13px] font-semibold text-muted-foreground">
               Collection health
             </div>
             {snapshot ? (
@@ -1200,11 +1109,6 @@ export function ResourceTelemetryDiagnostics({
                 <DetailRow
                   label="Inaccessible"
                   value={String(snapshot.health.inaccessibleProcessCount)}
-                  valueClassName={
-                    snapshot.health.inaccessibleProcessCount > 0
-                      ? "text-amber-600 dark:text-amber-300"
-                      : undefined
-                  }
                 />
                 <DetailRow
                   label="Sidecar"
@@ -1230,12 +1134,11 @@ export function ResourceTelemetryDiagnostics({
 
       <SettingsSection
         title="Resource timeline"
-        icon={<HardDriveIcon className="size-4 text-muted-foreground" />}
         headerAction={
           <div className="flex items-center gap-2">
             <HistoryWindowSelector selectedWindowMs={windowMs} onSelect={setWindowMs} />
             <Button
-              size="icon-micro"
+              size="icon-sm"
               variant="ghost"
               disabled={history.isPending}
               onClick={history.refresh}
@@ -1247,10 +1150,10 @@ export function ResourceTelemetryDiagnostics({
         }
       >
         <div className="overflow-hidden rounded-xl bg-card">
-          {history.error ? (
-            <div className="flex items-start gap-2 border-b border-destructive/20 bg-destructive/5 px-4 py-3 text-xs text-destructive sm:px-5">
-              <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
-              <span>{history.error}</span>
+          {history.error && history.error !== telemetry.error ? (
+            <div className="flex min-h-11 items-center gap-2 border-b border-border/60 px-4 py-2 text-[13px] text-foreground">
+              <AlertTriangleIcon className="size-4 shrink-0 text-destructive" />
+              <span className="min-w-0">{history.error}</span>
             </div>
           ) : null}
           <ResourceHistoryChart buckets={history.data?.buckets ?? []} />
@@ -1260,12 +1163,9 @@ export function ResourceTelemetryDiagnostics({
 
       <SettingsSection
         title="Live process tree"
-        icon={<CpuIcon className="size-4 text-muted-foreground" />}
         headerAction={
           snapshot ? (
-            <span className="text-[11px] text-muted-foreground/55">
-              Identity: <span className="font-mono">PID + start time</span>
-            </span>
+            <span className="text-[11px] text-muted-foreground">Identity: PID and start time</span>
           ) : null
         }
       >
@@ -1280,17 +1180,14 @@ export function ResourceTelemetryDiagnostics({
 
       <SettingsSection
         title="Instrumented application I/O"
-        icon={<DatabaseIcon className="size-4 text-muted-foreground" />}
         headerAction={
-          <span className="text-[11px] text-muted-foreground/55">Logical bytes by operation</span>
+          <span className="text-[11px] text-muted-foreground">Logical bytes by operation</span>
         }
       >
         <div className="overflow-hidden rounded-xl bg-card">
-          <div className="bg-muted/15 px-4 py-3 text-[11px] leading-relaxed text-muted-foreground sm:px-5">
-            Native counters identify which process is reading or writing. These application-level
-            counters identify known Iskra operations so process spikes can be correlated with
-            specific persistence and logging paths.
-          </div>
+          <p className="flex min-h-11 items-center px-4 py-2 text-xs text-muted-foreground">
+            Known Iskra operations, to match process spikes to persistence and logging.
+          </p>
           <AttributionTable entries={snapshot?.attribution.entries ?? []} />
         </div>
       </SettingsSection>
