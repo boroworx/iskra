@@ -6,13 +6,17 @@ import {
 } from "@iskra/contracts";
 import { useState } from "react";
 
+import type { AtomCommandResult } from "@iskra/client-runtime/state/runtime";
+
 import { useUpdateEnvironmentSettings } from "~/hooks/useSettings";
 import { randomUUID } from "~/lib/utils";
 import { cardEnvironment } from "~/state/cards";
+import { channelEnvironment } from "~/state/channels";
 import { useEnvironments } from "~/state/environments";
 import { useAtomCommand } from "~/state/use-atom-command";
 import type { Project } from "~/types";
 import { toastCommandFailure } from "../toastCommandFailure";
+import { toastManager } from "../ui/toast";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Input } from "../ui/input";
@@ -634,7 +638,80 @@ function ProjectSecrets(props: { readonly project: Project }) {
           </div>
         </div>
       </SettingsRow>
+      {saved.length > 0 ? (
+        <SettingsRow
+          title="Secret values"
+          description="Stored on this machine and never shown again. Setting a value replaces the one stored."
+        >
+          <div className="flex flex-col gap-1.5 px-4 pb-3">
+            {saved.map((row) => (
+              <SecretValue key={row.name} project={props.project} name={row.name} />
+            ))}
+          </div>
+        </SettingsRow>
+      ) : null}
     </SettingsSection>
+  );
+}
+
+/** Sets, replaces or removes one secret's value. Write-only: nothing reads a value back. */
+function SecretValue(props: { readonly project: Project; readonly name: string }) {
+  const setSecret = useAtomCommand(channelEnvironment.setProjectSecret);
+  const removeSecret = useAtomCommand(channelEnvironment.removeProjectSecret);
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+  const target = {
+    environmentId: props.project.environmentId,
+    input: { projectId: props.project.id, name: props.name },
+  };
+  const done = (result: AtomCommandResult<unknown, unknown>, success: string, failure: string) => {
+    setBusy(false);
+    toastCommandFailure(result, failure, "The request was refused.");
+    if (result._tag === "Success") {
+      toastManager.add({ type: "success", title: success });
+    }
+  };
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="min-w-0 flex-1 truncate font-mono text-sm">{props.name}</span>
+      <Input
+        size="sm"
+        type="password"
+        autoComplete="off"
+        className="min-w-0 flex-1"
+        aria-label={`Value for ${props.name}`}
+        placeholder="New value"
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
+      />
+      <Button
+        size="sm"
+        disabled={busy || value.length === 0}
+        onClick={async () => {
+          setBusy(true);
+          const result = await setSecret({ ...target, input: { ...target.input, value } });
+          if (result._tag === "Success") setValue("");
+          done(result, `${props.name} is set`, "The secret was not set");
+        }}
+      >
+        Set value
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost-muted"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          done(
+            await removeSecret(target),
+            `${props.name}'s value is removed`,
+            "The secret's value was not removed",
+          );
+        }}
+      >
+        Remove value
+      </Button>
+    </div>
   );
 }
 
