@@ -1020,6 +1020,10 @@ export const CardRuntimeSettings = Schema.Struct({
   environmentSessionCap: Schema.NullOr(PositiveInt).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  // What this machine's runs may spend each month across all projects; null sets no cap.
+  monthlyBudgetUsd: Schema.NullOr(Schema.Number).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   // A heavy job waits while load exceeds cores × load, or free memory falls below freeMem.
   admission: Schema.Struct({
     load: Schema.Number.pipe(Schema.withDecodingDefault(Effect.succeed(1))),
