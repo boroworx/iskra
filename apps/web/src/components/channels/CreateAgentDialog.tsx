@@ -1,5 +1,11 @@
 import type { EnvironmentProject } from "@iskra/client-runtime/state/models";
-import type { AgentId, ModelSelection, RunCapability } from "@iskra/contracts";
+import {
+  DEFAULT_AGENT_ROLES,
+  type AgentId,
+  type AgentRole,
+  type ModelSelection,
+  type RunCapability,
+} from "@iskra/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useId, useState } from "react";
 
@@ -19,13 +25,24 @@ import {
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
+import { DisabledReason } from "../cards/DisabledReason";
 import {
   AgentModelPicker,
+  AgentRunNote,
   resolveAgentModelSelection,
+  useAgentRunRefusal,
   useEnvironmentProviders,
 } from "./AgentModelPicker";
-import { CapabilityFields, orderedCapabilities } from "./AgentSettingsDialog";
+import {
+  CapabilityFields,
+  NO_ROLES_TEXT,
+  RoleFields,
+  orderedCapabilities,
+} from "./AgentSettingsDialog";
 import { toAgentName } from "./channels.logic";
+
+const NO_PROVIDER_TEXT =
+  "No provider that can run agents is on. Turn on Claude or OpenCode in Settings, Providers.";
 
 // An agent is usually made to build, so card sessions can change files and run commands; network stays off.
 const NEW_AGENT_CAPABILITIES: ReadonlyArray<RunCapability> = ["read", "write", "shell"];
@@ -55,8 +72,18 @@ export function CreateAgentDialog(props: {
   const [chosenModel, setChosenModel] = useState<ModelSelection | null>(null);
   const [capabilities, setCapabilities] =
     useState<ReadonlyArray<RunCapability>>(NEW_AGENT_CAPABILITIES);
+  const [roles, setRoles] = useState<ReadonlyArray<AgentRole>>(DEFAULT_AGENT_ROLES);
   const modelSelection =
     chosenModel ?? resolveAgentModelSelection(providers, props.project.defaultModelSelection);
+  const run = useAgentRunRefusal(environmentId, modelSelection, capabilities);
+  const blocked =
+    agentName.length === 0
+      ? "Give it a name."
+      : modelSelection === null
+        ? NO_PROVIDER_TEXT
+        : roles.length === 0
+          ? NO_ROLES_TEXT
+          : run.refusal;
 
   const joinChannels = async (agentIds: ReadonlyArray<AgentId>) => {
     for (const channel of channels) {
@@ -71,7 +98,7 @@ export function CreateAgentDialog(props: {
   };
 
   const submit = async () => {
-    if (agentName.length === 0 || modelSelection === null || busy) {
+    if (blocked !== null || modelSelection === null || busy) {
       return;
     }
     setBusy(true);
@@ -86,6 +113,7 @@ export function CreateAgentDialog(props: {
           tags: [],
           modelSelection,
           capabilities: orderedCapabilities(capabilities),
+          roles,
           rolePrompt: role.trim(),
         },
       },
@@ -101,6 +129,7 @@ export function CreateAgentDialog(props: {
     setRole("");
     setChosenModel(null);
     setCapabilities(NEW_AGENT_CAPABILITIES);
+    setRoles(DEFAULT_AGENT_ROLES);
     props.onOpenChange(false);
     void navigate({ to: "/agents/$environmentId/$agentId", params: { environmentId, agentId } });
   };
@@ -176,9 +205,7 @@ export function CreateAgentDialog(props: {
               onChange={(event) => setRole(event.target.value)}
             />
             {modelSelection === null ? (
-              <p className="text-sm text-destructive-foreground">
-                Agents need Claude. Turn on a Claude provider in Settings, Providers.
-              </p>
+              <p className="text-sm text-destructive-foreground">{NO_PROVIDER_TEXT}</p>
             ) : (
               <AgentModelPicker
                 environmentId={environmentId}
@@ -186,7 +213,11 @@ export function CreateAgentDialog(props: {
                 onChange={setChosenModel}
               />
             )}
-            <CapabilityFields value={capabilities} onChange={setCapabilities} />
+            <RoleFields value={roles} onChange={setRoles} />
+            <div className="space-y-1.5">
+              <CapabilityFields value={capabilities} onChange={setCapabilities} />
+              <AgentRunNote driver={run.driver} refusal={run.refusal} />
+            </div>
           </form>
         </DialogPanel>
         <DialogFooter>
@@ -202,13 +233,11 @@ export function CreateAgentDialog(props: {
           <Button type="button" variant="outline" onClick={() => props.onOpenChange(false)}>
             Cancel
           </Button>
-          <Button
-            type="submit"
-            form={formId}
-            disabled={agentName.length === 0 || modelSelection === null || busy}
-          >
-            Create agent
-          </Button>
+          <DisabledReason reason={agentName.length === 0 ? null : blocked}>
+            <Button type="submit" form={formId} disabled={blocked !== null || busy}>
+              Create agent
+            </Button>
+          </DisabledReason>
         </DialogFooter>
       </DialogPopup>
     </Dialog>

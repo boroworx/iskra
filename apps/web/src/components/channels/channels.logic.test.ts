@@ -21,13 +21,13 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   agentListEntries,
-  busyChannelName,
   cardNoteOf,
   cardProposalStatus,
   channelListEntries,
   channelMemberEntries,
   channelMessageRows,
   deliveryNotes,
+  liveInstances,
   dmTargets,
   mentionCandidates,
   mentionQueryAt,
@@ -245,6 +245,34 @@ describe("dmTargets", () => {
     ]);
   });
 
+  it("lists every live run of an agent as its own instance, newest first", () => {
+    const dm = channel("dm:m1", "dm-backend", { kind: "dm" });
+    const general = channel("channel-general", "general");
+    const other = channel("channel-other", "other");
+
+    expect(
+      liveInstances(
+        [
+          run("run-a", { channelId: general.id, startedAt: "2026-01-01T00:01:00.000Z" }),
+          run("run-b", { channelId: other.id, startedAt: "2026-01-01T00:02:00.000Z" }),
+          run("run-dm", { channelId: dm.id, startedAt: "2026-01-01T00:03:00.000Z" }),
+          run("run-verify", {
+            role: "verifier",
+            cardTitle: "Add /health",
+            startedAt: "2026-01-01T00:04:00.000Z",
+          }),
+          run("run-ended", { channelId: general.id, endedAt: "2026-01-01T00:05:00.000Z" }),
+        ],
+        [dm, general, other],
+      ).map((instance) => `${instance.doing} ${instance.where}`),
+    ).toEqual([
+      "Verifying Add /health",
+      "Replying in this DM",
+      "Replying in #other",
+      "Replying in #general",
+    ]);
+  });
+
   it("labels a run in the agent's DM as this DM, and one in a channel by name", () => {
     const dm = channel("dm:m1", "dm-backend", { kind: "dm" });
     const backend = channel("channel-backend", "backend");
@@ -253,24 +281,6 @@ describe("dmTargets", () => {
     expect(sessionWhere(run("run-channel", { channelId: backend.id }), [dm, backend])).toBe(
       "#backend",
     );
-  });
-
-  it("finds the channel an agent is busy in, never its DM or an ended run", () => {
-    const dm = channel("dm:m1", "dm-backend", { kind: "dm" });
-    const backend = channel("channel-backend", "backend");
-    const api = channel("channel-api", "api");
-
-    expect(
-      busyChannelName(
-        [
-          run("run-dm", { channelId: dm.id }),
-          run("run-ended", { channelId: api.id, endedAt: "2026-01-01T00:01:00.000Z" }),
-          run("run-backend", { channelId: backend.id }),
-        ],
-        [dm, backend, api],
-      ),
-    ).toBe("#backend");
-    expect(busyChannelName([run("run-dm", { channelId: dm.id })], [dm])).toBeNull();
   });
 });
 
@@ -383,25 +393,15 @@ describe("deliveryNotes", () => {
     ]);
   });
 
-  it("says a queued DM waits for the agent to finish work in its busy channel", () => {
+  it("never says queued: a delivery an older server queued is just waiting", () => {
     const queued = {
       ...message("q", "human", "human", "2026-01-01T10:00:00.000Z"),
-      deliveries: [
-        { agentId: AgentId.make("agent-backend"), status: "queued" as const },
-        { agentId: AgentId.make("agent-writer"), status: "queued" as const },
-      ],
+      deliveries: [{ agentId: AgentId.make("agent-backend"), status: "queued" as const }],
     };
 
     expect(
-      deliveryNotes(
-        queued,
-        [agent("agent-backend", "backend"), agent("agent-writer", "writer")],
-        new Map([["agent-backend", "#api"]]),
-      ).map((note) => note.text),
-    ).toEqual([
-      "Queued: @backend is finishing work in #api",
-      "Queued: @writer is finishing other work",
-    ]);
+      deliveryNotes(queued, [agent("agent-backend", "backend")]).map((note) => note.text),
+    ).toEqual(["Waiting for @backend"]);
   });
 });
 

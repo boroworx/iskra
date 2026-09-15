@@ -217,8 +217,6 @@ interface TimelineSource {
   readonly channels: ReadonlyArray<OrchestrationChannelShell>;
   readonly cwd: string | undefined;
   readonly environmentId: EnvironmentId;
-  /** Agent id to the `#channel` it is busy in, for queued DM deliveries. */
-  readonly busyChannels?: ReadonlyMap<string, string> | undefined;
   /** A channel's cards and its project's agents, to show the lead's proposals under their messages. */
   readonly proposals?:
     | {
@@ -282,7 +280,6 @@ export const Timeline = memo(function Timeline(props: TimelineSource) {
             channels={props.channels}
             cwd={props.cwd}
             environmentId={props.environmentId}
-            busyChannels={props.busyChannels}
             proposals={anchors.get(row.message.id)}
             proposalAgents={proposals?.agents ?? NO_AGENTS}
             cardById={cardById}
@@ -299,14 +296,13 @@ function MessageRow(props: {
   readonly channels: ReadonlyArray<OrchestrationChannelShell>;
   readonly cwd: string | undefined;
   readonly environmentId: EnvironmentId;
-  readonly busyChannels: ReadonlyMap<string, string> | undefined;
   readonly proposals: ReadonlyArray<OrchestrationCardShell> | undefined;
   readonly proposalAgents: ReadonlyArray<AgentEntry>;
   readonly cardById: ReadonlyMap<string, OrchestrationCardShell>;
 }) {
   const { message, authorName, showHeader } = props.row;
   const notes =
-    message.authorKind === "human" ? deliveryNotes(message, props.agents, props.busyChannels) : [];
+    message.authorKind === "human" ? deliveryNotes(message, props.agents) : [];
   return (
     <li className={cn("flex min-w-0 flex-col", showHeader ? "mt-4 first:mt-0" : "mt-1")}>
       {showHeader ? (

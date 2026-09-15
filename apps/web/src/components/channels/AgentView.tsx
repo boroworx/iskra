@@ -31,10 +31,11 @@ import {
   useSaveAgentDefinition,
 } from "./AgentSettingsDialog";
 import { MessageComposer, PresenceBadge, Timeline, useStickToNewest } from "./ChannelView";
-import { agentDmChannel, busyChannelName, dmTargets } from "./channels.logic";
+import { agentDmChannel, dmTargets, liveInstances } from "./channels.logic";
 import { RunBlock } from "./RunBlock";
 
 const EMPTY_MESSAGES: ReadonlyArray<OrchestrationChannelMessage> = [];
+const sinceFormat = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
 
 /**
  * An agent's page. Messages is its DM, a private read-only conversation opened by
@@ -94,11 +95,8 @@ export function AgentView(props: {
 
   const sessions = useMemo(() => (runs.data?.runs ?? []).toReversed(), [runs.data]);
   const targets = useMemo(() => dmTargets(runs.data?.runs ?? [], channels), [runs.data, channels]);
-  // A queued DM waits for the agent's live run in another channel to end.
-  const busyChannels = useMemo(() => {
-    const name = busyChannelName(runs.data?.runs ?? [], channels);
-    return name === null ? undefined : new Map([[props.agentId as string, name]]);
-  }, [runs.data, channels, props.agentId]);
+  // Every wake is its own run, so an agent can be live in several places at once.
+  const live = useMemo(() => liveInstances(runs.data?.runs ?? [], channels), [runs.data, channels]);
   const [chosenThreadId, setChosenThreadId] = useState<ThreadId | null>(null);
   const target = targets.find((entry) => entry.threadId === chosenThreadId) ?? targets[0];
 
@@ -170,6 +168,31 @@ export function AgentView(props: {
           ) : null
         ) : (
           <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+            {live.length > 0 ? (
+              <section
+                aria-label="Live now"
+                className="flex max-h-32 shrink-0 flex-col gap-0.5 overflow-y-auto border-b border-border px-5 py-2"
+              >
+                <h2 className="text-xs font-medium text-muted-foreground">
+                  Live now <span className="tabular-nums">{live.length}</span>
+                </h2>
+                <ul className="flex flex-col">
+                  {live.map((instance) => (
+                    <li key={instance.threadId} className="flex min-w-0 items-baseline gap-2 text-sm">
+                      <span className="min-w-0 truncate">
+                        {instance.doing} <span className="text-muted-foreground">{instance.where}</span>
+                      </span>
+                      <time
+                        dateTime={instance.since}
+                        className="ms-auto shrink-0 text-xs tabular-nums text-muted-foreground"
+                      >
+                        since {sinceFormat.format(new Date(instance.since))}
+                      </time>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
             {view === "messages" ? (
               dmChannel !== null && (messages.length > 0 || dmMessages.error !== null) ? (
                 <Timeline
@@ -179,7 +202,6 @@ export function AgentView(props: {
                   channels={channels}
                   cwd={project?.workspaceRoot}
                   environmentId={props.environmentId}
-                  busyChannels={busyChannels}
                 />
               ) : (
                 <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">

@@ -163,24 +163,37 @@ export function dmTargets(
   return [DIRECT_MESSAGE_TARGET, ...sessions];
 }
 
+const RUN_DOING: Record<OrchestrationAgentRun["role"], string> = {
+  conversation: "Replying in",
+  lead: "Leading",
+  owner: "Building",
+  helper: "Helping on",
+  critic: "Critiquing",
+  verifier: "Verifying",
+};
+
 /**
- * The channel an agent is busy in, as `#name`, from its live runs outside DMs: where a
- * queued DM waits for it to finish. Null when it has no such run or the channel is unknown.
+ * An agent's live runs, newest first: what each does and where, and since when. Every wake is
+ * its own run, so one agent can be live in several channels, DMs and cards at once.
  */
-export function busyChannelName(
+export function liveInstances(
   runs: ReadonlyArray<OrchestrationAgentRun>,
   channels: ReadonlyArray<OrchestrationChannelShell>,
-): string | null {
-  for (const run of runs) {
-    if (run.endedAt !== null || run.channelId === null) {
-      continue;
-    }
-    const channel = channels.find((candidate) => candidate.id === run.channelId);
-    if (channel !== undefined && channel.kind !== "dm") {
-      return `#${channel.name}`;
-    }
-  }
-  return null;
+): ReadonlyArray<{
+  readonly threadId: OrchestrationAgentRun["threadId"];
+  readonly doing: string;
+  readonly where: string;
+  readonly since: string;
+}> {
+  return runs
+    .filter((run) => run.endedAt === null)
+    .toSorted((left, right) => right.startedAt.localeCompare(left.startedAt))
+    .map((run) => ({
+      threadId: run.threadId,
+      doing: RUN_DOING[run.role],
+      where: sessionWhere(run, channels),
+      since: run.startedAt,
+    }));
 }
 
 /** A channel's member agents in name order. */
@@ -276,30 +289,20 @@ export interface DeliveryNote {
   readonly undelivered: boolean;
 }
 
-const NO_BUSY_CHANNELS: ReadonlyMap<string, string> = new Map();
-
 /**
- * What a human message says about its deliveries: a wait while unread, a queue
- * while the agent finishes work elsewhere (`busyChannels` maps agent id to the
- * `#channel` it works in), and a warning if never read.
+ * What a human message says about its deliveries: a wait while unread and a warning if never
+ * read. Every wake is its own run now, so a delivery an older server still marks queued is
+ * just waiting too.
  */
 export function deliveryNotes(
   message: OrchestrationChannelMessage,
   agents: ReadonlyArray<OrchestrationAgentShell>,
-  busyChannels: ReadonlyMap<string, string> = NO_BUSY_CHANNELS,
 ): ReadonlyArray<DeliveryNote> {
   const agentNames = new Map<string, string>(agents.map((agent) => [agent.id, agent.name]));
   return (message.deliveries ?? []).flatMap((delivery): ReadonlyArray<DeliveryNote> => {
     const name = `@${agentNames.get(delivery.agentId) ?? delivery.agentId}`;
     switch (delivery.status) {
-      case "queued": {
-        const busyIn = busyChannels.get(delivery.agentId);
-        const text =
-          busyIn === undefined
-            ? `Queued: ${name} is finishing other work`
-            : `Queued: ${name} is finishing work in ${busyIn}`;
-        return [{ agentId: delivery.agentId, text, undelivered: false }];
-      }
+      case "queued":
       case "pending":
       case "sent":
         return [{ agentId: delivery.agentId, text: `Waiting for ${name}`, undelivered: false }];

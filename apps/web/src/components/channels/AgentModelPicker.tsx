@@ -1,6 +1,18 @@
-import type { EnvironmentId, ModelSelection, ServerProvider } from "@iskra/contracts";
+import {
+  canHostRuns,
+  providerRunSummary,
+  runRefusalText,
+  templateRunRefusal,
+} from "@iskra/client-runtime/run-enforcement";
+import type {
+  EnvironmentId,
+  ModelSelection,
+  ProviderInstanceId,
+  RunCapability,
+  ServerProvider,
+} from "@iskra/contracts";
 import { createModelSelection } from "@iskra/shared/model";
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 
 import { useEnvironmentSettings } from "~/hooks/useSettings";
 import { getCustomModelOptionsByInstance } from "~/modelSelection";
@@ -20,25 +32,36 @@ export function useEnvironmentProviders(environmentId: EnvironmentId) {
   return useServerConfigs().get(environmentId)?.providers ?? EMPTY_PROVIDERS;
 }
 
+/** The driver a model selection runs on, such as `claudeAgent`; null when its instance is gone. */
+export const selectionDriver = (
+  providers: ReadonlyArray<ServerProvider>,
+  selection: Pick<ModelSelection, "instanceId">,
+): string | null =>
+  providers.find((provider) => provider.instanceId === selection.instanceId)?.driver ?? null;
+
 /**
- * The model a new agent runs on. Agent runs need Claude, so it is the project's
- * default model when that is a Claude one, otherwise the first available Claude
- * instance's default; null when no Claude instance is on.
+ * The model a new agent runs on: the project's default model when its provider can host runs,
+ * otherwise the first available Claude instance's default (Claude enforces every capability a
+ * new agent starts with), then any other provider that hosts runs; null when none is on.
  */
 export function resolveAgentModelSelection(
   providers: ReadonlyArray<ServerProvider>,
   projectDefault: ModelSelection | null,
 ): ModelSelection | null {
-  const claudeEntries = deriveProviderInstanceEntries(providers).filter(
-    (entry) => entry.driverKind === "claudeAgent" && entry.enabled && entry.installed,
+  const entries = deriveProviderInstanceEntries(providers).filter(
+    (entry) => entry.enabled && entry.installed && canHostRuns(entry.driverKind),
   );
   if (
     projectDefault !== null &&
-    claudeEntries.some((entry) => entry.instanceId === projectDefault.instanceId)
+    entries.some((entry) => entry.instanceId === projectDefault.instanceId)
   ) {
     return projectDefault;
   }
-  for (const entry of claudeEntries) {
+  const claudeFirst = [
+    ...entries.filter((entry) => entry.driverKind === "claudeAgent"),
+    ...entries.filter((entry) => entry.driverKind !== "claudeAgent"),
+  ];
+  for (const entry of claudeFirst) {
     const model = getDefaultProviderInstanceModel(providers, entry.instanceId);
     if (model !== undefined) {
       return { instanceId: entry.instanceId, model };
@@ -48,8 +71,9 @@ export function resolveAgentModelSelection(
 }
 
 /**
- * The model picker for an agent: only enabled, installed Claude instances, since
- * only Claude runs agents. A new pick drops the old model's options.
+ * The model picker for an agent: every enabled, installed provider. Models on a provider that
+ * can't host agent runs, such as Codex, stay listed but disabled with the server's refusal.
+ * A new pick drops the old model's options.
  */
 export function AgentModelPicker(props: {
   readonly environmentId: EnvironmentId;
@@ -63,7 +87,7 @@ export function AgentModelPicker(props: {
     () =>
       sortProviderInstanceEntries(
         applyProviderInstanceSettings(deriveProviderInstanceEntries(providers), settings),
-      ).filter((entry) => entry.driverKind === "claudeAgent" && entry.enabled && entry.installed),
+      ).filter((entry) => entry.enabled && entry.installed),
     [providers, settings],
   );
   const modelOptions = useMemo(
@@ -76,6 +100,15 @@ export function AgentModelPicker(props: {
       ),
     [settings, providers, props.value.instanceId, props.value.model],
   );
+  const disabledReason = useCallback(
+    (instanceId: ProviderInstanceId) => {
+      const driver = entries.find((entry) => entry.instanceId === instanceId)?.driverKind;
+      return driver === undefined || canHostRuns(driver)
+        ? null
+        : runRefusalText(driver, { capabilities: [] });
+    },
+    [entries],
+  );
   return (
     <ProviderModelPicker
       activeInstanceId={props.value.instanceId}
@@ -85,10 +118,38 @@ export function AgentModelPicker(props: {
       modelOptionsByInstance={modelOptions}
       triggerVariant="outline"
       triggerAriaLabel="Agent model"
+      getModelDisabledReason={disabledReason}
       {...(props.disabled === undefined ? {} : { disabled: props.disabled })}
       onInstanceModelChange={(instanceId, model) =>
         props.onChange(createModelSelection(instanceId, model))
       }
     />
   );
+}
+
+/** Why this template's card runs can't start on its model's provider, or null when they can. */
+export function useAgentRunRefusal(
+  environmentId: EnvironmentId,
+  model: Pick<ModelSelection, "instanceId"> | null,
+  capabilities: ReadonlyArray<RunCapability>,
+): { readonly driver: string | null; readonly refusal: string | null } {
+  const providers = useEnvironmentProviders(environmentId);
+  const driver = model === null ? null : selectionDriver(providers, model);
+  return { driver, refusal: driver === null ? null : templateRunRefusal(driver, capabilities) };
+}
+
+/** Under an agent's capabilities: what its provider's runs can do, or the refusal that blocks saving. */
+export function AgentRunNote(props: {
+  readonly driver: string | null;
+  readonly refusal: string | null;
+}) {
+  if (props.refusal !== null) {
+    return (
+      <p role="alert" className="text-xs text-destructive-foreground">
+        {props.refusal}
+      </p>
+    );
+  }
+  const summary = props.driver === null ? null : providerRunSummary(props.driver);
+  return summary === null ? null : <p className="text-xs text-muted-foreground">{summary}</p>;
 }
