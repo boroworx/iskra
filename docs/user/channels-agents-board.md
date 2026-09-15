@@ -73,8 +73,11 @@ To keep cards in step with Linear issues, see [Linear](./linear.md).
 ## Needs you
 
 **Needs you** at the top of the sidebar collects everything waiting on you across projects:
-cards to approve, specs to review, and questions from agents. Decide most of them right in the list;
-**Approve & start** on a proposal starts it with the owner you pick.
+cards to approve, specs to review, questions from agents, comments on a card's pull request from
+people outside the repository, merges the host refused, and branches or tags that changed outside a
+card while its agent worked. Decide most of them right in the list: answer a question in one click,
+forward a comment to the agent or dismiss it, retry a landing, or restore or keep changed refs and
+then resume the card. **Approve & start** on a proposal starts it with the owner you pick.
 
 ## Shortcuts
 

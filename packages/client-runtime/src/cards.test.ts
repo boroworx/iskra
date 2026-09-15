@@ -4,6 +4,7 @@ import {
   LEGACY_CARD_CONTRACT,
   ProjectId,
   ThreadId,
+  type CardOpenElicitation,
   type CardStatus,
   type OrchestrationCard,
   type OrchestrationCardShell,
@@ -21,7 +22,6 @@ import {
   isCardSnoozed,
   needsYouItems,
   needsYouLabel,
-  openCardQuestions,
   openCheckpointActivityId,
   reasonLabel,
   waitingLabel,
@@ -69,6 +69,24 @@ const card = (id: string, overrides: Partial<OrchestrationCard> = {}): Orchestra
   suggestedAgentId: null,
   priority: 0,
   ...LEGACY_CARD_CONTRACT,
+  ...overrides,
+});
+
+/** An open question as the card shell lists it, answered in words unless options are given. */
+const openQuestion = (
+  activityId: string,
+  kind: CardOpenElicitation["kind"],
+  askedAt: string,
+  overrides: Partial<CardOpenElicitation> = {},
+): CardOpenElicitation => ({
+  activityId,
+  kind,
+  optionIds: [],
+  askedAt,
+  question: "",
+  options: [],
+  recommendedOptionId: null,
+  allowText: true,
   ...overrides,
 });
 
@@ -394,12 +412,46 @@ describe("needsYouItems on the card contract", () => {
             pausedAt: at(7),
           },
         }),
+        card("refs", {
+          status: "inProgress",
+          paused: {
+            reason: { code: "refMovedOutsideCard", text: "Refs changed." },
+            by: "system",
+            pausedAt: at(7),
+          },
+          openElicitations: [openQuestion("refs-1", "refsChanged", at(7))],
+        }),
         card("asked", {
           status: "inProgress",
           openElicitations: [
-            { activityId: "k9", kind: "checkpoint", optionIds: [], askedAt: at(7) },
-            { activityId: "q1", kind: "question", optionIds: ["a", "b"], askedAt: at(8) },
-            { activityId: "q2", kind: "question", optionIds: [], askedAt: at(9) },
+            openQuestion("k9", "checkpoint", at(7)),
+            openQuestion("q1", "question", at(8), { question: "Which store?", optionIds: ["a", "b"] }),
+            openQuestion("q2", "question", at(9), { question: "Per key?" }),
+          ],
+        }),
+        card("comment", {
+          status: "inReview",
+          attention: [
+            {
+              activityId: "comment-1",
+              code: "untrustedComment",
+              text: "stranger on the pull request: Use tabs.",
+              createdAt: at(9),
+              actions: ["forward", "dismiss"],
+            },
+          ],
+        }),
+        card("linear", {
+          status: "ready",
+          openElicitations: [openQuestion("ask", "question", at(9), { question: "Which criteria?" })],
+          attention: [
+            {
+              activityId: "ask",
+              code: "criteriaMissing",
+              text: "Which criteria?",
+              createdAt: at(9),
+              actions: ["addCriteria"],
+            },
           ],
         }),
         card("ci", { ...review, evidence: evidence({ pendingCi: ["build"] }) }),
@@ -435,12 +487,28 @@ describe("needsYouItems on the card contract", () => {
         "Agents don't start work until someone checks this project's scheduled jobs and outbound APIs in project settings.",
       ],
       ["paused", "moved-ref", "It moved main."],
-      // One item per card however many questions are open, from the oldest; a checkpoint's is not one.
-      ["awaitingInput", "asked", null],
+      // The refs question stands in for its pause until the refs are restored or kept.
+      ["refsChanged", "refs", null],
+      // One item per open question with its words; a checkpoint's is not one.
+      ["awaitingInput", "asked", "Which store?"],
+      ["awaitingInput", "asked", "Per key?"],
+      ["attention", "comment", "stranger on the pull request: Use tabs."],
+      // Asking for criteria shows once, as its attention item.
+      ["attention", "linear", "Which criteria?"],
     ]);
     expect(
       needsYouLabel(items.find((item) => item.cardId === "moved-ref")!),
-    ).toBe("Moved a branch outside its card");
+    ).toBe("Refs changed outside this card");
+    expect(items.find((item) => item.cardId === "refs")).toMatchObject({
+      activityId: "refs-1",
+      snoozable: false,
+    });
+    const comment = items.find((item) => item.cardId === "comment")!;
+    expect([needsYouLabel(comment), comment.activityId, comment.snoozable]).toEqual([
+      "Comment from outside the repository",
+      "comment-1",
+      true,
+    ]);
     expect(items.find((item) => item.cardId === "asked")!.since).toBe(at(8));
     expect(
       cardWaitItems([
@@ -511,6 +579,7 @@ describe("reasonLabel", () => {
     "runChecksRequested",
     "runChecksResult",
     "mergedOnHost",
+    "pullRequestReopened",
   ];
 
   it("gives every emitted code a short label and a tooltip", () => {
@@ -525,7 +594,7 @@ describe("reasonLabel", () => {
       "Waiting for machine capacity",
     );
     expect(reasonLabel({ code: "refMovedOutsideCard", text: "x" }).label).toBe(
-      "Moved a branch outside its card",
+      "Refs changed outside this card",
     );
     expect(reasonLabel({ code: "somethingNew", text: "Waiting on the moon." })).toEqual({
       label: "Waiting on the moon.",
@@ -558,51 +627,10 @@ describe("elicitationAnswer", () => {
     expect(elicitationAnswer({ ...question, allowText: false }, { text: "both" })).toBeNull();
   });
 
-  it("lists the open questions the card's shell names, with their words from the activity", () => {
-    const base = {
-      cardId: CardId.make("c"),
-      author: { kind: "agent" as const, id: "builder" },
-      body: "",
-      runThreadId: null,
-      deliverTo: null,
-      delivery: null,
-      status: null,
-      evidenceId: null,
-      reason: null,
-      createdAt: at(1),
-    };
-    const elicitation = {
-      question: "Which?",
-      ...question,
-      recommendedOptionId: "keep",
-      kind: "question" as const,
-    };
-    const activities = [
-      { ...base, activityId: "q1", kind: "elicitation" as const, elicitation, answers: null },
-      { ...base, activityId: "q2", kind: "elicitation" as const, elicitation, answers: null },
-      {
-        ...base,
-        activityId: "k1",
-        kind: "elicitation" as const,
-        elicitation: { ...elicitation, kind: "checkpoint" as const },
-        answers: null,
-      },
-    ];
+  it("finds a checkpoint's question by its kind, not by assuming its id", () => {
     const shell = {
-      openElicitations: [
-        { activityId: "k1", kind: "checkpoint" as const, optionIds: [], askedAt: at(1) },
-        { activityId: "q2", kind: "question" as const, optionIds: [], askedAt: at(1) },
-        // Not streamed in yet: left out until its activity arrives.
-        { activityId: "q3", kind: "criteriaChange" as const, optionIds: [], askedAt: at(2) },
-      ],
+      openElicitations: [openQuestion("q2", "question", at(1)), openQuestion("k1", "checkpoint", at(1))],
     };
-    // q1 is answered: the shell no longer lists it, whatever the activities hold.
-    expect(
-      openCardQuestions(shell, activities, ["question", "criteriaChange"]).map(
-        (entry) => entry.activityId,
-      ),
-    ).toEqual(["q2"]);
-    // The checkpoint is found by its kind, not by assuming its id.
     expect(openCheckpointActivityId(shell)).toBe("k1");
     expect(openCheckpointActivityId({ openElicitations: [] })).toBeNull();
   });

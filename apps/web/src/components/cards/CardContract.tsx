@@ -1,10 +1,10 @@
 import { cardPreview } from "@iskra/client-runtime/card-preview";
-import { elicitationAnswer, openCardQuestions } from "@iskra/client-runtime/cards";
+import { CARD_QUESTION_KINDS, elicitationAnswer } from "@iskra/client-runtime/cards";
 import {
   MessageId,
-  type CardActivity,
   type CardCriterion,
   type CardEstimate,
+  type CardOpenElicitation,
   type Elicitation,
   type EnvironmentId,
   type OrchestrationAgentShell,
@@ -12,7 +12,7 @@ import {
   type OrchestrationChannelMessage,
 } from "@iskra/contracts";
 import { PlusIcon, XIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { randomUUID } from "~/lib/utils";
 import { cardEnvironment } from "~/state/cards";
@@ -193,7 +193,7 @@ export function CardPreviewPanel(props: {
  * answer when the question takes one. `onAnswer` gets the option's label or the trimmed words.
  */
 export function ElicitationOptions(props: {
-  readonly elicitation: Elicitation;
+  readonly elicitation: Pick<Elicitation, "options" | "recommendedOptionId" | "allowText">;
   readonly disabled?: boolean;
   readonly onAnswer: (answer: { readonly optionId: string | null; readonly body: string }) => void;
 }) {
@@ -291,54 +291,78 @@ export function ChannelQuestion(props: {
   );
 }
 
+/** The card's open questions answered in place, from its shell; a request for criteria shows as attention. */
+export function cardQuestionsOf(
+  card: Pick<OrchestrationCardShell, "openElicitations" | "attention">,
+): ReadonlyArray<CardOpenElicitation> {
+  return card.openElicitations.filter(
+    (open) =>
+      CARD_QUESTION_KINDS.includes(open.kind) &&
+      !card.attention.some((item) => item.activityId === open.activityId),
+  );
+}
+
+/** One open question with one-click answers, and the person's own words when it takes them. */
+export function CardQuestion(props: {
+  readonly cardId: OrchestrationCardShell["id"];
+  readonly question: CardOpenElicitation;
+  readonly environmentId: EnvironmentId;
+}) {
+  const answer = useAtomCommand(cardEnvironment.answerElicitation);
+  const [sending, setSending] = useState(false);
+  return (
+    <div className="flex flex-col gap-1.5">
+      {props.question.question.length > 0 ? (
+        <p className="whitespace-pre-wrap break-words text-sm font-medium">
+          {props.question.question}
+        </p>
+      ) : null}
+      <ElicitationOptions
+        elicitation={props.question}
+        disabled={sending}
+        onAnswer={async (choice) => {
+          setSending(true);
+          const result = await answer({
+            environmentId: props.environmentId,
+            input: {
+              cardId: props.cardId,
+              activityId: props.question.activityId,
+              optionId: choice.optionId,
+              body: choice.body,
+            },
+          });
+          setSending(false);
+          toastCommandFailure(result, "The answer was not sent", "The request was refused.");
+        }}
+      />
+    </div>
+  );
+}
+
 /**
  * The card's open questions with one-click answers: the agent's own and proposed criteria changes.
  * A checkpoint's question is answered by the checkpoint controls instead.
  */
 export function CardQuestions(props: {
-  readonly card: Pick<OrchestrationCardShell, "id" | "openElicitations">;
-  readonly activities: ReadonlyArray<CardActivity>;
+  readonly card: Pick<OrchestrationCardShell, "id" | "openElicitations" | "attention">;
   readonly environmentId: EnvironmentId;
 }) {
-  const answer = useAtomCommand(cardEnvironment.answerElicitation);
-  const [sending, setSending] = useState(false);
-  const questions = useMemo(
-    () => openCardQuestions(props.card, props.activities, QUESTION_KINDS),
-    [props.card, props.activities],
-  );
+  const questions = cardQuestionsOf(props.card);
   if (questions.length === 0) return null;
   return (
     <ol className="flex flex-col gap-3">
       {questions.map((question) => (
-        <li key={question.activityId} className="flex flex-col gap-1.5">
-          <p className="whitespace-pre-wrap break-words text-sm font-medium">
-            {question.elicitation.question}
-          </p>
-          <ElicitationOptions
-            elicitation={question.elicitation}
-            disabled={sending}
-            onAnswer={async (choice) => {
-              setSending(true);
-              const result = await answer({
-                environmentId: props.environmentId,
-                input: {
-                  cardId: props.card.id,
-                  activityId: question.activityId,
-                  optionId: choice.optionId,
-                  body: choice.body,
-                },
-              });
-              setSending(false);
-              toastCommandFailure(result, "The answer was not sent", "The request was refused.");
-            }}
+        <li key={question.activityId}>
+          <CardQuestion
+            cardId={props.card.id}
+            question={question}
+            environmentId={props.environmentId}
           />
         </li>
       ))}
     </ol>
   );
 }
-
-const QUESTION_KINDS = ["question", "criteriaChange"] as const;
 
 const sameCriteria = (left: ReadonlyArray<CardCriterion>, right: ReadonlyArray<CardCriterion>) =>
   JSON.stringify(left) === JSON.stringify(right);

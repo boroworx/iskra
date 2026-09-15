@@ -210,18 +210,6 @@ export function riskClaimsOf(activities: ReadonlyArray<CardActivity>): CardRiskC
   return null;
 }
 
-/**
- * Pull request comments from people who aren't trusted on the repository: the server marks their
- * author untrusted and delivers them to no one, so they wait for a person to forward them.
- */
-export function untrustedComments(
-  activities: ReadonlyArray<CardActivity>,
-): ReadonlyArray<CardActivity> {
-  return activities.filter(
-    (activity) => activity.author.trusted === false && activity.deliverTo === null,
-  );
-}
-
 interface FixRoundView {
   readonly used: number;
   readonly cap: number;

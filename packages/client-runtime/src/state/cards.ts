@@ -12,8 +12,12 @@ import {
   commentOnCardReview,
   createCard,
   decideCard,
+  dismissCardAttention,
+  forwardCardComment,
+  keepCardRefs,
   postCardMessage,
   removeCardRelation,
+  restoreCardRefs,
   setCardBudget,
   setCardCriteria,
   setProjectOrchestration,
@@ -38,6 +42,22 @@ export function createCardEnvironmentAtoms<R, E>(
     answerElicitation: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:card:answer-elicitation",
       execute: answerCardElicitation,
+    }),
+    restoreRefs: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:card:restore-refs",
+      execute: restoreCardRefs,
+    }),
+    keepRefs: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:card:keep-refs",
+      execute: keepCardRefs,
+    }),
+    forwardComment: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:card:forward-comment",
+      execute: forwardCardComment,
+    }),
+    dismissAttention: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:card:dismiss-attention",
+      execute: dismissCardAttention,
     }),
     acknowledgeFlags: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:card:acknowledge-flags",

@@ -21,6 +21,8 @@ import { useEnvironmentAgents, useEnvironmentCards, useProjects } from "~/state/
 import { usePrimaryEnvironmentId } from "~/state/environments";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { ApproveAndStart } from "../channels/CardProposal";
+import { AttentionActions, RefsChangedControls } from "./CardAttention";
+import { CardQuestion } from "./CardContract";
 import { CheckpointControls } from "./CardReviewPanel";
 import { agentListEntries, type AgentEntry } from "../channels/channels.logic";
 import { Button } from "../ui/button";
@@ -130,6 +132,13 @@ export function NeedsYouView() {
             <ol className="flex flex-col divide-y divide-border">
               {items.map((item) => {
                 const itemCard = cardById.get(item.cardId);
+                // The question or attention item this answers, from the card shell.
+                const question = itemCard?.openElicitations.find(
+                  (open) => open.activityId === item.activityId,
+                );
+                const attention = itemCard?.attention.find(
+                  (entry) => entry.activityId === item.activityId,
+                );
                 return (
                   <li
                     key={item.key}
@@ -146,10 +155,26 @@ export function NeedsYouView() {
                       <span className="truncate text-xs text-muted-foreground">
                         {needsYouLabel(item)} · {projectTitle(item.projectId)}
                       </span>
-                      {item.reason !== null && item.kind !== "checkpoint" ? (
+                      {item.reason !== null && item.kind !== "checkpoint" && item.activityId === null ? (
                         <p className="line-clamp-2 text-xs text-muted-foreground">
                           Why: {item.reason}
                         </p>
+                      ) : null}
+                      {attention !== undefined ? (
+                        <p className="line-clamp-3 whitespace-pre-wrap break-words text-xs">
+                          {attention.text}
+                        </p>
+                      ) : null}
+                      {question !== undefined &&
+                      question.kind !== "refsChanged" &&
+                      environmentId !== null ? (
+                        <div className="mt-1.5">
+                          <CardQuestion
+                            cardId={item.cardId}
+                            question={question}
+                            environmentId={environmentId}
+                          />
+                        </div>
                       ) : null}
                       {item.kind === "triage" && proposalReasoningOf(item.cardId) !== null ? (
                         <p className="line-clamp-2 text-xs text-muted-foreground">
@@ -163,13 +188,30 @@ export function NeedsYouView() {
                           <CheckpointControls card={itemCard} environmentId={environmentId} />
                         </div>
                       ) : null}
+                      {question?.kind === "refsChanged" && environmentId !== null ? (
+                        <div className="mt-1.5">
+                          <RefsChangedControls
+                            cardId={item.cardId}
+                            report={question}
+                            environmentId={environmentId}
+                          />
+                        </div>
+                      ) : null}
                     </div>
                     <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
                       waiting {waitingLabel(item.since, now)}
                     </span>
+                    {attention !== undefined && itemCard !== undefined && environmentId !== null ? (
+                      <AttentionActions
+                        card={itemCard}
+                        item={attention}
+                        environmentId={environmentId}
+                      />
+                    ) : null}
                     {(item.kind === "awaitingInput" || item.kind === "criteriaChange") &&
+                    question === undefined &&
                     environmentId !== null ? (
-                      // The question's words stream with the card, so it is answered on the card.
+                      // A session waiting with no question on the card is answered in its sheet.
                       <Button
                         size="sm"
                         variant="ghost-muted"

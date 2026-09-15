@@ -5,18 +5,12 @@ import {
   fixRoundsView,
   reviewByCriterion,
   riskClaimsOf,
-  untrustedComments,
   type CriterionState,
   type EvidenceItemView,
 } from "@iskra/client-runtime/card-review";
-import {
-  forwardedCommentMessage,
-  hasUnacknowledgedHardFlags,
-  openCheckpointActivityId,
-} from "@iskra/client-runtime/cards";
+import { hasUnacknowledgedHardFlags, openCheckpointActivityId } from "@iskra/client-runtime/cards";
 import type { AtomCommandResult } from "@iskra/client-runtime/state/runtime";
 import {
-  MessageId,
   type AssetResource,
   type CardActivity,
   type CardCheckpointDecision,
@@ -28,7 +22,7 @@ import {
 import { memo, useMemo, useState } from "react";
 
 import { useAssetUrlState } from "~/assets/assetUrls";
-import { cn, randomUUID } from "~/lib/utils";
+import { cn } from "~/lib/utils";
 import { cardEnvironment } from "~/state/cards";
 import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -340,37 +334,33 @@ function CardDiffBody(props: {
 }
 
 /**
- * Where the card lands: its pull request (or local fast-forward), CI as the evidence reads it,
- * the fix rounds used against the project's caps with a reset, and untrusted comments to forward.
+ * Where the card lands: its pull request (or local fast-forward), CI as the evidence reads it, and
+ * the fix rounds used against the project's caps with a reset. Comments to forward are attention.
  */
 export function CardLandingPanel(props: {
   readonly card: OrchestrationCardShell;
   readonly items: ReadonlyArray<CardEvidenceItem>;
-  readonly activities: ReadonlyArray<CardActivity>;
   readonly policy: ProjectOrchestration;
   readonly environmentId: EnvironmentId;
 }) {
   const { card, environmentId } = props;
   const decide = useAtomCommand(cardEnvironment.decide);
-  const postMessage = useAtomCommand(cardEnvironment.postMessage);
-  const [forwarded, setForwarded] = useState<ReadonlySet<string>>(() => new Set());
   const rounds = fixRoundsView(card.fixRounds, props.policy);
   const ci = useMemo(() => ciSummary(props.items), [props.items]);
-  const comments = useMemo(
-    () =>
-      untrustedComments(props.activities).filter((comment) => !forwarded.has(comment.activityId)),
-    [props.activities, forwarded],
-  );
   const roundsOut = rounds.exhausted || card.paused?.reason.code === "fixRoundsExhausted";
   const landing = card.landing;
-  const mergedOnHost =
-    card.status === "landed" &&
-    props.activities.some((activity) => activity.reason?.code === "mergedOnHost");
 
   return (
     <div className="flex flex-col gap-2 text-xs">
       <p>
-        {mergedOnHost ? <span>Merged on the host · </span> : null}
+        {card.status === "landed" && landing?.mergedOnHostUrl !== undefined ? (
+          <span>
+            <a href={landing.mergedOnHostUrl} target="_blank" rel="noreferrer" className="underline">
+              Merged on the host
+            </a>{" "}
+            ·{" "}
+          </span>
+        ) : null}
         {landing === null ? (
           <span className="text-muted-foreground">Not linked to a pull request yet.</span>
         ) : landing.mode === "local" ? (
@@ -419,47 +409,6 @@ export function CardLandingPanel(props: {
           </Button>
         ) : null}
       </div>
-      {comments.length > 0 ? (
-        <div className="flex flex-col gap-1.5">
-          <h4 className="font-medium text-muted-foreground">
-            Comments from outside the repository
-          </h4>
-          {comments.map((comment) => (
-            <div
-              key={comment.activityId}
-              className="flex flex-col gap-1 rounded-md border border-border px-2 py-1.5"
-            >
-              <p className="text-muted-foreground">@{comment.author.id}</p>
-              <p className="whitespace-pre-wrap break-words text-sm">{comment.body}</p>
-              <Button
-                size="sm"
-                variant="outline"
-                className="self-start"
-                onClick={async () => {
-                  const result = await postMessage({
-                    environmentId,
-                    input: {
-                      cardId: card.id,
-                      messageId: MessageId.make(randomUUID()),
-                      body: forwardedCommentMessage(`@${comment.author.id}`, comment.body),
-                    },
-                  });
-                  toastCommandFailure(
-                    result,
-                    "The comment was not forwarded",
-                    "The request was refused.",
-                  );
-                  if (result._tag === "Success") {
-                    setForwarded((current) => new Set([...current, comment.activityId]));
-                  }
-                }}
-              >
-                Forward to the agent
-              </Button>
-            </div>
-          ))}
-        </div>
-      ) : null}
     </div>
   );
 }

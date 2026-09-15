@@ -33,7 +33,8 @@ import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { ApproveAndStart } from "../channels/CardProposal";
 import { CardActivityTimeline } from "./CardActivityTimeline";
-import { CardCriteria, CardPreviewPanel, CardQuestions } from "./CardContract";
+import { AttentionActions, RefsChangedControls } from "./CardAttention";
+import { CardCriteria, CardPreviewPanel, CardQuestions, cardQuestionsOf } from "./CardContract";
 import { CardLandingPanel, CardReview, CheckpointControls } from "./CardReviewPanel";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -173,10 +174,19 @@ function CardSheetBody(props: {
         <p className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
           <span>
             {statusLabel(card.status)}
-            {card.status === "landed" &&
-            activities.some((entry) => entry.reason?.code === "mergedOnHost")
-              ? " · merged on the host"
-              : ""}
+            {card.status === "landed" && card.landing?.mergedOnHostUrl !== undefined ? (
+              <>
+                {" · "}
+                <a
+                  href={card.landing.mergedOnHostUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline-offset-2 hover:text-foreground hover:underline"
+                >
+                  merged on the host
+                </a>
+              </>
+            ) : null}
           </span>
           {card.ownerSession !== null ? (
             <span>· {CARD_SESSION_LABEL[card.ownerSession.state]}</span>
@@ -338,15 +348,43 @@ function CardSheetBody(props: {
           ) : null}
         </Section>
 
-        {open ? (
-          <CardQuestionsSection card={card} activities={activities} environmentId={environmentId} />
+        {open && card.attention.length > 0 ? (
+          <Section label="Waiting on you">
+            <ol className="flex flex-col gap-3">
+              {card.attention.map((item) => (
+                <li key={item.activityId} className="flex flex-col gap-1">
+                  <span className="text-xs text-muted-foreground">
+                    {reasonLabel({ code: item.code, text: item.text }).label}
+                  </span>
+                  <p className="whitespace-pre-wrap break-words text-sm">{item.text}</p>
+                  <AttentionActions card={card} item={item} environmentId={environmentId} onCard />
+                </li>
+              ))}
+            </ol>
+          </Section>
         ) : null}
+
+        {open ? <CardQuestionsSection card={card} environmentId={environmentId} /> : null}
 
         {open && card.checkpoint !== null ? (
           <Section label="Checkpoint">
             <CheckpointControls card={card} environmentId={environmentId} />
           </Section>
         ) : null}
+
+        {open
+          ? card.openElicitations
+              .filter((question) => question.kind === "refsChanged")
+              .map((report) => (
+                <Section key={report.activityId} label="Refs changed outside this card">
+                  <RefsChangedControls
+                    cardId={card.id}
+                    report={report}
+                    environmentId={environmentId}
+                  />
+                </Section>
+              ))
+          : null}
 
         {card.evidence !== null || card.status === "inReview" || card.status === "landing" ? (
           <Section label="Review">
@@ -364,7 +402,6 @@ function CardSheetBody(props: {
             <CardLandingPanel
               card={card}
               items={evidence?.items ?? NO_EVIDENCE_ITEMS}
-              activities={activities}
               policy={policy}
               environmentId={environmentId}
             />
@@ -681,10 +718,9 @@ function CardSheetBody(props: {
 const NO_ACTIVITIES: ReadonlyArray<CardActivity> = [];
 const NO_EVIDENCE_ITEMS: ReadonlyArray<CardEvidenceItem> = [];
 
-/** The card's open questions, titled only when there are some besides a checkpoint's. */
+/** The card's open questions, titled only when there are some it answers in place. */
 function CardQuestionsSection(props: Parameters<typeof CardQuestions>[0]) {
-  const hasQuestion = props.card.openElicitations.some((open) => open.kind !== "checkpoint");
-  return hasQuestion ? (
+  return cardQuestionsOf(props.card).length > 0 ? (
     <Section label="Questions for you">
       <CardQuestions {...props} />
     </Section>

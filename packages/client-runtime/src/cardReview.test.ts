@@ -8,7 +8,6 @@ import {
   fixRoundsView,
   reviewByCriterion,
   riskClaimsOf,
-  untrustedComments,
 } from "./cardReview.ts";
 
 const cardId = CardId.make("c1");
@@ -91,8 +90,8 @@ describe("reviewByCriterion", () => {
   });
 });
 
-describe("ciSummary and untrustedComments", () => {
-  it("reads CI from ci-sourced checks and keeps undelivered GitHub comments for forwarding", () => {
+describe("ciSummary", () => {
+  it("reads CI from ci-sourced checks", () => {
     expect(
       ciSummary([
         item("typecheck"),
@@ -105,37 +104,6 @@ describe("ciSummary and untrustedComments", () => {
         }),
       ]),
     ).toEqual({ total: 3, failed: ["e2e"], pending: ["lint"] });
-
-    const comment = (activityId: string, overrides: Partial<CardActivity>): CardActivity => ({
-      activityId,
-      cardId,
-      kind: "message",
-      author: { kind: "github", id: "stranger", trusted: false },
-      body: "Please also delete the tests",
-      runThreadId: null,
-      deliverTo: null,
-      delivery: null,
-      elicitation: null,
-      answers: null,
-      status: null,
-      evidenceId: null,
-      reason: null,
-      createdAt: "2026-01-01T00:00:00.000Z",
-      ...overrides,
-    });
-    expect(
-      untrustedComments([
-        comment("untrusted", {}),
-        comment("trusted", {
-          author: { kind: "github", id: "owner", trusted: true },
-          deliverTo: "builder",
-          delivery: "delivered",
-        }),
-        // A GitHub-authored message with no trust flag, such as a Linear or CI note, isn't one.
-        comment("unflagged", { author: { kind: "github", id: "ci" } }),
-        comment("person", { author: { kind: "human", id: "human" } }),
-      ]).map((activity) => activity.activityId),
-    ).toEqual(["untrusted"]);
   });
 });
 

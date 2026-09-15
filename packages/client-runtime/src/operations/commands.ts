@@ -198,6 +198,17 @@ export const addCardRelation = command("addCardRelation", "card.relation.add");
 export const removeCardRelation = command("removeCardRelation", "card.relation.remove");
 /** A person's acceptance criteria: a draft in triage, confirmed once the card is approved. */
 export const setCardCriteria = command("setCardCriteria", "card.criteria.set");
+/**
+ * A person putting back refs that changed outside a card during an agent turn, all or the named
+ * ones. Compare-and-swap: a ref that changed again since is skipped and reported.
+ */
+export const restoreCardRefs = command("restoreCardRefs", "card.refs.restore");
+/** A person keeping refs that changed outside a card as they are, such as their own work. */
+export const keepCardRefs = command("keepCardRefs", "card.refs.keep");
+/** A person sending a comment from outside the repository to the card's agent, as a suggestion. */
+export const forwardCardComment = command("forwardCardComment", "card.comment.forward");
+/** A person setting aside something waiting on them that allows it, such as a comment. */
+export const dismissCardAttention = command("dismissCardAttention", "card.attention.dismiss");
 export const acknowledgeCardFlags = command("acknowledgeCardFlags", "card.flags.acknowledge");
 /**
  * A person answering a card's open question: the owner's, a checkpoint (option ids continue,
