@@ -158,10 +158,9 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
           ? item.snapshot
           : Option.match(next.snapshot, {
               onNone: () => null,
-              onSome: (snapshot) =>
-                item.sequence > snapshot.snapshotSequence
-                  ? applyShellStreamEvent(snapshot, item)
-                  : snapshot,
+              // The reducer drops stale items itself: a card update may share its sequence with
+              // the agent update just before it, so a strict gate here would lose the card.
+              onSome: (snapshot) => applyShellStreamEvent(snapshot, item),
             });
       if (nextSnapshot === null) continue;
       receivedSnapshot ||= item.kind === "snapshot";
