@@ -1,5 +1,6 @@
 import {
   MessageId,
+  REQUESTS_CHANNEL_NAME,
   type AgentId,
   type ChannelId,
   type EnvironmentId,
@@ -35,6 +36,25 @@ export function ChannelRouteScreen(props: ChannelParams) {
   const environmentId = props.route.params.environmentId as EnvironmentId;
   const channels = useEnvironmentChannels(environmentId);
   const channel = channels.find((entry) => entry.id === props.route.params.channelId) ?? null;
+  // Requests exists once someone picks its lead on a computer; until then it can't be posted to.
+  if (props.route.params.channelId.startsWith("requests:")) {
+    const ready = channel !== null && channel.leadAgentId !== null;
+    return (
+      <Conversation
+        environmentId={environmentId}
+        channelId={channel?.id ?? null}
+        agentId={null}
+        title={REQUESTS_CHANNEL_NAME}
+        emptyText="No requests yet."
+        placeholder="Ask for something, or @mention an agent"
+        notice={
+          ready
+            ? undefined
+            : "Choose who turns requests into cards in Iskra on your computer to start using Requests."
+        }
+      />
+    );
+  }
   return (
     <Conversation
       environmentId={environmentId}
@@ -74,6 +94,9 @@ function Conversation(props: {
   readonly agentId: AgentId | null;
   readonly title: string;
   readonly emptyText: string;
+  readonly placeholder?: string;
+  /** Why the conversation can't be posted to yet; shown above a disabled composer. */
+  readonly notice?: string;
 }) {
   const { environmentId, channelId, agentId } = props;
   const insets = useSafeAreaInsets();
@@ -93,7 +116,7 @@ function Conversation(props: {
     [messages.data, agents],
   );
   const trimmed = body.trim();
-  const canPost = channelId !== null || agentId !== null;
+  const canPost = (channelId !== null || agentId !== null) && props.notice === undefined;
 
   const send = async () => {
     if (trimmed.length === 0 || sending || !canPost) return;
@@ -124,26 +147,33 @@ function Conversation(props: {
           </View>
         }
       />
-      {canPost ? (
+      {canPost || props.notice !== undefined ? (
         <KeyboardStickyView offset={{ opened: insets.bottom }}>
           <View
-            className="flex-row items-end gap-2 border-t border-border bg-screen px-4 pt-2"
+            className="gap-2 border-t border-border bg-screen px-4 pt-2"
             style={{ paddingBottom: Math.max(insets.bottom, 8) }}
           >
-            <View className="flex-1">
-              <Field
-                value={body}
-                onChangeText={setBody}
-                placeholder={agentId !== null ? `Message ${props.title}` : `Message ${props.title} — @mention to wake an agent`}
-                multiline
+            {props.notice !== undefined ? <Muted>{props.notice}</Muted> : null}
+            <View className="flex-row items-end gap-2">
+              <View className="flex-1">
+                <Field
+                  value={body}
+                  onChangeText={setBody}
+                  placeholder={
+                    props.placeholder ??
+                    (agentId !== null ? `Message ${props.title}` : `Message ${props.title} — @mention to wake an agent`)
+                  }
+                  editable={canPost}
+                  multiline
+                />
+              </View>
+              <ActionButton
+                label="Send"
+                kind="primary"
+                disabled={!canPost || trimmed.length === 0 || sending}
+                onPress={() => void send()}
               />
             </View>
-            <ActionButton
-              label="Send"
-              kind="primary"
-              disabled={trimmed.length === 0 || sending}
-              onPress={() => void send()}
-            />
           </View>
         </KeyboardStickyView>
       ) : null}

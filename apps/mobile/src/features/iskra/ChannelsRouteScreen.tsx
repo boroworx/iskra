@@ -1,12 +1,18 @@
 import type { SparkState } from "@iskra/client-runtime/card-face";
 import type { EnvironmentProject } from "@iskra/client-runtime/state/shell";
-import type { AgentPresence, EnvironmentId } from "@iskra/contracts";
+import {
+  requestsChannelId,
+  type AgentPresence,
+  type EnvironmentId,
+  type OrchestrationAgentShell,
+  type OrchestrationChannelShell,
+} from "@iskra/contracts";
 import { useNavigation } from "@react-navigation/native";
 import { useMemo } from "react";
 import { ScrollView, View } from "react-native";
 
 import { useProjects } from "../../state/entities";
-import { AgentAvatar, Body, Group, Muted, Row } from "./components";
+import { AgentAvatar, Body, Group, Muted, Row, SparkGlyph } from "./components";
 import { useEnvironmentAgents, useEnvironmentChannels } from "./state";
 
 export const PRESENCE_SPARK: Record<AgentPresence, SparkState> = {
@@ -71,6 +77,13 @@ function EnvironmentChannels(props: {
             <Row first onPress={() => navigation.navigate("IskraBoard", { environmentId, projectId: project.id })}>
               <Body>Board</Body>
             </Row>
+            <RequestsRow
+              channel={channels.find((channel) => channel.id === requestsChannelId(project.id))}
+              agents={projectAgents}
+              onPress={() =>
+                navigation.navigate("IskraChannel", { environmentId, channelId: requestsChannelId(project.id) })
+              }
+            />
             {projectChannels.map((channel) => (
               <Row
                 key={channel.id}
@@ -97,5 +110,23 @@ function EnvironmentChannels(props: {
         );
       })}
     </>
+  );
+}
+
+/** The project's built-in Requests conversation, sparked while its lead works or waits on you. */
+function RequestsRow(props: {
+  readonly channel: OrchestrationChannelShell | undefined;
+  readonly agents: ReadonlyArray<OrchestrationAgentShell>;
+  readonly onPress: () => void;
+}) {
+  const lead = props.agents.find((agent) => agent.id === props.channel?.leadAgentId);
+  const spark = lead === undefined ? "idle" : PRESENCE_SPARK[lead.presence];
+  return (
+    <Row onPress={props.onPress}>
+      <View className="flex-row items-center gap-2">
+        <Body>Requests</Body>
+        {spark === "idle" ? null : <SparkGlyph state={spark} size={14} />}
+      </View>
+    </Row>
   );
 }
