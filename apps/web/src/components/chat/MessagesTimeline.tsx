@@ -2149,7 +2149,7 @@ function CompactingLabel() {
 // ---------------------------------------------------------------------------
 
 /** Live elapsed time for the "Working for" label. */
-function WorkingTimer({ createdAt }: { createdAt: string }) {
+export function WorkingTimer({ createdAt }: { createdAt: string }) {
   const textRef = useRef<HTMLSpanElement>(null);
   const initialText = formatWorkingTimerNow(createdAt);
 

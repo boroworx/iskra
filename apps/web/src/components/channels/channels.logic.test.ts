@@ -534,6 +534,29 @@ describe("deliveryNotes", () => {
       deliveryNotes(queued, [agent("agent-backend", "backend")]).map((note) => note.text),
     ).toEqual(["Waiting for @backend"]);
   });
+
+  it("leaves out the wait of an agent whose live row shows, but still warns when never read", () => {
+    const question = {
+      ...message("q", "human", "human", "2026-01-01T10:00:00.000Z"),
+      deliveries: [
+        { agentId: AgentId.make("agent-backend"), status: "sent" as const },
+        { agentId: AgentId.make("agent-writer"), status: "pending" as const },
+        { agentId: AgentId.make("agent-reader"), status: "undelivered" as const },
+      ],
+    };
+
+    expect(
+      deliveryNotes(
+        question,
+        [
+          agent("agent-backend", "backend"),
+          agent("agent-writer", "writer"),
+          agent("agent-reader", "reader"),
+        ],
+        new Set(["agent-backend", "agent-reader"]),
+      ).map((note) => note.text),
+    ).toEqual(["Waiting for @writer", "@reader never read this"]);
+  });
 });
 
 describe("mentions", () => {

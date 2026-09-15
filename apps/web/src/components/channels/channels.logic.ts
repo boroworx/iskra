@@ -370,6 +370,8 @@ export function groupRunOutput(items: ReadonlyArray<RunOutputItem>): ReadonlyArr
   return groups;
 }
 
+const NO_WORKING_AGENTS: ReadonlySet<string> = new Set();
+
 export interface DeliveryNote {
   readonly agentId: AgentId;
   readonly text: string;
@@ -379,11 +381,12 @@ export interface DeliveryNote {
 /**
  * What a human message says about its deliveries: a wait while unread and a warning if never
  * read. Every wake is its own run now, so a delivery an older server still marks queued is
- * just waiting too.
+ * just waiting too. An agent in `working` shows its own live row, so its wait is left out.
  */
 export function deliveryNotes(
   message: OrchestrationChannelMessage,
   agents: ReadonlyArray<OrchestrationAgentShell>,
+  working: ReadonlySet<string> = NO_WORKING_AGENTS,
 ): ReadonlyArray<DeliveryNote> {
   const agentNames = new Map<string, string>(agents.map((agent) => [agent.id, agent.name]));
   return (message.deliveries ?? []).flatMap((delivery): ReadonlyArray<DeliveryNote> => {
@@ -392,7 +395,9 @@ export function deliveryNotes(
       case "queued":
       case "pending":
       case "sent":
-        return [{ agentId: delivery.agentId, text: `Waiting for ${name}`, undelivered: false }];
+        return working.has(delivery.agentId)
+          ? []
+          : [{ agentId: delivery.agentId, text: `Waiting for ${name}`, undelivered: false }];
       case "undelivered":
         return [{ agentId: delivery.agentId, text: `${name} never read this`, undelivered: true }];
       case "delivered":

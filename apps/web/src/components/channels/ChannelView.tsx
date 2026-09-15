@@ -1,3 +1,6 @@
+import { scopeThreadRef } from "@iskra/client-runtime/environment";
+import { derivePendingRequests } from "@iskra/client-runtime/pending-requests";
+import { EMPTY_CHANNEL_STATE, liveRunPreview } from "@iskra/client-runtime/state/channels";
 import {
   AgentId,
   MessageId,
@@ -8,11 +11,21 @@ import {
   type OrchestrationAgentShell,
   type OrchestrationCardShell,
   type OrchestrationChannelMessage,
+  type OrchestrationChannelRun,
   type OrchestrationChannelShell,
 } from "@iskra/contracts";
 import { Link } from "@tanstack/react-router";
 import { ChevronRightIcon, ChevronsUpDownIcon, InfoIcon, PlusIcon } from "lucide-react";
-import { memo, useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { collapseExpandedComposerCursor, replaceTextRange } from "~/composer-logic";
 import { cn, randomUUID } from "~/lib/utils";
@@ -22,10 +35,12 @@ import {
   useEnvironmentCards,
   useEnvironmentChannels,
   useProjects,
+  useThreadDetail,
 } from "~/state/entities";
 import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
 import ChatMarkdown from "../ChatMarkdown";
+import { WorkingTimer } from "../chat/MessagesTimeline";
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
 import { EMPTY_COMPOSER_CONTEXT_RECORDS } from "../composerContextPresentation";
 import { Button } from "../ui/button";
@@ -185,7 +200,8 @@ export function ChannelView(props: {
                 </PageColumn>
               ) : null}
               <Timeline
-                messages={messages.data ?? EMPTY_MESSAGES}
+                messages={(messages.data ?? EMPTY_CHANNEL_STATE).messages}
+                runs={(messages.data ?? EMPTY_CHANNEL_STATE).runs}
                 error={messages.error}
                 agents={agents}
                 channels={channels}
@@ -235,12 +251,15 @@ export function ChannelView(props: {
   );
 }
 
-const EMPTY_MESSAGES: ReadonlyArray<OrchestrationChannelMessage> = [];
+const NO_RUNS: ReadonlyArray<OrchestrationChannelRun> = [];
+const NO_SHOWING_RUNS: ReadonlyMap<string, string> = new Map();
 const NO_ANCHORS: ReadonlyMap<string, ReadonlyArray<OrchestrationCardShell>> = new Map();
 const NO_AGENTS: ReadonlyArray<AgentEntry> = [];
 
 interface TimelineSource {
   readonly messages: ReadonlyArray<OrchestrationChannelMessage>;
+  /** Runs seen live in the conversation: each shows as a working row until its reply lands. */
+  readonly runs?: ReadonlyArray<OrchestrationChannelRun> | undefined;
   readonly error: string | null;
   readonly agents: ReadonlyArray<OrchestrationAgentShell>;
   readonly channels: ReadonlyArray<OrchestrationChannelShell>;
@@ -305,9 +324,34 @@ export const Timeline = memo(function Timeline(props: TimelineSource) {
   }, [rows]);
   // Keep the newest message in view as messages arrive.
   const scrollRef = useStickToNewest(rows.at(-1)?.message.id);
+  // A reply streaming in keeps the view at the bottom, unless the person scrolled up to read.
+  const pinned = useRef(true);
+  const followNewest = useCallback(() => {
+    const element = scrollRef.current;
+    if (element !== null && pinned.current) element.scrollTop = element.scrollHeight;
+  }, [scrollRef]);
+  // Live rows by thread id, with their agent: that agent's "Waiting for" note would say it twice.
+  const [showingRuns, setShowingRuns] = useState(NO_SHOWING_RUNS);
+  const reportRun = useCallback((threadId: string, agentId: string | null) => {
+    setShowingRuns((current) => {
+      if ((current.get(threadId) ?? null) === agentId) return current;
+      const next = new Map(current);
+      if (agentId === null) next.delete(threadId);
+      else next.set(threadId, agentId);
+      return next;
+    });
+  }, []);
+  const workingAgents = useMemo(() => new Set(showingRuns.values()), [showingRuns]);
 
   return (
-    <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto pt-7 pb-4">
+    <div
+      ref={scrollRef}
+      className="min-h-0 flex-1 overflow-y-auto pt-7 pb-4"
+      onScroll={(event) => {
+        const element = event.currentTarget;
+        pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 64;
+      }}
+    >
       <PageColumn>
         {props.error !== null ? <p className="text-sm text-destructive">{props.error}</p> : null}
         <ol className="flex flex-col">
@@ -323,6 +367,19 @@ export const Timeline = memo(function Timeline(props: TimelineSource) {
               proposalAgents={proposals?.agents ?? NO_AGENTS}
               cardById={cardById}
               linksCard={linkedCardNotes.has(row.message.id)}
+              workingAgents={workingAgents}
+            />
+          ))}
+          {(props.runs ?? NO_RUNS).map((run) => (
+            <LiveRunRow
+              key={run.threadId}
+              run={run}
+              agents={props.agents}
+              channelMessages={props.messages}
+              cwd={props.cwd}
+              environmentId={props.environmentId}
+              onShow={reportRun}
+              onGrow={followNewest}
             />
           ))}
         </ol>
@@ -342,9 +399,12 @@ function MessageRow(props: {
   readonly cardById: ReadonlyMap<string, OrchestrationCardShell>;
   /** Whether this is the newest note on its card, the one that links to it. */
   readonly linksCard: boolean;
+  /** Agents with a live row showing, whose waits that row already shows. */
+  readonly workingAgents: ReadonlySet<string>;
 }) {
   const { message, authorName, showHeader } = props.row;
-  const notes = message.authorKind === "human" ? deliveryNotes(message, props.agents) : [];
+  const notes =
+    message.authorKind === "human" ? deliveryNotes(message, props.agents, props.workingAgents) : [];
   // Iskra's own notes, such as a card starting or asking something, read as centered events.
   if (message.authorKind === "system") {
     const note = cardNoteOf(message);
@@ -443,6 +503,99 @@ function MessageRow(props: {
     </li>
   );
 }
+
+/**
+ * A run still working on its reply, shaped like the message it becomes: what it has said so far
+ * this turn as it streams in, or that it is working or waiting on you. It hides the moment the
+ * turn's reply is posted, and shows again for a follow-up turn.
+ */
+const LiveRunRow = memo(function LiveRunRow(props: {
+  readonly run: OrchestrationChannelRun;
+  readonly agents: ReadonlyArray<OrchestrationAgentShell>;
+  readonly channelMessages: ReadonlyArray<OrchestrationChannelMessage>;
+  readonly cwd: string | undefined;
+  readonly environmentId: EnvironmentId;
+  readonly onShow: (threadId: string, agentId: string | null) => void;
+  readonly onGrow: () => void;
+}) {
+  const { run, onShow, onGrow } = props;
+  // ponytail: an ended run keeps its thread subscription until the channel resubscribes.
+  const threadRef = useMemo(
+    () => scopeThreadRef(props.environmentId, run.threadId),
+    [props.environmentId, run.threadId],
+  );
+  const thread = useThreadDetail(threadRef);
+  const awaitingInput = useMemo(() => {
+    if (thread === null) return false;
+    const pending = derivePendingRequests(thread.activities);
+    return pending.approvals.length + pending.userInputs.length > 0;
+  }, [thread]);
+  const preview = liveRunPreview({
+    run,
+    thread,
+    awaitingInput,
+    channelMessages: props.channelMessages,
+    // oxlint-disable-next-line react/purity -- the start and settle graces compare against render time
+    now: Date.now(),
+  });
+  const visible = preview !== null;
+  useLayoutEffect(() => {
+    onShow(run.threadId, visible ? run.agentId : null);
+    return () => onShow(run.threadId, null);
+  }, [onShow, run.threadId, run.agentId, visible]);
+  // Every render may have grown the streamed text: keep a pinned view at the bottom.
+  useLayoutEffect(() => {
+    if (visible) onGrow();
+  });
+  if (preview === null) {
+    return null;
+  }
+  const name = props.agents.find((agent) => agent.id === run.agentId)?.name ?? run.agentId;
+  const turn = thread?.latestTurn;
+  const since =
+    turn !== null && turn !== undefined && turn.turnId === preview.turnId
+      ? turn.requestedAt
+      : run.startedAt;
+  return (
+    <li
+      aria-busy={!preview.waiting}
+      className="mt-[22px] grid min-w-0 grid-cols-[32px_minmax(0,1fr)] gap-x-3 text-[14px] leading-[1.45] first:mt-0"
+    >
+      <AgentAvatar name={name} size="lg" spark={preview.waiting ? "needsYou" : "working"} />
+      <div className="flex min-w-0 flex-col">
+        <div className="flex items-baseline gap-2">
+          <span className="text-[13px] font-semibold">{name}</span>
+          <time dateTime={since} className="text-[11px] tabular-nums text-muted-foreground/55">
+            {messageTimeFormat.format(new Date(since))}
+          </time>
+        </div>
+        {preview.message !== null ? (
+          <ChatMarkdown
+            key={preview.message.id}
+            text={preview.message.text}
+            cwd={props.cwd}
+            environmentId={props.environmentId}
+            isStreaming={preview.message.streaming}
+          />
+        ) : null}
+        {preview.waiting ? (
+          <p className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
+            <SparkGlyph state="needsYou" size={12} />
+            Waiting on you
+          </p>
+        ) : preview.message === null ? (
+          <p className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
+            <SparkGlyph state="working" size={12} />
+            Working…
+            <span className="text-[11px] text-tertiary-label">
+              <WorkingTimer createdAt={since} />
+            </span>
+          </p>
+        ) : null}
+      </div>
+    </li>
+  );
+});
 
 /** Under Iskra's note on a card's progress: where to open the card, or answer its owner's question. */
 function CardNoteLink(props: {

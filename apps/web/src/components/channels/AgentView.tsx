@@ -109,7 +109,7 @@ export function AgentView(props: {
   const target = targets.find((entry) => entry.threadId === chosenThreadId) ?? targets[0];
 
   const scrollRef = useStickToNewest(view === "sessions" ? sessions.at(-1)?.threadId : undefined);
-  const messages = dmMessages.data ?? EMPTY_MESSAGES;
+  const messages = dmMessages.data?.messages ?? EMPTY_MESSAGES;
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
@@ -221,6 +221,7 @@ export function AgentView(props: {
               dmChannel !== null && (messages.length > 0 || dmMessages.error !== null) ? (
                 <Timeline
                   messages={messages}
+                  runs={dmMessages.data?.runs}
                   error={dmMessages.error}
                   agents={agents}
                   channels={channels}
