@@ -2,6 +2,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import { CardDeliveryUpdatedPayload } from "@iskra/contracts";
 
 import { toPersistenceSqlError } from "../Errors.ts";
@@ -12,12 +13,15 @@ import {
   PROJECTION_CARD_ACTIVITY_COLUMNS,
   PROJECTION_CARD_COLUMNS,
   PROJECTION_CARD_EVIDENCE_COLUMNS,
+  PROJECTION_CARD_VERDICT_COLUMNS,
   ProjectionCardActivity,
   ProjectionCardDbRow,
   ProjectionCardEvidenceDbRow,
   ProjectionCardEvidenceItem,
   ProjectionCardRepository,
   ProjectionCardSpend,
+  ProjectionCardVerdict,
+  ProjectionCardVerdictDbRow,
   type ProjectionCardRepositoryShape,
 } from "../Services/ProjectionCards.ts";
 
@@ -75,6 +79,7 @@ const makeProjectionCardRepository = Effect.gen(function* () {
           queued_at,
           open_elicitations_json,
           attention_json,
+          verification_json,
           relations_json,
           created_by_json,
           created_at,
@@ -125,6 +130,7 @@ const makeProjectionCardRepository = Effect.gen(function* () {
           ${row.queuedAt},
           ${row.openElicitations},
           ${row.attention},
+          ${row.verification},
           ${row.relations},
           ${row.createdBy},
           ${row.createdAt},
@@ -175,6 +181,7 @@ const makeProjectionCardRepository = Effect.gen(function* () {
           queued_at = excluded.queued_at,
           open_elicitations_json = excluded.open_elicitations_json,
           attention_json = excluded.attention_json,
+          verification_json = excluded.verification_json,
           relations_json = excluded.relations_json,
           created_by_json = excluded.created_by_json,
           created_at = excluded.created_at,
@@ -348,7 +355,51 @@ const makeProjectionCardRepository = Effect.gen(function* () {
       `,
   });
 
+  const insertVerdictRow = SqlSchema.void({
+    Request: ProjectionCardVerdict,
+    execute: (row) =>
+      sql`
+        INSERT INTO projection_card_verdicts (
+          verdict_id,
+          card_id,
+          head_sha,
+          verifier_json,
+          criteria_json,
+          diff_judge_json,
+          scenarios_json,
+          passed,
+          recorded_at
+        )
+        VALUES (
+          ${row.verdictId},
+          ${row.cardId},
+          ${row.headSha},
+          ${row.verifier},
+          ${row.criteria},
+          ${row.diffJudge},
+          ${row.scenarios},
+          ${row.passed ? 1 : 0},
+          ${row.recordedAt}
+        )
+        ON CONFLICT (verdict_id) DO NOTHING
+      `,
+  });
+
+  const latestVerdictRow = SqlSchema.findOneOption({
+    Request: GetProjectionCardInput,
+    Result: ProjectionCardVerdictDbRow,
+    execute: ({ cardId }) =>
+      sql`
+        SELECT ${sql.literal(PROJECTION_CARD_VERDICT_COLUMNS)}
+        FROM projection_card_verdicts
+        WHERE card_id = ${cardId}
+        ORDER BY recorded_at DESC, rowid DESC
+        LIMIT 1
+      `,
+  });
+
   const listEvidenceRows = SqlSchema.findAll({
+
     Request: ListProjectionCardEvidenceInput,
     Result: ProjectionCardEvidenceDbRow,
     execute: ({ cardId, evidenceId }) =>
@@ -375,6 +426,12 @@ const makeProjectionCardRepository = Effect.gen(function* () {
     appendEvidenceItems: (rows) =>
       Effect.forEach(rows, insertEvidenceRow, { discard: true }).pipe(
         query("appendEvidenceItems"),
+      ),
+    appendVerdict: (verdict) => insertVerdictRow(verdict).pipe(query("appendVerdict")),
+    latestVerdict: (input) =>
+      latestVerdictRow(input).pipe(
+        Effect.map(Option.map((row) => ({ ...row, passed: row.passed === 1 }))),
+        query("latestVerdict"),
       ),
     listEvidenceItems: (input) =>
       listEvidenceRows(input).pipe(

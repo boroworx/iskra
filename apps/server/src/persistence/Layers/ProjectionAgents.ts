@@ -5,6 +5,7 @@ import * as Layer from "effect/Layer";
 
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
+  DEFAULT_AGENT_ROLES_JSON,
   GetProjectionAgentInput,
   ProjectionAgentDbRow,
   ProjectionAgentRepository,
@@ -29,6 +30,9 @@ const makeProjectionAgentRepository = Effect.gen(function* () {
           role_prompt,
           model_selection_json,
           capabilities_json,
+          roles_json,
+          verify_with,
+          blueprint_json,
           created_at,
           updated_at,
           archived_at
@@ -42,6 +46,9 @@ const makeProjectionAgentRepository = Effect.gen(function* () {
           ${row.rolePrompt},
           ${row.modelSelection},
           ${row.capabilities},
+          ${row.roles},
+          ${row.verifyWith},
+          ${row.blueprint},
           ${row.createdAt},
           ${row.updatedAt},
           ${row.archivedAt}
@@ -55,6 +62,9 @@ const makeProjectionAgentRepository = Effect.gen(function* () {
           role_prompt = excluded.role_prompt,
           model_selection_json = excluded.model_selection_json,
           capabilities_json = excluded.capabilities_json,
+          roles_json = excluded.roles_json,
+          verify_with = excluded.verify_with,
+          blueprint_json = excluded.blueprint_json,
           created_at = excluded.created_at,
           updated_at = excluded.updated_at,
           archived_at = excluded.archived_at
@@ -75,6 +85,9 @@ const makeProjectionAgentRepository = Effect.gen(function* () {
           role_prompt AS "rolePrompt",
           model_selection_json AS "modelSelection",
           capabilities_json AS "capabilities",
+          COALESCE(roles_json, ${DEFAULT_AGENT_ROLES_JSON}) AS "roles",
+          verify_with AS "verifyWith",
+          COALESCE(blueprint_json, '{}') AS "blueprint",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           archived_at AS "archivedAt"

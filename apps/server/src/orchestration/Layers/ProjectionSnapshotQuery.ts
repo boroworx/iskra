@@ -63,6 +63,7 @@ import { ProjectionCheckpoint } from "../../persistence/Services/ProjectionCheck
 import { ThreadBackgroundLivenessService } from "../ThreadBackgroundLiveness.ts";
 import { ThreadPlanProgressService } from "../ThreadPlanProgress.ts";
 import {
+  DEFAULT_AGENT_ROLES_JSON,
   ProjectionAgentDbRow,
   ProjectionAgentShellDbRow,
 } from "../../persistence/Services/ProjectionAgents.ts";
@@ -78,6 +79,8 @@ import {
 } from "../../persistence/Services/ProjectionChannels.ts";
 import {
   PROJECTION_CARD_COLUMNS,
+  PROJECTION_CARD_VERDICT_COLUMNS,
+  ProjectionCardVerdictDbRow,
   PROJECTION_CARD_ACTIVITY_COLUMNS,
   PROJECTION_CARD_EVIDENCE_COLUMNS,
   ProjectionCardActivity,
@@ -620,6 +623,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           role_prompt AS "rolePrompt",
           model_selection_json AS "modelSelection",
           capabilities_json AS "capabilities",
+          COALESCE(roles_json, ${DEFAULT_AGENT_ROLES_JSON}) AS "roles",
+          verify_with AS "verifyWith",
+          COALESCE(blueprint_json, '{}') AS "blueprint",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           archived_at AS "archivedAt"
@@ -777,6 +783,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           agents.role_tags_json AS "roleTags",
           agents.model_selection_json AS "modelSelection",
           agents.capabilities_json AS "capabilities",
+          COALESCE(agents.roles_json, ${DEFAULT_AGENT_ROLES_JSON}) AS "roles",
+          COALESCE(agents.blueprint_json, '{}') AS "blueprint",
           CASE
             WHEN EXISTS (
               SELECT 1
@@ -4173,11 +4181,29 @@ pending_approval_requests AS (
       `,
   });
 
+  const listLatestCardVerdictRows = SqlSchema.findAll({
+    Request: Schema.Struct({ cardId: Schema.String }),
+    Result: ProjectionCardVerdictDbRow,
+    execute: ({ cardId }) =>
+      sql`
+        SELECT ${sql.literal(PROJECTION_CARD_VERDICT_COLUMNS)}
+        FROM projection_card_verdicts
+        WHERE card_id = ${cardId}
+        ORDER BY recorded_at DESC, rowid DESC
+        LIMIT 1
+      `,
+  });
+
   const getCardActivity: ProjectionSnapshotQueryShape["getCardActivity"] = (cardId, limit) =>
-    Effect.all([listCardActivityRows({ cardId, limit }), listLatestCardEvidenceRows({ cardId })]).pipe(
+    Effect.all([
+      listCardActivityRows({ cardId, limit }),
+      listLatestCardEvidenceRows({ cardId }),
+      listLatestCardVerdictRows({ cardId }),
+    ]).pipe(
       Effect.mapError(queryError("getCardActivity")),
-      Effect.map(([activityRows, evidenceRows]) => ({
+      Effect.map(([activityRows, evidenceRows, [verdictRow]]) => ({
         activities: activityRows.map((row) => Struct.omit(row, ["deliveryThreadId"])),
+        verdict: verdictRow === undefined ? null : { ...verdictRow, passed: verdictRow.passed === 1 },
         evidence:
           evidenceRows[0] === undefined
             ? null

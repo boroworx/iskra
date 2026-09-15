@@ -2370,6 +2370,9 @@ const makeWsRpcLayer = (
                         items: event.payload.items,
                       });
                     }
+                    if (event.type === "card.verdict-recorded") {
+                      items.push({ kind: "verdict", verdict: event.payload.verdict });
+                    }
                     return items.length === 0 ? Effect.void : Queue.offerAll(live, items);
                   }),
                 ),

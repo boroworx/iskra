@@ -710,6 +710,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             yield* projectionCardRepository.updateDeliveries(event.payload);
             return;
 
+          case "card.verdict-recorded":
+            yield* projectionCardRepository.appendVerdict(event.payload.verdict);
+            return;
+
           default:
             return;
         }

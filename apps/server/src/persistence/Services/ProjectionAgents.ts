@@ -7,11 +7,14 @@
  * @module ProjectionAgentRepository
  */
 import {
+  AgentBlueprint,
   AgentId,
+  AgentRoles,
   IsoDateTime,
   ModelSelection,
   OrchestrationAgentShell,
   ProjectId,
+  DEFAULT_AGENT_ROLES,
   RunCapabilities,
   TrimmedNonEmptyString,
 } from "@iskra/contracts";
@@ -32,6 +35,9 @@ export const ProjectionAgent = Schema.Struct({
   rolePrompt: Schema.String,
   modelSelection: ModelSelection,
   capabilities: RunCapabilities,
+  roles: AgentRoles,
+  verifyWith: Schema.NullOr(Schema.String),
+  blueprint: AgentBlueprint,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime),
@@ -44,6 +50,8 @@ export const ProjectionAgentDbRow = ProjectionAgent.mapFields(
     roleTags: Schema.fromJsonString(Schema.Array(Schema.String)),
     modelSelection: Schema.fromJsonString(ModelSelection),
     capabilities: Schema.fromJsonString(RunCapabilities),
+    roles: Schema.fromJsonString(AgentRoles),
+    blueprint: Schema.fromJsonString(AgentBlueprint),
   }),
 );
 
@@ -53,8 +61,13 @@ export const ProjectionAgentShellDbRow = OrchestrationAgentShell.mapFields(
     roleTags: Schema.fromJsonString(Schema.Array(TrimmedNonEmptyString)),
     modelSelection: Schema.fromJsonString(ModelSelection),
     capabilities: Schema.fromJsonString(RunCapabilities),
+    roles: Schema.fromJsonString(AgentRoles),
+    blueprint: Schema.fromJsonString(AgentBlueprint),
   }),
 );
+
+/** Roles and blueprint columns are null on agents from before templates; they read as the defaults. */
+export const DEFAULT_AGENT_ROLES_JSON = JSON.stringify(DEFAULT_AGENT_ROLES);
 
 export const GetProjectionAgentInput = Schema.Struct({
   agentId: AgentId,

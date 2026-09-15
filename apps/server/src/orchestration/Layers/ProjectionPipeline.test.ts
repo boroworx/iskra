@@ -4715,6 +4715,12 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
       const rendered = { systemPrompt: "system", firstMessage: "first" };
       const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" };
       const apiBrief = { id: api, name: "api", rolePrompt: "" };
+      const webVerifier = {
+        agentId: web,
+        instanceId: ProviderInstanceId.make("opencode"),
+        model: "openai/gpt-5",
+        reason: { code: "differentProvider", text: "OpenCode checks work Codex built." },
+      };
       const createCard = { projectId, parentCardId: null, spec: "", specState: "draft", tags: [] };
       const cardDefaults = {
         ...createCard,
@@ -4757,6 +4763,13 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
             rolePrompt: "",
             modelSelection,
             capabilities: ["read"],
+            roles: ["critic", "verifier"],
+            blueprint: {
+              preflight: "targeted",
+              uiCapture: "always",
+              uiPaths: ["/limits"],
+              verify: "always",
+            },
             createdAt: at(2),
             updatedAt: at(2),
           },
@@ -4768,6 +4781,7 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
             agentId: api,
             roleTags: ["backend", "docs"],
             rolePrompt: "Own the API and its docs.",
+            verifyWith: "web",
             updatedAt: at(3),
           },
         ],
@@ -5441,6 +5455,79 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
             createdAt: at(66),
           },
         ],
+        // A verifier on another provider fails the card's commit, a person reruns and overrides it,
+        // and evidence for a new commit sends the verification back to pending.
+        [
+          "card.critique-requested",
+          card1,
+          {
+            cardId: card1,
+            agentId: web,
+            messageId: MessageId.make("card-critique-1"),
+            focus: "diff",
+            requestedAt: at(66),
+          },
+        ],
+        [
+          "card.verifier-selected",
+          card1,
+          { cardId: card1, headSha: "abc1234def", verifier: webVerifier, selectedAt: at(66) },
+        ],
+        [
+          "card.verdict-recorded",
+          card1,
+          {
+            cardId: card1,
+            verdict: {
+              verdictId: "verdict-1",
+              cardId: card1,
+              headSha: "abc1234def",
+              verifier: webVerifier,
+              criteria: [
+                { criterionId: "c1", pass: false, evidence: "test", note: "No 429 on request 101." },
+              ],
+              diffJudge: { matchesCriteria: true, concerns: ["No burst test."] },
+              scenarios: [{ scenarioId: "holdout-1", satisfied: false }],
+              passed: false,
+              recordedAt: at(66),
+            },
+          },
+        ],
+        [
+          "card.status-changed",
+          card1,
+          {
+            cardId: card1,
+            from: "inReview",
+            to: "inProgress",
+            move: "returnToWork",
+            reason: "The verifier failed c1.",
+            reasonCode: "verifierFailed",
+            round: "review",
+            updatedAt: at(66),
+          },
+        ],
+        ["card.verifier-rerun-requested", card1, { cardId: card1, requestedAt: at(66) }],
+        [
+          "card.verifier-overridden",
+          card1,
+          { cardId: card1, reason: "Checked the 429 by hand.", overriddenAt: at(66) },
+        ],
+        [
+          "card.evidence-recorded",
+          card1,
+          {
+            cardId: card1,
+            evidenceId: "evidence-2",
+            headSha: "fed4321cba",
+            purpose: "review",
+            items: [],
+            flags: [],
+            risks: null,
+            passed: true,
+            recordedAt: at(66),
+          },
+        ],
         [
           "channel.message-posted",
           general,
@@ -5529,6 +5616,7 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
         cardRow: yield* cardRepository.getById({ cardId: card1 }),
         activities: yield* cardRepository.listActivities({ cardId: card1, limit: 50 }),
         openBuilderActivities: yield* cardRepository.listOpenBuilderActivities({ cardId: card1 }),
+        latestVerdict: yield* cardRepository.latestVerdict({ cardId: card1 }),
         evidenceItems: yield* cardRepository.listEvidenceItems({
           cardId: card1,
           evidenceId: "evidence-1",

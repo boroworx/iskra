@@ -24,6 +24,12 @@ import {
   CardKind,
   CardAttention,
   CardLanding,
+  CardVerdict,
+  CardVerdictCriterion,
+  CardVerdictDiffJudge,
+  CardVerdictScenario,
+  CardVerification,
+  CardVerifierSelection,
   CardPause,
   CardPremise,
   CardRefChange,
@@ -99,6 +105,7 @@ export const ProjectionCard = Schema.Struct({
   queuedAt: Schema.NullOr(IsoDateTime),
   openElicitations: Schema.Array(CardOpenElicitation),
   attention: Schema.Array(CardAttention),
+  verification: CardVerification,
   relations: Schema.Array(CardRelation),
   createdBy: CardAuthor,
   createdAt: IsoDateTime,
@@ -127,6 +134,7 @@ export const ProjectionCardDbRow = ProjectionCard.mapFields(
     waitReason: Schema.fromJsonString(Schema.NullOr(CardWaitReason)),
     openElicitations: Schema.fromJsonString(Schema.Array(CardOpenElicitation)),
     attention: Schema.fromJsonString(Schema.Array(CardAttention)),
+    verification: Schema.fromJsonString(CardVerification),
   }),
 );
 
@@ -179,6 +187,7 @@ export const PROJECTION_CARD_COLUMNS = `
   queued_at AS "queuedAt",
   COALESCE(open_elicitations_json, '[]') AS "openElicitations",
   COALESCE(attention_json, '[]') AS "attention",
+  COALESCE(verification_json, '{"state":"off","headSha":null,"verdictId":null,"verifier":null,"satisfaction":null,"override":null}') AS "verification",
   relations_json AS "relations",
   created_by_json AS "createdBy",
   created_at AS "createdAt",
@@ -257,7 +266,36 @@ export const PROJECTION_CARD_EVIDENCE_COLUMNS = `
   created_at AS "createdAt"
 `;
 
+/** A verdict as `projection_card_verdicts` stores it, with its JSON columns encoded. */
+export const ProjectionCardVerdict = CardVerdict.mapFields(
+  Struct.assign({
+    verifier: Schema.fromJsonString(CardVerifierSelection),
+    criteria: Schema.fromJsonString(Schema.Array(CardVerdictCriterion)),
+    diffJudge: Schema.fromJsonString(CardVerdictDiffJudge),
+    scenarios: Schema.fromJsonString(Schema.Array(CardVerdictScenario)),
+  }),
+);
+
+/** A verdict row as selected: SQLite stores `passed` as 0 or 1. */
+export const ProjectionCardVerdictDbRow = ProjectionCardVerdict.mapFields(
+  Struct.assign({ passed: Schema.Number }),
+);
+
+/** The `projection_card_verdicts` columns as `ProjectionCardVerdictDbRow` reads them. */
+export const PROJECTION_CARD_VERDICT_COLUMNS = `
+  verdict_id AS "verdictId",
+  card_id AS "cardId",
+  head_sha AS "headSha",
+  verifier_json AS "verifier",
+  criteria_json AS "criteria",
+  diff_judge_json AS "diffJudge",
+  scenarios_json AS "scenarios",
+  passed,
+  recorded_at AS "recordedAt"
+`;
+
 /** One priced turn of a card session, so spend sums by card and by agent. */
+
 export const ProjectionCardSpend = Schema.Struct({
   spendId: Schema.String,
   cardId: CardId,
@@ -324,6 +362,14 @@ export interface ProjectionCardRepositoryShape {
   readonly appendEvidenceItems: (
     rows: ReadonlyArray<ProjectionCardEvidenceItem>,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /** Record a verdict; recording the same verdict again is a no-op. */
+  readonly appendVerdict: (verdict: CardVerdict) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /** A card's newest verdict, if it has one. */
+  readonly latestVerdict: (
+    input: GetProjectionCardInput,
+  ) => Effect.Effect<Option.Option<CardVerdict>, ProjectionRepositoryError>;
 
   /** The items of one recording of a card's evidence, in the order they were captured. */
   readonly listEvidenceItems: (
