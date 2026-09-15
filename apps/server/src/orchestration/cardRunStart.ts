@@ -33,6 +33,7 @@ const RUN_TITLE: Record<CardSessionRole, (agent: string, card: string) => string
   helper: (agent, card) => `@${agent} helping on ${card}`,
   critic: (agent, card) => `@${agent} reviewing ${card}`,
   verifier: (agent, card) => `@${agent} verifying ${card}`,
+  coordinator: (agent, card) => `@${agent} coordinating ${card}`,
 };
 
 /** The hidden thread a card run with this key lives in. */

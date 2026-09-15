@@ -1,8 +1,14 @@
 import {
+  CARD_PLAN_DRAFTING,
   CARD_VERIFICATION_OFF,
   CHANNEL_HUMAN_AUTHOR_ID,
   CHANNEL_SYSTEM_AUTHOR_ID,
   DEFAULT_CARD_BUDGET_USD,
+  LESSON_TEXT_MAX_CHARS,
+  cardOriginOf,
+  type ProjectSpend,
+  type ProjectTrigger,
+  type Reason,
   type AgentRole,
   type CardVerdict,
   type OrchestrationAgent,
@@ -147,6 +153,123 @@ export const VERIFY_LATEST_COMMIT_REASON = "A verifier checks only the card's la
 export const VERIFIER_SESSION_ONLY_REASON = "Only the card's verifier session can record a verdict.";
 export const BUILDER_ONLY_ASSIST_REASON = "Only the card's builder can ask for help or a critique.";
 
+export const AUTO_MERGE_NEEDS_VERIFIED_REASON =
+  "Auto-merge needs a passing verifier and at least one hidden scenario.";
+export const autoMergeSatisfactionReason = (satisfied: number, total: number, percent: number) =>
+  `Hidden scenarios satisfied ${satisfied}/${total}, below this project's ${percent}%.`;
+export const TRIGGER_WORK_WAITS_REASON =
+  "Work started by a trigger always waits for a person to merge.";
+export const AUTO_MERGE_NEEDS_VERIFIER_REASON =
+  "Turn on the verifier before auto-merge; it merges only verified work.";
+
+export const triggerOffReason = (triggerId: string) =>
+  `Trigger '${triggerId}' is off or no longer exists.`;
+export const triggerReadyReason = (triggerId: string) =>
+  `Trigger '${triggerId}' can't start ready work: only schedule triggers with fixed criteria can.`;
+export const untrustedAuthorReason = (login: string) =>
+  `@${login} can't command Iskra on this repository.`;
+export const DUPLICATE_TRIGGER_REASON = "Each trigger in a project needs its own id.";
+
+export const projectBudgetReason = (capUsd: number) =>
+  `This project reached its $${capUsd} monthly budget; raise it in project settings.`;
+export const agentBudgetReason = (agentName: string, capUsd: number) =>
+  `@${agentName} reached its $${capUsd} monthly budget in this project; raise it in project settings.`;
+export const environmentBudgetReason = (capUsd: number) =>
+  `This machine reached its $${capUsd} monthly budget; raise it in settings.`;
+/** The wait codes of a monthly budget holding new work; the scheduler clears them once there is room. */
+export const BUDGET_WAIT_CODES = ["budgetCap", "agentBudgetCap", "environmentBudgetCap"] as const;
+
+export const LESSON_TOO_LONG_REASON = `Keep a lesson under ${LESSON_TEXT_MAX_CHARS} characters.`;
+export const LESSON_NOT_PROPOSED_REASON = "Only a proposed lesson can be approved or dismissed.";
+export const NO_LESSON_REASON = "This project has no lesson with that id.";
+export const OUTCOME_UNFINISHED_REASON = "Only a finished card has an outcome.";
+export const REVERT_NOT_LANDED_REASON = "Only a landed card can be reverted.";
+export const REVERT_IN_PROGRESS_REASON = "This card already has a revert in progress.";
+export const RESTORE_NEEDS_STOPPED_REASON =
+  "Restore needs the card's agent stopped; pause the card first.";
+/** The reason code of a person setting a card's outcome; its text is their note. */
+export const OUTCOME_SET_BY_PERSON_CODE = "outcomeSetByPerson";
+/** The reason a coordinator's pause records on a child. */
+export const COORDINATOR_PAUSED_CODE = "coordinatorPaused";
+/** The wait a plan child notes while its slice waits for the checkpoint. */
+export const HELD_BY_CHECKPOINT_WAIT: Reason = {
+  code: "heldByCheckpoint",
+  text: "Waits for the plan's slice checkpoint.",
+};
+
+/** The criteria a revert card is held to. */
+export const revertCriteria = (title: string) =>
+  [
+    { id: "reverted", text: `The changes from ${title} are reverted`, verification: "automated" },
+    { id: "checks", text: "The project's checks pass", verification: "automated" },
+  ] as const;
+
+/** Whether a card's pull request opens as a draft: trigger work nobody approved waits for a person. */
+export const pullRequestDraftOf = (
+  card: Pick<OrchestrationCard, "unattended" | "origin" | "createdBy" | "attemptGroupId">,
+): boolean => card.unattended || cardOriginOf(card).kind === "trigger";
+
+/** Why a trigger can't be saved as configured, or null: only a schedule with criteria takes ready work. */
+export const triggerConfigRefusal = (trigger: ProjectTrigger): string | null =>
+  trigger.intake === "ready" && (trigger.kind !== "schedule" || trigger.template.criteria.length === 0)
+    ? triggerReadyReason(trigger.id)
+    : null;
+
+/** Why a trigger's fire can't create a card, or null. The refusal is recorded as the fire's reason. */
+export function triggerFireRefusal(
+  trigger: ProjectTrigger | undefined,
+  triggerId: string,
+  author: { readonly login: string; readonly trusted: boolean } | null,
+): string | null {
+  if (trigger === undefined || !trigger.enabled) return triggerOffReason(triggerId);
+  if (author !== null && !author.trusted) return untrustedAuthorReason(author.login);
+  return triggerConfigRefusal(trigger);
+}
+
+/** Why the project's or the agent's monthly budget holds new work, as a wait reason, or null. */
+export function budgetWaitReason(
+  policy: Pick<ProjectOrchestration, "budgets">,
+  spend: ProjectSpend,
+  agent: Pick<OrchestrationAgent, "id" | "name"> | null,
+): Reason | null {
+  const { projectUsd, perAgentUsd } = policy.budgets;
+  if (projectUsd !== null && spend.totalUsd >= projectUsd) {
+    return { code: "budgetCap", text: projectBudgetReason(projectUsd) };
+  }
+  const agentUsd = spend.byAgent.find((entry) => entry.agentId === agent?.id)?.usd ?? 0;
+  return agent !== null && perAgentUsd !== null && agentUsd >= perAgentUsd
+    ? { code: "agentBudgetCap", text: agentBudgetReason(agent.name, perAgentUsd) }
+    : null;
+}
+
+/** Why this machine's monthly budget holds new work, as a wait reason, or null. */
+export const environmentBudgetWaitReason = (
+  monthlyBudgetUsd: number | null,
+  spentUsd: number,
+): Reason | null =>
+  monthlyBudgetUsd !== null && spentUsd >= monthlyBudgetUsd
+    ? { code: "environmentBudgetCap", text: environmentBudgetReason(monthlyBudgetUsd) }
+    : null;
+
+/** A project's spend after one priced turn; a new month starts from nothing. */
+export const withSpend = (
+  spend: ProjectSpend | undefined,
+  turn: { readonly agentId: string; readonly costUsd: number; readonly recordedAt: string },
+): ProjectSpend => {
+  const month = turn.recordedAt.slice(0, 7);
+  const current = spend?.month === month ? spend : { month, totalUsd: 0, byAgent: [] };
+  const agentId = turn.agentId as ProjectSpend["byAgent"][number]["agentId"];
+  return {
+    month,
+    totalUsd: current.totalUsd + turn.costUsd,
+    byAgent: current.byAgent.some((entry) => entry.agentId === agentId)
+      ? current.byAgent.map((entry) =>
+          entry.agentId === agentId ? { ...entry, usd: entry.usd + turn.costUsd } : entry,
+        )
+      : [...current.byAgent, { agentId, usd: turn.costUsd }],
+  };
+};
+
 /** Whether a card built by `builder` needs a passing verifier: the project says so, or its template does. */
 export const verificationRequired = (
   policy: Pick<ProjectOrchestration, "verifier">,
@@ -289,8 +412,11 @@ export function fixRoundRefusal(
  * status move itself.
  */
 export function landingBeginRefusal(input: {
-  readonly card: Pick<OrchestrationCard, "evidence" | "baseBranch" | "verification">;
-  readonly parent: Pick<OrchestrationCard, "kind" | "branch"> | undefined;
+  readonly card: Pick<
+    OrchestrationCard,
+    "evidence" | "baseBranch" | "verification" | "unattended" | "origin" | "createdBy" | "attemptGroupId"
+  >;
+  readonly parent: Pick<OrchestrationCard, "kind" | "branch" | "plan"> | undefined;
   readonly policy: Pick<ProjectOrchestration, "checksWaived" | "autoMerge">;
   readonly reason: CardLandingBeginReason;
   readonly verificationRequired: boolean;
@@ -298,14 +424,40 @@ export function landingBeginRefusal(input: {
   const { card, parent, policy } = input;
   if (input.reason === "autoMergePolicy") {
     if (!policy.autoMerge.enabled) return AUTO_MERGE_OFF_REASON;
+    if (pullRequestDraftOf(card)) return TRIGGER_WORK_WAITS_REASON;
     if (!hasPassingReviewEvidence(card, policy)) return REVIEW_EVIDENCE_REASON;
-    return verificationRefusal(card, input.verificationRequired);
+    return autoMergeVerificationRefusal(card, policy);
   }
   const intoPlanBranch =
-    parent?.kind === "plan" && parent.branch !== null && card.baseBranch === parent.branch;
+    (parent?.kind === "plan" || parent?.kind === "migration") &&
+    card.baseBranch !== null &&
+    (card.baseBranch === parent.branch || card.baseBranch === parent.plan?.integrationBranch);
   return intoPlanBranch && hasPassingReviewEvidence(card, policy)
     ? verificationRefusal(card, input.verificationRequired)
     : PLAN_CHILD_LANDING_REASON;
+}
+
+/**
+ * Auto-merge merges only verified work: the verifier passed the latest commit (an override doesn't
+ * count), at least one hidden scenario ran, and enough of them held for the project's threshold.
+ */
+function autoMergeVerificationRefusal(
+  card: Pick<OrchestrationCard, "verification" | "evidence">,
+  policy: Pick<ProjectOrchestration, "autoMerge">,
+): string | null {
+  const { verification } = card;
+  if (
+    verification.state !== "passed" ||
+    verification.headSha !== (card.evidence?.headSha ?? null) ||
+    verification.satisfaction === null ||
+    verification.satisfaction.total === 0
+  ) {
+    return AUTO_MERGE_NEEDS_VERIFIED_REASON;
+  }
+  const { satisfied, total } = verification.satisfaction;
+  return satisfied / total >= policy.autoMerge.minSatisfaction
+    ? null
+    : autoMergeSatisfactionReason(satisfied, total, Math.round(policy.autoMerge.minSatisfaction * 100));
 }
 
 /** Owner sessions start only once a person reviewed the project's side-effect guard. */
@@ -576,6 +728,14 @@ export function newCard(
     acceptance: payload.acceptance ?? LEGACY_CARD_CONTRACT.acceptance,
     estimate: payload.estimate ?? null,
     premise: payload.premise ?? null,
+    origin: payload.origin ?? cardOriginOf({ createdBy: payload.createdBy, attemptGroupId: payload.attemptGroupId ?? null }),
+    plan: payload.kind === "plan" ? CARD_PLAN_DRAFTING : null,
+    migration: payload.migration ?? null,
+    planKey: payload.planKey ?? null,
+    slice: payload.slice ?? null,
+    heldByCheckpoint: payload.heldByCheckpoint ?? false,
+    unattended: payload.unattended ?? false,
+    revertsCardId: payload.revertsCardId ?? null,
     // A card that starts ready joins the queue as it is created.
     queuedAt: payload.status === "ready" ? payload.createdAt : null,
     createdBy: payload.createdBy,
@@ -666,6 +826,8 @@ export const ATTENTION_ACTIONS: Record<CardAttentionCode, ReadonlyArray<CardAtte
   verifierError: ["rerunVerifier", "dismiss"],
   serviceDown: ["restartServices", "dismiss"],
   previewDown: ["restartServices", "dismiss"],
+  outcomeFlawed: ["addHoldout", "dismiss"],
+  revertConflict: ["assignAgent", "dismiss"],
 };
 
 const isAttentionCode = (code: string): code is CardAttentionCode => Object.hasOwn(ATTENTION_ACTIONS, code);
@@ -733,6 +895,21 @@ export const REFS_CHANGED_OPTIONS = [
   { id: "restore", label: "Restore" },
   { id: "keep", label: "Keep" },
 ] as const;
+
+/** The answers a proposed plan offers: approve (only through `card.plan.approve`) or redirect in words. */
+export const PLAN_OPTIONS = [
+  { id: "approve", label: "Approve plan" },
+  { id: "redirect", label: "Redirect" },
+] as const;
+
+/** The activity a plan revision's question is recorded as. */
+export const planProposalActivityId = (cardId: string, revision: number) =>
+  `plan:${cardId}:${revision}`;
+
+const planSummary = (children: ReadonlyArray<{ readonly slice: number }>) => {
+  const slices = new Set(children.map((child) => child.slice)).size;
+  return `${children.length} ${children.length === 1 ? "child" : "children"} in ${slices} ${slices === 1 ? "slice" : "slices"}`;
+};
 
 /** What a checkpoint asks when its owner didn't write a question. */
 const CHECKPOINT_QUESTION = "Is this going the right way?";
@@ -992,6 +1169,135 @@ export function cardActivitiesOf(event: OrchestrationEvent): ReadonlyArray<CardA
         }),
       ];
     }
+    case "card.plan-proposed": {
+      const { cardId, revision, premise, children, proposedAt } = event.payload;
+      return [
+        cardActivity({
+          activityId: planProposalActivityId(cardId, revision),
+          cardId,
+          kind: "elicitation",
+          author: SYSTEM_AUTHOR,
+          body: premise.trim() === "" ? `A plan of ${planSummary(children)}.` : premise,
+          elicitation: {
+            question: `Approve this plan of ${planSummary(children)}?`,
+            options: PLAN_OPTIONS,
+            recommendedOptionId: "approve",
+            allowText: true,
+            kind: "plan",
+          },
+          createdAt: proposedAt,
+        }),
+      ];
+    }
+    case "card.plan-approved": {
+      const { cardId, revision, approvedAt } = event.payload;
+      const questionId = planProposalActivityId(cardId, revision);
+      return [
+        cardActivity({
+          activityId: `${questionId}:approved`,
+          cardId,
+          kind: "response",
+          author: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
+          body: `Approved plan revision ${revision}.`,
+          answers: { questionId, optionId: "approve" },
+          createdAt: approvedAt,
+        }),
+      ];
+    }
+    case "card.plan-slice-released": {
+      const { cardId, slice, releasedAt } = event.payload;
+      return [
+        cardActivity({
+          activityId: `plan-slice:${cardId}:${slice}`,
+          cardId,
+          kind: "status",
+          author: SYSTEM_AUTHOR,
+          body: `Slice ${slice} of the plan started.`,
+          createdAt: releasedAt,
+        }),
+      ];
+    }
+    case "card.migration-enumerated": {
+      const { cardId, items, enumeratedAt } = event.payload;
+      return [
+        cardActivity({
+          activityId: `migration-enumerated:${event.eventId}`,
+          cardId,
+          kind: "status",
+          author: SYSTEM_AUTHOR,
+          body: `The enumerate script listed ${items.length} ${items.length === 1 ? "item" : "items"}.`,
+          createdAt: enumeratedAt,
+        }),
+      ];
+    }
+    case "card.migration-phase-changed": {
+      const { cardId, phase, started, changedAt } = event.payload;
+      return [
+        cardActivity({
+          activityId: `migration-phase:${event.eventId}`,
+          cardId,
+          kind: "status",
+          author: SYSTEM_AUTHOR,
+          body:
+            started.length === 0
+              ? `The migration is ${phase}.`
+              : `The migration is ${phase}, starting ${started.length} ${started.length === 1 ? "item" : "items"}.`,
+          createdAt: changedAt,
+        }),
+      ];
+    }
+    case "card.migration-instructions-set": {
+      const { cardId, instructions, setAt } = event.payload;
+      return [
+        cardActivity({
+          activityId: `migration-instructions:${event.eventId}`,
+          cardId,
+          kind: "decision",
+          author: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
+          body: instructions,
+          createdAt: setAt,
+        }),
+      ];
+    }
+    case "card.outcome-recorded": {
+      const { cardId, outcome } = event.payload;
+      return [
+        cardActivity({
+          activityId: `outcome:${event.eventId}`,
+          cardId,
+          kind: "status",
+          author: SYSTEM_AUTHOR,
+          body: `Outcome: ${outcome.state}.`,
+          createdAt: outcome.decidedAt,
+        }),
+      ];
+    }
+    case "card.revert-requested": {
+      const { cardId, revertCardId, requestedAt } = event.payload;
+      return [
+        cardActivity({
+          activityId: `revert:${revertCardId}`,
+          cardId,
+          kind: "decision",
+          author: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
+          body: "A person asked to revert this card.",
+          createdAt: requestedAt,
+        }),
+      ];
+    }
+    case "card.checkpoint-restore-requested": {
+      const { cardId, turnCount, requestedAt } = event.payload;
+      return [
+        cardActivity({
+          activityId: `restore:${event.eventId}`,
+          cardId,
+          kind: "decision",
+          author: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
+          body: `A person asked to restore the worktree to before turn ${turnCount}.`,
+          createdAt: requestedAt,
+        }),
+      ];
+    }
     case "card.landing-linked": {
       const { cardId, landing } = event.payload;
       return [
@@ -1072,6 +1378,7 @@ export function cardPatches(
               payload.mergedOnHostUrl !== undefined && card.landing !== null
                 ? { ...card.landing, mergedOnHostUrl: payload.mergedOnHostUrl }
                 : card.landing,
+            landedSha: payload.landedSha ?? card.landedSha,
             attention: withoutCodes(card.attention, RESOLVED_BY_STATUS[payload.to] ?? []),
             ...(isFinishedCardStatus(payload.to)
               ? { checkpoint: null, waitReason: null, openElicitations: [], attention: [] }
@@ -1287,6 +1594,167 @@ export function cardPatches(
         ],
       ];
     }
+    case "card.plan-proposed": {
+      const { cardId, revision, premise, children, proposedAt } = event.payload;
+      const activityId = planProposalActivityId(cardId, revision);
+      return [
+        [
+          cardId,
+          (card) => ({
+            ...card,
+            plan: {
+              ...(card.plan ?? CARD_PLAN_DRAFTING),
+              state: "proposed" as const,
+              revision,
+              proposalActivityId: activityId,
+              premise,
+              children,
+              approvedAt: null,
+            },
+            // A new revision replaces the question the last one asked.
+            openElicitations: [
+              ...card.openElicitations.filter((question) => question.kind !== "plan"),
+              {
+                activityId,
+                kind: "plan" as const,
+                optionIds: PLAN_OPTIONS.map((option) => option.id),
+                askedAt: proposedAt,
+                question: `Approve this plan of ${planSummary(children)}?`,
+                options: PLAN_OPTIONS,
+                recommendedOptionId: "approve",
+                allowText: true,
+              },
+            ],
+            activityAt: proposedAt,
+          }),
+        ],
+      ];
+    }
+    case "card.plan-approved": {
+      const { cardId, integrationBranch, approvedAt } = event.payload;
+      return [
+        [
+          cardId,
+          (card) => ({
+            ...card,
+            plan:
+              card.plan === null
+                ? null
+                : { ...card.plan, state: "approved" as const, integrationBranch, approvedAt },
+            openElicitations: card.openElicitations.filter((question) => question.kind !== "plan"),
+            activityAt: approvedAt,
+          }),
+        ],
+      ];
+    }
+    case "card.plan-slice-released": {
+      const { cardId, slice, releasedCardIds, releasedAt } = event.payload;
+      const release: CardPatch = (card) => ({
+        ...card,
+        heldByCheckpoint: false,
+        waitReason: card.waitReason?.code === HELD_BY_CHECKPOINT_WAIT.code ? null : card.waitReason,
+      });
+      return [
+        [
+          cardId,
+          (card) => ({
+            ...card,
+            plan: card.plan === null ? null : { ...card.plan, currentSlice: slice },
+            activityAt: releasedAt,
+          }),
+        ],
+        ...releasedCardIds.map((childId) => [childId, release] as const),
+      ];
+    }
+    case "card.migration-enumerated": {
+      const { cardId, items, enumeratedAt } = event.payload;
+      return [
+        [
+          cardId,
+          (card) => ({
+            ...card,
+            migration:
+              card.migration === null
+                ? null
+                : {
+                    ...card.migration,
+                    items: items.map((key) => ({ key, childCardId: null, state: "pending" as const })),
+                  },
+            activityAt: enumeratedAt,
+          }),
+        ],
+      ];
+    }
+    case "card.migration-phase-changed": {
+      const { cardId, phase, started, changedAt } = event.payload;
+      const startedByKey = new Map(started.map((item) => [item.key, item.cardId] as const));
+      return [
+        [
+          cardId,
+          (card) => ({
+            ...card,
+            migration:
+              card.migration === null
+                ? null
+                : {
+                    ...card.migration,
+                    phase,
+                    items: card.migration.items.map((item) => {
+                      const childCardId = startedByKey.get(item.key);
+                      return childCardId === undefined
+                        ? item
+                        : { ...item, childCardId, state: "running" as const };
+                    }),
+                  },
+            activityAt: changedAt,
+          }),
+        ],
+      ];
+    }
+    case "card.migration-items-updated": {
+      const { cardId, items, updatedAt } = event.payload;
+      const stateByKey = new Map(items.map((item) => [item.key, item.state] as const));
+      return [
+        [
+          cardId,
+          (card) => ({
+            ...card,
+            migration:
+              card.migration === null
+                ? null
+                : {
+                    ...card.migration,
+                    items: card.migration.items.map((item) => ({
+                      ...item,
+                      state: stateByKey.get(item.key) ?? item.state,
+                    })),
+                  },
+            updatedAt,
+          }),
+        ],
+      ];
+    }
+    case "card.migration-instructions-set": {
+      const { cardId, instructions, setAt } = event.payload;
+      return [
+        [
+          cardId,
+          (card) => ({
+            ...card,
+            migration: card.migration === null ? null : { ...card.migration, instructions },
+            activityAt: setAt,
+          }),
+        ],
+      ];
+    }
+    case "card.outcome-recorded": {
+      const { cardId, outcome } = event.payload;
+      return [[cardId, (card) => ({ ...card, outcome })]];
+    }
+    case "card.revert-requested":
+      return [[event.payload.cardId, touchCard(event.payload.requestedAt)]];
+    case "card.checkpoint-restore-requested":
+      return [[event.payload.cardId, touchCard(event.payload.requestedAt)]];
     case "card.fix-rounds-reset": {
       const { cardId, resetAt } = event.payload;
       return [[cardId, (card) => ({ ...card, fixRounds: { ci: 0, review: 0 }, activityAt: resetAt })]];
@@ -1322,6 +1790,11 @@ export function cardPatches(
           (card) => ({
             ...card,
             delegateAgentId: payload.delegateAgentId,
+            // An agent assigned to a revert that conflicted takes the conflict over.
+            attention:
+              payload.delegateAgentId === null
+                ? card.attention
+                : withoutCodes(card.attention, ["revertConflict"]),
             updatedAt: payload.updatedAt,
             activityAt: payload.updatedAt,
           }),

@@ -36,6 +36,10 @@ export const SCHEDULER_WAIT_CODES = [
   "sideEffectGuard",
   "delegateReadOnly",
   "exclusivePathBusy",
+  // BUDGET_WAIT_CODES in cardRules.ts.
+  "budgetCap",
+  "agentBudgetCap",
+  "environmentBudgetCap",
 ] as const;
 export type SchedulerWaitCode = (typeof SCHEDULER_WAIT_CODES)[number];
 

@@ -1,5 +1,6 @@
 import {
   projectOrchestrationOf,
+  projectSpendOf,
   type OrchestrationAgent,
   type OrchestrationChannel,
   type OrchestrationReadModel,
@@ -7,6 +8,8 @@ import {
   type ProjectId,
   type ThreadId,
 } from "@iskra/contracts";
+
+import { budgetWaitReason } from "./cardRules.ts";
 
 export type WakeDecision =
   | { readonly kind: "wake"; readonly liveRunThreadId?: ThreadId }
@@ -66,6 +69,8 @@ export function decideWake(input: {
   readonly channel: OrchestrationChannel;
   readonly agent: OrchestrationAgent;
   readonly newRuns: number;
+  /** When the wake happens, which picks the month whose spend counts against the budgets. */
+  readonly now: string;
 }): WakeDecision {
   const { readModel, channel, agent } = input;
   const where = channel.kind === "dm" ? "this DM" : `#${channel.name}`;
@@ -73,6 +78,16 @@ export function decideWake(input: {
   const belongs = channel.memberAgentIds.includes(agent.id) || channel.leadAgentId === agent.id;
   if (agent.archivedAt !== null || !belongs) {
     return { kind: "refuse", reason: `@${agent.name} isn't an active member of ${where}.` };
+  }
+  // A project or agent past its monthly budget takes no new turns, joined run or not.
+  const project = readModel.projects.find((candidate) => candidate.id === channel.projectId) ?? {};
+  const overBudget = budgetWaitReason(
+    projectOrchestrationOf(project),
+    projectSpendOf(project, input.now),
+    agent,
+  );
+  if (overBudget !== null) {
+    return { kind: "refuse", reason: overBudget.text };
   }
 
   const agentRun = (readModel.liveRuns ?? []).find(

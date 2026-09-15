@@ -12,9 +12,13 @@ import {
   isImportedAgentSessionMessageId,
   projectOrchestrationOf,
   AgentId,
+  CardId,
+  LESSON_TEXT_MAX_CHARS,
+  MIGRATION_ITEMS_MAX,
+  MIGRATION_SAMPLE_SIZE,
+  cardOriginOf,
   type AgentRole,
   type CardFixRound,
-  type CardId,
   type CardMove,
   type OrchestrationCommand,
   type OrchestrationEvent,
@@ -115,7 +119,38 @@ import {
   verificationRefusal,
   verificationRequired,
   verificationStateOf,
+  AUTO_MERGE_NEEDS_VERIFIER_REASON,
+  COORDINATOR_PAUSED_CODE,
+  DUPLICATE_TRIGGER_REASON,
+  HELD_BY_CHECKPOINT_WAIT,
+  LESSON_NOT_PROPOSED_REASON,
+  LESSON_TOO_LONG_REASON,
+  NO_LESSON_REASON,
+  OUTCOME_SET_BY_PERSON_CODE,
+  OUTCOME_UNFINISHED_REASON,
+  RESTORE_NEEDS_STOPPED_REASON,
+  REVERT_IN_PROGRESS_REASON,
+  REVERT_NOT_LANDED_REASON,
+  revertCriteria,
+  triggerConfigRefusal,
+  triggerFireRefusal,
 } from "./cardRules.ts";
+import {
+  COORDINATOR_OWN_CHILDREN_REASON,
+  MIGRATION_ENUMERATE_COMMAND_REASON,
+  MIGRATION_PHASE_ORDER_REASON,
+  NOT_MIGRATION_CARD_REASON,
+  NOT_PLAN_CARD_REASON,
+  PLAN_SLICE_RELEASE_REASON,
+  migrationItemReason,
+  migrationPhaseAllowed,
+  migrationTooManyItemsReason,
+  migrationUnknownItemReason,
+  planChildCards,
+  planIntegrationBranch,
+  planNextSlice,
+  planRefusal,
+} from "./planRules.ts";
 import { parseMentions } from "./mentions.ts";
 import { projectEvent } from "./projector.ts";
 import { decideWake, projectLiveRunCount, type WakeDecision } from "./wakeRouting.ts";
@@ -320,6 +355,7 @@ const decideCardMove = Effect.fn("decideCardMove")(function* (input: {
   readonly reason?: string;
   readonly round?: CardFixRound;
   readonly mergedOnHostUrl?: string;
+  readonly landedSha?: string;
 }): Effect.fn.Return<
   PlannedOrchestrationEvent,
   OrchestrationCommandInvariantError | PlatformError.PlatformError,
@@ -345,6 +381,7 @@ const decideCardMove = Effect.fn("decideCardMove")(function* (input: {
       ...(input.reason !== undefined ? { reason: input.reason } : {}),
       ...(input.round !== undefined ? { round: input.round } : {}),
       ...(input.mergedOnHostUrl !== undefined ? { mergedOnHostUrl: input.mergedOnHostUrl } : {}),
+      ...(input.landedSha !== undefined ? { landedSha: input.landedSha } : {}),
       updatedAt: occurredAt,
     },
   });
@@ -384,11 +421,20 @@ const decideCommandSequence = Effect.fn("decideCommandSequence")(function* ({
   return plannedEvents;
 });
 
-/** The card whose budget a card spends from: an attempt or a builder's sub-card spends from its parent's. */
-export const budgetCardOf = (readModel: OrchestrationReadModel, card: OrchestrationCard) =>
-  (card.attemptGroupId !== null || card.createdBy.kind === "agent") && card.parentCardId !== null
+/**
+ * The card whose budget a card spends from: an attempt, a builder's sub-card, and a plan's or
+ * migration's child spend from their parent's.
+ */
+export const budgetCardOf = (readModel: OrchestrationReadModel, card: OrchestrationCard) => {
+  const origin = cardOriginOf(card).kind;
+  return card.parentCardId !== null &&
+    (card.attemptGroupId !== null ||
+      card.createdBy.kind === "agent" ||
+      origin === "plan" ||
+      origin === "migration")
     ? (readModel.cards?.find((candidate) => candidate.id === card.parentCardId) ?? card)
     : card;
+};
 
 /** The card's live owner session, if it has one. */
 export const liveOwnerRun = (readModel: OrchestrationReadModel, cardId: CardId) =>
@@ -2422,6 +2468,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           return yield* refuse(command, refusal);
         }
       }
+      if (command.kind === "migration" && command.migration === undefined) {
+        return yield* refuse(command, MIGRATION_ENUMERATE_COMMAND_REASON);
+      }
       return yield* planned(command, "card", command.cardId, command.createdAt, {
         type: "card.created",
         payload: {
@@ -2429,6 +2478,17 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           projectId: command.projectId,
           channelId,
           parentCardId,
+          ...(command.kind !== undefined ? { kind: command.kind } : {}),
+          ...(command.kind === "migration" && command.migration !== undefined
+            ? {
+                migration: {
+                  ...command.migration,
+                  phase: "enumerating" as const,
+                  items: [],
+                  sampleSize: MIGRATION_SAMPLE_SIZE,
+                },
+              }
+            : {}),
           title: command.title,
           spec: command.spec,
           specState: "draft",
@@ -2585,16 +2645,19 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         ...(command.round !== undefined ? { round: command.round } : {}),
       });
     }
-    case "card.land":
+    case "card.land": {
+      const landedSha = command.landedSha === undefined ? {} : { landedSha: command.landedSha };
       return command.mergedOnHostUrl === undefined
-        ? yield* decideCardMove({ readModel, command, move: "landed" })
+        ? yield* decideCardMove({ readModel, command, move: "landed", ...landedSha })
         : yield* decideCardMove({
             readModel,
             command,
             move: "mergedOnHost",
             reason: `Merged on the host: ${command.mergedOnHostUrl}`,
             mergedOnHostUrl: command.mergedOnHostUrl,
+            ...landedSha,
           });
+    }
 
     case "card.assign":
     case "card.unassign": {
@@ -3129,6 +3192,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           threadId: command.threadId,
           agentId: command.agentId,
           turnId: command.turnId,
+          ...(command.role !== undefined ? { role: command.role } : {}),
           costUsd: command.costUsd,
           costSource: command.costSource,
           recordedAt: command.recordedAt,
@@ -3860,6 +3924,20 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           resolvedAt: occurredAt,
         },
       });
+      // Redirecting a migration's tuning checkpoint replaces what each of its children is told.
+      if (
+        command.decision === "redirect" &&
+        command.note !== undefined &&
+        card.migration?.phase === "tuning"
+      ) {
+        return [
+          resolved,
+          yield* planned(command, "card", card.id, occurredAt, {
+            type: "card.migration-instructions-set",
+            payload: { cardId: card.id, instructions: command.note, setAt: occurredAt },
+          }),
+        ];
+      }
       // Stopping at a checkpoint holds the card until a person resumes it.
       return command.decision === "stop" && card.paused === null
         ? [
@@ -3919,6 +3997,18 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           readModel,
         });
       }
+      // A plan's approval is its own command; any other answer goes back to the coordinator.
+      if (question.kind === "plan" && command.optionId === "approve") {
+        return yield* decideOrchestrationCommand({
+          command: {
+            type: "card.plan.approve",
+            commandId: command.commandId,
+            cardId: command.cardId,
+            revision: card.plan?.revision ?? 0,
+          },
+          readModel,
+        });
+      }
       return yield* planned(command, "card", card.id, command.createdAt, {
         type: "card.activity-recorded",
         payload: {
@@ -3928,7 +4018,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           author: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
           body: command.body,
           runThreadId: null,
-          deliverTo: "builder",
+          deliverTo: question.kind === "plan" ? "coordinator" : "builder",
           delivery: "pending",
           elicitation: null,
           answers: { questionId: command.activityId, optionId: command.optionId },
@@ -4461,7 +4551,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         if (agent === undefined) {
           continue;
         }
-        const decision = decideWake({ readModel, channel, agent, newRuns });
+        const decision = decideWake({ readModel, channel, agent, newRuns, now: command.createdAt });
         if (decision.kind === "refuse") {
           // Invariant 4: a refused wake is said in the channel, never dropped silently.
           events.push(
@@ -4507,7 +4597,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           `Channel '${channel.id}' is archived and cannot wake agents.`,
         );
       }
-      const decision = decideWake({ readModel, channel, agent, newRuns: 0 });
+      const decision = decideWake({ readModel, channel, agent, newRuns: 0, now: command.createdAt });
       if (decision.kind === "refuse") {
         return yield* refuse(command, decision.reason);
       }
@@ -4643,6 +4733,16 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           `A domain can't be both allowed and denied: ${both.join(", ")}.`,
         );
       }
+      const { autoMerge, verifier, triggers } = command.orchestration;
+      if (autoMerge.enabled && verifier.mode === "off") {
+        return yield* refuse(command, AUTO_MERGE_NEEDS_VERIFIER_REASON);
+      }
+      if (new Set(triggers.map((trigger) => trigger.id)).size !== triggers.length) {
+        return yield* refuse(command, DUPLICATE_TRIGGER_REASON);
+      }
+      for (const trigger of triggers) {
+        yield* refuseIf(command, triggerConfigRefusal(trigger));
+      }
       const occurredAt = yield* nowIso;
       return yield* planned(command, "project", command.projectId, occurredAt, {
         type: "project.orchestration-set",
@@ -4651,6 +4751,547 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           orchestration: command.orchestration,
           updatedAt: occurredAt,
         },
+      });
+    }
+
+    // A coordinator proposes; only a person approves (`card.plan.approve` is a client command).
+    case "card.plan.propose": {
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        "A card that has landed or been abandoned takes no plan.",
+      );
+      if (card.plan === null) {
+        return yield* refuse(command, NOT_PLAN_CARD_REASON);
+      }
+      yield* refuseIf(command, planRefusal(command.children));
+      return yield* planned(command, "card", card.id, command.createdAt, {
+        type: "card.plan-proposed",
+        payload: {
+          cardId: card.id,
+          revision: card.plan.revision + 1,
+          premise: command.premise,
+          children: command.children,
+          proposedAt: command.createdAt,
+        },
+      });
+    }
+
+    // One batch: every new child, its builder, its blockers and its hold, then the approval itself.
+    case "card.plan.approve": {
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        "A card that has landed or been abandoned takes no plan.",
+      );
+      const approval = planChildCards({
+        card,
+        revision: command.revision,
+        agents: readModel.agents ?? [],
+        cards: readModel.cards ?? [],
+      });
+      if (!approval.ok) {
+        return yield* refuse(command, approval.reason);
+      }
+      const occurredAt = yield* nowIso;
+      const integrationBranch = approval.plan.integrationBranch ?? planIntegrationBranch(card);
+      const { cardDefaultUsd } = policyOf(readModel, card.projectId).budgets;
+      const crypto = yield* Crypto.Crypto;
+      const idByKey = new Map<string, CardId>();
+      for (const existing of readModel.cards ?? []) {
+        if (existing.parentCardId === card.id && existing.planKey !== null) {
+          idByKey.set(existing.planKey, existing.id);
+        }
+      }
+      for (const { child } of approval.children) {
+        idByKey.set(child.key, CardId.make(yield* crypto.randomUUIDv4));
+      }
+      const events: PlannedOrchestrationEvent[] = [];
+      for (const { child, delegate, held } of approval.children) {
+        const childId = idByKey.get(child.key) ?? CardId.make(child.key);
+        events.push(
+          yield* planned(command, "card", childId, occurredAt, {
+            type: "card.created",
+            payload: {
+              cardId: childId,
+              projectId: card.projectId,
+              channelId: card.channelId,
+              parentCardId: card.id,
+              title: child.title,
+              spec: child.spec,
+              // The person approving the plan read each child's spec and criteria.
+              specState: "approved",
+              tags: card.tags,
+              status: "ready",
+              ownerHumanId: card.ownerHumanId,
+              baseBranch: integrationBranch,
+              acceptance: { criteria: child.criteria, state: "confirmed" },
+              budgetCapUsd: cardDefaultUsd,
+              origin: { kind: "plan", id: card.id },
+              planKey: child.key,
+              slice: child.slice,
+              heldByCheckpoint: held,
+              createdBy: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
+              createdAt: occurredAt,
+              updatedAt: occurredAt,
+            },
+          }),
+        );
+        if (delegate !== null) {
+          events.push(
+            yield* planned(command, "card", childId, occurredAt, {
+              type: "card.delegate-changed",
+              payload: { cardId: childId, delegateAgentId: delegate.id, updatedAt: occurredAt },
+            }),
+          );
+        }
+        for (const dependency of child.dependsOn) {
+          events.push(
+            yield* planned(command, "card", childId, occurredAt, {
+              type: "card.relation-added",
+              payload: {
+                cardId: childId,
+                kind: "blockedBy",
+                otherCardId: idByKey.get(dependency) ?? CardId.make(dependency),
+                updatedAt: occurredAt,
+              },
+            }),
+          );
+        }
+        if (held) {
+          events.push(
+            yield* planned(command, "card", childId, occurredAt, {
+              type: "card.wait-noted",
+              payload: { cardId: childId, threadId: null, reason: HELD_BY_CHECKPOINT_WAIT, notedAt: occurredAt },
+            }),
+          );
+        }
+      }
+      events.push(
+        yield* planned(command, "card", card.id, occurredAt, {
+          type: "card.plan-approved",
+          payload: { cardId: card.id, revision: command.revision, integrationBranch, approvedAt: occurredAt },
+        }),
+      );
+      return events;
+    }
+
+    case "card.plan.slice.release": {
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        "A card that has landed or been abandoned takes no plan.",
+      );
+      const next = card.plan?.state === "approved" ? planNextSlice(card.plan) : null;
+      if (next === null || command.slice !== next) {
+        return yield* refuse(command, PLAN_SLICE_RELEASE_REASON);
+      }
+      const occurredAt = yield* nowIso;
+      return yield* planned(command, "card", card.id, occurredAt, {
+        type: "card.plan-slice-released",
+        payload: {
+          cardId: card.id,
+          slice: next,
+          releasedCardIds: (readModel.cards ?? [])
+            .filter(
+              (child) =>
+                child.parentCardId === card.id &&
+                child.heldByCheckpoint &&
+                child.slice !== null &&
+                child.slice <= next,
+            )
+            .map((child) => child.id),
+          releasedAt: occurredAt,
+        },
+      });
+    }
+
+    // A coordinator's tools reach only children of its own plan; `cardId` is the child.
+    case "card.coordinator.message":
+    case "card.coordinator.pause": {
+      const child = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        FINISHED_CARD_WAITS_REASON,
+      );
+      if (child.parentCardId !== command.planCardId || cardOriginOf(child).kind !== "plan") {
+        return yield* refuse(command, COORDINATOR_OWN_CHILDREN_REASON);
+      }
+      const plan = yield* requireCard({ readModel, command, cardId: command.planCardId });
+      if (command.type === "card.coordinator.message") {
+        return yield* planned(command, "card", child.id, command.createdAt, {
+          type: "card.activity-recorded",
+          payload: cardActivity({
+            activityId: command.messageId,
+            cardId: child.id,
+            kind: "message",
+            author:
+              plan.delegateAgentId === null
+                ? { kind: "system", id: CHANNEL_SYSTEM_AUTHOR_ID }
+                : { kind: "agent", id: plan.delegateAgentId },
+            body: command.body,
+            deliverTo: "builder",
+            delivery: "pending",
+            createdAt: command.createdAt,
+          }),
+        });
+      }
+      if (child.paused !== null) {
+        return yield* refuse(command, "The card is already paused.");
+      }
+      const occurredAt = yield* nowIso;
+      return yield* planned(command, "card", child.id, occurredAt, {
+        type: "card.paused",
+        payload: {
+          cardId: child.id,
+          reason: { code: COORDINATOR_PAUSED_CODE, text: command.reason },
+          by: "system",
+          pausedAt: occurredAt,
+        },
+      });
+    }
+
+    case "card.migration.enumerate": {
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        "A card that has landed or been abandoned sweeps nothing.",
+      );
+      if (card.migration === null) {
+        return yield* refuse(command, NOT_MIGRATION_CARD_REASON);
+      }
+      const items = [...new Set(command.items)];
+      if (items.length > MIGRATION_ITEMS_MAX) {
+        return yield* refuse(command, migrationTooManyItemsReason(items.length));
+      }
+      if (card.migration.phase !== "enumerating") {
+        return yield* refuse(command, MIGRATION_PHASE_ORDER_REASON);
+      }
+      const occurredAt = yield* nowIso;
+      return yield* planned(command, "card", card.id, occurredAt, {
+        type: "card.migration-enumerated",
+        payload: { cardId: card.id, items, enumeratedAt: occurredAt },
+      });
+    }
+
+    // Each started item is a ready child on the migration's branch, held to its criteria, built by its agent.
+    case "card.migration.phase": {
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        "A card that has landed or been abandoned sweeps nothing.",
+      );
+      const { migration } = card;
+      if (migration === null) {
+        return yield* refuse(command, NOT_MIGRATION_CARD_REASON);
+      }
+      if (!migrationPhaseAllowed(migration.phase, command.phase)) {
+        return yield* refuse(command, MIGRATION_PHASE_ORDER_REASON);
+      }
+      const children = command.children ?? [];
+      const pending = new Set(
+        migration.items.filter((item) => item.state === "pending").map((item) => item.key),
+      );
+      const occurredAt = yield* nowIso;
+      const { cardDefaultUsd } = policyOf(readModel, card.projectId).budgets;
+      const events: PlannedOrchestrationEvent[] = [];
+      for (const child of children) {
+        if (!pending.delete(child.key)) {
+          return yield* refuse(command, migrationItemReason(child.key));
+        }
+        yield* requireCardAbsent({ readModel, command, cardId: child.cardId });
+        events.push(
+          yield* planned(command, "card", child.cardId, occurredAt, {
+            type: "card.created",
+            payload: {
+              cardId: child.cardId,
+              projectId: card.projectId,
+              channelId: card.channelId,
+              parentCardId: card.id,
+              title: `${card.title}: ${child.key}`,
+              spec: `${migration.instructions}\n\nItem: ${child.key}`,
+              specState: "approved",
+              tags: card.tags,
+              status: "ready",
+              ownerHumanId: card.ownerHumanId,
+              baseBranch: card.branch ?? card.baseBranch,
+              acceptance: { criteria: card.acceptance.criteria, state: "confirmed" },
+              budgetCapUsd: cardDefaultUsd,
+              origin: { kind: "migration", id: card.id },
+              planKey: child.key,
+              createdBy: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
+              createdAt: occurredAt,
+              updatedAt: occurredAt,
+            },
+          }),
+        );
+        if (card.delegateAgentId !== null) {
+          events.push(
+            yield* planned(command, "card", child.cardId, occurredAt, {
+              type: "card.delegate-changed",
+              payload: {
+                cardId: child.cardId,
+                delegateAgentId: card.delegateAgentId,
+                updatedAt: occurredAt,
+              },
+            }),
+          );
+        }
+      }
+      events.push(
+        yield* planned(command, "card", card.id, occurredAt, {
+          type: "card.migration-phase-changed",
+          payload: { cardId: card.id, phase: command.phase, started: children, changedAt: occurredAt },
+        }),
+      );
+      return events;
+    }
+
+    case "card.migration.items.update": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      if (card.migration === null) {
+        return yield* refuse(command, NOT_MIGRATION_CARD_REASON);
+      }
+      const keys = new Set(card.migration.items.map((item) => item.key));
+      const unknown = command.items.find((item) => !keys.has(item.key));
+      if (unknown !== undefined) {
+        return yield* refuse(command, migrationUnknownItemReason(unknown.key));
+      }
+      const occurredAt = yield* nowIso;
+      return yield* planned(command, "card", card.id, occurredAt, {
+        type: "card.migration-items-updated",
+        payload: { cardId: card.id, items: command.items, updatedAt: occurredAt },
+      });
+    }
+
+    // Criteria come only from the trigger's template, never from the text that fired it. A refused
+    // fire is recorded, not rejected; a repeated fire reuses its command id and is a no-op.
+    case "card.trigger.intake": {
+      const project = yield* requireProject({ readModel, command, projectId: command.projectId });
+      const policy = projectOrchestrationOf(project);
+      const trigger = policy.triggers.find((candidate) => candidate.id === command.triggerId);
+      const fired = (cardId: CardId | null, refusal: string | null) =>
+        planned(command, "project", command.projectId, command.createdAt, {
+          type: "project.trigger-fired",
+          payload: {
+            projectId: command.projectId,
+            triggerId: command.triggerId,
+            sourceKey: command.sourceKey,
+            outcome: refusal === null ? "created" : "refused",
+            cardId,
+            reason: refusal === null ? null : { code: "triggerRefused", text: refusal },
+            firedAt: command.createdAt,
+          },
+        });
+      const refusal = triggerFireRefusal(trigger, command.triggerId, command.author);
+      if (trigger === undefined || refusal !== null) {
+        return yield* fired(null, refusal);
+      }
+      yield* requireCardAbsent({ readModel, command, cardId: command.cardId });
+      const ready = trigger.intake === "ready";
+      const agent = (readModel.agents ?? []).find(
+        (candidate) =>
+          candidate.id === trigger.agentId &&
+          candidate.projectId === project.id &&
+          candidate.archivedAt === null,
+      );
+      const agentRefusal = ready && agent !== undefined ? roleRefusal(agent, "builder") : null;
+      if (agentRefusal !== null) {
+        return yield* fired(null, agentRefusal);
+      }
+      const events: PlannedOrchestrationEvent[] = [
+        yield* planned(command, "card", command.cardId, command.createdAt, {
+          type: "card.created",
+          payload: {
+            cardId: command.cardId,
+            projectId: project.id,
+            channelId: null,
+            parentCardId: null,
+            title: command.title,
+            spec: command.spec,
+            specState: ready ? "approved" : "draft",
+            tags: [],
+            // Only a schedule with fixed criteria starts ready, unattended; anything else is triaged by a person.
+            status: ready ? "ready" : "triage",
+            ownerHumanId: CHANNEL_HUMAN_AUTHOR_ID,
+            baseBranch: null,
+            acceptance: { criteria: trigger.template.criteria, state: ready ? "confirmed" : "draft" },
+            budgetCapUsd: policy.budgets.cardDefaultUsd,
+            origin: { kind: "trigger", id: trigger.id },
+            unattended: ready,
+            createdBy: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
+            createdAt: command.createdAt,
+            updatedAt: command.createdAt,
+          },
+        }),
+      ];
+      if (ready && agent !== undefined) {
+        events.push(
+          yield* planned(command, "card", command.cardId, command.createdAt, {
+            type: "card.delegate-changed",
+            payload: { cardId: command.cardId, delegateAgentId: agent.id, updatedAt: command.createdAt },
+          }),
+        );
+      }
+      events.push(yield* fired(command.cardId, null));
+      return events;
+    }
+
+    // Runs outside cards (conversations, leads); card sessions record through card.spend.record.
+    case "project.spend.record": {
+      yield* requireProject({ readModel, command, projectId: command.projectId });
+      if (!Number.isFinite(command.costUsd) || command.costUsd < 0) {
+        return yield* refuse(command, "A turn's cost must be a finite amount of zero or more.");
+      }
+      const { type: _type, commandId: _commandId, ...payload } = command;
+      return yield* planned(command, "project", command.projectId, command.recordedAt, {
+        type: "project.spend-recorded",
+        payload,
+      });
+    }
+
+    // Agents only propose lessons; a person approves, dismisses or removes them.
+    case "card.lesson.propose": {
+      const project = yield* requireProject({ readModel, command, projectId: command.projectId });
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      if (card.projectId !== project.id) {
+        return yield* refuse(command, `Card '${card.id}' is not in project '${project.id}'.`);
+      }
+      const text = command.text.trim();
+      if (text.length === 0) {
+        return yield* refuse(command, "A lesson needs some text.");
+      }
+      if (text.length > LESSON_TEXT_MAX_CHARS) {
+        return yield* refuse(command, LESSON_TOO_LONG_REASON);
+      }
+      if ((project.knowledge ?? []).some((lesson) => lesson.lessonId === command.lessonId)) {
+        return yield* refuse(command, "This lesson was already proposed.");
+      }
+      return yield* planned(command, "project", project.id, command.createdAt, {
+        type: "project.knowledge-proposed",
+        payload: {
+          projectId: project.id,
+          lesson: {
+            lessonId: command.lessonId,
+            kind: command.kind,
+            text,
+            paths: command.paths,
+            state: "proposed",
+            sourceCardId: card.id,
+            createdAt: command.createdAt,
+          },
+        },
+      });
+    }
+
+    case "project.knowledge.approve":
+    case "project.knowledge.dismiss":
+    case "project.knowledge.remove": {
+      const project = yield* requireProject({ readModel, command, projectId: command.projectId });
+      const lesson = (project.knowledge ?? []).find((entry) => entry.lessonId === command.lessonId);
+      if (command.type === "project.knowledge.remove") {
+        yield* refuseIf(command, lesson === undefined ? NO_LESSON_REASON : null);
+      } else if (lesson?.state !== "proposed") {
+        return yield* refuse(command, LESSON_NOT_PROPOSED_REASON);
+      }
+      const occurredAt = yield* nowIso;
+      return yield* planned(command, "project", project.id, occurredAt, {
+        type:
+          command.type === "project.knowledge.approve"
+            ? "project.knowledge-added"
+            : command.type === "project.knowledge.dismiss"
+              ? "project.knowledge-dismissed"
+              : "project.knowledge-removed",
+        payload: { projectId: project.id, lessonId: command.lessonId, decidedAt: occurredAt },
+      });
+    }
+
+    case "card.outcome.record":
+    case "card.outcome.set": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      if (!isFinishedCardStatus(card.status)) {
+        return yield* refuse(command, OUTCOME_UNFINISHED_REASON);
+      }
+      const occurredAt = yield* nowIso;
+      return yield* planned(command, "card", card.id, occurredAt, {
+        type: "card.outcome-recorded",
+        payload: {
+          cardId: card.id,
+          outcome:
+            command.type === "card.outcome.record"
+              ? command.outcome
+              : {
+                  state: command.outcome,
+                  decidedAt: occurredAt,
+                  signals: [{ code: OUTCOME_SET_BY_PERSON_CODE, text: command.note }],
+                },
+        },
+      });
+    }
+
+    // A revert is a new card whose git work the server does; it enters review with evidence, no agent.
+    case "card.revert": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      if (card.status !== "landed" || card.landedSha === null) {
+        return yield* refuse(command, REVERT_NOT_LANDED_REASON);
+      }
+      if (
+        (readModel.cards ?? []).some(
+          (other) => other.revertsCardId === card.id && other.status !== "abandoned",
+        )
+      ) {
+        return yield* refuse(command, REVERT_IN_PROGRESS_REASON);
+      }
+      yield* requireCardAbsent({ readModel, command, cardId: command.revertCardId });
+      return [
+        yield* planned(command, "card", command.revertCardId, command.createdAt, {
+          type: "card.created",
+          payload: {
+            cardId: command.revertCardId,
+            projectId: card.projectId,
+            channelId: card.channelId,
+            parentCardId: null,
+            title: `Revert ${card.title}`,
+            spec: `Revert the changes "${card.title}" landed as ${card.landedSha}.`,
+            specState: "approved",
+            tags: card.tags,
+            // Not queued for an agent: the revert reactor does its work and sends it to review.
+            status: "inProgress",
+            ownerHumanId: card.ownerHumanId,
+            baseBranch: card.baseBranch,
+            acceptance: { criteria: revertCriteria(card.title), state: "confirmed" },
+            budgetCapUsd: policyOf(readModel, card.projectId).budgets.cardDefaultUsd,
+            origin: { kind: "revert", id: card.id },
+            revertsCardId: card.id,
+            createdBy: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
+            createdAt: command.createdAt,
+            updatedAt: command.createdAt,
+          },
+        }),
+        yield* planned(command, "card", card.id, command.createdAt, {
+          type: "card.revert-requested",
+          payload: {
+            cardId: card.id,
+            revertCardId: command.revertCardId,
+            landedSha: card.landedSha,
+            requestedAt: command.createdAt,
+          },
+        }),
+      ];
+    }
+
+    case "card.checkpoint.restore": {
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        "A card that has landed or been abandoned has no worktree to restore.",
+      );
+      const owner = liveOwnerRun(readModel, card.id);
+      const ownerTurn =
+        owner === undefined
+          ? null
+          : (readModel.threads.find((thread) => thread.id === owner.threadId)?.session?.activeTurnId ??
+            null);
+      if (card.paused === null || ownerTurn !== null) {
+        return yield* refuse(command, RESTORE_NEEDS_STOPPED_REASON);
+      }
+      const occurredAt = yield* nowIso;
+      return yield* planned(command, "card", card.id, occurredAt, {
+        type: "card.checkpoint-restore-requested",
+        payload: { cardId: card.id, turnCount: command.turnCount, requestedAt: occurredAt },
       });
     }
 

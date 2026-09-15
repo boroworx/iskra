@@ -143,9 +143,32 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "card.verifier.override":
     case "card.verifier.rerun":
     case "card.services.restart":
+    case "card.plan.propose":
+    case "card.plan.approve":
+    case "card.plan.slice.release":
+    case "card.coordinator.message":
+    case "card.coordinator.pause":
+    case "card.migration.enumerate":
+    case "card.migration.phase":
+    case "card.migration.items.update":
+    case "card.outcome.record":
+    case "card.outcome.set":
+    case "card.revert":
+    case "card.checkpoint.restore":
       return {
         aggregateKind: "card",
         aggregateId: command.cardId,
+      };
+    // Decided on the project: the fire and the lesson are recorded there, as the receipt's last event.
+    case "card.trigger.intake":
+    case "card.lesson.propose":
+    case "project.spend.record":
+    case "project.knowledge.approve":
+    case "project.knowledge.dismiss":
+    case "project.knowledge.remove":
+      return {
+        aggregateKind: "project",
+        aggregateId: command.projectId,
       };
     case "channel.create":
     case "channel.update":

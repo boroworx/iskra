@@ -1,4 +1,5 @@
 import {
+  CARD_PLAN_DRAFTING,
   CARD_VERIFICATION_OFF,
   CardId,
   type CardMove,
@@ -10,6 +11,9 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   AUTO_MERGE_OFF_REASON,
+  AUTO_MERGE_NEEDS_VERIFIED_REASON,
+  TRIGGER_WORK_WAITS_REASON,
+  autoMergeSatisfactionReason,
   BLOCKED_REASON,
   NO_CHECKS_REASON,
   PENDING_CI_REASON,
@@ -277,8 +281,15 @@ describe("card contract gates", () => {
   });
 
   it("lands without a person only a plan child into its plan's branch, or under auto-merge", () => {
-    const plan = { kind: "plan" as const, branch: "iskra/plan-limits" };
-    const child = { evidence, baseBranch: "iskra/plan-limits", verification: CARD_VERIFICATION_OFF };
+    const plan = { kind: "plan" as const, branch: "iskra/plan-limits", plan: null };
+    const child = {
+      evidence,
+      baseBranch: "iskra/plan-limits",
+      verification: CARD_VERIFICATION_OFF,
+      attemptGroupId: null,
+      unattended: false,
+      createdBy: { kind: "human" as const, id: "human" },
+    };
     const begin = (overrides: Partial<Parameters<typeof landingBeginRefusal>[0]>) =>
       landingBeginRefusal({
         card: child,
@@ -301,19 +312,62 @@ describe("card contract gates", () => {
     expect(begin({ verificationRequired: true, card: verified("overridden", "old") })).toBeNull();
     expect(begin({})).toBeNull();
     expect(begin({ parent: undefined })).toBe(PLAN_CHILD_LANDING_REASON);
-    expect(begin({ parent: { kind: "task", branch: plan.branch } })).toBe(PLAN_CHILD_LANDING_REASON);
+    expect(begin({ parent: { kind: "task", branch: plan.branch, plan: null } })).toBe(
+      PLAN_CHILD_LANDING_REASON,
+    );
     expect(begin({ card: { ...child, baseBranch: "main" } })).toBe(PLAN_CHILD_LANDING_REASON);
     expect(begin({ card: { ...child, evidence: { ...evidence, passed: false } } })).toBe(
       PLAN_CHILD_LANDING_REASON,
     );
     expect(begin({ reason: "autoMergePolicy" })).toBe(AUTO_MERGE_OFF_REASON);
+    // A plan's children may also land into the integration branch the plan named at approval.
     expect(
-      begin({
-        reason: "autoMergePolicy",
-        parent: undefined,
-        policy: { ...policy, autoMerge: { enabled: true, minSatisfaction: 0.9 } },
-      }),
+      begin({ parent: { kind: "plan", branch: null, plan: { ...CARD_PLAN_DRAFTING, integrationBranch: plan.branch } } }),
     ).toBeNull();
+  });
+
+  it("auto-merges only verified, attended work whose hidden scenarios held", () => {
+    const autoMerge = (
+      card: Partial<Parameters<typeof landingBeginRefusal>[0]["card"]>,
+      minSatisfaction = 0.9,
+    ) =>
+      landingBeginRefusal({
+        card: {
+          evidence,
+          baseBranch: null,
+          verification: CARD_VERIFICATION_OFF,
+          attemptGroupId: null,
+          unattended: false,
+          createdBy: { kind: "human", id: "human" },
+          ...card,
+        },
+        parent: undefined,
+        policy: { ...policy, autoMerge: { enabled: true, minSatisfaction } },
+        reason: "autoMergePolicy",
+        verificationRequired: false,
+      });
+    const passed = (satisfied: number, total: number, headSha = "abc123") => ({
+      ...CARD_VERIFICATION_OFF,
+      state: "passed" as const,
+      headSha,
+      satisfaction: total === 0 ? null : { satisfied, total },
+    });
+    expect(autoMerge({})).toBe(AUTO_MERGE_NEEDS_VERIFIED_REASON);
+    expect(autoMerge({ verification: passed(0, 0) })).toBe(AUTO_MERGE_NEEDS_VERIFIED_REASON);
+    expect(autoMerge({ verification: passed(1, 1, "old") })).toBe(AUTO_MERGE_NEEDS_VERIFIED_REASON);
+    // An override lets a person merge, never auto-merge.
+    expect(
+      autoMerge({ verification: { ...passed(1, 1), state: "overridden" } }),
+    ).toBe(AUTO_MERGE_NEEDS_VERIFIED_REASON);
+    expect(autoMerge({ verification: passed(1, 1) })).toBeNull();
+    expect(autoMerge({ verification: passed(1, 2) })).toBe(autoMergeSatisfactionReason(1, 2, 90));
+    expect(autoMerge({ verification: passed(1, 2) }, 0.5)).toBeNull();
+    expect(autoMerge({ verification: passed(1, 1), unattended: true })).toBe(
+      TRIGGER_WORK_WAITS_REASON,
+    );
+    expect(
+      autoMerge({ verification: passed(1, 1), origin: { kind: "trigger", id: "nightly" } }),
+    ).toBe(TRIGGER_WORK_WAITS_REASON);
   });
 
   it("refuses criteria and questions that can't be held to", () => {

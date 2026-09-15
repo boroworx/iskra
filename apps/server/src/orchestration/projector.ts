@@ -77,7 +77,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Predicate from "effect/Predicate";
 
-import { cardPatches, newCard, touchCard } from "./cardRules.ts";
+import { cardPatches, newCard, touchCard, withSpend } from "./cardRules.ts";
 import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from "./Errors.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
@@ -486,6 +486,22 @@ function withChannelPatch(model: OrchestrationReadModel, event: ChannelPatchEven
       ...patch,
     })),
   };
+}
+
+function withProject(
+  model: OrchestrationReadModel,
+  projectId: string,
+  patch: (project: OrchestrationReadModel["projects"][number]) => OrchestrationReadModel["projects"][number],
+): OrchestrationReadModel {
+  return { ...model, projects: patchById(model.projects, projectId, patch) };
+}
+
+function withProjectSpend(
+  model: OrchestrationReadModel,
+  projectId: string,
+  turn: { readonly agentId: string; readonly costUsd: number; readonly recordedAt: string },
+): OrchestrationReadModel {
+  return withProject(model, projectId, (project) => ({ ...project, spend: withSpend(project.spend, turn) }));
 }
 
 function withCardPatches(
@@ -1405,10 +1421,68 @@ export function projectEvent(
     case "card.delivery-updated":
       return Effect.succeed(nextBase);
 
+    // A card's spend also counts toward its project's month.
+    case "card.spend-recorded": {
+      const withCard = withCardPatches(nextBase, cardPatches(event));
+      const projectId = withCard.cards?.find((card) => card.id === event.payload.cardId)?.projectId;
+      return Effect.succeed(
+        projectId === undefined ? withCard : withProjectSpend(withCard, projectId, event.payload),
+      );
+    }
+
+    case "project.spend-recorded":
+      return Effect.succeed(withProjectSpend(nextBase, event.payload.projectId, event.payload));
+
+    case "project.knowledge-proposed": {
+      const { projectId, lesson } = event.payload;
+      return Effect.succeed(
+        withProject(nextBase, projectId, (project) => ({
+          ...project,
+          knowledge: [
+            ...(project.knowledge ?? []).filter((entry) => entry.lessonId !== lesson.lessonId),
+            lesson,
+          ],
+        })),
+      );
+    }
+
+    // Only proposed and approved lessons stay in the read model.
+    case "project.knowledge-added":
+    case "project.knowledge-dismissed":
+    case "project.knowledge-removed": {
+      const { projectId, lessonId } = event.payload;
+      const approved = event.type === "project.knowledge-added";
+      return Effect.succeed(
+        withProject(nextBase, projectId, (project) => ({
+          ...project,
+          knowledge: (project.knowledge ?? []).flatMap((lesson) =>
+            lesson.lessonId !== lessonId
+              ? [lesson]
+              : approved
+                ? [{ ...lesson, state: "approved" as const }]
+                : [],
+          ),
+        })),
+      );
+    }
+
+    // Fires are read from their projection; nothing decides on them.
+    case "project.trigger-fired":
+      return Effect.succeed(nextBase);
+
+    case "card.plan-proposed":
+    case "card.plan-approved":
+    case "card.plan-slice-released":
+    case "card.migration-enumerated":
+    case "card.migration-phase-changed":
+    case "card.migration-items-updated":
+    case "card.migration-instructions-set":
+    case "card.outcome-recorded":
+    case "card.revert-requested":
+    case "card.checkpoint-restore-requested":
     case "card.message-posted":
     case "card.spec-submitted":
     case "card.snoozed":
-    case "card.spend-recorded":
     case "card.linear-synced":
     case "card.budget-set":
     case "card.unpriced-accepted":

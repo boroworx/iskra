@@ -23,6 +23,7 @@ import {
   ALREADY_ANSWERED_REASON,
   ANSWER_OPTION_REASON,
   AUTO_MERGE_OFF_REASON,
+  AUTO_MERGE_NEEDS_VERIFIED_REASON,
   NO_VERIFIER_RUNNING_REASON,
   OPEN_ASSIST_RUNS_REASON,
   RESTART_SERVICES_REASON,
@@ -384,8 +385,37 @@ it.layer(NodeServices.layer)("decider card contract", (it) => {
       expect(yield* refusal(reviewed, landingBegin(cardId, "autoMergePolicy"))).toBe(
         AUTO_MERGE_OFF_REASON,
       );
-      const autoMerged = yield* applyTo(reviewed, [
-        setPolicy({ autoMerge: { enabled: true, minSatisfaction: 0.9 } }),
+      // Auto-merge merges only work a verifier passed, with at least one hidden scenario.
+      const autoMergeOn = yield* applyTo(reviewed, [
+        setPolicy({ autoMerge: { enabled: true, minSatisfaction: 0.9 }, verifier: { mode: "on" } }),
+      ]);
+      expect(yield* refusal(autoMergeOn, landingBegin(cardId, "autoMergePolicy"))).toBe(
+        AUTO_MERGE_NEEDS_VERIFIED_REASON,
+      );
+      const autoMerged = yield* applyTo(autoMergeOn, [
+        {
+          type: "card.verifier.select",
+          commandId: nextCommandId(),
+          cardId,
+          headSha: "abc123",
+          verifier: {
+            agentId: backend,
+            instanceId: ProviderInstanceId.make("claudeAgent"),
+            model: "claude-haiku-4-5",
+            reason: { code: "sameModelVerifier", text: "Only the builder's model can check it." },
+          },
+        },
+        {
+          type: "card.verdict.record",
+          commandId: nextCommandId(),
+          verdictId: "verdict-auto-merge",
+          cardId,
+          headSha: "abc123",
+          criteria: [{ criterionId: "c1", pass: true, evidence: "limits.test.ts", note: "" }],
+          diffJudge: { matchesCriteria: true, concerns: [] },
+          scenarios: [{ scenarioId: "holdout-1", satisfied: true }],
+          recordedAt: now,
+        },
         landingBegin(cardId, "autoMergePolicy"),
       ]);
       expect(cardIn(autoMerged)?.status).toBe("landing");
@@ -685,23 +715,27 @@ it.layer(NodeServices.layer)("decider card contract", (it) => {
 
   it.effect("auto-merge and a template that always verifies wait for the verifier too", () =>
     Effect.gen(function* () {
+      // The project's verifier is off; the template verifies its cards anyway.
       const reviewed = yield* applyCommands([
         createProject(),
-        setPolicy({ autoMerge: { enabled: true, minSatisfaction: 0.9 } }),
+        setPolicy(),
         createAgent(backend, { blueprint: { ...DEFAULT_AGENT_BLUEPRINT, verify: "always" } }),
         createAgent(frontend),
         ...cardInProgress(),
         recordEvidence("abc123", [check("test", 0)]),
         enterReview("abc123"),
       ]);
+      expect(yield* refusal(reviewed, onCard("card.merge.approve"))).toBe(VERIFIER_NOT_PASSED_REASON);
       const autoMerge: OrchestrationCommand = {
         type: "card.landing.begin",
         commandId: nextCommandId(),
         cardId,
         reason: "autoMergePolicy",
       };
-      expect(yield* refusal(reviewed, autoMerge)).toBe(VERIFIER_NOT_PASSED_REASON);
-      expect(yield* refusal(reviewed, onCard("card.merge.approve"))).toBe(VERIFIER_NOT_PASSED_REASON);
+      const autoMergeOn = yield* applyTo(reviewed, [
+        setPolicy({ autoMerge: { enabled: true, minSatisfaction: 0.9 }, verifier: { mode: "on" } }),
+      ]);
+      expect(yield* refusal(autoMergeOn, autoMerge)).toBe(AUTO_MERGE_NEEDS_VERIFIED_REASON);
     }),
   );
 
