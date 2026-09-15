@@ -16,6 +16,7 @@ import { TestClock } from "effect/testing";
 
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import * as CardWatchdog from "./CardWatchdog.ts";
+import { CardWorkspace } from "./CardWorkspace.ts";
 import { HostAdmission } from "./HostAdmission.ts";
 import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
@@ -36,6 +37,8 @@ const readModel = {
       spentUsd: 0,
       budgetCapUsd: 10,
       checks: null,
+      worktreePath: null,
+      verification: { state: "off" },
     },
   ],
   liveRuns: [
@@ -47,8 +50,13 @@ const readModel = {
  * The watchdog over fakes for everything but its own clock-driven loop: the real engine's work
  * never has to run under the test clock, so moving the clock only drives the watchdog's tick.
  */
-const makeWatchdog = (dispatched: Ref.Ref<ReadonlyArray<OrchestrationCommand>>) =>
+const makeWatchdog = (
+  dispatched: Ref.Ref<ReadonlyArray<OrchestrationCommand>>,
+  model: OrchestrationReadModel = readModel,
+  workspace = Layer.mock(CardWorkspace)({ serviceHealth: () => Effect.succeed([]) }),
+) =>
   CardWatchdog.layer.pipe(
+    Layer.provide(workspace),
     Layer.provide(
       Layer.mock(OrchestrationEngineService)({
         dispatch: (command) =>
@@ -58,7 +66,7 @@ const makeWatchdog = (dispatched: Ref.Ref<ReadonlyArray<OrchestrationCommand>>) 
     ),
     Layer.provide(
       Layer.mock(ProjectionSnapshotQuery)({
-        getCommandReadModel: () => Effect.succeed(readModel),
+        getCommandReadModel: () => Effect.succeed(model),
         getThreadShellById: () =>
           Effect.succeed(
             Option.some({
@@ -109,5 +117,51 @@ it.effect("checks live owners on its minute tick and nudges one left idle for fi
         ["message", null, "builder"],
       ]);
     }).pipe(Effect.provide(makeWatchdog(dispatched)), Effect.scoped);
+  }),
+);
+
+it.effect("reports a card's service down for a minute on its tick, restarts it, and says when it is back", () =>
+  Effect.gen(function* () {
+    const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationCommand>>([]);
+    let up = false;
+    const reviewModel = {
+      cards: [
+        {
+          ...readModel.cards![0]!,
+          id: CardId.make("card-review"),
+          status: "inReview",
+          worktreePath: "/tmp/card-review",
+        },
+      ],
+      liveRuns: [],
+    } as unknown as OrchestrationReadModel;
+    const workspace = Layer.mock(CardWorkspace)({
+      serviceHealth: () =>
+        Effect.sync(() => [{ kind: "service" as const, name: "api", port: 42_000, up }]),
+      ensureServices: () =>
+        Effect.sync(() => {
+          up = true;
+        }),
+    });
+    yield* Effect.gen(function* () {
+      const watchdog = yield* CardWatchdog.CardWatchdog;
+      yield* watchdog.start();
+      yield* watchdog.drain;
+      expect(yield* Ref.get(dispatched)).toEqual([]);
+
+      // The next tick finds it down a minute: reported, restarted, and back.
+      yield* TestClock.adjust("1 minute");
+      const commands = yield* Ref.get(dispatched).pipe(
+        Effect.repeat({ until: (all) => all.length >= 2 }),
+      );
+      expect(recorded(commands)).toEqual([
+        ["error", "serviceDown", null],
+        ["message", "serviceRestored", null],
+      ]);
+
+      yield* TestClock.adjust("2 minutes");
+      yield* watchdog.drain;
+      expect(yield* Ref.get(dispatched)).toHaveLength(2);
+    }).pipe(Effect.provide(makeWatchdog(dispatched, reviewModel, workspace)), Effect.scoped);
   }),
 );

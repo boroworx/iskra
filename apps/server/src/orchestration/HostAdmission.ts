@@ -57,7 +57,14 @@ export const WAITING_FOR_CAPACITY: Reason = {
 /** How long a denied heavy job waits before the machine is asked again. */
 export const ADMISSION_RETRY = "15 seconds";
 
-export type HeavyJobKind = "checks" | "runChecks" | "journey" | "evidence" | "setup" | "landing";
+export type HeavyJobKind =
+  | "checks"
+  | "runChecks"
+  | "journey"
+  | "holdout"
+  | "evidence"
+  | "setup"
+  | "landing";
 
 /** A heavy job asking for the machine. A card-scoped job shows why it waits on its card. */
 export interface HeavyJob {
@@ -69,6 +76,8 @@ export interface HeavyJob {
 }
 
 export interface HeavyJobEntry {
+  // Stable for the job's whole life, requeues included.
+  readonly id: number;
   readonly job: HeavyJob;
   // Epoch millis: when it first asked (kept across a requeue), and when it last started.
   readonly enqueuedAt: number;
@@ -104,8 +113,16 @@ export class HostAdmission extends Context.Service<
      * queue, where it starts again from scratch. Returns the job, or null when none runs.
      */
     readonly cancelLowestPriority: Effect.Effect<HeavyJob | null>;
+    /**
+     * Interrupts the running job `id`: "requeue" puts it back in the queue to start again from
+     * scratch; "stop" ends its caller with a defect saying it ran past its limit. Returns the job,
+     * or null when no such job runs.
+     */
+    readonly cancel: (id: number, how: HeavyJobCancel) => Effect.Effect<HeavyJob | null>;
   }
 >()("@iskra/cli/orchestration/HostAdmission") {}
+
+export type HeavyJobCancel = "requeue" | "stop";
 
 interface Entry {
   readonly id: number;
@@ -113,7 +130,7 @@ interface Entry {
   readonly enqueuedAt: number;
   startedAt: number | null;
   admit: Deferred.Deferred<void>;
-  cancel: Deferred.Deferred<void>;
+  cancel: Deferred.Deferred<HeavyJobCancel>;
   // Whether the card currently shows this job's wait reason.
   noted: boolean;
 }
@@ -232,7 +249,7 @@ export const make = (sample: Effect.Effect<HostSample>) =>
           enqueuedAt: yield* nowMillis,
           startedAt: null,
           admit: yield* Deferred.make<void>(),
-          cancel: yield* Deferred.make<void>(),
+          cancel: yield* Deferred.make<HeavyJobCancel>(),
           noted: false,
         };
         while (true) {
@@ -243,19 +260,23 @@ export const make = (sample: Effect.Effect<HostSample>) =>
             return yield* effect.pipe(
               Effect.map((value) => ({ done: true as const, value })),
               Effect.raceFirst(
-                Deferred.await(entry.cancel).pipe(Effect.as({ done: false as const })),
+                Deferred.await(entry.cancel).pipe(Effect.map((how) => ({ done: false as const, how }))),
               ),
             );
           }).pipe(Effect.ensuring(leave(entry)));
           if (outcome.done) return outcome.value;
-          // Cancelled for capacity: ask again, keeping its place by original wait time.
+          if (outcome.how === "stop") {
+            return yield* Effect.die(new Error(`${job.label} was stopped: it ran past its time limit.`));
+          }
+          // Cancelled for capacity or a hang: ask again, keeping its place by original wait time.
           entry.startedAt = null;
           entry.admit = yield* Deferred.make<void>();
-          entry.cancel = yield* Deferred.make<void>();
+          entry.cancel = yield* Deferred.make<HeavyJobCancel>();
         }
       });
 
     const view = (entry: Entry): HeavyJobEntry => ({
+      id: entry.id,
       job: entry.job,
       enqueuedAt: entry.enqueuedAt,
       startedAt: entry.startedAt,
@@ -273,8 +294,16 @@ export const make = (sample: Effect.Effect<HostSample>) =>
       const victim = [...running].sort(byQueueOrder).at(-1);
       return victim === undefined
         ? Effect.succeed(null)
-        : Deferred.succeed(victim.cancel, undefined).pipe(Effect.as(victim.job));
+        : Deferred.succeed(victim.cancel, "requeue").pipe(Effect.as(victim.job));
     });
+
+    const cancel = (id: number, how: HeavyJobCancel) =>
+      Effect.suspend(() => {
+        const entry = running.find((candidate) => candidate.id === id);
+        return entry === undefined
+          ? Effect.succeed(null)
+          : Deferred.succeed(entry.cancel, how).pipe(Effect.as(entry.job));
+      });
 
     // Asks the machine again on a fixed spacing while anything waits or runs.
     yield* pump.pipe(
@@ -287,7 +316,7 @@ export const make = (sample: Effect.Effect<HostSample>) =>
       Effect.forkScoped,
     );
 
-    return HostAdmission.of({ run, snapshot, cancelLowestPriority });
+    return HostAdmission.of({ run, snapshot, cancelLowestPriority, cancel });
   });
 
 /** Load from os.loadavg, free memory from HostResources (which counts reclaimable cache on macOS). */

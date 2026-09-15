@@ -17,7 +17,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Schedule from "effect/Schedule";
-import type * as Scope from "effect/Scope";
+import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
 import { ProjectionRunLivenessRepositoryLive } from "../persistence/Layers/ProjectionRunLiveness.ts";
@@ -28,15 +28,20 @@ import {
   type ProjectionThreadActivity,
 } from "../persistence/Services/ProjectionThreadActivities.ts";
 import { forkParked } from "../serverActivation.ts";
+import { CardWorkspace } from "./CardWorkspace.ts";
 import { HostAdmission } from "./HostAdmission.ts";
 import * as OrchestrationEngine from "./Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts";
 import {
   checksHung,
+  hungJobAction,
   memoryPressureActions,
   MEMORY_PRESSURE_REASON,
+  SERVICE_RESTORED_CODE,
   watchOwnerRun,
+  watchServices,
   type OwnerRunFacts,
+  type ServiceProbe,
   type WatchdogAction,
   type WatchdogRule,
 } from "./watchdogRules.ts";
@@ -56,6 +61,58 @@ export class CardWatchdog extends Context.Service<
     readonly drain: Effect.Effect<void>;
   }
 >()("@iskra/cli/orchestration/CardWatchdog") {}
+
+/** The reason a reactor step that died is recorded with on its card. */
+export const REACTOR_FAILED_CODE = "reactorFailed";
+
+/**
+ * Wraps a reactor's per-card step: a failure or defect (never an interrupt) is logged and, when the
+ * step has a card, recorded on it as an error with reason `reactorFailed`, so a job that died shows
+ * on the card instead of only in the server log.
+ */
+export const catchReactorCause =
+  (input: {
+    readonly engine: OrchestrationEngine.OrchestrationEngineService["Service"];
+    readonly reactor: string;
+    readonly cardId: CardId | null;
+  }) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A | void, never, R> =>
+    effect.pipe(
+      Effect.catchCause((cause) => {
+        if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause as Cause.Cause<never>);
+        const error = Cause.squash(cause);
+        const detail = error instanceof Error ? error.message : String(error);
+        const text = `${input.reactor} stopped on this card: ${detail}`.slice(0, 500);
+        const { cardId } = input;
+        return Effect.logWarning(`${input.reactor} failed`, { cardId, cause: Cause.pretty(cause) }).pipe(
+          Effect.andThen(
+            cardId === null
+              ? Effect.void
+              : Effect.gen(function* () {
+                  const now = yield* DateTime.now;
+                  const activityId = `reactor-failed:${input.reactor}:${cardId}:${DateTime.toEpochMillis(now)}`;
+                  yield* input.engine.dispatch({
+                    type: "card.activity.record",
+                    commandId: CommandId.make(activityId),
+                    activityId,
+                    cardId,
+                    kind: "error",
+                    author: { kind: "system", id: CHANNEL_SYSTEM_AUTHOR_ID },
+                    body: text,
+                    runThreadId: null,
+                    deliverTo: null,
+                    elicitation: null,
+                    answers: null,
+                    status: null,
+                    evidenceId: null,
+                    reason: { code: REACTOR_FAILED_CODE, text },
+                    createdAt: DateTime.formatIso(now),
+                  });
+                }).pipe(Effect.catchCause(() => Effect.void)),
+          ),
+        );
+      }),
+    );
 
 const EPOCH = "1970-01-01T00:00:00.000Z";
 // ponytail: checks triggered by tool calls run at most this often; the tick covers the rest.
@@ -103,11 +160,17 @@ const make = Effect.gen(function* () {
   const threadActivities = yield* ProjectionThreadActivityRepository;
   const liveness = yield* ProjectionRunLivenessRepository;
   const admission = yield* HostAdmission;
+  const workspace = yield* CardWorkspace;
+  const layerScope = yield* Scope.Scope;
   const nowMillis = Effect.map(DateTime.now, DateTime.toEpochMillis);
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
   // In memory, per session: a restarted server starts every session with a clean slate.
   const strikes = new Map<ThreadId, Map<WatchdogRule, { count: number; at: number }>>();
+  // How often each heavy job was started over for hanging, by its admission id.
+  const hungStrikes = new Map<number, number>();
+  // Each watched card's ports that stopped listening, and whether that outage was reported.
+  const outages = new Map<CardId, ReadonlyMap<string, { readonly since: number; readonly reported: boolean }>>();
   const flaggedChecks = new Set<string>();
   const interruptedForMemory = new Set<ThreadId>();
   let lastCheckAt = 0;
@@ -210,6 +273,30 @@ const make = Effect.gen(function* () {
     }
   });
 
+  /** Brings a service (or the preview's run script) back, and says so on the card once it answers. */
+  const restartService = (cardId: CardId, down: ServiceProbe) =>
+    Effect.gen(function* () {
+      if (down.kind === "service") {
+        yield* workspace.ensureServices(cardId);
+      } else {
+        yield* workspace.runScript({ cardId, scriptId: down.name });
+      }
+      const text = `${down.kind === "service" ? `Service ${down.name}` : "The preview"} is running again.`;
+      yield* record({
+        activityId: `watchdog-restored:${cardId}:${down.name}:${yield* nowMillis}`,
+        cardId,
+        threadId: null,
+        kind: "message",
+        body: text,
+        reason: { code: SERVICE_RESTORED_CODE, text },
+        forBuilder: false,
+      });
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.logWarning("card watchdog could not restart a service", { cardId, error: error.message }),
+      ),
+    );
+
   const ownerFacts = Effect.fn("CardWatchdog.ownerFacts")(function* (
     run: OrchestrationLiveRun & { readonly cardId: CardId },
     card: OrchestrationCard,
@@ -245,8 +332,11 @@ const make = Effect.gen(function* () {
     lastCheckAt = now;
     const readModel = yield* snapshotQuery.getCommandReadModel();
     const cards = new Map((readModel.cards ?? []).map((card) => [card.id, card] as const));
+    // A verifier session is held to the same liveness rules as the owner.
     const owners = (readModel.liveRuns ?? []).flatMap((run) =>
-      run.role === "owner" && run.cardId !== null ? [{ ...run, cardId: run.cardId }] : [],
+      (run.role === "owner" || run.role === "verifier") && run.cardId !== null
+        ? [{ ...run, cardId: run.cardId }]
+        : [],
     );
     const liveThreads = new Set(owners.map((run) => run.threadId));
     for (const threadId of strikes.keys()) {
@@ -285,6 +375,66 @@ const make = Effect.gen(function* () {
     }
 
     const snapshot = yield* admission.snapshot;
+
+    // Heavy jobs past their limit: started over once, then stopped.
+    const liveJobIds = new Set([...snapshot.running, ...snapshot.waiting].map((entry) => entry.id));
+    for (const id of hungStrikes.keys()) {
+      if (!liveJobIds.has(id)) hungStrikes.delete(id);
+    }
+    for (const entry of snapshot.running) {
+      const struck = hungStrikes.get(entry.id) ?? 0;
+      const action = hungJobAction(entry, struck, now);
+      if (action === null) continue;
+      hungStrikes.set(entry.id, struck + 1);
+      yield* admission.cancel(entry.id, action.cancel);
+      if (entry.job.cardId !== undefined) {
+        yield* record({
+          activityId: `watchdog-hung:${entry.job.cardId}:${entry.enqueuedAt}:${entry.id}:${struck + 1}`,
+          cardId: entry.job.cardId,
+          threadId: null,
+          kind: "error",
+          body: action.reason.text,
+          reason: action.reason,
+          forBuilder: false,
+        });
+      }
+    }
+
+    // Services and previews of cards in review, verifying, or mid-blueprint must keep listening.
+    for (const cardId of outages.keys()) {
+      if (!cards.has(cardId)) outages.delete(cardId);
+    }
+    for (const card of cards.values()) {
+      const watched =
+        card.paused === null &&
+        card.worktreePath !== null &&
+        (card.status === "inReview" ||
+          card.verification.state === "running" ||
+          snapshot.running.some((entry) => entry.job.cardId === card.id));
+      if (!watched) {
+        outages.delete(card.id);
+        continue;
+      }
+      const probes = yield* workspace
+        .serviceHealth(card.id)
+        .pipe(Effect.orElseSucceed((): ReadonlyArray<ServiceProbe> => []));
+      const next = watchServices({ probes, outages: outages.get(card.id) ?? new Map(), now });
+      outages.set(card.id, next.outages);
+      for (const down of next.report) {
+        yield* record({
+          activityId: `watchdog-${down.reason.code}:${card.id}:${down.name}:${now}`,
+          cardId: card.id,
+          threadId: null,
+          kind: "error",
+          body: down.reason.text,
+          reason: down.reason,
+          forBuilder: false,
+        });
+        // A restart can wait a minute on readiness, so it never holds up the rest of the check.
+        yield* restartService(card.id, down).pipe(Effect.forkIn(layerScope));
+      }
+    }
+
     const pressure = memoryPressureActions({ admission: snapshot, activeOwners, now });
     if (pressure.cancelHeavyJob) {
       yield* admission.cancelLowestPriority;

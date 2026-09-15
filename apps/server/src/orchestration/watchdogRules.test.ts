@@ -1,12 +1,16 @@
 import { CardId, ThreadId } from "@iskra/contracts";
 import { describe, expect, it } from "@effect/vitest";
 
+import type { HeavyJobEntry } from "./HostAdmission.ts";
 import {
   checksHung,
+  hungJobAction,
   memoryPressureActions,
   watchOwnerRun,
+  watchServices,
   WATCHDOG_LIMITS,
   type OwnerRunFacts,
+  type ServiceProbe,
   type WatchdogRule,
 } from "./watchdogRules.ts";
 
@@ -163,5 +167,59 @@ describe("memoryPressureActions", () => {
         now,
       }),
     ).toEqual({ cancelHeavyJob: false, interrupt: null });
+  });
+});
+
+describe("hungJobAction", () => {
+  const entry = (kind: string, startedAt: number | null) =>
+    ({
+      id: 1,
+      job: { projectId: "p", priority: 0, label: "Card", kind },
+      enqueuedAt: 0,
+      startedAt,
+    }) as unknown as HeavyJobEntry;
+
+  it("starts a hung job over once, then stops it; setup counts as hung sooner", () => {
+    expect(hungJobAction(entry("checks", now - 61 * MINUTE), 0, now)).toBeNull();
+    expect(hungJobAction(entry("checks", now - 62 * MINUTE), 0, now)).toMatchObject({
+      cancel: "requeue",
+      reason: { code: "checksHung" },
+    });
+    expect(hungJobAction(entry("journey", now - 62 * MINUTE), 1, now)).toMatchObject({
+      cancel: "stop",
+      reason: {
+        code: "checksHung",
+        text: "The journeys hung again after being started over; it was stopped.",
+      },
+    });
+    expect(hungJobAction(entry("setup", now - 12 * MINUTE), 0, now)).toMatchObject({
+      cancel: "requeue",
+      reason: { code: "setupTimedOut" },
+    });
+    expect(hungJobAction(entry("setup", null), 0, now)).toBeNull();
+  });
+});
+
+describe("watchServices", () => {
+  const probe = (up: boolean): ServiceProbe => ({ kind: "service", name: "api", port: 42_000, up });
+
+  it("reports a port down for a minute once per outage, and forgets it once it answers", () => {
+    const first = watchServices({ probes: [probe(false)], outages: new Map(), now });
+    expect(first.report).toEqual([]);
+    const second = watchServices({ probes: [probe(false)], outages: first.outages, now: now + MINUTE });
+    expect(second.report.map((down) => down.reason.code)).toEqual(["serviceDown"]);
+    expect(
+      watchServices({ probes: [probe(false)], outages: second.outages, now: now + 5 * MINUTE }).report,
+    ).toEqual([]);
+    expect(watchServices({ probes: [probe(true)], outages: second.outages, now }).outages.size).toBe(0);
+    const preview = watchServices({
+      probes: [{ kind: "preview", name: "dev", port: 42_003, up: false }],
+      outages: new Map([["preview:dev", { since: now - MINUTE, reported: false }]]),
+      now,
+    });
+    expect(preview.report[0]?.reason).toEqual({
+      code: "previewDown",
+      text: "The preview stopped listening on port 42003; Iskra is restarting it.",
+    });
   });
 });

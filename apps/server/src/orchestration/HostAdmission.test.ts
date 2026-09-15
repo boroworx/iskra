@@ -231,6 +231,34 @@ describe("HostAdmission", () => {
     }),
   );
 
+  it.effect("starts a running job over when asked, and stops it for good when asked to", () =>
+    Effect.gen(function* () {
+      const { layer } = yield* makeWorld;
+      yield* Effect.gen(function* () {
+        const admission = yield* HostAdmission;
+        const attempts = yield* Ref.make(0);
+        const gate = yield* Deferred.make<void>();
+        const suite = Ref.update(attempts, (count) => count + 1).pipe(
+          Effect.andThen(Deferred.await(gate)),
+          Effect.as("done"),
+        );
+        const fiber = yield* admission.run(job("hung", 2, "card-hung"), suite).pipe(Effect.forkChild);
+        const { running } = yield* until((snapshot) => snapshot.running.length === 1);
+        const id = running[0]!.id;
+
+        expect(yield* admission.cancel(id, "requeue")).toMatchObject({ label: "hung" });
+        yield* Ref.get(attempts).pipe(Effect.repeat({ until: (count) => count === 2 }));
+        expect((yield* until((snapshot) => snapshot.running.length === 1)).running[0]!.id).toBe(id);
+
+        expect(yield* admission.cancel(id, "stop")).toMatchObject({ label: "hung" });
+        const exit = yield* Effect.exit(Fiber.join(fiber));
+        expect(String(exit)).toContain("hung was stopped: it ran past its time limit.");
+        expect(yield* admission.snapshot).toMatchObject({ running: [], waiting: [] });
+        expect(yield* admission.cancel(id, "stop")).toBeNull();
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
   it.effect("drops a waiting job whose caller gives up", () =>
     Effect.gen(function* () {
       const { layer } = yield* makeWorld;

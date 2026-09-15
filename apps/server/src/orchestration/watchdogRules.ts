@@ -1,6 +1,6 @@
 import type { CardId, CardPriority, CardStatus, Reason, ThreadId } from "@iskra/contracts";
 
-import type { HostAdmissionSnapshot } from "./HostAdmission.ts";
+import type { HeavyJobEntry, HostAdmissionSnapshot } from "./HostAdmission.ts";
 import { priorityRank } from "./HostAdmission.ts";
 
 const MINUTE = 60_000;
@@ -19,6 +19,9 @@ export const WATCHDOG_LIMITS = {
   budgetBreaker: 1.2,
   // A check may run 60 minutes; two more before its run counts as hung.
   checksHungMs: 62 * MINUTE,
+  // A setup script is killed at 10 minutes; two more before its job counts as hung.
+  setupHungMs: 12 * MINUTE,
+  serviceDownMs: MINUTE,
   memoryPressureMs: MINUTE,
 } as const;
 
@@ -222,6 +225,95 @@ export const checksHung = (
   now: number,
 ): boolean =>
   checks !== null && checks.state === "running" && now - checks.updatedAt >= WATCHDOG_LIMITS.checksHungMs;
+
+const HEAVY_JOB_NAMES: Record<HeavyJobEntry["job"]["kind"], string> = {
+  checks: "The checks",
+  runChecks: "A run_checks job",
+  journey: "The journeys",
+  holdout: "A hidden scenario",
+  evidence: "The evidence capture",
+  setup: "The setup script",
+  landing: "The checks before landing",
+};
+
+/**
+ * What to do about a heavy job running past its limit (setup 12 minutes, anything else 62): the
+ * first time it is started again from scratch, after that it is stopped. `strikes` counts how often
+ * this job was already started over for hanging.
+ * ponytail: one limit per kind, not per job; a job running several long checks back to back can
+ * outlast 62 minutes honestly. Give HeavyJob its own deadline if that happens.
+ */
+export function hungJobAction(
+  entry: HeavyJobEntry,
+  strikes: number,
+  now: number,
+): { readonly cancel: "requeue" | "stop"; readonly reason: Reason } | null {
+  if (entry.startedAt === null) return null;
+  const setup = entry.job.kind === "setup";
+  const ranFor = now - entry.startedAt;
+  if (ranFor < (setup ? WATCHDOG_LIMITS.setupHungMs : WATCHDOG_LIMITS.checksHungMs)) return null;
+  const code = setup ? "setupTimedOut" : "checksHung";
+  const name = HEAVY_JOB_NAMES[entry.job.kind];
+  return strikes === 0
+    ? {
+        cancel: "requeue",
+        reason: { code, text: `${name} ran ${minutes(ranFor)} minutes, past its limit; it was started again.` },
+      }
+    : {
+        cancel: "stop",
+        reason: { code, text: `${name} hung again after being started over; it was stopped.` },
+      };
+}
+
+/** The reason code a service or preview the watchdog restarted is recorded with once it answers. */
+export const SERVICE_RESTORED_CODE = "serviceRestored";
+
+/** A card service's or preview's port as the watchdog probed it. */
+export interface ServiceProbe {
+  readonly kind: "service" | "preview";
+  readonly name: string;
+  readonly port: number;
+  readonly up: boolean;
+}
+
+/**
+ * Tracks when each probed port stopped listening. A port down for a minute is reported once per
+ * outage, with the reason its card records (`serviceDown` or `previewDown`); a port that answers
+ * again starts a new outage the next time it goes down.
+ */
+export function watchServices(input: {
+  readonly probes: ReadonlyArray<ServiceProbe>;
+  readonly outages: ReadonlyMap<string, { readonly since: number; readonly reported: boolean }>;
+  readonly now: number;
+}): {
+  readonly outages: ReadonlyMap<string, { readonly since: number; readonly reported: boolean }>;
+  readonly report: ReadonlyArray<ServiceProbe & { readonly reason: Reason }>;
+} {
+  const outages = new Map<string, { since: number; reported: boolean }>();
+  const report: Array<ServiceProbe & { readonly reason: Reason }> = [];
+  for (const probe of input.probes) {
+    if (probe.up) continue;
+    const key = `${probe.kind}:${probe.name}`;
+    const outage = input.outages.get(key) ?? { since: input.now, reported: false };
+    const due = !outage.reported && input.now - outage.since >= WATCHDOG_LIMITS.serviceDownMs;
+    outages.set(key, { since: outage.since, reported: outage.reported || due });
+    if (!due) continue;
+    report.push({
+      ...probe,
+      reason:
+        probe.kind === "service"
+          ? {
+              code: "serviceDown",
+              text: `Service ${probe.name} stopped listening on port ${probe.port}; Iskra is restarting it.`,
+            }
+          : {
+              code: "previewDown",
+              text: `The preview stopped listening on port ${probe.port}; Iskra is restarting it.`,
+            },
+    });
+  }
+  return { outages, report };
+}
 
 /**
  * Under memory pressure for a minute with heavy jobs running: cancel the lowest-priority heavy job,
