@@ -146,6 +146,26 @@ export function createChannelEnvironmentAtoms<R, E>(
       execute: (input: EnvironmentRpcInput<typeof ORCHESTRATION_WS_METHODS.removeProjectSecret>) =>
         request(ORCHESTRATION_WS_METHODS.removeProjectSecret, input),
     }),
+    /** A project's hidden scenarios by title and kind; bodies load one at a time. */
+    projectHoldouts: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:projects:holdouts",
+      tag: ORCHESTRATION_WS_METHODS.listProjectHoldouts,
+    }),
+    getProjectHoldout: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:project:get-holdout",
+      execute: (input: EnvironmentRpcInput<typeof ORCHESTRATION_WS_METHODS.getProjectHoldout>) =>
+        request(ORCHESTRATION_WS_METHODS.getProjectHoldout, input),
+    }),
+    setProjectHoldout: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:project:set-holdout",
+      execute: (input: EnvironmentRpcInput<typeof ORCHESTRATION_WS_METHODS.setProjectHoldout>) =>
+        request(ORCHESTRATION_WS_METHODS.setProjectHoldout, input),
+    }),
+    removeProjectHoldout: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:project:remove-holdout",
+      execute: (input: EnvironmentRpcInput<typeof ORCHESTRATION_WS_METHODS.removeProjectHoldout>) =>
+        request(ORCHESTRATION_WS_METHODS.removeProjectHoldout, input),
+    }),
     importAgentDefinitions: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:agent:import-definitions",
       execute: (

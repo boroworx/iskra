@@ -24,6 +24,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
+import { ProjectHoldoutsSettings } from "./ProjectHoldoutsSettings";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 
 /** Publishing and billing APIs agent shells should never reach from a social-publishing product. */
@@ -443,6 +444,7 @@ function ProjectOrchestrationForm(props: {
       </SettingsSection>
       <SideEffectGuard current={current} saving={saving} onSave={save} />
       <ProjectSecrets project={props.representative} />
+      <ProjectHoldoutsSettings project={props.representative} />
     </>
   );
 }
