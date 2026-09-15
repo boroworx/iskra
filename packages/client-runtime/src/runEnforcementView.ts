@@ -15,18 +15,27 @@ const RUN_ENFORCEMENT: Readonly<
 
 /**
  * Why runs on `provider` can't have these capabilities, in the server's words; null when it can
- * enforce them all. Providers not in the table host no runs.
+ * enforce them all. Mirrors `runRefusal` check for check, including its order. Providers not in the
+ * table host no runs; `external` marks an instance talking to a server Iskra didn't start.
  */
 export function runRefusalText(
   provider: string,
   run: { readonly capabilities: ReadonlyArray<RunCapability>; readonly egressAllowlist?: boolean },
+  options: { readonly external?: boolean } = {},
 ): string | null {
+  if (options.external) {
+    return `Agent runs on '${provider}' can't use an external OpenCode server; choose a provider that can.`;
+  }
   const enforcement = RUN_ENFORCEMENT[provider] ?? { capabilities: [], egressAllowlist: false };
+  // Egress only reaches a run that has a shell or network.
+  const reachesNetwork = run.capabilities.includes("shell") || run.capabilities.includes("network");
   const missing =
-    run.egressAllowlist === true && !enforcement.egressAllowlist
-      ? "an egress allowlist"
+    enforcement.capabilities.length === 0
+      ? "its restrictions"
       : (run.capabilities.find((capability) => !enforcement.capabilities.includes(capability)) ??
-        (enforcement.capabilities.length === 0 ? "its restrictions" : undefined));
+        (reachesNetwork && run.egressAllowlist === true && !enforcement.egressAllowlist
+          ? "an egress allowlist"
+          : undefined));
   return missing === undefined
     ? null
     : `Agent runs on '${provider}' can't enforce ${missing}; choose a provider that can.`;

@@ -17,7 +17,7 @@ describe("runRefusalText", () => {
       "Agent runs on 'opencode' can't enforce network; choose a provider that can.",
     );
     expect(runRefusalText("codex", { capabilities: ["read"] })).toBe(
-      "Agent runs on 'codex' can't enforce read; choose a provider that can.",
+      "Agent runs on 'codex' can't enforce its restrictions; choose a provider that can.",
     );
     expect(runRefusalText("codex", { capabilities: [] })).toBe(
       "Agent runs on 'codex' can't enforce its restrictions; choose a provider that can.",
@@ -26,8 +26,17 @@ describe("runRefusalText", () => {
       "Agent runs on 'cursor' can't enforce its restrictions; choose a provider that can.",
     );
     expect(
-      runRefusalText("opencode", { capabilities: ["read"], egressAllowlist: true }),
-    ).toBe("Agent runs on 'opencode' can't enforce an egress allowlist; choose a provider that can.");
+      runRefusalText("opencode", { capabilities: ["read", "write", "shell"], egressAllowlist: true }),
+    ).toBe("Agent runs on 'opencode' can't enforce shell; choose a provider that can.");
+    expect(runRefusalText("opencode", { capabilities: ["read"] }, { external: true })).toBe(
+      "Agent runs on 'opencode' can't use an external OpenCode server; choose a provider that can.",
+    );
+  });
+
+  it("ignores an egress allowlist for runs that can't reach the network, as the server does", () => {
+    expect(
+      runRefusalText("opencode", { capabilities: ["read", "write"], egressAllowlist: true }),
+    ).toBeNull();
   });
 
   it("lets each provider run what it can enforce", () => {
