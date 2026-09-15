@@ -88,7 +88,22 @@ const make = Effect.gen(function* () {
         ["run", "list", "--branch", input.branch, "--status", "failure", "--limit", String(RUNS_PER_POLL), "--json", "databaseId,headSha,name,url,createdAt"],
         input.cwd,
       );
-      return json === null ? [] : yield* decodeFailedRuns(json);
+      if (json === null) return [];
+      const runs = yield* decodeFailedRuns(json);
+      if (runs.length === 0) return runs;
+      // One git call for every head commit; commits the checkout hasn't fetched are skipped.
+      const log = yield* run(
+        "git",
+        ["log", "--no-walk", "--ignore-missing", "--name-only", "--format=%H", ...new Set(runs.map((failed) => failed.headSha))],
+        input.cwd,
+      );
+      const files = new Map<string, Array<string>>();
+      let current: Array<string> | null = null;
+      for (const line of (log ?? "").split("\n")) {
+        if (/^[0-9a-f]{40}$/.test(line)) files.set(line, (current = []));
+        else if (line.length > 0) current?.push(line);
+      }
+      return runs.map((failed) => ({ ...failed, files: files.get(failed.headSha) ?? [] }));
     }).pipe(quietly<ReadonlyArray<FailedRun>>("list failed runs", []));
 
   const openPullRequests = (projectId: ProjectId) =>

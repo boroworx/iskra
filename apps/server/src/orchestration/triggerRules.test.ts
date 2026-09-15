@@ -9,6 +9,7 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 
 import { untrustedAuthorReason } from "./cardRules.ts";
+import { firstCommitSha } from "./outcomeRules.ts";
 import {
   applyCommands,
   applyTo,
@@ -179,6 +180,25 @@ describe("trigger sources", () => {
         author: null,
       },
     ]);
+  });
+
+  it("names the failing head commit and its changed files, so an outcome can match a landed card", () => {
+    const headSha = "a".repeat(40);
+    const [source] = ciFailureSources(
+      [
+        {
+          databaseId: 7,
+          headSha,
+          name: "test",
+          url: "https://github.com/acme/api/actions/runs/7",
+          createdAt: "2026-03-02T10:05:00Z",
+          files: ["src/slugify.js", "test/slugify.test.js"],
+        },
+      ],
+      { branch: "main", sinceIso: "2026-03-02T10:00:00.000Z", skipShas: new Set() },
+    );
+    expect(firstCommitSha(source!.text!)).toBe(headSha);
+    expect(source!.text).toContain("\n- src/slugify.js\n- test/slugify.test.js");
   });
 
   it("finds @iskra mentions by an author since a time, and nothing else", () => {

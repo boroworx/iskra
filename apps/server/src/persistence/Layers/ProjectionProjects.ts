@@ -217,7 +217,7 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
         ${projectId}, ${fire.triggerId}, ${fire.sourceKey}, ${fire.outcome}, ${fire.cardId},
         ${fire.reason === null ? null : JSON.stringify(fire.reason)}, ${fire.firedAt}
       )
-      ON CONFLICT (trigger_id, source_key) DO NOTHING
+      ON CONFLICT (project_id, trigger_id, source_key) DO NOTHING
     `.pipe(
       Effect.asVoid,
       Effect.mapError(toPersistenceSqlError("ProjectionProjectRepository.recordTriggerFire:query")),

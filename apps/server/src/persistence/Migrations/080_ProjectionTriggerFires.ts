@@ -14,7 +14,7 @@ export default Effect.gen(function* () {
       card_id TEXT,
       reason_json TEXT,
       fired_at TEXT NOT NULL,
-      PRIMARY KEY (trigger_id, source_key)
+      PRIMARY KEY (project_id, trigger_id, source_key)
     )
   `;
   yield* sql`

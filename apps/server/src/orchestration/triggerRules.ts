@@ -87,7 +87,12 @@ export interface FailedRun {
   readonly name: string;
   readonly url: string;
   readonly createdAt: string;
+  /** The files the head commit changed, when the checkout has that commit. */
+  readonly files?: ReadonlyArray<string>;
 }
+
+// Enough file names for the outcome check to match a landed card's files; a huge commit is cut.
+const FAILED_RUN_FILES_MAX = 50;
 
 /** Commits Iskra's own cards produced: their CI is the landing reactor's business, not a trigger's. */
 export const iskraCommitShas = (cards: ReadonlyArray<OrchestrationCard>): ReadonlySet<string> =>
@@ -105,7 +110,14 @@ export const ciFailureSources = (
     .map((run) => ({
       sourceKey: `run-${run.databaseId}`,
       label: `a failed CI run on ${input.branch}`,
-      text: `${run.name} failed on ${input.branch} at ${run.headSha}.\n${run.url}`,
+      // The outcome check reads the head SHA and the changed files back out of the spec.
+      text: [
+        `${run.name} failed on ${input.branch} at ${run.headSha}.`,
+        run.url,
+        ...(run.files === undefined || run.files.length === 0
+          ? []
+          : [`Changed in ${run.headSha.slice(0, 7)}:`, ...run.files.slice(0, FAILED_RUN_FILES_MAX).map((file) => `- ${file}`)]),
+      ].join("\n"),
       author: null,
     }));
 
