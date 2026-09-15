@@ -125,7 +125,7 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
 
 function DialogFooter({
   className,
-  variant = "default",
+  variant: _variant = "default",
   ...props
 }: React.ComponentProps<"div"> & {
   variant?: "default" | "bare";
@@ -134,8 +134,7 @@ function DialogFooter({
     <div
       className={cn(
         "flex flex-col-reverse gap-2 px-6 sm:flex-row sm:justify-end sm:rounded-b-[14px]",
-        variant === "default" && "border-t border-border/70 py-4",
-        variant === "bare" && "py-4",
+        "py-4",
         className,
       )}
       data-slot="dialog-footer"

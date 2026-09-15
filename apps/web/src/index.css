@@ -209,8 +209,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(iskra-mo
   --color-muted: var(--muted);
   --color-placeholder: var(--contrast-placeholder);
   --color-secondary-label: var(--contrast-secondary-label);
-  /* Captions, counts and section heads: rgb(60 60 67 / 36%) light, rgb(235 235 245 / 32%) dark. */
-  --color-tertiary-label: color-mix(in srgb, var(--contrast-foreground) 34%, transparent);
+  /* Ids, ages, counts: at least 3:1 on the canvas, cards and sidebar in both themes. */
+  --color-tertiary-label: color-mix(
+    in srgb,
+    var(--contrast-foreground) var(--tertiary-label-alpha, 52%),
+    transparent
+  );
   --color-icon-muted: var(--contrast-icon-muted);
   --color-secondary-foreground: var(--contrast-secondary-foreground);
   --color-secondary: var(--secondary);
@@ -359,19 +363,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(iskra-mo
   }
 }
 
+/* The one popover surface (menus, selects, popovers, tooltips, toasts): solid, hairline, no blur.
+   Callers add the 10px radius and a soft shadow. */
 @utility dropdown-glass {
-  background: color-mix(
-    in srgb,
-    var(--popover) 18%,
-    color-mix(in srgb, var(--popover) var(--glass-opacity), transparent)
-  );
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  background: var(--popover);
   border: 0.5px solid color-mix(in srgb, var(--contrast-foreground) 12%, transparent);
-
-  @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-    background: var(--popover) !important;
-  }
 }
 
 @utility topbar-scroll-fade {
@@ -996,6 +992,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(iskra-mo
   --muted: rgb(120 120 128 / 8%);
   --muted-foreground: #6e6e73;
   --placeholder: var(--muted-foreground);
+  --tertiary-label-alpha: 52%;
   --secondary-label: var(--muted-foreground);
   --icon-muted: var(--muted-foreground);
   --message-surface: var(--accent);
@@ -1056,6 +1053,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(iskra-mo
     --secondary-foreground: #f5f5f7;
     --muted: rgb(120 120 128 / 16%);
     --muted-foreground: rgb(235 235 245 / 60%);
+    --tertiary-label-alpha: 42%;
     --accent: rgb(120 120 128 / 24%);
     --accent-foreground: #f5f5f7;
     --error: #ff453a;

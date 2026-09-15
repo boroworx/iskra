@@ -59,7 +59,7 @@ function Input({
       className={
         cn(
           !unstyled &&
-            "relative inline-flex w-full rounded-lg border border-input bg-card not-dark:bg-clip-padding text-base text-foreground ring-ring/24 transition-shadow has-focus-visible:has-aria-invalid:border-destructive/64 has-focus-visible:has-aria-invalid:ring-destructive/16 has-aria-invalid:border-destructive/36 has-focus-visible:border-ring has-autofill:bg-foreground/4 has-disabled:opacity-64 has-focus-visible:ring-[3px] sm:text-sm dark:border-transparent dark:bg-[rgb(120_120_128/16%)] dark:has-autofill:bg-foreground/8 dark:has-aria-invalid:ring-destructive/24",
+            "relative inline-flex w-full rounded-lg border border-transparent bg-[rgb(120_120_128/10%)] text-[13px] text-foreground ring-ring/24 transition-shadow has-focus-visible:has-aria-invalid:border-destructive/64 has-focus-visible:has-aria-invalid:ring-destructive/16 has-aria-invalid:border-destructive/36 has-focus-visible:border-ring has-autofill:bg-foreground/4 has-disabled:opacity-64 has-focus-visible:ring-[3px] dark:border-transparent dark:bg-[rgb(120_120_128/16%)] dark:has-autofill:bg-foreground/8 dark:has-aria-invalid:ring-destructive/24",
           !unstyled &&
             size === "compact" &&
             "rounded-md before:rounded-[calc(var(--radius-md)-1px)]",
