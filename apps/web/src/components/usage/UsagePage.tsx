@@ -53,8 +53,8 @@ import { SidebarInset } from "../ui/sidebar";
 import { Skeleton } from "../ui/skeleton";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../WorkspaceBreadcrumb";
-import { SETTINGS_SECTION_HEAD_CLASSNAME, SettingsLargeTitle } from "../settings/settingsLayout";
-import { WorkspacePageContainer } from "../WorkspacePageContainer";
+import { PageColumn, PageLargeTitle } from "../iskra/Page";
+import { SETTINGS_GROUP_CLASSNAME, SETTINGS_SECTION_HEAD_CLASSNAME } from "../settings/settingsLayout";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { UsageLimitsSection } from "./UsageLimits";
 import { UsagePriceOverrides } from "./UsagePriceOverrides";
@@ -203,10 +203,10 @@ export function UsagePage() {
       ? `${formatDateTimeShort(window.sinceTime, window.timeZone)} to ${formatDateTimeShort(window.untilTime, window.timeZone)}`
       : `${formatDayShort(window.sinceDay)} to ${formatDayShort(window.untilDay)}`;
   const topbarContent = (
-    <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 py-2 xl:flex">
+    <div className="flex w-full min-w-0 items-center gap-3">
       <WorkspaceBreadcrumb
         ariaLabel="Usage scope"
-        className="col-span-2 min-w-0 [&_li]:font-normal [&_ol]:text-[13px]"
+        className="min-w-0 [&_li]:font-normal [&_ol]:text-[13px]"
       >
         <WorkspaceBreadcrumbItem current className="min-w-10">
           <UsageEnvironmentFilter
@@ -226,7 +226,7 @@ export function UsagePage() {
           {windowLabel}
         </span>
       ) : null}
-      <div className="ms-auto hidden min-w-0 items-center justify-end gap-2 xl:flex">
+      <div className="ms-auto hidden shrink-0 items-center justify-end gap-2 xl:flex">
         <ToggleGroup
           aria-label="Usage metric"
           variant="segmented"
@@ -271,7 +271,7 @@ export function UsagePage() {
           <RefreshIcon className="size-3.5" refreshing={isRefreshing} />
         </Button>
       </div>
-      <div className="col-span-2 ms-auto flex min-w-0 items-center justify-end gap-1 xl:hidden">
+      <div className="ms-auto flex shrink-0 items-center justify-end gap-1 xl:hidden">
         <Select
           value={metric}
           onValueChange={(value) => {
@@ -336,13 +336,14 @@ export function UsagePage() {
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
-        <WorkspacePageHeader electron={isElectron} className="h-auto">
+        <WorkspacePageHeader electron={isElectron}>
           {topbarContent}
         </WorkspacePageHeader>
 
         <ScrollArea className="min-h-0 flex-1">
-          <WorkspacePageContainer width="wide" className="gap-7 pt-2">
-            <SettingsLargeTitle>Usage</SettingsLargeTitle>
+          <PageColumn width="wide" className="pb-12">
+            <PageLargeTitle>Usage</PageLargeTitle>
+            <div className="flex flex-col gap-7">
             {selectedEnvironments.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 {environments.length === 0
@@ -356,9 +357,9 @@ export function UsagePage() {
             ) : (
               <>
                 <section className="grid gap-6 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]">
-                  <div className="flex min-w-0 flex-col gap-5">
-                    <div className="flex flex-col gap-1">
-                      <span className="text-4xl font-semibold text-foreground tabular-nums">
+                  <div className="flex min-w-0 flex-col gap-4">
+                    <div className="flex flex-col gap-1 px-4">
+                      <span className="text-[28px] leading-tight font-bold tracking-[-0.02em] text-foreground tabular-nums">
                         {metric === "cost"
                           ? formatUsd(merged.costUsd)
                           : formatTokens(merged.totalTokens)}
@@ -374,52 +375,58 @@ export function UsagePage() {
                       </span>
                     </div>
 
-                    {activeProviders.map((provider) => {
-                      const totals = merged.providers.find((entry) => entry.provider === provider);
-                      const share =
-                        metric === "cost" ? (totals?.costShare ?? 0) : (totals?.tokenShare ?? 0);
-                      const providerSessions = totals?.sessions ?? 0;
-                      const sessionLabel = `${formatCount(providerSessions)} ${
-                        providerSessions === 1 ? "session" : "sessions"
-                      }`;
-                      return (
-                        <div key={provider} className="flex flex-col gap-1">
-                          <div className="flex items-baseline justify-between gap-4">
-                            <span className="flex min-w-0 items-center gap-2 text-sm text-foreground">
+                    {activeProviders.length > 0 ? (
+                      <div className={SETTINGS_GROUP_CLASSNAME}>
+                        {activeProviders.map((provider) => {
+                          const totals = merged.providers.find(
+                            (entry) => entry.provider === provider,
+                          );
+                          const share =
+                            metric === "cost"
+                              ? (totals?.costShare ?? 0)
+                              : (totals?.tokenShare ?? 0);
+                          const providerSessions = totals?.sessions ?? 0;
+                          const sessionLabel = `${formatCount(providerSessions)} ${
+                            providerSessions === 1 ? "session" : "sessions"
+                          }`;
+                          return (
+                            <div
+                              key={provider}
+                              className="flex min-h-11 items-center gap-3 px-4 py-2"
+                            >
+                              {/* The swatch is the provider's series in the chart. */}
                               <span
                                 aria-hidden
-                                className="size-2 shrink-0 rounded-full"
+                                className="h-3 w-1 shrink-0 rounded-full"
                                 style={{
                                   backgroundColor: PROVIDER_PRESENTATION[provider].color,
                                 }}
                               />
-                              <ProviderMark provider={provider} className="size-4" />
-                              <span className="flex min-w-0 items-baseline gap-1.5">
-                                <span className="truncate">
-                                  {PROVIDER_PRESENTATION[provider].label}
+                              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                                <span className="flex items-baseline justify-between gap-3 text-[13px] text-foreground">
+                                  <span className="min-w-0">
+                                    {PROVIDER_PRESENTATION[provider].label}
+                                  </span>
+                                  <span className="shrink-0 tabular-nums">
+                                    {metric === "cost"
+                                      ? formatUsd(totals?.costUsd ?? 0)
+                                      : formatTokens(totals?.totalTokens ?? 0)}
+                                  </span>
                                 </span>
-                                <span className="shrink-0 whitespace-nowrap text-[11px] text-muted-foreground tabular-nums">
-                                  {sessionLabel}
+                                <span className="text-xs text-muted-foreground tabular-nums">
+                                  {metric === "cost"
+                                    ? `${formatPercent(share)} of cost · ${formatTokens(totals?.totalTokens ?? 0)} tokens · ${sessionLabel}`
+                                    : `${formatPercent(share)} of tokens · ${formatUsd(totals?.costUsd ?? 0)} · ${sessionLabel}`}
                                 </span>
-                              </span>
-                            </span>
-                            <span className="shrink-0 text-sm font-medium text-foreground tabular-nums">
-                              {metric === "cost"
-                                ? formatUsd(totals?.costUsd ?? 0)
-                                : formatTokens(totals?.totalTokens ?? 0)}
-                            </span>
-                          </div>
-                          <span className="text-xs text-muted-foreground">
-                            {metric === "cost"
-                              ? `${formatPercent(share)} of cost · ${formatTokens(totals?.totalTokens ?? 0)} tokens`
-                              : `${formatPercent(share)} of tokens · ${formatUsd(totals?.costUsd ?? 0)}`}
-                          </span>
-                        </div>
-                      );
-                    })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
                   </div>
 
-                  <div className="flex min-w-0 flex-col gap-3">
+                  <div className="flex min-w-0 flex-col gap-3 rounded-xl bg-card p-4">
                     <h2 className={SETTINGS_SECTION_HEAD_CLASSNAME}>
                       {isPast24Hours ? "Hourly" : "Daily"}{" "}
                       {metric === "tokens" ? "processed tokens" : "cost"}
@@ -439,8 +446,8 @@ export function UsagePage() {
                 </section>
 
                 <section className="flex flex-col gap-2">
-                  <h2 className={SETTINGS_SECTION_HEAD_CLASSNAME}>Totals</h2>
-                  <div className="grid grid-cols-2 gap-x-6 gap-y-4 py-1 md:grid-cols-5">
+                  <h2 className={cn(SETTINGS_SECTION_HEAD_CLASSNAME, "px-4")}>Totals</h2>
+                  <div className={SETTINGS_GROUP_CLASSNAME}>
                     <Metric label="Processed tokens" value={formatTokens(merged.totalTokens)} />
                     <Metric label="Cached input" value={formatTokens(merged.cachedInputTokens)} />
                     <Metric
@@ -455,8 +462,8 @@ export function UsagePage() {
                   </div>
                 </section>
 
-                <section className="flex flex-col gap-3">
-                  <div className="flex items-center justify-between gap-3">
+                <section className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between gap-3 ps-4">
                     <h2 className={SETTINGS_SECTION_HEAD_CLASSNAME}>Breakdown</h2>
                     <ToggleGroup
                       aria-label="Usage breakdown"
@@ -480,8 +487,9 @@ export function UsagePage() {
                     </ToggleGroup>
                   </div>
 
+                  <div className="overflow-x-auto rounded-xl bg-card">
                   {breakdown === "model" ? (
-                    <table className="w-full table-fixed text-sm">
+                    <table className={BREAKDOWN_TABLE_CLASSNAME}>
                       <colgroup>
                         <col className="w-2/5" />
                         <col className="w-1/5" />
@@ -489,7 +497,7 @@ export function UsagePage() {
                         <col className="w-1/5" />
                       </colgroup>
                       <thead>
-                        <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                        <tr className="text-left text-xs text-muted-foreground">
                           <th className="py-2 font-normal">Model</th>
                           <th className="py-2 text-right font-normal">Cost</th>
                           <th className="py-2 text-right font-normal">Share</th>
@@ -507,7 +515,7 @@ export function UsagePage() {
                           breakdownModels.map((model) => (
                             <tr
                               key={`${model.provider}:${model.model}`}
-                              className="border-b border-border/50 transition-colors hover:bg-muted/50"
+                              className="transition-colors hover:bg-muted/40"
                             >
                               <td className="py-2 text-foreground">
                                 <span className="flex items-center gap-2">
@@ -534,7 +542,7 @@ export function UsagePage() {
                       </tbody>
                     </table>
                   ) : (
-                    <table className="w-full table-fixed text-sm">
+                    <table className={BREAKDOWN_TABLE_CLASSNAME}>
                       <colgroup>
                         <col className="w-2/5" />
                         {activeProviders.map((provider) => (
@@ -544,7 +552,7 @@ export function UsagePage() {
                         <col style={{ width: timeValueColumnWidth }} />
                       </colgroup>
                       <thead>
-                        <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                        <tr className="text-left text-xs text-muted-foreground">
                           <th className="py-2 font-normal">{isPast24Hours ? "Hour" : "Day"}</th>
                           {activeProviders.map((provider) => (
                             <th key={provider} className="py-2 text-right font-normal">
@@ -569,7 +577,7 @@ export function UsagePage() {
                           breakdownPeriods.map((period) => (
                             <tr
                               key={"hourStart" in period ? period.hourStart : period.day}
-                              className="border-b border-border/50 transition-colors hover:bg-muted/50"
+                              className="transition-colors hover:bg-muted/40"
                             >
                               <td className="py-2 text-foreground">
                                 {"hourStart" in period
@@ -596,10 +604,12 @@ export function UsagePage() {
                       </tbody>
                     </table>
                   )}
+                  </div>
                 </section>
               </>
             )}
-          </WorkspacePageContainer>
+            </div>
+          </PageColumn>
         </ScrollArea>
       </div>
     </SidebarInset>
@@ -618,11 +628,15 @@ function ProviderMark({
   return <Mark className={cn("shrink-0", className)} aria-hidden />;
 }
 
+/** Breakdown rows on the card surface: inset hairlines, edge cells at the row text inset. */
+const BREAKDOWN_TABLE_CLASSNAME =
+  "w-full table-fixed text-[13px] [&_tr>*:first-child]:ps-4 [&_tr>*:last-child]:pe-4 [&_tbody_tr]:bg-[linear-gradient(var(--border),var(--border))] [&_tbody_tr]:bg-[length:calc(100%-1rem)_0.5px] [&_tbody_tr]:bg-right-top [&_tbody_tr]:bg-no-repeat";
+
 function Metric({ label, value }: { readonly label: string; readonly value: string }) {
   return (
-    <div className="flex min-w-0 flex-col gap-0.5">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="text-base font-medium text-foreground tabular-nums">{value}</span>
+    <div className="flex min-h-11 items-center justify-between gap-4 px-4 text-[13px]">
+      <span className="text-foreground">{label}</span>
+      <span className="text-muted-foreground tabular-nums">{value}</span>
     </div>
   );
 }
@@ -829,55 +843,56 @@ function UsageSkeleton() {
   return (
     <>
       <section className="grid gap-6 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]">
-        <div className="flex flex-col gap-5">
-          <div className="flex flex-col gap-1">
-            <Skeleton className="h-10 w-36" />
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1 px-4">
+            <Skeleton className="h-9 w-36" />
             <Skeleton className="h-4 w-32" />
           </div>
-          {PROVIDER_ORDER.map((provider) => (
-            <div key={provider} className="flex flex-col gap-1">
-              <div className="flex min-h-5 items-center justify-between gap-4">
-                <span className="flex items-center gap-2">
-                  <Skeleton className="size-2 shrink-0 rounded-full" />
-                  <Skeleton className="size-4 shrink-0 rounded-full" />
+          <div className={SETTINGS_GROUP_CLASSNAME}>
+            {PROVIDER_ORDER.map((provider) => (
+              <div key={provider} className="flex min-h-11 flex-col justify-center gap-1 px-4 py-2">
+                <div className="flex items-center justify-between gap-4">
                   <Skeleton className="h-3.5 w-20" />
-                </span>
-                <Skeleton className="h-3.5 w-14" />
+                  <Skeleton className="h-3.5 w-14" />
+                </div>
+                <Skeleton className="h-3 w-36" />
               </div>
-              <Skeleton className="h-4 w-36" />
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
 
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3 rounded-xl bg-card p-4">
           <Skeleton className="h-5 w-24" />
-          <div className="flex flex-col gap-1">
-            <Skeleton className="ml-16 h-56 bg-muted-foreground/10" />
-            <Skeleton className="ml-16 h-4 bg-muted-foreground/10" />
-          </div>
+          <Skeleton className="ml-16 h-56 bg-muted-foreground/10" />
+          <Skeleton className="ml-16 h-4 bg-muted-foreground/10" />
         </div>
       </section>
 
       <section className="flex flex-col gap-2">
-        <h2 className={SETTINGS_SECTION_HEAD_CLASSNAME}>Totals</h2>
-        <div className="grid grid-cols-2 gap-x-6 gap-y-4 py-1 md:grid-cols-5">
+        <h2 className={cn(SETTINGS_SECTION_HEAD_CLASSNAME, "px-4")}>Totals</h2>
+        <div className={SETTINGS_GROUP_CLASSNAME}>
           {["Processed tokens", "Cached input", "Uncached input", "Output", "Cache savings"].map(
             (label) => (
-              <div key={label} className="flex flex-col gap-0.5">
-                <span className="text-xs text-muted-foreground">{label}</span>
-                <Skeleton className="h-6 w-16" />
+              <div
+                key={label}
+                className="flex min-h-11 items-center justify-between gap-4 px-4 text-[13px]"
+              >
+                <span className="text-foreground">{label}</span>
+                <Skeleton className="h-3.5 w-16" />
               </div>
             ),
           )}
         </div>
       </section>
 
-      <section className="flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-3">
+      <section className="flex flex-col gap-2">
+        <div className="flex items-center justify-between gap-3 ps-4">
           <h2 className={SETTINGS_SECTION_HEAD_CLASSNAME}>Breakdown</h2>
           <Skeleton className="h-7 w-28 rounded-lg" />
         </div>
-        <Skeleton className="h-44 bg-muted-foreground/10" />
+        <div className="rounded-xl bg-card p-4">
+          <Skeleton className="h-36 bg-muted-foreground/10" />
+        </div>
       </section>
     </>
   );

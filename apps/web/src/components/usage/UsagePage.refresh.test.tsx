@@ -72,7 +72,6 @@ vi.mock("../WorkspaceBreadcrumb", () => ({
   WorkspaceBreadcrumbItem: "div",
   WorkspaceBreadcrumbSeparator: "span",
 }));
-vi.mock("../WorkspacePageContainer", () => ({ WorkspacePageContainer: "main" }));
 vi.mock("../WorkspacePageHeader", () => ({ WorkspacePageHeader: "header" }));
 vi.mock("./UsageProviderChart", () => ({ UsageProviderChart: "div" }));
 vi.mock("./UsagePriceOverrides", () => ({ UsagePriceOverrides: () => null }));

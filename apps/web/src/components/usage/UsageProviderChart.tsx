@@ -434,7 +434,7 @@ export function UsageProviderChart({
         </div>
       </div>
 
-      <div className="flex justify-between pl-16 text-[10px] text-muted-foreground uppercase">
+      <div className="flex justify-between pl-16 text-[11px] text-muted-foreground">
         <span>{periods[0] === undefined ? "" : formatPeriod(periods[0])}</span>
         <span>
           {periods[Math.floor(periods.length / 2)] === undefined

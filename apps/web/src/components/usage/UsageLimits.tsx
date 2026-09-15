@@ -5,7 +5,6 @@ import {
   ServerProvider,
   ServerProviderResetCredits,
   ServerProviderUsageWindow,
-  UsageProviderKind,
 } from "@iskra/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -36,20 +35,12 @@ import {
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { UsageLimitsPooled } from "./UsageLimitsPooled";
-import { PROVIDER_PRESENTATION } from "./usageProviders";
 
 const PACE: Record<LimitPace, { readonly label: string; readonly icon: typeof GaugeIcon }> = {
   ahead: { label: "Ahead of pace: spending faster than the window elapses", icon: TrendingUpIcon },
   on: { label: "On pace with the window", icon: GaugeIcon },
   under: { label: "Under pace: headroom left for the rest of the window", icon: TrendingDownIcon },
 };
-
-/** The series colour the cost chart uses for this driver, so the two views read as one. */
-export function barColor(driver: ServerProvider["driver"]): string {
-  const kind: UsageProviderKind | undefined =
-    driver === "codex" ? "codex" : driver === "claudeAgent" ? "claude" : undefined;
-  return kind ? PROVIDER_PRESENTATION[kind].color : "var(--foreground)";
-}
 
 /** Pace as a glyph with the words on hover. */
 export function PaceIcon({ pace }: { readonly pace: LimitPace }) {
@@ -79,11 +70,9 @@ export function PaceIcon({ pace }: { readonly pace: LimitPace }) {
  * fill. Hover for the exact figures and reset time.
  */
 function WindowBar({
-  color,
   window,
   now,
 }: {
-  readonly color: string;
   readonly window: ServerProviderUsageWindow;
   readonly now: number;
 }) {
@@ -112,11 +101,14 @@ function WindowBar({
           />
         }
       >
-        <div className="absolute inset-x-0 inset-y-1.5 rounded-full bg-muted" />
+        {/* Blue is quota still open; a spent window's track turns red. */}
+        <div
+          className={`absolute inset-x-0 inset-y-2 rounded-full ${remaining > 0 ? "bg-foreground/10" : "bg-destructive/30"}`}
+        />
         {remaining > 0 ? (
           <div
-            className="absolute inset-y-1.5 left-0 rounded-full"
-            style={{ width: `${remaining}%`, backgroundColor: color }}
+            className="absolute inset-y-2 left-0 rounded-full bg-primary"
+            style={{ width: `${remaining}%` }}
           />
         ) : null}
         {timeLeft !== null ? (
@@ -152,7 +144,6 @@ function WindowBar({
  * Compact rows fit the composer panel with narrower columns.
  */
 export function LimitWindows({
-  driver,
   windows,
   now,
   compact = false,
@@ -162,7 +153,6 @@ export function LimitWindows({
   readonly now: number;
   readonly compact?: boolean;
 }) {
-  const color = barColor(driver);
   return (
     <div
       className={
@@ -182,7 +172,7 @@ export function LimitWindows({
                 {remainingPercent(window)}% left
               </span>
             </span>
-            <WindowBar color={color} window={window} now={now} />
+            <WindowBar window={window} now={now} />
             <span className="flex items-center gap-2 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
               {pace ? <PaceIcon pace={pace} /> : null}
               <span className="ms-auto shrink-0">{resetsIn ?? ""}</span>
