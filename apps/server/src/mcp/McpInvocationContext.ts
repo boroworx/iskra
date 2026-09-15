@@ -8,8 +8,11 @@ import {
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 
-/** `board` is granted only to a session building a card, `lead` only to a channel lead's run. */
-export type McpCapability = "preview" | "device" | "pull-requests" | "board" | "lead";
+/**
+ * `board` is granted only to a session building a card, `lead` only to a channel lead's run and
+ * `verifier` only to a card's verifier session.
+ */
+export type McpCapability = "preview" | "device" | "pull-requests" | "board" | "lead" | "verifier";
 
 export interface McpInvocationScope {
   readonly environmentId: EnvironmentId;

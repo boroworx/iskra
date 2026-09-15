@@ -136,6 +136,12 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "card.refs.keep":
     case "card.comment.forward":
     case "card.attention.dismiss":
+    case "card.help.request":
+    case "card.critique.request":
+    case "card.verifier.select":
+    case "card.verdict.record":
+    case "card.verifier.override":
+    case "card.verifier.rerun":
       return {
         aggregateKind: "card",
         aggregateId: command.cardId,

@@ -11,6 +11,8 @@ import type {
   ThreadPullRequestLink,
 } from "@iskra/contracts";
 import {
+  DEFAULT_AGENT_BLUEPRINT,
+  DEFAULT_AGENT_ROLES,
   AgentArchivedPayload,
   AgentCreatedPayload,
   AgentUnarchivedPayload,
@@ -350,6 +352,9 @@ export function newAgent(
     rolePrompt: payload.rolePrompt,
     modelSelection: payload.modelSelection,
     capabilities: payload.capabilities,
+    roles: payload.roles ?? DEFAULT_AGENT_ROLES,
+    verifyWith: payload.verifyWith ?? null,
+    blueprint: payload.blueprint ?? DEFAULT_AGENT_BLUEPRINT,
     createdAt: payload.createdAt,
     updatedAt: payload.updatedAt,
     archivedAt: null,
@@ -370,6 +375,9 @@ export function agentPatch(
         ...(payload.rolePrompt !== undefined ? { rolePrompt: payload.rolePrompt } : {}),
         ...(payload.modelSelection !== undefined ? { modelSelection: payload.modelSelection } : {}),
         ...(payload.capabilities !== undefined ? { capabilities: payload.capabilities } : {}),
+        ...(payload.roles !== undefined ? { roles: payload.roles } : {}),
+        ...(payload.verifyWith !== undefined ? { verifyWith: payload.verifyWith } : {}),
+        ...(payload.blueprint !== undefined ? { blueprint: payload.blueprint } : {}),
         updatedAt: payload.updatedAt,
       };
     }
@@ -1393,6 +1401,7 @@ export function projectEvent(
     // A card's activity and requests live in projections and reactors, not the read model.
     case "card.session-requested":
     case "card.helper-requested":
+    case "card.critique-requested":
     case "card.delivery-updated":
       return Effect.succeed(nextBase);
 
@@ -1417,6 +1426,10 @@ export function projectEvent(
     case "card.flags-acknowledged":
     case "card.fix-rounds-reset":
     case "card.landing-linked":
+    case "card.verifier-selected":
+    case "card.verdict-recorded":
+    case "card.verifier-overridden":
+    case "card.verifier-rerun-requested":
       return Effect.succeed(withCardPatches(nextBase, cardPatches(event)));
 
     case "project.orchestration-set":

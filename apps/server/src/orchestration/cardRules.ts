@@ -1,7 +1,12 @@
 import {
+  CARD_VERIFICATION_OFF,
   CHANNEL_HUMAN_AUTHOR_ID,
   CHANNEL_SYSTEM_AUTHOR_ID,
   DEFAULT_CARD_BUDGET_USD,
+  type AgentRole,
+  type CardVerdict,
+  type OrchestrationAgent,
+  type OrchestrationLiveRun,
   LEGACY_CARD_CONTRACT,
   type CardActivity,
   type CardAuthor,
@@ -92,6 +97,104 @@ export const NOT_FORWARDABLE_REASON = "Only a comment from outside the repositor
 export const NOT_DISMISSABLE_REASON =
   "This can't be dismissed; it clears once what it asks for is done.";
 
+/** Why an agent can't run as `role`, or null. Also refuses a `verifyWith` agent that can't verify. */
+export const roleRefusal = (
+  agent: Pick<OrchestrationAgent, "name" | "roles">,
+  role: AgentRole,
+): string | null =>
+  agent.roles.includes(role)
+    ? null
+    : `@${agent.name} can't act as a ${role}; choose an agent whose roles include it.`;
+
+/** Helper and critic runs one card may have open at once. */
+export const MAX_OPEN_ASSIST_RUNS = 2;
+export const OPEN_ASSIST_RUNS_REASON = `This card already has ${MAX_OPEN_ASSIST_RUNS} helper or critic runs open; wait for one to answer.`;
+
+// ponytail: counts started runs only; a requested run that hasn't started yet slips past the cap.
+/** Why a card can't take another helper or critic run, or null. */
+export const openAssistRunsRefusal = (
+  liveRuns: ReadonlyArray<Pick<OrchestrationLiveRun, "cardId" | "role">>,
+  cardId: CardId,
+): string | null =>
+  liveRuns.filter((run) => run.cardId === cardId && (run.role === "helper" || run.role === "critic"))
+    .length >= MAX_OPEN_ASSIST_RUNS
+    ? OPEN_ASSIST_RUNS_REASON
+    : null;
+
+export const VERIFIER_NOT_PASSED_REASON = "The verifier hasn't passed every criterion yet.";
+export const VERDICT_STALE_REASON =
+  "This verdict is for an older commit; the verifier checks the latest one.";
+export const VERDICT_INCOMPLETE_REASON = "Give a verdict for every automated criterion.";
+export const NO_VERIFIER_RUNNING_REASON =
+  "No verifier is checking this card's commit, so there is no verdict to record.";
+export const OVERRIDE_REASON_REQUIRED = "Say why you're overriding the verifier.";
+export const OVERRIDE_STATE_REASON = "Only a failed or pending verification can be overridden.";
+export const VERIFIER_RUNNING_REASON = "The verifier is already checking this commit.";
+export const VERIFY_IN_REVIEW_REASON = "Only a card in review is verified.";
+export const VERIFY_LATEST_COMMIT_REASON = "A verifier checks only the card's latest commit.";
+/** MCP tool errors: a verdict comes only from its verifier session, help only from the builder. */
+export const VERIFIER_SESSION_ONLY_REASON = "Only the card's verifier session can record a verdict.";
+export const BUILDER_ONLY_ASSIST_REASON = "Only the card's builder can ask for help or a critique.";
+
+/** Whether a card built by `builder` needs a passing verifier: the project says so, or its template does. */
+export const verificationRequired = (
+  policy: Pick<ProjectOrchestration, "verifier">,
+  builder: Pick<OrchestrationAgent, "blueprint"> | undefined,
+): boolean => policy.verifier.mode === "on" || builder?.blueprint.verify === "always";
+
+/** A card's verification state, counting a required verification nobody started as pending. */
+export const verificationStateOf = (
+  card: Pick<OrchestrationCard, "verification">,
+  required: boolean,
+): OrchestrationCard["verification"]["state"] =>
+  card.verification.state === "off" && required ? "pending" : card.verification.state;
+
+/** Why a card can't merge or land for its verifier, or null: it passed the latest commit, or a person overrode it. */
+export function verificationRefusal(
+  card: Pick<OrchestrationCard, "verification" | "evidence">,
+  required: boolean,
+): string | null {
+  if (!required || card.verification.state === "overridden") return null;
+  return card.verification.state === "passed" &&
+    card.verification.headSha === (card.evidence?.headSha ?? null)
+    ? null
+    : VERIFIER_NOT_PASSED_REASON;
+}
+
+/** Why a verdict can't be recorded on the card, or null. */
+export function verdictRefusal(
+  card: Pick<OrchestrationCard, "acceptance" | "evidence" | "verification">,
+  verdict: Pick<CardVerdict, "headSha" | "criteria">,
+): string | null {
+  if (verdict.headSha !== card.evidence?.headSha) return VERDICT_STALE_REASON;
+  if (card.verification.state !== "running" || card.verification.headSha !== verdict.headSha) {
+    return NO_VERIFIER_RUNNING_REASON;
+  }
+  const judged = new Set(verdict.criteria.map((criterion) => criterion.criterionId));
+  return card.acceptance.criteria.every(
+    (criterion) => criterion.verification === "manual" || judged.has(criterion.id),
+  )
+    ? null
+    : VERDICT_INCOMPLETE_REASON;
+}
+
+/** A verdict passes when every automated criterion passed, the diff matches them and every hidden scenario held. */
+export const verdictPassed = (
+  card: Pick<OrchestrationCard, "acceptance">,
+  verdict: Pick<CardVerdict, "criteria" | "diffJudge" | "scenarios">,
+): boolean => {
+  const passing = new Set(
+    verdict.criteria.filter((criterion) => criterion.pass).map((criterion) => criterion.criterionId),
+  );
+  return (
+    card.acceptance.criteria.every(
+      (criterion) => criterion.verification === "manual" || passing.has(criterion.id),
+    ) &&
+    verdict.diffJudge.matchesCriteria &&
+    verdict.scenarios.every((scenario) => scenario.satisfied)
+  );
+};
+
 /** Why a set of acceptance criteria can't be used, or null. */
 export function criteriaRefusal(criteria: ReadonlyArray<{ readonly id: string }>): string | null {
   if (criteria.length === 0) return NO_CRITERIA_REASON;
@@ -113,7 +216,7 @@ export function elicitationRefusal(elicitation: {
     : "The recommended answer must be one of the offered answers.";
 }
 
-/** Checks pass when every check exited 0 without timing out; captures never fail a recording. */
+/** Checks and journeys pass when each exited 0 without timing out; captures never fail a recording. */
 export const evidencePassed = (
   items: ReadonlyArray<
     Pick<CardEvidenceItem, "kind" | "exitCode" | "timedOut"> & {
@@ -123,7 +226,7 @@ export const evidencePassed = (
 ): boolean =>
   items.every(
     (item) =>
-      item.kind !== "check" ||
+      (item.kind !== "check" && item.kind !== "journey") ||
       item.unavailable?.code === PENDING_CI_CODE ||
       (item.exitCode === 0 && !item.timedOut),
   );
@@ -171,23 +274,26 @@ export function fixRoundRefusal(
 /**
  * Why a card can't land without a person approving its merge, or null. A plan child lands only into
  * its plan's branch once its evidence passed; any other card only when the project turned on
- * auto-merge. Hard flags and blockers are refused by the status move itself.
+ * auto-merge. Either also waits for a required verifier. Hard flags and blockers are refused by the
+ * status move itself.
  */
 export function landingBeginRefusal(input: {
-  readonly card: Pick<OrchestrationCard, "evidence" | "baseBranch">;
+  readonly card: Pick<OrchestrationCard, "evidence" | "baseBranch" | "verification">;
   readonly parent: Pick<OrchestrationCard, "kind" | "branch"> | undefined;
   readonly policy: Pick<ProjectOrchestration, "checksWaived" | "autoMerge">;
   readonly reason: CardLandingBeginReason;
+  readonly verificationRequired: boolean;
 }): string | null {
   const { card, parent, policy } = input;
   if (input.reason === "autoMergePolicy") {
     if (!policy.autoMerge.enabled) return AUTO_MERGE_OFF_REASON;
-    return hasPassingReviewEvidence(card, policy) ? null : REVIEW_EVIDENCE_REASON;
+    if (!hasPassingReviewEvidence(card, policy)) return REVIEW_EVIDENCE_REASON;
+    return verificationRefusal(card, input.verificationRequired);
   }
   const intoPlanBranch =
     parent?.kind === "plan" && parent.branch !== null && card.baseBranch === parent.branch;
   return intoPlanBranch && hasPassingReviewEvidence(card, policy)
-    ? null
+    ? verificationRefusal(card, input.verificationRequired)
     : PLAN_CHILD_LANDING_REASON;
 }
 
@@ -546,6 +652,9 @@ export const ATTENTION_ACTIONS: Record<CardAttentionCode, ReadonlyArray<CardAtte
   pullRequestClosed: ["dismiss"],
   criteriaMissing: ["addCriteria"],
   ciChecksNeedPullRequest: ["openSettings", "dismiss"],
+  verifierError: ["rerunVerifier", "dismiss"],
+  serviceDown: ["dismiss"],
+  previewDown: ["dismiss"],
 };
 
 const isAttentionCode = (code: string): code is CardAttentionCode => Object.hasOwn(ATTENTION_ACTIONS, code);
@@ -650,6 +759,27 @@ export const cardActivity = (
   ...entry,
 });
 
+/** The hidden scenarios a verdict satisfied, as counts; null when none ran. */
+export const verdictSatisfaction = (
+  verdict: Pick<CardVerdict, "scenarios">,
+): OrchestrationCard["verification"]["satisfaction"] =>
+  verdict.scenarios.length === 0
+    ? null
+    : {
+        satisfied: verdict.scenarios.filter((scenario) => scenario.satisfied).length,
+        total: verdict.scenarios.length,
+      };
+
+function verdictText(verdict: CardVerdict): string {
+  const passing = verdict.criteria.filter((criterion) => criterion.pass).length;
+  const satisfaction = verdictSatisfaction(verdict);
+  const scenarios =
+    satisfaction === null
+      ? ""
+      : ` ${satisfaction.satisfied} of ${satisfaction.total} hidden scenarios satisfied.`;
+  return `The verifier ${verdict.passed ? "passed" : "failed"} ${verdict.headSha.slice(0, 7)}: ${passing} of ${verdict.criteria.length} criteria passed.${scenarios}`;
+}
+
 function evidenceText(summary: CardEvidenceSummary): string {
   if (summary.checkCount === 0) return "No checks ran.";
   return summary.failedChecks.length === 0
@@ -719,7 +849,9 @@ export function cardActivitiesOf(event: OrchestrationEvent): ReadonlyArray<CardA
           body: "",
           status: { from: payload.from, to: payload.to },
           reason:
-            payload.reason === undefined ? null : { code: payload.move, text: payload.reason },
+            payload.reason === undefined
+              ? null
+              : { code: payload.reasonCode ?? payload.move, text: payload.reason },
           createdAt: payload.updatedAt,
         }),
       ];
@@ -776,6 +908,62 @@ export function cardActivitiesOf(event: OrchestrationEvent): ReadonlyArray<CardA
           body: evidenceText(evidenceSummaryOf(payload)),
           evidenceId: payload.evidenceId,
           createdAt: payload.recordedAt,
+        }),
+      ];
+    }
+    case "card.verifier-selected": {
+      const { cardId, headSha, verifier, selectedAt } = event.payload;
+      return [
+        cardActivity({
+          activityId: `verifier-selected:${event.eventId}`,
+          cardId,
+          kind: "status",
+          author: SYSTEM_AUTHOR,
+          body: `A verifier on ${verifier.model} checks ${headSha.slice(0, 7)}.`,
+          reason: verifier.reason,
+          createdAt: selectedAt,
+        }),
+      ];
+    }
+    case "card.verdict-recorded": {
+      const { cardId, verdict } = event.payload;
+      const body = verdictText(verdict);
+      return [
+        cardActivity({
+          activityId: `verdict:${verdict.verdictId}`,
+          cardId,
+          kind: "verdict",
+          author: { kind: "agent", id: verdict.verifier.agentId },
+          body,
+          reason: verdict.passed ? null : { code: "verifierFailed", text: body },
+          createdAt: verdict.recordedAt,
+        }),
+      ];
+    }
+    case "card.verifier-overridden": {
+      const { cardId, reason, overriddenAt } = event.payload;
+      return [
+        cardActivity({
+          activityId: `verifier-overridden:${event.eventId}`,
+          cardId,
+          kind: "decision",
+          author: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
+          body: reason,
+          reason: { code: "verifierOverridden", text: reason },
+          createdAt: overriddenAt,
+        }),
+      ];
+    }
+    case "card.verifier-rerun-requested": {
+      const { cardId, requestedAt } = event.payload;
+      return [
+        cardActivity({
+          activityId: `verifier-rerun:${event.eventId}`,
+          cardId,
+          kind: "status",
+          author: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
+          body: "A person asked the verifier to check the card again.",
+          createdAt: requestedAt,
         }),
       ];
     }
@@ -973,6 +1161,11 @@ export function cardPatches(
           (card) => ({
             ...card,
             evidence: evidenceSummaryOf(payload),
+            // A started verification checks the latest commit, so evidence for another sends it back.
+            verification:
+              card.verification.state !== "off" && card.verification.headSha !== payload.headSha
+                ? { ...CARD_VERIFICATION_OFF, state: "pending" as const }
+                : card.verification,
             // Failing review evidence sends the owner a fix while the card stays in progress: a CI round.
             fixRounds:
               !payload.passed && payload.purpose === "review" && card.status === "inProgress"
@@ -994,6 +1187,77 @@ export function cardPatches(
               card.evidence?.evidenceId === evidenceId
                 ? { ...card.evidence, flagsAcknowledgedAt: acknowledgedAt }
                 : card.evidence,
+          }),
+        ],
+      ];
+    }
+    case "card.verifier-selected": {
+      const { cardId, headSha, verifier, selectedAt } = event.payload;
+      return [
+        [
+          cardId,
+          (card) => ({
+            ...card,
+            verification: { ...CARD_VERIFICATION_OFF, state: "running" as const, headSha, verifier },
+            attention: withoutCodes(card.attention, ["verifierError"]),
+            activityAt: selectedAt,
+          }),
+        ],
+      ];
+    }
+    case "card.verdict-recorded": {
+      const { cardId, verdict } = event.payload;
+      return [
+        [
+          cardId,
+          (card) => ({
+            ...card,
+            verification: {
+              ...card.verification,
+              state: verdict.passed ? ("passed" as const) : ("failed" as const),
+              headSha: verdict.headSha,
+              verdictId: verdict.verdictId,
+              verifier: verdict.verifier,
+              satisfaction: verdictSatisfaction(verdict),
+              override: null,
+            },
+            activityAt: verdict.recordedAt,
+          }),
+        ],
+      ];
+    }
+    case "card.verifier-overridden": {
+      const { cardId, reason, overriddenAt } = event.payload;
+      return [
+        [
+          cardId,
+          (card) => ({
+            ...card,
+            verification: {
+              ...card.verification,
+              state: "overridden" as const,
+              headSha: card.verification.headSha ?? card.evidence?.headSha ?? null,
+              override: { reason, at: overriddenAt },
+            },
+            activityAt: overriddenAt,
+          }),
+        ],
+      ];
+    }
+    case "card.verifier-rerun-requested": {
+      const { cardId, requestedAt } = event.payload;
+      return [
+        [
+          cardId,
+          (card) => ({
+            ...card,
+            verification: {
+              ...CARD_VERIFICATION_OFF,
+              state: "pending" as const,
+              headSha: card.evidence?.headSha ?? null,
+            },
+            attention: withoutCodes(card.attention, ["verifierError"]),
+            activityAt: requestedAt,
           }),
         ],
       ];

@@ -9,6 +9,8 @@ import {
   ProviderInstanceId,
   ThreadId,
   TurnId,
+  type AgentBlueprint,
+  type AgentRole,
   type CardSessionRole,
   type OrchestrationCommand,
   type OrchestrationReadModel,
@@ -79,6 +81,8 @@ export const createAgent = (
     readonly name?: string;
     readonly capabilities?: ReadonlyArray<RunCapability>;
     readonly projectId?: ProjectId;
+    readonly roles?: ReadonlyArray<AgentRole>;
+    readonly blueprint?: AgentBlueprint;
   } = {},
 ): OrchestrationCommand => ({
   type: "agent.create",
@@ -90,6 +94,8 @@ export const createAgent = (
   rolePrompt: "",
   modelSelection,
   capabilities: options.capabilities ?? ["read", "write"],
+  ...(options.roles === undefined ? {} : { roles: options.roles }),
+  ...(options.blueprint === undefined ? {} : { blueprint: options.blueprint }),
   createdAt: now,
 });
 

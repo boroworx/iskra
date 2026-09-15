@@ -1,5 +1,7 @@
 import {
   AgentId,
+  DEFAULT_AGENT_BLUEPRINT,
+  DEFAULT_AGENT_ROLES,
   CardBriefPayload,
   CardId,
   LEGACY_CARD_CONTRACT,
@@ -36,6 +38,9 @@ const agent = (id: string, name: string, rolePrompt = ""): OrchestrationAgent =>
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
   archivedAt: null,
+  roles: DEFAULT_AGENT_ROLES,
+  verifyWith: null,
+  blueprint: DEFAULT_AGENT_BLUEPRINT,
 });
 
 const backend = agent("agent-backend", "backend", "You own the API.");

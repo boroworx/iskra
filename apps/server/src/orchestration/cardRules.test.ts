@@ -1,4 +1,5 @@
 import {
+  CARD_VERIFICATION_OFF,
   CardId,
   type CardMove,
   type CardStatus,
@@ -15,6 +16,7 @@ import {
   PLAN_CHILD_LANDING_REASON,
   REVIEW_EVIDENCE_REASON,
   UNACKNOWLEDGED_FLAGS_REASON,
+  VERIFIER_NOT_PASSED_REASON,
   WORK_CRITERIA_REASON,
   cardActivitiesOf,
   criteriaRefusal,
@@ -276,9 +278,27 @@ describe("card contract gates", () => {
 
   it("lands without a person only a plan child into its plan's branch, or under auto-merge", () => {
     const plan = { kind: "plan" as const, branch: "iskra/plan-limits" };
-    const child = { evidence, baseBranch: "iskra/plan-limits" };
+    const child = { evidence, baseBranch: "iskra/plan-limits", verification: CARD_VERIFICATION_OFF };
     const begin = (overrides: Partial<Parameters<typeof landingBeginRefusal>[0]>) =>
-      landingBeginRefusal({ card: child, parent: plan, policy, reason: "planChild", ...overrides });
+      landingBeginRefusal({
+        card: child,
+        parent: plan,
+        policy,
+        reason: "planChild",
+        verificationRequired: false,
+        ...overrides,
+      });
+    // A required verifier holds both until it passed the latest commit, or a person overrode it.
+    expect(begin({ verificationRequired: true })).toBe(VERIFIER_NOT_PASSED_REASON);
+    const verified = (state: "passed" | "overridden", headSha: string) => ({
+      ...child,
+      verification: { ...CARD_VERIFICATION_OFF, state, headSha },
+    });
+    expect(begin({ verificationRequired: true, card: verified("passed", "abc123") })).toBeNull();
+    expect(begin({ verificationRequired: true, card: verified("passed", "old") })).toBe(
+      VERIFIER_NOT_PASSED_REASON,
+    );
+    expect(begin({ verificationRequired: true, card: verified("overridden", "old") })).toBeNull();
     expect(begin({})).toBeNull();
     expect(begin({ parent: undefined })).toBe(PLAN_CHILD_LANDING_REASON);
     expect(begin({ parent: { kind: "task", branch: plan.branch } })).toBe(PLAN_CHILD_LANDING_REASON);

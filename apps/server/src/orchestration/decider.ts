@@ -12,6 +12,7 @@ import {
   isImportedAgentSessionMessageId,
   projectOrchestrationOf,
   AgentId,
+  type AgentRole,
   type CardFixRound,
   type CardId,
   type CardMove,
@@ -98,6 +99,20 @@ import {
   sessionCapRefusal,
   sideEffectGuardRefusal,
   subCardRefusal,
+  NO_VERIFIER_RUNNING_REASON,
+  OVERRIDE_REASON_REQUIRED,
+  OVERRIDE_STATE_REASON,
+  VERIFIER_RUNNING_REASON,
+  VERIFY_IN_REVIEW_REASON,
+  VERIFY_LATEST_COMMIT_REASON,
+  BUILDER_ONLY_ASSIST_REASON,
+  openAssistRunsRefusal,
+  roleRefusal,
+  verdictPassed,
+  verdictRefusal,
+  verificationRefusal,
+  verificationRequired,
+  verificationStateOf,
 } from "./cardRules.ts";
 import { parseMentions } from "./mentions.ts";
 import { projectEvent } from "./projector.ts";
@@ -400,6 +415,50 @@ const refuseAtSessionCap = (
     projectLiveRunCount(readModel, projectId),
   );
   return refusal === null ? Effect.void : Effect.fail(refuse(command, refusal));
+};
+
+/** Whether the card's merge and landing wait on a passing verifier. */
+const verificationRequiredFor = (readModel: OrchestrationReadModel, card: OrchestrationCard) =>
+  verificationRequired(
+    policyOf(readModel, card.projectId),
+    (readModel.agents ?? []).find((agent) => agent.id === card.delegateAgentId),
+  );
+
+/** Refuses the command when a rule gives a reason. */
+const refuseIf = (command: Pick<OrchestrationCommand, "type">, refusal: string | null) =>
+  refusal === null ? Effect.void : Effect.fail(refuse(command, refusal));
+
+/** An active agent of the card's project that can run as `role`, or the command's refusal. */
+const requireCardAgentAs = Effect.fn("requireCardAgentAs")(function* (input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly card: OrchestrationCard;
+  readonly agentId: AgentId;
+  readonly role: AgentRole;
+}) {
+  const agent = yield* requireAgent({
+    readModel: input.readModel,
+    command: input.command,
+    agentId: input.agentId,
+  });
+  if (agent.projectId !== input.card.projectId || agent.archivedAt !== null) {
+    return yield* refuse(input.command, `@${agent.name} isn't an active agent of this card's project.`);
+  }
+  yield* refuseIf(input.command, roleRefusal(agent, input.role));
+  return agent;
+});
+
+/** A `verifyWith` that names a project agent must name one that verifies; an unknown name is skipped at selection. */
+const refuseVerifyWith = (
+  readModel: OrchestrationReadModel,
+  command: OrchestrationCommand,
+  projectId: OrchestrationCard["projectId"],
+  verifyWith: string | null | undefined,
+) => {
+  const named = (readModel.agents ?? []).find(
+    (agent) => agent.projectId === projectId && agent.name === verifyWith && agent.archivedAt === null,
+  );
+  return named === undefined ? Effect.void : refuseIf(command, roleRefusal(named, "verifier"));
 };
 
 export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand")(function* ({
@@ -2238,6 +2297,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         projectId: command.projectId,
         name: command.name,
       });
+      yield* refuseVerifyWith(readModel, command, command.projectId, command.verifyWith);
       return yield* planned(command, "agent", command.agentId, command.createdAt, {
         type: "agent.created",
         payload: {
@@ -2249,6 +2309,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           rolePrompt: command.rolePrompt,
           modelSelection: command.modelSelection,
           capabilities: command.capabilities,
+          ...(command.roles !== undefined ? { roles: command.roles } : {}),
+          ...(command.verifyWith !== undefined ? { verifyWith: command.verifyWith } : {}),
+          ...(command.blueprint !== undefined ? { blueprint: command.blueprint } : {}),
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
@@ -2266,6 +2329,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           exceptAgentId: agent.id,
         });
       }
+      yield* refuseVerifyWith(readModel, command, agent.projectId, command.verifyWith);
       const occurredAt = yield* nowIso;
       return yield* planned(command, "agent", command.agentId, occurredAt, {
         type: "agent.updated",
@@ -2279,6 +2343,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             ? { modelSelection: command.modelSelection }
             : {}),
           ...(command.capabilities !== undefined ? { capabilities: command.capabilities } : {}),
+          ...(command.roles !== undefined ? { roles: command.roles } : {}),
+          ...(command.verifyWith !== undefined ? { verifyWith: command.verifyWith } : {}),
+          ...(command.blueprint !== undefined ? { blueprint: command.blueprint } : {}),
           updatedAt: occurredAt,
         },
       });
@@ -2478,6 +2545,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const attempt = yield* requireCard({ readModel, command, cardId: command.cardId });
       if (attempt.attemptGroupId !== null) {
         return yield* refuse(command, "An attempt lands only by being promoted into its card.");
+      }
+      if (attempt.status === "inReview") {
+        yield* refuseIf(
+          command,
+          verificationRefusal(attempt, verificationRequiredFor(readModel, attempt)),
+        );
       }
       return yield* decideCardMove({ readModel, command, move: "approveMerge" });
     }
@@ -3259,13 +3332,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       if (criticId === null) {
         return yield* refuse(command, "Choose an agent to review the spec.");
       }
-      const critic = yield* requireAgent({ readModel, command, agentId: criticId });
-      if (critic.projectId !== card.projectId || critic.archivedAt !== null) {
-        return yield* refuse(
-          command,
-          `@${critic.name} isn't an active agent of this card's project.`,
-        );
-      }
+      const critic = yield* requireCardAgentAs({
+        readModel,
+        command,
+        card,
+        agentId: criticId,
+        role: "critic",
+      });
+      yield* refuseIf(command, openAssistRunsRefusal(readModel.liveRuns ?? [], card.id));
       yield* refuseAtSessionCap(readModel, command, card.projectId);
       const occurredAt = yield* nowIso;
       return yield* planned(command, "card", command.cardId, occurredAt, {
@@ -3312,17 +3386,18 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "card.helper.request": {
-      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
-      const agent = yield* requireAgent({ readModel, command, agentId: command.agentId });
-      if (agent.projectId !== card.projectId || agent.archivedAt !== null) {
-        return yield* refuse(
-          command,
-          `@${agent.name} isn't an active agent of this card's project.`,
-        );
-      }
-      if (isFinishedCardStatus(card.status)) {
-        return yield* refuse(command, FINISHED_CARD_SESSION_REASON);
-      }
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        FINISHED_CARD_SESSION_REASON,
+      );
+      const agent = yield* requireCardAgentAs({
+        readModel,
+        command,
+        card,
+        agentId: command.agentId,
+        role: "helper",
+      });
+      yield* refuseIf(command, openAssistRunsRefusal(readModel.liveRuns ?? [], card.id));
       yield* refuseAtSessionCap(readModel, command, card.projectId);
       return [
         yield* planned(command, "card", command.cardId, command.createdAt, {
@@ -3343,10 +3418,173 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             agentId: agent.id,
             messageId: command.messageId,
             question: command.question,
+            requestedBy: "human",
             requestedAt: command.createdAt,
           },
         }),
       ];
+    }
+
+    // The builder's owner tools: a read-only helper or critic whose answer comes back to the builder.
+    case "card.help.request":
+    case "card.critique.request": {
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        FINISHED_CARD_SESSION_REASON,
+      );
+      if (card.delegateAgentId === null) {
+        return yield* refuse(command, BUILDER_ONLY_ASSIST_REASON);
+      }
+      const agent = yield* requireCardAgentAs({
+        readModel,
+        command,
+        card,
+        agentId: command.agentId ?? card.delegateAgentId,
+        role: command.type === "card.help.request" ? "helper" : "critic",
+      });
+      yield* refuseIf(command, openAssistRunsRefusal(readModel.liveRuns ?? [], card.id));
+      yield* refuseAtSessionCap(readModel, command, card.projectId);
+      const asked = yield* planned(command, "card", card.id, command.createdAt, {
+        type: "card.activity-recorded",
+        payload: cardActivity({
+          activityId: command.messageId,
+          cardId: card.id,
+          kind: "message",
+          author: { kind: "agent", id: card.delegateAgentId },
+          body:
+            command.type === "card.help.request"
+              ? `@${agent.name} ${command.question}`
+              : `@${agent.name} critique the ${command.focus}.`,
+          createdAt: command.createdAt,
+        }),
+      });
+      return [
+        asked,
+        command.type === "card.help.request"
+          ? yield* planned(command, "card", card.id, command.createdAt, {
+              type: "card.helper-requested",
+              payload: {
+                cardId: card.id,
+                agentId: agent.id,
+                messageId: command.messageId,
+                question: command.question,
+                requestedBy: "builder",
+                requestedAt: command.createdAt,
+              },
+            })
+          : yield* planned(command, "card", card.id, command.createdAt, {
+              type: "card.critique-requested",
+              payload: {
+                cardId: card.id,
+                agentId: agent.id,
+                messageId: command.messageId,
+                focus: command.focus,
+                requestedAt: command.createdAt,
+              },
+            }),
+      ];
+    }
+
+    case "card.verifier.select": {
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        FINISHED_CARD_SESSION_REASON,
+      );
+      if (card.status !== "inReview") {
+        return yield* refuse(command, VERIFY_IN_REVIEW_REASON);
+      }
+      if (card.evidence?.headSha !== command.headSha) {
+        return yield* refuse(command, VERIFY_LATEST_COMMIT_REASON);
+      }
+      if (card.verification.state === "running" && card.verification.headSha === command.headSha) {
+        return yield* refuse(command, VERIFIER_RUNNING_REASON);
+      }
+      // The builder's own template verifies only as a fallback; any other agent must be a verifier.
+      const verifierAgentId = command.verifier.agentId;
+      yield* requireCardAgentAs({
+        readModel,
+        command,
+        card,
+        agentId: verifierAgentId,
+        role: verifierAgentId === card.delegateAgentId ? "builder" : "verifier",
+      });
+      const occurredAt = yield* nowIso;
+      return yield* planned(command, "card", card.id, occurredAt, {
+        type: "card.verifier-selected",
+        payload: {
+          cardId: card.id,
+          headSha: command.headSha,
+          verifier: command.verifier,
+          selectedAt: occurredAt,
+        },
+      });
+    }
+
+    case "card.verdict.record": {
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        "A card that has landed or been abandoned takes no new verdicts.",
+      );
+      yield* refuseIf(command, verdictRefusal(card, command));
+      const { verifier } = card.verification;
+      if (verifier === null) {
+        return yield* refuse(command, NO_VERIFIER_RUNNING_REASON);
+      }
+      return yield* planned(command, "card", card.id, command.recordedAt, {
+        type: "card.verdict-recorded",
+        payload: {
+          cardId: card.id,
+          verdict: {
+            verdictId: command.verdictId,
+            cardId: card.id,
+            headSha: command.headSha,
+            verifier,
+            criteria: command.criteria,
+            diffJudge: command.diffJudge,
+            scenarios: command.scenarios,
+            passed: verdictPassed(card, command),
+            recordedAt: command.recordedAt,
+          },
+        },
+      });
+    }
+
+    case "card.verifier.override": {
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        FINISHED_CARD_WAITS_REASON,
+      );
+      const reason = command.reason.trim();
+      if (reason.length === 0) {
+        return yield* refuse(command, OVERRIDE_REASON_REQUIRED);
+      }
+      const state = verificationStateOf(card, verificationRequiredFor(readModel, card));
+      if (state !== "failed" && state !== "pending") {
+        return yield* refuse(command, OVERRIDE_STATE_REASON);
+      }
+      const occurredAt = yield* nowIso;
+      return yield* planned(command, "card", card.id, occurredAt, {
+        type: "card.verifier-overridden",
+        payload: { cardId: card.id, reason, overriddenAt: occurredAt },
+      });
+    }
+
+    case "card.verifier.rerun": {
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        FINISHED_CARD_WAITS_REASON,
+      );
+      if (card.status !== "inReview") {
+        return yield* refuse(command, VERIFY_IN_REVIEW_REASON);
+      }
+      if (card.verification.state === "running") {
+        return yield* refuse(command, VERIFIER_RUNNING_REASON);
+      }
+      const occurredAt = yield* nowIso;
+      return yield* planned(command, "card", card.id, occurredAt, {
+        type: "card.verifier-rerun-requested",
+        payload: { cardId: card.id, requestedAt: occurredAt },
+      });
     }
 
     case "card.message.post": {
@@ -3817,6 +4055,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         parent,
         policy: policyOf(readModel, card.projectId),
         reason: command.reason,
+        verificationRequired: verificationRequiredFor(readModel, card),
       });
       if (refusal !== null) {
         return yield* refuse(command, refusal);

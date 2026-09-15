@@ -1,6 +1,9 @@
 import {
   CardId,
   ChannelId,
+  DEFAULT_AGENT_BLUEPRINT,
+  ProviderInstanceId,
+  type AgentId,
   ClientOrchestrationCommand,
   DEFAULT_PROJECT_ORCHESTRATION,
   MessageId,
@@ -20,6 +23,15 @@ import {
   ALREADY_ANSWERED_REASON,
   ANSWER_OPTION_REASON,
   AUTO_MERGE_OFF_REASON,
+  NO_VERIFIER_RUNNING_REASON,
+  OPEN_ASSIST_RUNS_REASON,
+  OVERRIDE_REASON_REQUIRED,
+  OVERRIDE_STATE_REASON,
+  VERDICT_INCOMPLETE_REASON,
+  VERDICT_STALE_REASON,
+  VERIFIER_NOT_PASSED_REASON,
+  VERIFIER_RUNNING_REASON,
+  VERIFY_LATEST_COMMIT_REASON,
   NO_CHECKS_REASON,
   NO_ATTENTION_REASON,
   NO_CRITERIA_REASON,
@@ -59,6 +71,7 @@ import {
   onCard,
   projectId,
   recordSession,
+  reviewer,
   setWorkspace,
 } from "./decider.testkit.ts";
 
@@ -449,8 +462,214 @@ it.layer(NodeServices.layer)("decider card contract", (it) => {
       expect(yield* refusal(children, landingBegin("card-stray", "planChild"))).toBe(
         PLAN_CHILD_LANDING_REASON,
       );
+      // With the verifier on, a plan child waits for it like any other card.
+      const verified = yield* applyTo(children, [setPolicy({ verifier: { mode: "on" } })]);
+      expect(yield* refusal(verified, landingBegin("card-child", "planChild"))).toBe(
+        VERIFIER_NOT_PASSED_REASON,
+      );
       const childLanding = yield* applyTo(children, [landingBegin("card-child", "planChild")]);
       expect(cardIn(childLanding, "card-child")?.status).toBe("landing");
+    }),
+  );
+
+  it.effect("helpers, critics and verifiers need their role, and a card has two helper or critic runs at most", () =>
+    Effect.gen(function* () {
+      const started = yield* applyCommands([
+        ...setup,
+        createAgent(reviewer, { roles: ["verifier"] }),
+        ...cardInProgress(),
+      ]);
+      const help = (agentId: AgentId | null): OrchestrationCommand => ({
+        type: "card.help.request",
+        commandId: nextCommandId(),
+        cardId,
+        agentId,
+        messageId: MessageId.make(`help-${nextCommandId()}`),
+        question: "Which store keeps the counters?",
+        createdAt: now,
+      });
+      const critique = (agentId: AgentId | null): OrchestrationCommand => ({
+        type: "card.critique.request",
+        commandId: nextCommandId(),
+        cardId,
+        agentId,
+        messageId: MessageId.make(`critique-${nextCommandId()}`),
+        focus: "diff",
+        createdAt: now,
+      });
+      const personAsks = (agentId: AgentId): OrchestrationCommand => ({
+        type: "card.helper.request",
+        commandId: nextCommandId(),
+        cardId,
+        agentId,
+        messageId: MessageId.make(`ask-${nextCommandId()}`),
+        question: "Which store?",
+        createdAt: now,
+      });
+      expect(yield* refusal(started, help(reviewer))).toBe(
+        "@reviewer can't act as a helper; choose an agent whose roles include it.",
+      );
+      expect(yield* refusal(started, critique(reviewer))).toBe(
+        "@reviewer can't act as a critic; choose an agent whose roles include it.",
+      );
+      expect(yield* refusal(started, personAsks(reviewer))).toBe(
+        "@reviewer can't act as a helper; choose an agent whose roles include it.",
+      );
+
+      // No agent named asks the builder's own template; the answer comes back to the builder.
+      const asked = yield* decide(started, help(null));
+      expect(asked.map((event) => event.type)).toEqual([
+        "card.activity-recorded",
+        "card.helper-requested",
+      ]);
+      expect(asked[1]?.payload).toMatchObject({ agentId: backend, requestedBy: "builder" });
+      const critiqued = yield* decide(started, critique(frontend));
+      expect(critiqued[1]).toMatchObject({
+        type: "card.critique-requested",
+        payload: { agentId: frontend, focus: "diff" },
+      });
+
+      const busy = yield* applyTo(started, [
+        recordSession("thread-helper", frontend, "helper", ["read"]),
+        recordSession("thread-critic", frontend, "critic", ["read"]),
+      ]);
+      expect(yield* refusal(busy, help(frontend))).toBe(OPEN_ASSIST_RUNS_REASON);
+      expect(yield* refusal(busy, critique(frontend))).toBe(OPEN_ASSIST_RUNS_REASON);
+      expect(yield* refusal(busy, personAsks(frontend))).toBe(OPEN_ASSIST_RUNS_REASON);
+
+      // A template's verifier must be able to verify.
+      const verifyWith = (name: string): OrchestrationCommand => ({
+        type: "agent.update",
+        commandId: nextCommandId(),
+        agentId: backend,
+        verifyWith: name,
+      });
+      expect(yield* refusal(started, verifyWith("frontend"))).toBe(
+        "@frontend can't act as a verifier; choose an agent whose roles include it.",
+      );
+      const paired = yield* applyTo(started, [verifyWith("reviewer")]);
+      expect(paired.agents?.find((agent) => agent.id === backend)?.verifyWith).toBe("reviewer");
+    }),
+  );
+
+  it.effect("a merge waits for the verifier to pass the latest commit, or a person to override it", () =>
+    Effect.gen(function* () {
+      const verifier = {
+        agentId: reviewer,
+        instanceId: ProviderInstanceId.make("opencode"),
+        model: "openai/gpt-5",
+        reason: { code: "differentProvider", text: "OpenCode checks work Claude built." },
+      };
+      const select = (headSha: string, agentId: AgentId = reviewer): OrchestrationCommand => ({
+        type: "card.verifier.select",
+        commandId: nextCommandId(),
+        cardId,
+        headSha,
+        verifier: { ...verifier, agentId },
+      });
+      const verdict = (
+        headSha: string,
+        pass: boolean,
+        criterionIds: ReadonlyArray<string> = ["c1"],
+      ): OrchestrationCommand => ({
+        type: "card.verdict.record",
+        commandId: nextCommandId(),
+        verdictId: `verdict-${nextCommandId()}`,
+        cardId,
+        headSha,
+        criteria: criterionIds.map((criterionId) => ({
+          criterionId,
+          pass,
+          evidence: "limits.test.ts",
+          note: pass ? "" : "No 429 on the 101st request.",
+        })),
+        diffJudge: { matchesCriteria: true, concerns: [] },
+        scenarios: [{ scenarioId: "holdout-1", satisfied: pass }],
+        recordedAt: now,
+      });
+      const override = (reason: string): OrchestrationCommand => ({
+        type: "card.verifier.override",
+        commandId: nextCommandId(),
+        cardId,
+        reason,
+      });
+      const rerun: OrchestrationCommand = {
+        type: "card.verifier.rerun",
+        commandId: nextCommandId(),
+        cardId,
+      };
+      const reviewed = yield* applyCommands([
+        ...setup,
+        setPolicy({ verifier: { mode: "on" } }),
+        createAgent(reviewer, { roles: ["verifier"] }),
+        ...cardInProgress(),
+        recordEvidence("abc123", [check("test", 0)]),
+        enterReview("abc123"),
+      ]);
+
+      // Nobody verified yet: the merge waits, and there is no verdict to record.
+      expect(yield* refusal(reviewed, onCard("card.merge.approve"))).toBe(VERIFIER_NOT_PASSED_REASON);
+      expect(yield* refusal(reviewed, verdict("abc123", true))).toBe(NO_VERIFIER_RUNNING_REASON);
+      expect(yield* refusal(reviewed, select("old123"))).toBe(VERIFY_LATEST_COMMIT_REASON);
+      expect(yield* refusal(reviewed, select("abc123", frontend))).toBe(
+        "@frontend can't act as a verifier; choose an agent whose roles include it.",
+      );
+
+      const running = yield* applyTo(reviewed, [select("abc123")]);
+      expect(cardIn(running)?.verification).toMatchObject({ state: "running", headSha: "abc123" });
+      expect(yield* refusal(running, rerun)).toBe(VERIFIER_RUNNING_REASON);
+      expect(yield* refusal(running, override("Checked by hand."))).toBe(OVERRIDE_STATE_REASON);
+      expect(yield* refusal(running, verdict("old123", true))).toBe(VERDICT_STALE_REASON);
+      expect(yield* refusal(running, verdict("abc123", true, []))).toBe(VERDICT_INCOMPLETE_REASON);
+
+      const failed = yield* applyTo(running, [verdict("abc123", false)]);
+      expect(cardIn(failed)?.verification).toMatchObject({
+        state: "failed",
+        satisfaction: { satisfied: 0, total: 1 },
+      });
+      expect(yield* refusal(failed, onCard("card.merge.approve"))).toBe(VERIFIER_NOT_PASSED_REASON);
+      expect(yield* refusal(failed, override("   "))).toBe(OVERRIDE_REASON_REQUIRED);
+      const overridden = yield* applyTo(failed, [
+        override("Checked the 429 by hand."),
+        onCard("card.merge.approve"),
+      ]);
+      expect(cardIn(overridden)?.status).toBe("landing");
+      expect(cardIn(yield* applyTo(failed, [rerun]))?.verification).toMatchObject({
+        state: "pending",
+        headSha: "abc123",
+      });
+
+      // A passing verdict lets the merge through, until evidence for another commit.
+      const passed = yield* applyTo(running, [verdict("abc123", true)]);
+      expect(cardIn(passed)?.verification.state).toBe("passed");
+      expect(cardIn(yield* applyTo(passed, [onCard("card.merge.approve")]))?.status).toBe("landing");
+      const newCommit = yield* applyTo(passed, [recordEvidence("def456", [check("test", 0)])]);
+      expect(cardIn(newCommit)?.verification).toMatchObject({ state: "pending", headSha: null });
+      expect(yield* refusal(newCommit, onCard("card.merge.approve"))).toBe(
+        VERIFIER_NOT_PASSED_REASON,
+      );
+    }),
+  );
+
+  it.effect("auto-merge and a template that always verifies wait for the verifier too", () =>
+    Effect.gen(function* () {
+      const reviewed = yield* applyCommands([
+        createProject(),
+        setPolicy({ autoMerge: { enabled: true, minSatisfaction: 0.9 } }),
+        createAgent(backend, { blueprint: { ...DEFAULT_AGENT_BLUEPRINT, verify: "always" } }),
+        createAgent(frontend),
+        ...cardInProgress(),
+        recordEvidence("abc123", [check("test", 0)]),
+        enterReview("abc123"),
+      ]);
+      const autoMerge: OrchestrationCommand = {
+        type: "card.landing.begin",
+        commandId: nextCommandId(),
+        cardId,
+        reason: "autoMergePolicy",
+      };
+      expect(yield* refusal(reviewed, autoMerge)).toBe(VERIFIER_NOT_PASSED_REASON);
+      expect(yield* refusal(reviewed, onCard("card.merge.approve"))).toBe(VERIFIER_NOT_PASSED_REASON);
     }),
   );
 
