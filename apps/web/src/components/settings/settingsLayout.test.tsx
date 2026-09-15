@@ -22,8 +22,7 @@ describe("unavailable settings", () => {
     );
 
     expect(markup).toContain("Only available in the desktop app.");
-    expect(markup).toContain("border-border/60");
-    expect(markup).toContain("[&amp;_h3]:opacity-64");
+    expect(markup).toContain("data-settings-unavailable");
   });
 });
 
@@ -44,10 +43,10 @@ describe("setting captions", () => {
     });
   });
 
-  it("ellipsizes a long single sentence but still offers all of it", () => {
+  it("moves a long single sentence behind the info button instead of cutting it", () => {
     const text =
       "Pairing links and client-session management require the access:write scope for this backend";
-    expect(splitSettingDescription(text)).toEqual({ inline: text, full: text });
+    expect(splitSettingDescription(text)).toEqual({ inline: null, full: text });
   });
 
   it("renders rich captions as given", () => {

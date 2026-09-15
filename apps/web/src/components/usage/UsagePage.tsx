@@ -53,7 +53,8 @@ import { SidebarInset } from "../ui/sidebar";
 import { Skeleton } from "../ui/skeleton";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../WorkspaceBreadcrumb";
-import { PageColumn, PageLargeTitle } from "../iskra/Page";
+import { PageLargeTitle } from "../iskra/Page";
+import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { SETTINGS_GROUP_CLASSNAME, SETTINGS_SECTION_HEAD_CLASSNAME } from "../settings/settingsLayout";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { UsageLimitsSection } from "./UsageLimits";
@@ -341,7 +342,7 @@ export function UsagePage() {
         </WorkspacePageHeader>
 
         <ScrollArea className="min-h-0 flex-1">
-          <PageColumn width="wide" className="pb-12">
+          <WorkspacePageContainer width="wide">
             <PageLargeTitle>Usage</PageLargeTitle>
             <div className="flex flex-col gap-7">
             {selectedEnvironments.length === 0 ? (
@@ -609,7 +610,7 @@ export function UsagePage() {
               </>
             )}
             </div>
-          </PageColumn>
+          </WorkspacePageContainer>
         </ScrollArea>
       </div>
     </SidebarInset>

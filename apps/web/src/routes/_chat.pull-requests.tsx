@@ -111,7 +111,8 @@ import {
   WorkspaceBreadcrumbItem,
   WorkspaceBreadcrumbSeparator,
 } from "../components/WorkspaceBreadcrumb";
-import { PageColumn, PageLargeTitle } from "../components/iskra/Page";
+import { PageLargeTitle } from "../components/iskra/Page";
+import { WorkspacePageContainer } from "../components/WorkspacePageContainer";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { isElectron } from "../env";
@@ -2390,7 +2391,7 @@ function PullRequestsColumn({
         {/* The top padding is the shared fade band's height, the same pairing the
             settings page makes: at rest the controls sit fully below the mask, and only
             content actually passing under the chrome fades. */}
-        <PageColumn width="wide" className="min-h-full pb-12">
+        <WorkspacePageContainer width="wide" className="min-h-full">
           <PageLargeTitle>Pull Requests</PageLargeTitle>
           <div className="flex flex-col gap-7">
             <div className="flex flex-col">
@@ -2400,7 +2401,7 @@ function PullRequestsColumn({
             </div>
             {listBody}
           </div>
-        </PageColumn>
+        </WorkspacePageContainer>
       </div>
     </div>
   );

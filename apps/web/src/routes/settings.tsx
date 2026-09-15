@@ -37,12 +37,12 @@ function RestoreDeviceDefaultsButton({ onRestored }: { onRestored: () => void })
   const { changedSettingLabels, restoreDefaults } = useSettingsRestore(onRestored);
   return (
     <Button
-      size="xs"
+      size="sm"
       variant="ghost-muted"
       disabled={changedSettingLabels.length === 0}
       onClick={() => void restoreDefaults()}
     >
-      <RotateCcwIcon className="size-3" />
+      <RotateCcwIcon />
       Restore device defaults
     </Button>
   );
@@ -158,6 +158,7 @@ function SettingsContentLayout() {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
         <WorkspacePageHeader electron={isElectron}>
           <div className="flex w-full items-center gap-3">
+            {/* Every page keeps the same crumb slot; device-local pages name the device instead. */}
             <SettingsBreadcrumb
               scope={
                 showScope
@@ -165,7 +166,8 @@ function SettingsContentLayout() {
                   : undefined
               }
             />
-            {location.pathname === "/settings/general" ? (
+            {location.pathname === "/settings/general" ||
+            location.pathname === "/settings/appearance" ? (
               <div className="ms-auto flex shrink-0 items-center">
                 <RestoreDeviceDefaultsButton
                   onRestored={() => setRestoreSignal((value) => value + 1)}

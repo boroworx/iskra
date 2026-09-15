@@ -51,7 +51,14 @@ export function SettingsBreadcrumb({
 }: {
   scope?: SettingsScopeBreadcrumbProps | undefined;
 }) {
-  if (!scope) return null;
+  // Pages whose rows are saved on this client have no scope to pick.
+  if (!scope) {
+    return (
+      <WorkspaceBreadcrumb ariaLabel="Settings scope" className="[&_ol]:text-[13px]">
+        <WorkspaceBreadcrumbItem className="font-normal">This device</WorkspaceBreadcrumbItem>
+      </WorkspaceBreadcrumb>
+    );
+  }
   return (
     <WorkspaceBreadcrumb
       ariaLabel="Settings scope"
@@ -178,7 +185,14 @@ function ProjectScopeMenu({ value, groups, onChange }: SettingsScopeBreadcrumbPr
     <ScopeMenu
       ariaLabel="Project scope"
       narrowed={value.project !== undefined}
-      icon={selected ? <ProjectFavicon project={selected} className="size-3.5 shrink-0" /> : null}
+      icon={
+        selected ? (
+          // Automatic project glyphs carry a hue; chrome keeps them neutral.
+          <span className="inline-flex shrink-0 [&_*]:text-muted-foreground!">
+            <ProjectFavicon project={selected} className="size-3.5 shrink-0" />
+          </span>
+        ) : null
+      }
       label={selected?.displayName ?? (value.project ? "Unavailable project" : "All projects")}
     >
       <MenuRadioGroup

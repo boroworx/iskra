@@ -1,4 +1,4 @@
-import { InfoIcon, Undo2Icon } from "lucide-react";
+import { InfoIcon, PlusIcon, Undo2Icon } from "lucide-react";
 import { DEFAULT_SERVER_SETTINGS, type ServerSettings } from "@iskra/contracts";
 import * as Equal from "effect/Equal";
 import { useLocation, useNavigate } from "@tanstack/react-router";
@@ -18,7 +18,8 @@ import {
   usePrimarySettingsAvailable,
 } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
-import { WorkspacePageContainer, type WorkspacePageWidth } from "../WorkspacePageContainer";
+import { PageLargeTitle } from "../iskra/Page";
+import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { settingsPageTitle } from "./settingsSearch";
@@ -184,32 +185,21 @@ export const SETTINGS_GROUP_CLASSNAME = `rounded-xl bg-card text-card-foreground
 export const SETTINGS_SECTION_HEAD_CLASSNAME =
   "flex min-h-6 items-center gap-2 text-[13px] font-semibold text-muted-foreground";
 
-/** The large page title shared by settings and the other workspace pages. */
-export function SettingsLargeTitle({
-  children,
-  className,
-}: {
-  children: ReactNode;
-  className?: string;
-}) {
-  return (
-    <h1
-      className={cn(
-        "text-[28px] leading-tight font-bold tracking-[-0.02em] text-foreground",
-        className,
-      )}
-    >
-      {children}
-    </h1>
-  );
-}
+/** Large titles come from the shared page primitive; this name stays for older callers. */
+export { PageLargeTitle as SettingsLargeTitle } from "../iskra/Page";
+
+/** Control widths in a row's control slot, so left edges line up row to row. */
+export const SETTINGS_SELECT_WIDTH_CLASSNAME = "w-44";
+export const SETTINGS_TEXT_INPUT_WIDTH_CLASSNAME = "w-64";
+export const SETTINGS_NUMBER_WIDTH_CLASSNAME = "w-24";
 
 const SETTINGS_CAPTION_MAX_LENGTH = 84;
 
 /**
- * A setting's caption fits one secondary line. A longer explanation keeps its
- * first sentence inline (or an ellipsized line) and moves whole behind the
- * row's info button. Rich captions render as given.
+ * A setting's caption is one complete secondary line. A longer explanation
+ * keeps its first sentence inline when that fits, otherwise it lives only
+ * behind the row's info button; a caption is never cut mid-word. Rich
+ * captions render as given.
  */
 export function splitSettingDescription(description: ReactNode): {
   readonly inline: ReactNode;
@@ -223,9 +213,46 @@ export function splitSettingDescription(description: ReactNode): {
     inline:
       firstSentence !== undefined && firstSentence.length <= SETTINGS_CAPTION_MAX_LENGTH
         ? firstSentence
-        : text,
+        : null,
     full: text,
   };
+}
+
+/** The "Add …" action of a group or row: a 28px secondary button with a plus. */
+export function SettingsAddButton({
+  children,
+  ...props
+}: Omit<ComponentPropsWithoutRef<typeof Button>, "size" | "variant">) {
+  return (
+    <Button size="sm" variant="secondary" {...props}>
+      <PlusIcon />
+      {children}
+    </Button>
+  );
+}
+
+/**
+ * The empty line of a grouped list ("No triggers yet."): a row at the row text
+ * inset, with an optional right-aligned action in the control slot.
+ */
+export function SettingsEmptyRow({
+  children,
+  action,
+  className,
+}: {
+  children: ReactNode;
+  action?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      data-slot="settings-row"
+      className={cn("flex min-h-11 items-center justify-between gap-4 px-4 py-2", className)}
+    >
+      <p className="min-w-0 text-[13px] text-muted-foreground">{children}</p>
+      {action ? <div className="flex shrink-0 items-center gap-2">{action}</div> : null}
+    </div>
+  );
 }
 
 /** Muted section headings have no descriptions; explanatory copy belongs to individual settings. */
@@ -256,7 +283,16 @@ export function SettingsSection({
       className={cn(!hideTitle && "space-y-2", className)}
     >
       {hideTitle ? (
-        <h2 className="sr-only">{title}</h2>
+        headerAction ? (
+          // A page's lone section: the title repeats the page title, so only its meta and
+          // actions stay in the head row.
+          <div className="flex min-h-7 items-center justify-end gap-4 px-4 pb-2">
+            <h2 className="sr-only">{title}</h2>
+            {headerAction}
+          </div>
+        ) : (
+          <h2 className="sr-only">{title}</h2>
+        )
       ) : (
         <div
           data-settings-scroll-target
@@ -296,12 +332,13 @@ export function SettingsUnavailableGroup({
   if (message === undefined) return children;
 
   return (
-    <div className="border-border/60 bg-muted/20 py-1.5">
-      <div className="flex items-start gap-2 px-3 py-2 text-[12px] leading-relaxed text-muted-foreground sm:px-4">
-        <InfoIcon className="mt-0.5 size-3.5 shrink-0 text-warning" />
+    <div data-settings-unavailable>
+      <div className="flex min-h-9 items-center gap-2 px-4 pt-2 text-[12px] text-muted-foreground">
+        <InfoIcon className="size-3.5 shrink-0" />
         <p>{message}</p>
       </div>
-      <div className="[&_h3]:opacity-64 [&_p]:opacity-64">{children}</div>
+      {/* The whole row reads unavailable, not just its disabled control. */}
+      <div className="[&_h3]:text-muted-foreground [&_p]:text-tertiary-label">{children}</div>
     </div>
   );
 }
@@ -315,9 +352,9 @@ export function SettingsUnavailableGroup({
  * Keep descriptions short enough for one line where possible. Allow wrapping
  * for clarity or narrow screens instead of truncating or forcing no-wrap.
  *
- * Control sizing across settings follows three tiers so rows share a baseline:
- * - `control` slot: `size="sm"` (Button, Select, Input, NumberField) or `icon-sm`.
- * - Section `headerAction`s and buttons inside list items, cards, toolbars: `xs` / `icon-xs`.
+ * Control sizing across settings, so rows share a baseline and every target is 28px:
+ * - `control` slot, section `headerAction`s and toolbar actions: `size="sm"` or `icon-sm`.
+ *   "Add …" actions use `SettingsAddButton`.
  * - Inline affordances (reset arrows, info tooltips, table-cell buttons): `icon-micro`.
  * Dialog footers keep the app-wide default button size.
  */
@@ -532,14 +569,7 @@ export function SettingsRow({
             </span>
           </div>
           {caption.inline ? (
-            <p
-              className={cn(
-                "max-w-xl text-xs leading-4 text-muted-foreground",
-                typeof caption.inline === "string" && "truncate",
-              )}
-            >
-              {caption.inline}
-            </p>
+            <p className="max-w-xl text-xs leading-4 text-muted-foreground">{caption.inline}</p>
           ) : null}
           {renderedStatus ? (
             <div className="text-xs text-muted-foreground">{renderedStatus}</div>
@@ -597,19 +627,19 @@ export function SettingResetButton({
 }
 
 /**
- * The scrolling frame of a settings page. It opens with the page's large title,
- * named after the settings section unless `title` names something narrower.
+ * The scrolling frame of a settings page: the shared page column (reading, or
+ * wide for Diagnostics), the page's large title named after the settings
+ * section unless `title` names something narrower, and one 28px rhythm
+ * between sections. Callers pass no width, padding or gap overrides.
  */
 export function SettingsPageContainer({
   children,
-  className,
   title,
-  width = "readable",
+  width = "reading",
 }: {
   children: ReactNode;
-  className?: string;
   title?: ReactNode;
-  width?: WorkspacePageWidth;
+  width?: "reading" | "wide";
 }) {
   const navigate = useNavigate();
   const pathname = useLocation({ select: (location) => location.pathname });
@@ -639,12 +669,9 @@ export function SettingsPageContainer({
         className="topbar-scroll-fade scrollbar-gutter-both flex-1 overflow-y-auto"
         data-settings-page-scroll
       >
-        <WorkspacePageContainer
-          width={width}
-          className={cn("gap-7 pt-2", width === "readable" && "max-w-[46rem]", className)}
-        >
-          {pageTitle ? <SettingsLargeTitle>{pageTitle}</SettingsLargeTitle> : null}
-          {children}
+        <WorkspacePageContainer width={width}>
+          {pageTitle ? <PageLargeTitle>{pageTitle}</PageLargeTitle> : null}
+          <div className="flex flex-col gap-7">{children}</div>
         </WorkspacePageContainer>
       </div>
     </SettingsSearchTargetProvider>
