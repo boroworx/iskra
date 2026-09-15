@@ -213,13 +213,7 @@ function ThemeLibraryCard({
                               mode={selected.preview.mode}
                             />
                             {isActive ? (
-                              <span
-                                aria-hidden
-                                className="pointer-events-none absolute inset-0 rounded-full ring-2 ring-ring"
-                              />
-                            ) : null}
-                            {isActive ? (
-                              <span className="pointer-events-none absolute -bottom-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full border border-border/70 bg-background text-foreground shadow-sm">
+                              <span className="pointer-events-none absolute -bottom-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-background text-foreground shadow-sm">
                                 {mode === "light" ? (
                                   <SunIcon className="size-2.5" />
                                 ) : (
@@ -891,7 +885,7 @@ export function ThemeLibrary({
         </h3>
         <div className="flex flex-wrap items-center justify-end gap-2">
           <Button
-            size="xs"
+            size="sm"
             variant="outline"
             onClick={() =>
               openThemeEditor({
@@ -905,7 +899,7 @@ export function ThemeLibrary({
             <PaintbrushIcon />
             Create theme
           </Button>
-          <Button size="xs" variant="outline" onClick={() => onImportOpenChange(true)}>
+          <Button size="sm" variant="outline" onClick={() => onImportOpenChange(true)}>
             <PlusIcon />
             Add theme
           </Button>
@@ -979,7 +973,7 @@ export function ThemeLibrary({
                 const checkboxId = `remove-theme-${customTheme.id}`;
                 return (
                   <label
-                    className="group relative flex min-h-28 cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-border/70 bg-muted/25 p-3 has-checked:border-ring has-checked:bg-accent/20 hover:bg-muted/40"
+                    className="group relative flex min-h-28 cursor-pointer flex-col items-center justify-center gap-2 rounded-lg bg-muted/40 p-3 has-checked:bg-accent/40 has-checked:ring-2 has-checked:ring-primary hover:bg-muted/60"
                     htmlFor={checkboxId}
                     key={customTheme.id}
                   >

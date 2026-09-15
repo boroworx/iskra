@@ -155,8 +155,8 @@ export function ThemePreviewCircle({
 
 /**
  * A theme card's light and dark balls. Clicking a ball assigns that theme to
- * that half of the appearance mix; assigned balls carry a ring and a sun or
- * moon badge.
+ * that half of the appearance mix; assigned balls carry a sun or moon badge
+ * (the card's own ring marks the active theme).
  */
 export function ThemePreviewCircles({
   label,
@@ -193,23 +193,16 @@ export function ThemePreviewCircles({
                 >
                   <ThemePreviewCircle colors={preview.colors} mode={mode} />
                   {isPicked ? (
-                    <>
-                      <span
-                        aria-hidden
-                        className="pointer-events-none absolute inset-0 rounded-full"
-                        style={{ boxShadow: "inset 0 0 0 2px var(--ring)" }}
-                      />
-                      <span
-                        aria-hidden
-                        className="pointer-events-none absolute bottom-0.5 right-0.5 flex size-5 items-center justify-center rounded-full border border-border/70 bg-background text-foreground shadow-sm"
-                      >
-                        {mode === "light" ? (
-                          <SunIcon className="size-3" />
-                        ) : (
-                          <MoonIcon className="size-3" />
-                        )}
-                      </span>
-                    </>
+                    <span
+                      aria-hidden
+                      className="pointer-events-none absolute bottom-0.5 right-0.5 flex size-5 items-center justify-center rounded-full bg-background text-foreground shadow-sm"
+                    >
+                      {mode === "light" ? (
+                        <SunIcon className="size-3" />
+                      ) : (
+                        <MoonIcon className="size-3" />
+                      )}
+                    </span>
                   ) : null}
                 </button>
               }

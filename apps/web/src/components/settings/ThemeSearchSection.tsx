@@ -293,7 +293,7 @@ export function ThemeSearchSection({
               <Button
                 key={suggestion}
                 disabled={installingId !== null}
-                size="xs"
+                size="sm"
                 variant="ghost"
                 onClick={() => {
                   if (query.trim() === suggestion) {
@@ -344,7 +344,7 @@ export function ThemeSearchSection({
       {error ? (
         <div
           aria-live="polite"
-          className="rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-destructive text-sm"
+          className="rounded-xl bg-destructive/10 px-3 py-2 text-destructive text-sm"
         >
           {error}
         </div>
@@ -358,7 +358,7 @@ export function ThemeSearchSection({
 
       {results ? (
         results.length === 0 ? (
-          <div className="flex min-h-40 flex-col items-center justify-center rounded-2xl border border-dashed text-center">
+          <div className="flex min-h-40 flex-col items-center justify-center rounded-xl bg-[rgb(120_120_128/12%)] text-center">
             <p className="text-sm font-medium">No supported open-source themes found</p>
             <p className="mt-1 text-muted-foreground text-xs">Try a broader search.</p>
           </div>

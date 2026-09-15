@@ -37,7 +37,7 @@ export function PromptFontPreview() {
     setCursor(nextCursor);
   }, []);
   return (
-    <div className="mt-1 mb-2 rounded-lg border border-border bg-background px-3 py-2">
+    <div className="mt-1 mb-2 rounded-lg bg-background px-3 py-2">
       <ComposerPromptEditor
         editorRef={editorRef}
         value={prompt}
@@ -182,6 +182,9 @@ export function TerminalFontPreview({ family, size }: { family: string; size: nu
   const mountRef = useRef<HTMLDivElement>(null);
   const surfaceRef = useRef<GhosttyTerminalSurface | null>(null);
   const fontRef = useRef({ family, size });
+  // A surface that cannot start (no canvas, the WASM core failed) hides the
+  // preview instead of leaving an empty box.
+  const [failed, setFailed] = useState(false);
   const { theme, resolvedTheme } = useTheme();
 
   useEffect(() => {
@@ -242,18 +245,23 @@ export function TerminalFontPreview({ family, size }: { family: string; size: nu
       // Tab keeps walking the settings page instead of feeding the echo loop.
       beforeKey: (event) => event.key !== "Tab",
       onLinkActivate: noop,
-    }).then((surface) => {
-      if (cancelled) {
-        surface.dispose();
-        return;
-      }
-      surfaceRef.current = surface;
-      // The theme and font may both have changed while the WASM surface loaded.
-      surface.setTheme(terminalThemeFromApp(mount));
-      const font = fontRef.current;
-      void surface.setFont(previewTerminalFont(font.family, font.size));
-      surface.write(TERMINAL_PREVIEW_TRANSCRIPT);
-    });
+    }).then(
+      (surface) => {
+        if (cancelled) {
+          surface.dispose();
+          return;
+        }
+        surfaceRef.current = surface;
+        // The theme and font may both have changed while the WASM surface loaded.
+        surface.setTheme(terminalThemeFromApp(mount));
+        const font = fontRef.current;
+        void surface.setFont(previewTerminalFont(font.family, font.size));
+        surface.write(TERMINAL_PREVIEW_TRANSCRIPT);
+      },
+      () => {
+        if (!cancelled) setFailed(true);
+      },
+    );
 
     return () => {
       cancelled = true;
@@ -262,10 +270,11 @@ export function TerminalFontPreview({ family, size }: { family: string; size: nu
     };
   }, []);
 
+  if (failed) return null;
   return (
     <div
       ref={mountRef}
-      className="relative mt-1 mb-2 h-52 overflow-hidden rounded-lg border border-border"
+      className="relative mt-1 mb-2 h-52 overflow-hidden rounded-lg bg-background"
       aria-label="Terminal font preview"
     />
   );

@@ -111,7 +111,7 @@ function ThemeJsonEditor({
   }, []);
 
   return (
-    <div className="relative overflow-hidden rounded-xl border border-input bg-background shadow-xs/5 focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/24">
+    <div className="relative overflow-hidden rounded-xl bg-[rgb(120_120_128/12%)] focus-within:ring-2 focus-within:ring-ring/40">
       {isPlainText ? null : (
         <pre
           ref={highlightRef}
@@ -438,9 +438,7 @@ export function ThemeImportDialog({
 
           <div className="flex items-center gap-3" aria-hidden>
             <div className="h-px flex-1 bg-border" />
-            <span className="text-muted-foreground text-[11px] uppercase tracking-wider">
-              or import a file
-            </span>
+            <span className="text-muted-foreground text-xs">Or import a file</span>
             <div className="h-px flex-1 bg-border" />
           </div>
 
@@ -490,7 +488,7 @@ export function ThemeImportDialog({
             if (conflicts) {
               return (
                 <div className="space-y-3">
-                  <div className="rounded-xl border border-border/70 bg-muted/20 p-3">
+                  <div className="rounded-xl bg-[rgb(120_120_128/12%)] p-3">
                     <p className="text-sm font-medium">Already installed</p>
                     <p className="mt-1 text-xs text-muted-foreground">
                       {conflicts.map((theme) => theme.label).join(", ")}
@@ -517,8 +515,10 @@ export function ThemeImportDialog({
               <div className="space-y-4">
                 <div
                   className={cn(
-                    "flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed px-3 py-3 transition-colors",
-                    isDropTarget ? "border-ring bg-accent/20" : "border-border/80 bg-muted/20",
+                    "flex flex-wrap items-center justify-between gap-3 rounded-xl px-3 py-3 transition-colors",
+                    isDropTarget
+                      ? "bg-primary/12 ring-2 ring-primary/60"
+                      : "bg-[rgb(120_120_128/12%)]",
                   )}
                   {...dropHandlers}
                 >
@@ -537,7 +537,7 @@ export function ThemeImportDialog({
                     them at the modal bottom would read as a modal-scoped action when
                     the dialog also has the search and conflict views. */}
                 <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                  <Button variant="ghost" onClick={() => onOpenChange(false)}>
+                  <Button variant="secondary" onClick={() => onOpenChange(false)}>
                     Cancel
                   </Button>
                   <Button disabled={!json.trim() || isReading} onClick={handleSubmit}>
