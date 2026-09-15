@@ -34,7 +34,7 @@ A message that mentions nobody goes to the lead. If the request is too vague, th
 question, usually with two or three answers and one it recommends. Pick one, or answer in your own
 words without mentioning anyone. Once the request is clear, the lead proposes a card with acceptance
 criteria, an estimate, and a suggested owner. The proposal appears under its reply with **Approve &
-start**, **Edit**, and **Drop**.
+Start**, **Edit**, and **Drop**.
 
 **Approve & Start** first shows what you are starting: the criteria to confirm or edit, and the
 lead's estimate of size, likely areas, and risks. If the lead thinks the work should be several
@@ -164,7 +164,7 @@ waits:
 - **Waiting on a blocker**: a card it is blocked by has not landed.
 - **Waiting for agent pull requests to be reviewed**: the project has as many open agent pull
   requests as it allows.
-- **Waiting for the side-effect guard**: see [Side-effect guard](#side-effect-guard).
+- **Waiting for a safety check**: see [Side-effect guard](#side-effect-guard).
 - **Its agent can only read**: give the agent write in its settings. Needs you lists this too.
 
 **Pause** on a card holds it out of the queue until you **Resume** it. Iskra pauses a card itself
@@ -340,11 +340,19 @@ below.
 
 ### Side-effect guard
 
-Agents don't start work on a project until someone goes through its side-effect guard checklist:
-check the project's scheduled jobs and workers for anything that could act on real accounts, check
-which outbound APIs it calls (publishing, email, payments) and deny the risky ones, and optionally
-name the environment variable that turns those actions off, after verifying that the code reads it.
-Projects created before this update need it too.
+Agents run your project's code, so before they start on a project, someone confirms that nothing in
+it posts, emails or charges real accounts on its own. **Open the checklist** in Needs you, or open the
+project in **Settings → Projects**, where the checklist leads the page until it's reviewed:
+
+- Nothing runs on a schedule or in the background (crons, queues, workers) that posts, sends or
+  charges on its own, or you've turned it off.
+- You know which outside services the code calls (publishing, email, payments), and you've denied the
+  risky ones under **Network for agent shells**.
+- Optionally, name the environment variable that turns those actions off, once you've checked that
+  the code reads it. Cards then run with it set.
+
+For a small or local-only project with no such integrations, tick both boxes and choose
+**Acknowledge**. **Review again** takes it back.
 
 ### Hidden scenarios
 

@@ -51,7 +51,7 @@ export { WAITING_FOR_MEMORY };
 
 const SIDE_EFFECT_GUARD_WAIT: Reason = {
   code: "sideEffectGuard",
-  text: "Review this project's side-effect guard in project settings before agents start work.",
+  text: "Confirm in project settings that this project won't post, email or charge anything when agents run it; agents start after that.",
 };
 
 /** Sessions this machine runs at once: a third of its cores or one per 8 GB, between 1 and 6. */

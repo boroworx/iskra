@@ -226,8 +226,8 @@ export const REASON_LABEL: Readonly<Record<string, ReasonLabel>> = {
     hint: "Work starts once a person confirms the acceptance criteria.",
   },
   sideEffectGuard: {
-    label: "Waiting for the side-effect guard",
-    hint: "Someone must review this project's side-effect guard in project settings first.",
+    label: "Waiting for a safety check",
+    hint: "Someone must confirm in project settings that this project won't post, email or charge anything when agents run it.",
   },
   delegateReadOnly: {
     label: "Its agent can only read",
@@ -876,7 +876,7 @@ export const NEEDS_YOU_LABEL: Record<NeedsYouKind, string> = {
   sessionFailed: "Its session stopped without finishing",
   paused: "Iskra paused it",
   fixRoundsExhausted: "Its fix rounds are used up; give it more or take over",
-  sideEffectGuard: "Review this project's side-effect guard before agents start",
+  sideEffectGuard: "Check this project won't post, email or charge anything when agents run it",
   evidenceMissing: "Some evidence couldn't be captured; check it yourself",
   scopeFlags: "Acknowledge the flagged changes before merging",
   readyToMerge: "Evidence passed; approve the merge",

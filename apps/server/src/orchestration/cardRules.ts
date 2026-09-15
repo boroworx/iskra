@@ -73,14 +73,15 @@ export const PLAN_CHILD_LANDING_REASON =
 export const AUTO_MERGE_OFF_REASON =
   "This project doesn't merge cards without a person; turn on auto-merge in its orchestration policy.";
 export const SIDE_EFFECT_GUARD_REASON =
-  "Review this project's side-effect guard in project settings before agents start work.";
+  "Confirm in project settings that this project won't post, email or charge anything when agents run it; agents start after that.";
 export const PREMISE_REASON =
   "The request doesn't get to its goal as proposed; ask the requester instead.";
 export const OPEN_CHECKPOINT_REASON = "Only an open checkpoint can be resolved.";
 export const PAUSED_REASON = "The card is paused; resume it first.";
 export const ALREADY_ANSWERED_REASON = "This question was already answered.";
 export const ANSWER_OPTION_REASON = "Choose one of the offered answers or write your own.";
-export const PENDING_CI_REASON = "CI hasn't reported on the pull request yet; the merge waits for it.";
+export const PENDING_CI_REASON =
+  "CI hasn't reported on the pull request yet; the merge waits for it.";
 export const CI_ONLY_NO_PULL_REQUEST_REASON =
   "This project's checks all run in CI, but this card can't open a pull request for them. Add a local check, or a remote the server can push to.";
 /** The unavailable code of a CI check that hasn't reported yet. */
@@ -89,7 +90,10 @@ export const PENDING_CI_CODE = "pendingCi";
 /** Whether a project's cards land through a pull request: its policy says so, or it has a host remote. */
 export const landsByPullRequest = (project: OrchestrationProject): boolean => {
   const { landing } = projectOrchestrationOf(project);
-  return landing === "pullRequest" || (landing === null && (project.repositoryIdentity?.provider ?? null) !== null);
+  return (
+    landing === "pullRequest" ||
+    (landing === null && (project.repositoryIdentity?.provider ?? null) !== null)
+  );
 };
 export const NO_OPEN_QUESTION_REASON =
   "This card has no open question with that id; it may already be answered.";
@@ -129,9 +133,7 @@ export const cardOwnerRoleRefusal = (
 export const channelLeadRoleRefusal = (
   agent: Pick<OrchestrationAgent, "name" | "roles">,
 ): string | null =>
-  agent.roles.includes("lead")
-    ? null
-    : `@${agent.name} can't lead; give it the lead role first.`;
+  agent.roles.includes("lead") ? null : `@${agent.name} can't lead; give it the lead role first.`;
 
 /** Helper and critic runs one card may have open at once. */
 export const MAX_OPEN_ASSIST_RUNS = 2;
@@ -143,8 +145,9 @@ export const openAssistRunsRefusal = (
   liveRuns: ReadonlyArray<Pick<OrchestrationLiveRun, "cardId" | "role">>,
   cardId: CardId,
 ): string | null =>
-  liveRuns.filter((run) => run.cardId === cardId && (run.role === "helper" || run.role === "critic"))
-    .length >= MAX_OPEN_ASSIST_RUNS
+  liveRuns.filter(
+    (run) => run.cardId === cardId && (run.role === "helper" || run.role === "critic"),
+  ).length >= MAX_OPEN_ASSIST_RUNS
     ? OPEN_ASSIST_RUNS_REASON
     : null;
 
@@ -163,7 +166,8 @@ export const RESTART_SERVICES_REASON =
   "Only a card still being worked on, with a worktree, has services to restart.";
 export const VERIFY_LATEST_COMMIT_REASON = "A verifier checks only the card's latest commit.";
 /** MCP tool errors: a verdict comes only from its verifier session, help only from the builder. */
-export const VERIFIER_SESSION_ONLY_REASON = "Only the card's verifier session can record a verdict.";
+export const VERIFIER_SESSION_ONLY_REASON =
+  "Only the card's verifier session can record a verdict.";
 export const BUILDER_ONLY_ASSIST_REASON = "Only the card's builder can ask for help or a critique.";
 
 export const AUTO_MERGE_NEEDS_VERIFIED_REASON =
@@ -224,7 +228,8 @@ export const pullRequestDraftOf = (
 
 /** Why a trigger can't be saved as configured, or null: only a schedule with criteria takes ready work. */
 export const triggerConfigRefusal = (trigger: ProjectTrigger): string | null =>
-  trigger.intake === "ready" && (trigger.kind !== "schedule" || trigger.template.criteria.length === 0)
+  trigger.intake === "ready" &&
+  (trigger.kind !== "schedule" || trigger.template.criteria.length === 0)
     ? triggerReadyReason(trigger.id)
     : null;
 
@@ -331,7 +336,9 @@ export const verdictPassed = (
   verdict: Pick<CardVerdict, "criteria" | "diffJudge" | "scenarios">,
 ): boolean => {
   const passing = new Set(
-    verdict.criteria.filter((criterion) => criterion.pass).map((criterion) => criterion.criterionId),
+    verdict.criteria
+      .filter((criterion) => criterion.pass)
+      .map((criterion) => criterion.criterionId),
   );
   return (
     card.acceptance.criteria.every(
@@ -427,7 +434,13 @@ export function fixRoundRefusal(
 export function landingBeginRefusal(input: {
   readonly card: Pick<
     OrchestrationCard,
-    "evidence" | "baseBranch" | "verification" | "unattended" | "origin" | "createdBy" | "attemptGroupId"
+    | "evidence"
+    | "baseBranch"
+    | "verification"
+    | "unattended"
+    | "origin"
+    | "createdBy"
+    | "attemptGroupId"
   >;
   readonly parent: Pick<OrchestrationCard, "kind" | "branch" | "plan"> | undefined;
   readonly policy: Pick<ProjectOrchestration, "checksWaived" | "autoMerge">;
@@ -470,7 +483,11 @@ function autoMergeVerificationRefusal(
   const { satisfied, total } = verification.satisfaction;
   return satisfied / total >= policy.autoMerge.minSatisfaction
     ? null
-    : autoMergeSatisfactionReason(satisfied, total, Math.round(policy.autoMerge.minSatisfaction * 100));
+    : autoMergeSatisfactionReason(
+        satisfied,
+        total,
+        Math.round(policy.autoMerge.minSatisfaction * 100),
+      );
 }
 
 /** Owner sessions start only once a person reviewed the project's side-effect guard. */
@@ -748,7 +765,12 @@ export function newCard(
     acceptance: payload.acceptance ?? LEGACY_CARD_CONTRACT.acceptance,
     estimate: payload.estimate ?? null,
     premise: payload.premise ?? null,
-    origin: payload.origin ?? cardOriginOf({ createdBy: payload.createdBy, attemptGroupId: payload.attemptGroupId ?? null }),
+    origin:
+      payload.origin ??
+      cardOriginOf({
+        createdBy: payload.createdBy,
+        attemptGroupId: payload.attemptGroupId ?? null,
+      }),
     plan: payload.kind === "plan" ? CARD_PLAN_DRAFTING : null,
     migration: payload.migration ?? null,
     planKey: payload.planKey ?? null,
@@ -831,7 +853,9 @@ export function withCardElicitations(
     ];
   }
   const { answers } = activity;
-  return answers === null ? open : open.filter((question) => question.activityId !== answers.questionId);
+  return answers === null
+    ? open
+    : open.filter((question) => question.activityId !== answers.questionId);
 }
 
 /** What a person can do about each attention code; how each resolves is in `withCardAttention`. */
@@ -850,7 +874,8 @@ export const ATTENTION_ACTIONS: Record<CardAttentionCode, ReadonlyArray<CardAtte
   revertConflict: ["assignAgent", "dismiss"],
 };
 
-const isAttentionCode = (code: string): code is CardAttentionCode => Object.hasOwn(ATTENTION_ACTIONS, code);
+const isAttentionCode = (code: string): code is CardAttentionCode =>
+  Object.hasOwn(ATTENTION_ACTIONS, code);
 
 // ponytail: the shell carries the text to every client; a longer comment is forwarded cut at this.
 const ATTENTION_TEXT_MAX = 4000;
@@ -1421,7 +1446,10 @@ export function cardPatches(
             return {
               ...card,
               acceptance: payload.acceptance,
-              attention: asked.length === 0 ? card.attention : withoutCodes(card.attention, ["criteriaMissing"]),
+              attention:
+                asked.length === 0
+                  ? card.attention
+                  : withoutCodes(card.attention, ["criteriaMissing"]),
               openElicitations:
                 asked.length === 0
                   ? card.openElicitations
@@ -1437,7 +1465,9 @@ export function cardPatches(
     }
     case "card.paused": {
       const { cardId, reason, by, pausedAt } = event.payload;
-      return [[cardId, (card) => ({ ...card, paused: { reason, by, pausedAt }, activityAt: pausedAt })]];
+      return [
+        [cardId, (card) => ({ ...card, paused: { reason, by, pausedAt }, activityAt: pausedAt })],
+      ];
     }
     case "card.resumed": {
       const { cardId, resumedAt } = event.payload;
@@ -1550,7 +1580,12 @@ export function cardPatches(
           cardId,
           (card) => ({
             ...card,
-            verification: { ...CARD_VERIFICATION_OFF, state: "running" as const, headSha, verifier },
+            verification: {
+              ...CARD_VERIFICATION_OFF,
+              state: "running" as const,
+              headSha,
+              verifier,
+            },
             attention: withoutCodes(card.attention, ["verifierError"]),
             activityAt: selectedAt,
           }),
@@ -1698,7 +1733,11 @@ export function cardPatches(
                 ? null
                 : {
                     ...card.migration,
-                    items: items.map((key) => ({ key, childCardId: null, state: "pending" as const })),
+                    items: items.map((key) => ({
+                      key,
+                      childCardId: null,
+                      state: "pending" as const,
+                    })),
                   },
             activityAt: enumeratedAt,
           }),
@@ -1777,7 +1816,9 @@ export function cardPatches(
       return [[event.payload.cardId, touchCard(event.payload.requestedAt)]];
     case "card.fix-rounds-reset": {
       const { cardId, resetAt } = event.payload;
-      return [[cardId, (card) => ({ ...card, fixRounds: { ci: 0, review: 0 }, activityAt: resetAt })]];
+      return [
+        [cardId, (card) => ({ ...card, fixRounds: { ci: 0, review: 0 }, activityAt: resetAt })],
+      ];
     }
     case "card.landing-linked": {
       const { cardId, landing } = event.payload;
@@ -1786,7 +1827,12 @@ export function cardPatches(
         landing.mode === "pullRequest"
           ? ["pullRequestOpenFailed", "pullRequestClosed", "ciChecksNeedPullRequest"]
           : ["pullRequestOpenFailed"];
-      return [[cardId, (card) => ({ ...card, landing, attention: withoutCodes(card.attention, resolved) })]];
+      return [
+        [
+          cardId,
+          (card) => ({ ...card, landing, attention: withoutCodes(card.attention, resolved) }),
+        ],
+      ];
     }
     case "card.activity-recorded": {
       const recorded = event.payload;

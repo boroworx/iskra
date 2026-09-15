@@ -222,8 +222,13 @@ function ProjectOrchestrationForm(props: {
     setSaving(false);
   };
 
+  // An unreviewed guard holds every agent back, so it leads the page until someone reviews it.
+  const guardReviewed = current.sideEffectGuard.acknowledgedAt !== null;
+  const guard = <SideEffectGuard current={current} saving={saving} onSave={save} />;
+
   return (
     <>
+      {guardReviewed ? null : guard}
       <SettingsSection id="project-orchestration" title="Agent orchestration">
         {props.mixed ? (
           <p className="px-4 py-2 text-xs text-muted-foreground">
@@ -518,7 +523,7 @@ function ProjectOrchestrationForm(props: {
       <ProjectKnowledgeSettings project={props.representative} />
       <ProjectHoldoutsSettings project={props.representative} />
       <ProjectSecrets project={props.representative} />
-      <SideEffectGuard current={current} saving={saving} onSave={save} />
+      {guardReviewed ? guard : null}
     </>
   );
 }
@@ -547,7 +552,7 @@ function SideEffectGuard(props: {
         title={guard.acknowledgedAt === null ? "Not reviewed" : "Reviewed"}
         description={
           guard.acknowledgedAt === null
-            ? "Agents don't start work on this project until someone goes through this list."
+            ? "Agents run this project's code. Confirm nothing in it posts, emails or charges real accounts on its own; a small or local-only project just needs both boxes ticked."
             : `Reviewed ${new Date(guard.acknowledgedAt).toLocaleString()}.${guard.killSwitchEnv === null ? "" : ` Cards run with ${guard.killSwitchEnv} set to stop outbound actions.`}`
         }
         control={
@@ -573,8 +578,8 @@ function SideEffectGuard(props: {
               checked={scheduledJobs}
               onCheckedChange={(checked) => setScheduledJobs(checked === true)}
             />
-            I checked this project's scheduled jobs and workers (crons, queues) for anything that
-            posts, sends or charges on its own.
+            Nothing runs on a schedule or in the background (crons, queues, workers) that posts,
+            sends or charges on its own, or I've turned it off.
           </label>
           <label className="flex items-start gap-2">
             <Checkbox
@@ -582,8 +587,8 @@ function SideEffectGuard(props: {
               checked={outboundApis}
               onCheckedChange={(checked) => setOutboundApis(checked === true)}
             />
-            I checked which outbound APIs it calls (publishing, email, payments) and denied the ones
-            agents must not reach under Network.
+            I know which outside services the code calls (publishing, email, payments), and I denied
+            the risky ones under Network for agent shells.
           </label>
           <div className="flex flex-col gap-1">
             <span className="text-xs text-muted-foreground">

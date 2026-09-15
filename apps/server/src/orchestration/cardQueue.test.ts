@@ -368,7 +368,7 @@ it.layer(NodeServices.layer)("planStarts", (it) => {
         expect(guarded.waits.map((wait) => wait.reason)).toEqual([
           {
             code: "sideEffectGuard",
-            text: "Review this project's side-effect guard in project settings before agents start work.",
+            text: "Confirm in project settings that this project won't post, email or charge anything when agents run it; agents start after that.",
           },
         ]);
 

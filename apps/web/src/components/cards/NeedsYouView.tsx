@@ -728,9 +728,11 @@ function GuardLink(props: { readonly search: { readonly project: string } | null
   return (
     <ActionButton
       tone="primary"
-      render={<Link to="/settings/projects" search={props.search} hash="project-orchestration" />}
+      render={
+        <Link to="/settings/projects" search={props.search} hash="project-side-effect-guard" />
+      }
     >
-      Review the guard
+      Open the checklist
     </ActionButton>
   );
 }
