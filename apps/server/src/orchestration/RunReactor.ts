@@ -220,7 +220,9 @@ const make = Effect.gen(function* () {
           commandId: CommandId.make(`run-wait:${event.eventId}`),
           channelId,
           messageId: MessageId.make(`run-wait:${event.eventId}`),
-          body: hold?.text ?? `@${agent.name} starts when one of this machine's ${cap} session slots frees.`,
+          body:
+            hold?.text ??
+            `@${agent.name} starts when one of this machine's ${cap} session slots frees.`,
           createdAt: yield* nowIso,
         });
       }
@@ -267,7 +269,7 @@ const make = Effect.gen(function* () {
       commandId: CommandId.make(`run-thread:${event.eventId}`),
       threadId,
       projectId: channel.projectId,
-      title: `@${agent.name} in #${channel.name}`,
+      title: `@${agent.name} in ${channel.kind === "requests" ? "Requests" : `#${channel.name}`}`,
       modelSelection: agent.modelSelection,
       runtimeMode: "approval-required",
       interactionMode: "default",
@@ -484,9 +486,10 @@ const make = Effect.gen(function* () {
     for (const channel of readModel.channels ?? []) {
       if (channel.kind !== "dm" || channel.archivedAt !== null) continue;
       for (const agentId of channel.memberAgentIds) {
-        const queued = (yield* channels.listOpenDeliveries({ agentId, channelId: channel.id })).filter(
-          (delivery) => delivery.status === "queued",
-        );
+        const queued = (yield* channels.listOpenDeliveries({
+          agentId,
+          channelId: channel.id,
+        })).filter((delivery) => delivery.status === "queued");
         yield* wakeForWaiting({
           commandId: CommandId.make(
             `run-queued-pickup:${channel.id}:${queued.at(-1)?.messageId ?? "none"}`,
@@ -552,10 +555,9 @@ const make = Effect.gen(function* () {
     yield* forkParked(Stream.runForEach(events, processEvent));
     yield* worker.enqueue({ kind: "pickUpQueued" });
     yield* forkParked(
-      Effect.suspend(() => (waiting.size > 0 ? worker.enqueue({ kind: "retry" }) : Effect.void)).pipe(
-        Effect.repeat(Schedule.spaced("1 minute")),
-        Effect.asVoid,
-      ),
+      Effect.suspend(() =>
+        waiting.size > 0 ? worker.enqueue({ kind: "retry" }) : Effect.void,
+      ).pipe(Effect.repeat(Schedule.spaced("1 minute")), Effect.asVoid),
     );
   });
 

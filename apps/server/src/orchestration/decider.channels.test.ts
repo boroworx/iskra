@@ -3,7 +3,9 @@ import {
   ChannelId,
   DEFAULT_PROJECT_ORCHESTRATION,
   MessageId,
+  REQUESTS_CHANNEL_NAME,
   ThreadId,
+  requestsChannelId,
   type OrchestrationCommand,
 } from "@iskra/contracts";
 import { expect, it } from "@effect/vitest";
@@ -43,6 +45,22 @@ const channelCommand = (
   type,
   commandId: nextCommandId(),
   channelId: ChannelId.make(id),
+});
+
+type ChannelCreate = Extract<OrchestrationCommand, { type: "channel.create" }>;
+type ChannelUpdate = Extract<OrchestrationCommand, { type: "channel.update" }>;
+
+const requestsId = requestsChannelId(projectId);
+const lead = AgentId.make("agent-lead");
+
+// Creates the project's Requests the way the web client does, with `overrides` on top.
+const createRequests = (
+  leadAgentId?: AgentId,
+  overrides: Partial<ChannelCreate> = {},
+): OrchestrationCommand => ({
+  ...(createChannel(requestsId, "requests", [backend, frontend], leadAgentId) as ChannelCreate),
+  name: REQUESTS_CHANNEL_NAME,
+  ...overrides,
 });
 
 // Decides a human post after `commands`.
@@ -211,43 +229,45 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
     }),
   );
 
-  it.effect("wakes exactly the member agents a message mentions, and says when it wakes nobody", () =>
-    Effect.gen(function* () {
-      const base = [
-        ...setup,
-        createAgent(reviewer),
-        createChannel("general", "channel", [backend, frontend]),
-      ];
+  it.effect(
+    "wakes exactly the member agents a message mentions, and says when it wakes nobody",
+    () =>
+      Effect.gen(function* () {
+        const base = [
+          ...setup,
+          createAgent(reviewer),
+          createChannel("general", "channel", [backend, frontend]),
+        ];
 
-      const mentioned = yield* decidePost(base, "general", "@frontend can you check this?");
-      expect(mentioned.map((event) => event.type)).toEqual([
-        "channel.message-posted",
-        "channel.agent-wake-requested",
-      ]);
-      expect(mentioned[0]).toMatchObject({ payload: { mentions: [frontend] } });
-      expect(mentioned[1]).toMatchObject({ payload: { agentId: frontend } });
+        const mentioned = yield* decidePost(base, "general", "@frontend can you check this?");
+        expect(mentioned.map((event) => event.type)).toEqual([
+          "channel.message-posted",
+          "channel.agent-wake-requested",
+        ]);
+        expect(mentioned[0]).toMatchObject({ payload: { mentions: [frontend] } });
+        expect(mentioned[1]).toMatchObject({ payload: { agentId: frontend } });
 
-      const silent = yield* decidePost(base, "general", "just thinking out loud");
-      expect(silent.map((event) => event.type)).toEqual([
-        "channel.message-posted",
-        "channel.message-posted",
-      ]);
-      expect(silent[1]).toMatchObject({
-        payload: {
-          authorKind: "system",
-          body: "Nobody was woken. @mention an agent, or choose a lead in channel settings.",
-        },
-      });
+        const silent = yield* decidePost(base, "general", "just thinking out loud");
+        expect(silent.map((event) => event.type)).toEqual([
+          "channel.message-posted",
+          "channel.message-posted",
+        ]);
+        expect(silent[1]).toMatchObject({
+          payload: {
+            authorKind: "system",
+            body: "Nobody was woken. @mention an agent, or choose a lead in channel settings.",
+          },
+        });
 
-      const outsider = yield* decidePost(base, "general", "@reviewer any thoughts?");
-      expect(outsider.map((event) => event.type)).toEqual([
-        "channel.message-posted",
-        "channel.message-posted",
-      ]);
-      expect(outsider[1]).toMatchObject({
-        payload: { authorKind: "system", body: "@reviewer isn't an active member of #general." },
-      });
-    }),
+        const outsider = yield* decidePost(base, "general", "@reviewer any thoughts?");
+        expect(outsider.map((event) => event.type)).toEqual([
+          "channel.message-posted",
+          "channel.message-posted",
+        ]);
+        expect(outsider[1]).toMatchObject({
+          payload: { authorKind: "system", body: "@reviewer isn't an active member of #general." },
+        });
+      }),
   );
 
   it.effect("wakes a DM's agent on every human message, mention or not", () =>
@@ -266,28 +286,30 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
     }),
   );
 
-  it.effect("joins an agent's live run from the same channel and starts another instance elsewhere", () =>
-    Effect.gen(function* () {
-      const base = [
-        ...setup,
-        createChannel("general", "channel", [backend]),
-        createChannel("other", "channel", [backend]),
-        startChannelRun(backend, "other", "run-other"),
-      ];
+  it.effect(
+    "joins an agent's live run from the same channel and starts another instance elsewhere",
+    () =>
+      Effect.gen(function* () {
+        const base = [
+          ...setup,
+          createChannel("general", "channel", [backend]),
+          createChannel("other", "channel", [backend]),
+          startChannelRun(backend, "other", "run-other"),
+        ];
 
-      const elsewhere = yield* decidePost(base, "general", "@backend ping");
-      expect(elsewhere[1]).toMatchObject({
-        type: "channel.agent-wake-requested",
-        payload: { agentId: backend },
-      });
-      expect(elsewhere[1]).not.toHaveProperty("payload.liveRunThreadId");
+        const elsewhere = yield* decidePost(base, "general", "@backend ping");
+        expect(elsewhere[1]).toMatchObject({
+          type: "channel.agent-wake-requested",
+          payload: { agentId: backend },
+        });
+        expect(elsewhere[1]).not.toHaveProperty("payload.liveRunThreadId");
 
-      const sameChannel = yield* decidePost(base, "other", "@backend one more thing");
-      expect(sameChannel[1]).toMatchObject({
-        type: "channel.agent-wake-requested",
-        payload: { agentId: backend, liveRunThreadId: "run-other" },
-      });
-    }),
+        const sameChannel = yield* decidePost(base, "other", "@backend one more thing");
+        expect(sameChannel[1]).toMatchObject({
+          type: "channel.agent-wake-requested",
+          payload: { agentId: backend, liveRunThreadId: "run-other" },
+        });
+      }),
   );
 
   it.effect("wakes a DM at once while the agent converses in another channel", () =>
@@ -452,6 +474,109 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
       ]);
       expect(kept.channels).toMatchObject([{ name: "triage-renamed", leadAgentId: backend }]);
     }),
+  );
+
+  it.effect("creates Requests only at its project's id and name, and only once", () =>
+    Effect.gen(function* () {
+      const readModel = yield* applyCommands([...setup, createAgent(lead), createRequests(lead)]);
+      expect(readModel.channels).toMatchObject([
+        { id: requestsId, kind: "requests", name: "Requests", leadAgentId: lead },
+      ]);
+
+      const wrongId = yield* Effect.flip(
+        applyCommands([
+          ...setup,
+          createRequests(undefined, { channelId: ChannelId.make("inbox") }),
+        ]),
+      );
+      expect(wrongId.message).toContain(
+        `This project's Requests must have the id '${requestsId}'.`,
+      );
+
+      const wrongName = yield* Effect.flip(
+        applyCommands([...setup, createRequests(undefined, { name: "Inbox" })]),
+      );
+      expect(wrongName.message).toContain('Requests must be named "Requests".');
+
+      const again = yield* Effect.flip(decide(readModel, createRequests()));
+      expect(again.message).toContain("This project's Requests already exists.");
+
+      const squatter = yield* Effect.flip(
+        applyCommands([...setup, createChannel(requestsId, "channel", [backend])]),
+      );
+      expect(squatter.message).toContain("That id is reserved for the project's Requests.");
+    }),
+  );
+
+  it.effect("lets Requests have a lead with the lead role, and never be renamed or archived", () =>
+    Effect.gen(function* () {
+      const builderOnly = AgentId.make("agent-builder-only");
+      const base = [...setup, createAgent(builderOnly, { roles: ["builder"] })];
+      const update = (fields: Partial<ChannelUpdate>): OrchestrationCommand => ({
+        type: "channel.update",
+        commandId: nextCommandId(),
+        channelId: requestsId,
+        ...fields,
+      });
+
+      const roleless = yield* Effect.flip(applyCommands([...base, createRequests(builderOnly)]));
+      expect(roleless.message).toContain("@builder-only can't lead a channel");
+
+      const created = [...base, createRequests()];
+      const updated = yield* applyCommands([
+        ...created,
+        update({ name: REQUESTS_CHANNEL_NAME, topic: "Bugs and asks", leadAgentId: backend }),
+      ]);
+      expect(updated.channels).toMatchObject([
+        { name: "Requests", topic: "Bugs and asks", leadAgentId: backend },
+      ]);
+      const cleared = yield* applyCommands([
+        ...created,
+        update({ leadAgentId: backend }),
+        update({ leadAgentId: null }),
+      ]);
+      expect(cleared.channels).toMatchObject([{ leadAgentId: null }]);
+
+      const renamed = yield* Effect.flip(applyCommands([...created, update({ name: "Inbox" })]));
+      expect(renamed.message).toContain(
+        "Requests can't be renamed; it's the project's built-in conversation.",
+      );
+      const archived = yield* Effect.flip(
+        applyCommands([...created, channelCommand(requestsId, "channel.archive")]),
+      );
+      expect(archived.message).toContain(
+        "Requests can't be archived; it's the project's built-in conversation.",
+      );
+    }),
+  );
+
+  it.effect(
+    "wakes Requests' lead on an unaddressed message, and says who to choose without one",
+    () =>
+      Effect.gen(function* () {
+        const led = yield* decidePost(
+          [...setup, createAgent(lead), createRequests(lead)],
+          requestsId,
+          "the export button is broken",
+        );
+        expect(led[1]).toMatchObject({
+          type: "channel.agent-wake-requested",
+          payload: { agentId: lead },
+        });
+
+        const base = [...setup, createAgent(reviewer), createRequests()];
+        const unled = yield* decidePost(base, requestsId, "the export button is broken");
+        expect(unled[1]).toMatchObject({
+          payload: {
+            authorKind: "system",
+            body: "Nobody was woken. @mention an agent, or choose who turns requests into cards.",
+          },
+        });
+        const outsider = yield* decidePost(base, requestsId, "@reviewer any thoughts?");
+        expect(outsider[1]).toMatchObject({
+          payload: { authorKind: "system", body: "@reviewer isn't an active member of Requests." },
+        });
+      }),
   );
 
   it.effect("opens an agent's DM on the first direct message and posts later ones there", () =>

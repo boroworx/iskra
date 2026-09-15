@@ -3,6 +3,8 @@ import {
   CHANNEL_SYSTEM_AUTHOR_ID,
   ChannelId,
   DEFAULT_CHANNEL_WAKE_DEPTH,
+  REQUESTS_CHANNEL_NAME,
+  requestsChannelId,
   EventId,
   MAX_SCRIPT_ID_LENGTH,
   SCRIPT_RUN_COMMAND_PATTERN,
@@ -164,9 +166,9 @@ const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 type ReadModelChannel = NonNullable<OrchestrationReadModel["channels"]>[number];
 
 /**
- * Why an agent cannot lead a channel, or null: a lead is an active agent of the project with the
- * lead role. The role is checked only for a new lead, so saving a channel whose lead lost the role
- * isn't refused.
+ * Why an agent cannot lead a channel or Requests, or null: a lead is an active agent of the project
+ * with the lead role. The role is checked only for a new lead, so saving a channel whose lead lost
+ * the role isn't refused.
  */
 function channelLeadProblem(input: {
   readonly readModel: OrchestrationReadModel;
@@ -176,7 +178,7 @@ function channelLeadProblem(input: {
   readonly currentLeadAgentId: ReadModelChannel["leadAgentId"];
 }): string | null {
   if (input.leadAgentId === null) return null;
-  if (input.kind !== "channel") return "Only a channel can have a lead, not a DM.";
+  if (input.kind === "dm") return "Only a channel can have a lead, not a DM.";
   const agent = (input.readModel.agents ?? []).find(
     (candidate) => candidate.id === input.leadAgentId,
   );
@@ -196,6 +198,14 @@ const wakeTarget = (decision: Exclude<WakeDecision, { readonly kind: "refuse" }>
 /** Said in a channel when a message wakes nobody. */
 export const NOBODY_WOKEN_NOTE =
   "Nobody was woken. @mention an agent, or choose a lead in channel settings.";
+/** Said in Requests when a message wakes nobody, since it has no lead yet. */
+export const REQUESTS_NOBODY_WOKEN_NOTE =
+  "Nobody was woken. @mention an agent, or choose who turns requests into cards.";
+/** Refused for renaming or archiving Requests. */
+const REQUESTS_RENAME_REASON =
+  "Requests can't be renamed; it's the project's built-in conversation.";
+const REQUESTS_ARCHIVE_REASON =
+  "Requests can't be archived; it's the project's built-in conversation.";
 const decodeUserInputRequestedPayload = Schema.decodeUnknownOption(UserInputRequestedPayload);
 const threadPullRequestLinksEqual = Schema.toEquivalence(Schema.NullOr(ThreadLinkedPullRequest));
 
@@ -505,7 +515,10 @@ const requireCardAgentAs = Effect.fn("requireCardAgentAs")(function* (input: {
     agentId: input.agentId,
   });
   if (agent.projectId !== input.card.projectId || agent.archivedAt !== null) {
-    return yield* refuse(input.command, `@${agent.name} isn't an active agent of this card's project.`);
+    return yield* refuse(
+      input.command,
+      `@${agent.name} isn't an active agent of this card's project.`,
+    );
   }
   yield* refuseIf(input.command, roleRefusal(agent, input.role));
   return agent;
@@ -519,7 +532,8 @@ const refuseVerifyWith = (
   verifyWith: string | null | undefined,
 ) => {
   const named = (readModel.agents ?? []).find(
-    (agent) => agent.projectId === projectId && agent.name === verifyWith && agent.archivedAt === null,
+    (agent) =>
+      agent.projectId === projectId && agent.name === verifyWith && agent.archivedAt === null,
   );
   return named === undefined ? Effect.void : refuseIf(command, roleRefusal(named, "verifier"));
 };
@@ -4000,9 +4014,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         { readModel, command, cardId: command.cardId },
         "A card that has landed or been abandoned takes no answers.",
       );
-      const question = card.openElicitations.find(
-        (open) => open.activityId === command.activityId,
-      );
+      const question = card.openElicitations.find((open) => open.activityId === command.activityId);
       if (question === undefined) {
         return yield* refuse(command, NO_OPEN_QUESTION_REASON);
       }
@@ -4028,7 +4040,11 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         if (command.optionId === null) {
           return yield* refuse(command, ANSWER_OPTION_REASON);
         }
-        const target = { commandId: command.commandId, cardId: command.cardId, activityId: command.activityId };
+        const target = {
+          commandId: command.commandId,
+          cardId: command.cardId,
+          activityId: command.activityId,
+        };
         return yield* decideOrchestrationCommand({
           command:
             command.optionId === "restore"
@@ -4093,7 +4109,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           return yield* refuse(command, `Not in this report: ${unknown.join(", ")}.`);
         }
       }
-      const restore = named === undefined ? reported : reported.filter((change) => named.includes(change.ref));
+      const restore =
+        named === undefined ? reported : reported.filter((change) => named.includes(change.ref));
       const optionId = command.type === "card.refs.restore" ? "restore" : "keep";
       const occurredAt = yield* nowIso;
       return yield* planned(command, "card", card.id, occurredAt, {
@@ -4273,7 +4290,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           cardId: card.id,
           ...(command.type === "card.pause"
-            ? { reason: { code: "pausedByPerson", text: "Paused by a person." }, by: "human" as const }
+            ? {
+                reason: { code: "pausedByPerson", text: "Paused by a person." },
+                by: "human" as const,
+              }
             : { reason: command.reason, by: "system" as const }),
           pausedAt: occurredAt,
         },
@@ -4414,6 +4434,25 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
 
     case "channel.create": {
       yield* requireProject({ readModel, command, projectId: command.projectId });
+      // A project has one Requests, at its fixed id, so a second create is refused, not duplicated.
+      const requestsId = requestsChannelId(command.projectId);
+      if (command.kind !== "requests" && command.channelId === requestsId) {
+        return yield* refuse(command, "That id is reserved for the project's Requests.");
+      }
+      if (command.kind === "requests") {
+        if (command.channelId !== requestsId) {
+          return yield* refuse(
+            command,
+            `This project's Requests must have the id '${requestsId}'.`,
+          );
+        }
+        if (command.name !== REQUESTS_CHANNEL_NAME) {
+          return yield* refuse(command, `Requests must be named "${REQUESTS_CHANNEL_NAME}".`);
+        }
+        if ((readModel.channels ?? []).some((channel) => channel.id === command.channelId)) {
+          return yield* refuse(command, "This project's Requests already exists.");
+        }
+      }
       yield* requireChannelAbsent({ readModel, command, channelId: command.channelId });
       yield* requireValidChannelMembers({
         readModel,
@@ -4452,6 +4491,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
 
     case "channel.update": {
       const channel = yield* requireChannel({ readModel, command, channelId: command.channelId });
+      // Saving Requests' settings may resend its name; only a different one is a rename.
+      if (
+        channel.kind === "requests" &&
+        command.name !== undefined &&
+        command.name !== channel.name
+      ) {
+        return yield* refuse(command, REQUESTS_RENAME_REASON);
+      }
       if (command.memberAgentIds !== undefined) {
         yield* requireValidChannelMembers({
           readModel,
@@ -4494,6 +4541,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
 
     case "channel.archive": {
       const channel = yield* requireChannel({ readModel, command, channelId: command.channelId });
+      if (channel.kind === "requests") {
+        return yield* refuse(command, REQUESTS_ARCHIVE_REASON);
+      }
       if (channel.archivedAt !== null) {
         return yield* refuse(command, `Channel '${command.channelId}' is already archived.`);
       }
@@ -4580,7 +4630,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
               messageId: MessageId.make(`${command.messageId}:system:nobody`),
               authorKind: "system",
               authorId: CHANNEL_SYSTEM_AUTHOR_ID,
-              body: NOBODY_WOKEN_NOTE,
+              body: channel.kind === "requests" ? REQUESTS_NOBODY_WOKEN_NOTE : NOBODY_WOKEN_NOTE,
               createdAt: command.createdAt,
             },
           }),
@@ -4638,7 +4688,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           `Channel '${channel.id}' is archived and cannot wake agents.`,
         );
       }
-      const decision = decideWake({ readModel, channel, agent, newRuns: 0, now: command.createdAt });
+      const decision = decideWake({
+        readModel,
+        channel,
+        agent,
+        newRuns: 0,
+        now: command.createdAt,
+      });
       if (decision.kind === "refuse") {
         return yield* refuse(command, decision.reason);
       }
@@ -4901,7 +4957,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           events.push(
             yield* planned(command, "card", childId, occurredAt, {
               type: "card.wait-noted",
-              payload: { cardId: childId, threadId: null, reason: HELD_BY_CHECKPOINT_WAIT, notedAt: occurredAt },
+              payload: {
+                cardId: childId,
+                threadId: null,
+                reason: HELD_BY_CHECKPOINT_WAIT,
+                notedAt: occurredAt,
+              },
             }),
           );
         }
@@ -4909,7 +4970,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       events.push(
         yield* planned(command, "card", card.id, occurredAt, {
           type: "card.plan-approved",
-          payload: { cardId: card.id, revision: command.revision, integrationBranch, approvedAt: occurredAt },
+          payload: {
+            cardId: card.id,
+            revision: command.revision,
+            integrationBranch,
+            approvedAt: occurredAt,
+          },
         }),
       );
       return events;
@@ -5081,7 +5147,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       events.push(
         yield* planned(command, "card", card.id, occurredAt, {
           type: "card.migration-phase-changed",
-          payload: { cardId: card.id, phase: command.phase, started: children, changedAt: occurredAt },
+          payload: {
+            cardId: card.id,
+            phase: command.phase,
+            started: children,
+            changedAt: occurredAt,
+          },
         }),
       );
       return events;
@@ -5155,7 +5226,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             status: ready ? "ready" : "triage",
             ownerHumanId: CHANNEL_HUMAN_AUTHOR_ID,
             baseBranch: null,
-            acceptance: { criteria: trigger.template.criteria, state: ready ? "confirmed" : "draft" },
+            acceptance: {
+              criteria: trigger.template.criteria,
+              state: ready ? "confirmed" : "draft",
+            },
             budgetCapUsd: policy.budgets.cardDefaultUsd,
             origin: { kind: "trigger", id: trigger.id },
             unattended: ready,
@@ -5169,7 +5243,11 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         events.push(
           yield* planned(command, "card", command.cardId, command.createdAt, {
             type: "card.delegate-changed",
-            payload: { cardId: command.cardId, delegateAgentId: agent.id, updatedAt: command.createdAt },
+            payload: {
+              cardId: command.cardId,
+              delegateAgentId: agent.id,
+              updatedAt: command.createdAt,
+            },
           }),
         );
       }
@@ -5329,8 +5407,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const ownerTurn =
         owner === undefined
           ? null
-          : (readModel.threads.find((thread) => thread.id === owner.threadId)?.session?.activeTurnId ??
-            null);
+          : (readModel.threads.find((thread) => thread.id === owner.threadId)?.session
+              ?.activeTurnId ?? null);
       if (card.paused === null || ownerTurn !== null) {
         return yield* refuse(command, RESTORE_NEEDS_STOPPED_REASON);
       }

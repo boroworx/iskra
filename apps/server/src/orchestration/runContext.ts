@@ -57,7 +57,11 @@ const ROLE_SUMMARY_LIMIT = 160;
 
 /** The first line of a role prompt, cut short: enough for a lead to choose an owner. */
 function roleSummary(rolePrompt: string): string {
-  const line = rolePrompt.split("\n").find((candidate) => candidate.trim().length > 0)?.trim() ?? "";
+  const line =
+    rolePrompt
+      .split("\n")
+      .find((candidate) => candidate.trim().length > 0)
+      ?.trim() ?? "";
   return line.length > ROLE_SUMMARY_LIMIT ? `${line.slice(0, ROLE_SUMMARY_LIMIT - 1)}…` : line;
 }
 
@@ -96,7 +100,10 @@ export function buildRunContext(input: RunContextInput): RunContextPayload {
               ];
             }),
             openCards: input.lead.cards
-              .filter((card) => card.projectId === channel.projectId && !isFinishedCardStatus(card.status))
+              .filter(
+                (card) =>
+                  card.projectId === channel.projectId && !isFinishedCardStatus(card.status),
+              )
               .map((card) => ({ id: card.id, title: card.title, status: card.status })),
           },
         }),
@@ -125,8 +132,14 @@ export function renderNewMessage(message: RunContextMessage): string {
  */
 export function renderRunContext(payload: RunContextPayload): RenderedRunContext {
   const { lead } = payload;
+  const { kind, name } = payload.channel;
   const where =
-    payload.channel.kind === "dm" ? "a direct message with the user" : `#${payload.channel.name}`;
+    kind === "dm"
+      ? "a direct message with the user"
+      : kind === "requests"
+        ? "the project's Requests conversation, where the user asks for work"
+        : `#${name}`;
+  const historyPlace = kind === "requests" ? "Requests" : where;
   const systemPrompt = [
     ...(lead === undefined
       ? [`You are @${payload.agent.name}, an agent working in ${where}.`]
@@ -154,7 +167,7 @@ export function renderRunContext(payload: RunContextPayload): RenderedRunContext
   const firstMessage = [
     payload.history.length === 0
       ? ""
-      : `Recent messages in ${where}:\n${payload.history.map(formatMessage).join("\n")}`,
+      : `Recent messages in ${historyPlace}:\n${payload.history.map(formatMessage).join("\n")}`,
     lead === undefined
       ? ""
       : `## Open cards\n\n${

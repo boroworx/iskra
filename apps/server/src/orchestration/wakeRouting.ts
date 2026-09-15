@@ -73,7 +73,12 @@ export function decideWake(input: {
   readonly now: string;
 }): WakeDecision {
   const { readModel, channel, agent } = input;
-  const where = channel.kind === "dm" ? "this DM" : `#${channel.name}`;
+  const where =
+    channel.kind === "dm"
+      ? "this DM"
+      : channel.kind === "requests"
+        ? "Requests"
+        : `#${channel.name}`;
   // A channel's lead is woken there without being a member.
   const belongs = channel.memberAgentIds.includes(agent.id) || channel.leadAgentId === agent.id;
   if (agent.archivedAt !== null || !belongs) {

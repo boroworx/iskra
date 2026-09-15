@@ -1,4 +1,12 @@
-import { AgentId, CardId, ChannelId, MessageId, type OrchestrationCommand } from "@iskra/contracts";
+import {
+  AgentId,
+  CardId,
+  ChannelId,
+  MessageId,
+  REQUESTS_CHANNEL_NAME,
+  requestsChannelId,
+  type OrchestrationCommand,
+} from "@iskra/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -70,7 +78,10 @@ it.layer(NodeServices.layer)("decider board tools", (it) => {
           ...setup,
           createChannel(channelId, "channel", [backend], reviewer),
         ]);
-        const propose = (agentId: AgentId, suggestedAgentName = "backend"): OrchestrationCommand => ({
+        const propose = (
+          agentId: AgentId,
+          suggestedAgentName = "backend",
+        ): OrchestrationCommand => ({
           type: "card.propose",
           commandId: nextCommandId(),
           cardId: CardId.make("card-limits-webhooks"),
@@ -120,5 +131,42 @@ it.layer(NodeServices.layer)("decider board tools", (it) => {
         const [unknown] = yield* decide(readModel, propose(reviewer, "ghost"));
         expect(unknown).toMatchObject({ payload: { suggestedAgentId: null } });
       }),
+  );
+
+  it.effect("records a Requests lead's proposal in Requests, so its notes post there", () =>
+    Effect.gen(function* () {
+      const channelId = requestsChannelId(projectId);
+      const readModel = yield* applyCommands([
+        ...setup,
+        {
+          ...(createChannel(channelId, "requests", [backend], reviewer) as Extract<
+            OrchestrationCommand,
+            { type: "channel.create" }
+          >),
+          name: REQUESTS_CHANNEL_NAME,
+        },
+      ]);
+      const [created] = yield* decide(readModel, {
+        type: "card.propose",
+        commandId: nextCommandId(),
+        cardId: CardId.make("card-export"),
+        agentId: reviewer,
+        projectId,
+        channelId,
+        title: "Fix the export button",
+        spec: "Export does nothing when clicked.",
+        tags: [],
+        lead: {
+          sourceMessageId: MessageId.make("message-export"),
+          reasoning: "The message reports a broken export.",
+          likelyDuplicateCardIds: [],
+        },
+        createdAt: now,
+      });
+      expect(created).toMatchObject({
+        type: "card.created",
+        payload: { channelId, createdBy: { kind: "lead", id: reviewer } },
+      });
+    }),
   );
 });

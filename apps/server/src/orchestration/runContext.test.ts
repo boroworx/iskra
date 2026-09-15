@@ -164,6 +164,23 @@ describe("renderRunContext", () => {
     });
   });
 
+  it("names Requests plainly, never as a #channel", () => {
+    const rendered = renderRunContext(
+      buildRunContext({
+        agent: backend,
+        channel: channel({ kind: "requests", name: "Requests", wakeDepth: 1 }),
+        agents: [backend],
+        messages: [message(4), trigger],
+        trigger,
+      }),
+    );
+
+    expect(rendered.systemPrompt).toBe(
+      "You are @backend, an agent working in the project's Requests conversation, where the user asks for work.\n\nYou own the API.",
+    );
+    expect(rendered.firstMessage).toContain("Recent messages in Requests:\n");
+  });
+
   it("renders the exact prompt text for a lead wake", () => {
     const payload = buildRunContext({
       agent: backend,
@@ -213,7 +230,8 @@ describe("renderRunContext", () => {
       ].join("\n\n"),
     });
     expect(
-      renderRunContext({ ...payload, history: [], lead: { members: [], openCards: [] } }).firstMessage,
+      renderRunContext({ ...payload, history: [], lead: { members: [], openCards: [] } })
+        .firstMessage,
     ).toBe(
       "## Open cards\n\nNo open cards.\n\nNew message for you:\n[2026-01-01T00:00:05.000Z] user: message 5",
     );

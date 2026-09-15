@@ -12,6 +12,7 @@ import {
   type AgentBlueprint,
   type AgentRole,
   type CardSessionRole,
+  type ChannelKind,
   type OrchestrationCommand,
   type OrchestrationReadModel,
   type RunCapability,
@@ -117,7 +118,9 @@ export const createCard = (
   spec: fields.spec ?? "",
   tags: fields.tags ?? [],
   // Approving the card confirms these, so work can start on it.
-  criteria: [{ id: "limit", text: "Each API key gets 100 requests a minute.", verification: "automated" }],
+  criteria: [
+    { id: "limit", text: "Each API key gets 100 requests a minute.", verification: "automated" },
+  ],
   createdAt: now,
 });
 
@@ -211,7 +214,12 @@ export const enterReview = (id: string = cardId): ReadonlyArray<OrchestrationCom
     risks: null,
     recordedAt: now,
   },
-  { type: "card.review.enter", commandId: nextCommandId(), cardId: CardId.make(id), headSha: "abc1234" },
+  {
+    type: "card.review.enter",
+    commandId: nextCommandId(),
+    cardId: CardId.make(id),
+    headSha: "abc1234",
+  },
 ];
 
 export const recordSession = (
@@ -296,7 +304,7 @@ export const startTurn = (threadId: string): OrchestrationCommand => {
 
 export const createChannel = (
   id: string,
-  kind: "channel" | "dm",
+  kind: ChannelKind,
   memberAgentIds: ReadonlyArray<AgentId>,
   leadAgentId?: AgentId,
 ): OrchestrationCommand => ({
