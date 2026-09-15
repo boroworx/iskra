@@ -104,12 +104,15 @@ export function WikiView(props: {
           input: { projectId, slug: props.slug },
         }),
   );
-  // A page an agent wrote lands in the project's shell as a new change time.
+  // A page an agent wrote lands in the project's shell as a new change time; the refreshes are
+  // stable per atom, so this only runs when that time changes.
   const changedAt = project?.wikiUpdatedAt ?? null;
+  const refreshList = list.refresh;
+  const refreshPage = page.refresh;
   useEffect(() => {
-    list.refresh();
-    page.refresh();
-  }, [changedAt, list, page]);
+    refreshList();
+    refreshPage();
+  }, [changedAt]);
 
   const write = useAtomCommand(channelEnvironment.writeWikiPage, { reportFailure: false });
   const lock = useAtomCommand(channelEnvironment.lockWikiPage, { reportFailure: false });
