@@ -201,8 +201,8 @@ the diff, and how many [hidden scenarios](#hidden-scenarios) held. A failed verd
 back to its owner with the notes, which counts as a review fix round. **Approve merge** stays off,
 saying so, until the verifier passes the card's latest commit.
 
-- **Rerun verifier** checks the latest commit again. It is also in the command palette for cards in
-  review.
+- **Rerun verifier** checks the latest commit again once the current check has finished; while a
+  verifier is still at work, Iskra refuses it. It is also in the command palette for cards in review.
 - **Override** lets the card merge without a passing verdict. Say why; the reason stays on the card.
 
 If the verifier's session fails twice, Needs you shows **The verifier didn't finish** with **Rerun
@@ -249,8 +249,8 @@ cards to approve, specs to review, open cards with no agent or no acceptance cri
 agent can only read, questions from agents, comments on a card's pull request from
 people outside the repository, merges the host refused, verifiers that didn't finish, card services
 or previews that went down, and branches or tags that changed outside a card while its agent worked. Decide most of them right in the list: answer a question in one click,
-forward a comment to the agent or dismiss it, retry a landing, or restore or keep changed refs and
-then resume the card. **Approve & start** on a proposal starts it with the owner you pick.
+forward a comment to the agent or dismiss it, retry a landing, rerun a verifier, restart a card's
+services, or restore or keep changed refs and then resume the card. **Approve & start** on a proposal starts it with the owner you pick.
 
 ## Project orchestration
 
@@ -276,8 +276,9 @@ a time limit of up to 30 minutes. A command runs in the verifier's copy of the c
 it exits 0.
 
 Scenarios are stored on the machine running Iskra, never in the repository. The list shows titles;
-open **Edit** to see or change one. Owners only learn how many scenarios failed. The limits: anyone
-who opens the verifier's session can read them, and a provider that can't keep an agent out of
+open **Edit** to see or change one. Owners only learn how many scenarios failed. The limits: the
+verifier's session keeps them in its history on this machine, so anyone who opens that session can
+read them, and a provider that can't keep an agent out of
 Iskra's data folder, like Codex, can't run agents here for that reason.
 
 ### Network for agent shells
@@ -360,8 +361,9 @@ change an agent makes to it on its own branch has no effect until it is merged:
   and a local landing runs them again after rebasing.
 
 If the server restarts, Iskra starts a card's services again when the card next needs them. When a
-service or the preview stops answering while a card is in review, Needs you shows **Service down**
-or **Preview down**.
+service or the preview stops answering for a minute while a card is in review, Iskra restarts it and
+Needs you shows **Service down** or **Preview down**. **Restart** there starts the card's services and
+preview again yourself.
 
 ## Secrets
 
