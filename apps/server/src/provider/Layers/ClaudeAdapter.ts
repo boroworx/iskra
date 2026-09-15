@@ -27,6 +27,7 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { parseCliArgs } from "@iskra/shared/cliArgs";
 import { isWorkspaceImagePreviewPath } from "@iskra/shared/filePreview";
+import { claudeTurnCostUsd } from "./claudeTurnCost.ts";
 import { type ClaudeScopedLimitNames, claudeRateLimitEventToUpdate } from "./claudeUsageLimits.ts";
 import {
   ApprovalRequestId,
@@ -340,6 +341,8 @@ interface ClaudeSessionContext {
    * effort override inherit this. */
   currentEffort: string | undefined;
   resumeSessionId: string | undefined;
+  /** The query's running cost from its last result; each turn's own cost is the increase. */
+  lastReportedTotalCostUsd: number;
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
   readonly turns: Array<{
@@ -2706,6 +2709,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       rawPayload: result ?? { status },
     });
 
+    // The SDK reports the query's running total; the turn costs what it added.
+    const turnCostUsd =
+      typeof result?.total_cost_usd === "number"
+        ? claudeTurnCostUsd(context.lastReportedTotalCostUsd, result.total_cost_usd)
+        : undefined;
+    if (typeof result?.total_cost_usd === "number") {
+      context.lastReportedTotalCostUsd = result.total_cost_usd;
+    }
     const stamp = yield* makeEventStamp();
     yield* offerRuntimeEvent({
       type: "turn.completed",
@@ -2719,9 +2730,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(result?.stop_reason !== undefined ? { stopReason: result.stop_reason } : {}),
         ...(result?.usage ? { usage: result.usage } : {}),
         ...(result?.modelUsage ? { modelUsage: result.modelUsage } : {}),
-        ...(typeof result?.total_cost_usd === "number"
-          ? { totalCostUsd: result.total_cost_usd }
-          : {}),
+        ...(turnCostUsd === undefined ? {} : { turnCostUsd }),
         ...(errorMessage ? { errorMessage } : {}),
         tokenUsage: normalizeClaudeTurnTokenUsage(result, turnState.hasSubagents, status),
       },
@@ -5045,6 +5054,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         currentApiModelId: apiModelId,
         currentEffort: effectiveEffort ?? undefined,
         resumeSessionId: sessionId,
+        lastReportedTotalCostUsd: 0,
         pendingApprovals,
         pendingUserInputs,
         turns: [],

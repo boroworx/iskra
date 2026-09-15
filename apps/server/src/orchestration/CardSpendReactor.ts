@@ -59,8 +59,7 @@ const make = Effect.gen(function* () {
     const priced = yield* usage.priceTurn({
       model: Option.isSome(thread) ? thread.value.modelSelection.model : "",
       totals: turnUsageTotals(event.payload.tokenUsage),
-      reportedCostUsd:
-        event.type === "turn.completed" ? (event.payload.totalCostUsd ?? null) : null,
+      reportedCostUsd: event.type === "turn.completed" ? (event.payload.turnCostUsd ?? null) : null,
     });
     // The turn names the record, so a repeated completion is counted once.
     const turn = {

@@ -402,7 +402,8 @@ const TurnCompletedPayload = Schema.Struct({
   stopReason: Schema.optional(Schema.NullOr(TrimmedNonEmptyStringSchema)),
   usage: Schema.optional(Schema.Unknown),
   modelUsage: Schema.optional(UnknownRecordSchema),
-  totalCostUsd: Schema.optional(Schema.Number),
+  /** What this turn alone cost, as the provider reports it; never a running session total. */
+  turnCostUsd: Schema.optional(Schema.Number),
   errorMessage: Schema.optional(TrimmedNonEmptyStringSchema),
   tokenUsage: Schema.optional(TurnTokenUsage),
 });

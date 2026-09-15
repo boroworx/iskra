@@ -158,7 +158,9 @@ const makeWorld = Effect.fn("makeWorld")(function* (name: string, model: string)
     title: "Rate limiting",
     spec: "",
     tags: [],
-    criteria: [{ id: "limit", text: "Each key gets 100 requests a minute.", verification: "automated" }],
+    criteria: [
+      { id: "limit", text: "Each key gets 100 requests a minute.", verification: "automated" },
+    ],
     createdAt: now,
   });
   for (const type of ["card.approve", "card.spec.skip"] as const) {
@@ -198,7 +200,7 @@ const makeWorld = Effect.fn("makeWorld")(function* (name: string, model: string)
   const finished = (
     threadId: ThreadId,
     turnId: string,
-    cost: { readonly totalCostUsd?: number; readonly outputTokens?: number },
+    cost: { readonly turnCostUsd?: number; readonly outputTokens?: number },
   ) =>
     reactor.recordTurn({
       eventId: EventId.make(`event-${threadId}-${turnId}`),
@@ -209,7 +211,7 @@ const makeWorld = Effect.fn("makeWorld")(function* (name: string, model: string)
       type: "turn.completed",
       payload: {
         state: "completed",
-        ...(cost.totalCostUsd === undefined ? {} : { totalCostUsd: cost.totalCostUsd }),
+        ...(cost.turnCostUsd === undefined ? {} : { turnCostUsd: cost.turnCostUsd }),
         ...(cost.outputTokens === undefined
           ? {}
           : {
@@ -238,9 +240,9 @@ it.layer(layer)("CardSpendReactor", (it) => {
   it.effect("records a card session turn's reported cost on its card and its agent, once", () =>
     Effect.gen(function* () {
       const world = yield* makeWorld("reported", "any-model");
-      yield* world.finished(world.ownerThreadId, "turn-1", { totalCostUsd: 1.25 });
-      yield* world.finished(world.ownerThreadId, "turn-1", { totalCostUsd: 1.25 });
-      yield* world.finished(world.ownerThreadId, "turn-2", { totalCostUsd: 0.5 });
+      yield* world.finished(world.ownerThreadId, "turn-1", { turnCostUsd: 1.25 });
+      yield* world.finished(world.ownerThreadId, "turn-1", { turnCostUsd: 1.25 });
+      yield* world.finished(world.ownerThreadId, "turn-2", { turnCostUsd: 0.5 });
 
       expect(yield* world.card).toMatchObject({ spentUsd: 1.75, unpricedTurns: 0 });
       expect(yield* world.agentSpend).toBe(1.75);
@@ -283,7 +285,7 @@ it.layer(layer)("CardSpendReactor", (it) => {
         portBase: 42010,
       });
 
-      yield* world.finished(attemptThreadId, "turn-1", { totalCostUsd: 2 });
+      yield* world.finished(attemptThreadId, "turn-1", { turnCostUsd: 2 });
 
       const cards = (yield* snapshotQuery.getCommandReadModel()).cards ?? [];
       expect(cards.find((card) => card.id === world.cardId)?.spentUsd).toBe(2);
@@ -291,85 +293,94 @@ it.layer(layer)("CardSpendReactor", (it) => {
     }),
   );
 
-  it.effect("records a lead's and a conversation's turns against the channel's project, with their roles", () =>
-    Effect.gen(function* () {
-      const world = yield* makeWorld("channels", "any-model");
-      const engine = yield* OrchestrationEngineService;
-      const snapshotQuery = yield* ProjectionSnapshotQuery;
-      const projectId = ProjectId.make("project-channels");
-      const channelId = ChannelId.make("channel-channels");
-      yield* engine.dispatch({
-        type: "channel.create",
-        commandId: CommandId.make("cmd-channel-channels"),
-        channelId,
-        projectId,
-        kind: "channel",
-        name: "general",
-        memberAgentIds: [world.agentId],
-        createdAt: now,
-      });
-      yield* engine.dispatch({
-        type: "channel.update",
-        commandId: CommandId.make("cmd-lead-channels"),
-        channelId,
-        leadAgentId: world.agentId,
-      });
-      for (const [role, costUsd] of [
-        ["lead", 0.5],
-        ["conversation", 0.25],
-      ] as const) {
-        const threadId = ThreadId.make(`run-${role}`);
-        const run = startChannelRun(world.agentId, channelId, threadId) as Extract<
-          OrchestrationCommand,
-          { type: "channel.run.start" }
-        >;
+  it.effect(
+    "records a lead's and a conversation's turns against the channel's project, with their roles",
+    () =>
+      Effect.gen(function* () {
+        const world = yield* makeWorld("channels", "any-model");
+        const engine = yield* OrchestrationEngineService;
+        const snapshotQuery = yield* ProjectionSnapshotQuery;
+        const projectId = ProjectId.make("project-channels");
+        const channelId = ChannelId.make("channel-channels");
         yield* engine.dispatch({
-          ...run,
-          commandId: CommandId.make(`cmd-run-${role}`),
-          ...(role === "lead" ? { role } : {}),
-        });
-        yield* engine.dispatch({
-          type: "thread.create",
-          commandId: CommandId.make(`cmd-thread-run-${role}`),
-          threadId,
+          type: "channel.create",
+          commandId: CommandId.make("cmd-channel-channels"),
+          channelId,
           projectId,
-          title: "Run",
-          modelSelection: { instanceId: ProviderInstanceId.make("claudeAgent"), model: "any-model" },
-          runtimeMode: "approval-required",
-          interactionMode: "default",
-          branch: null,
-          worktreePath: null,
+          kind: "channel",
+          name: "general",
+          memberAgentIds: [world.agentId],
           createdAt: now,
         });
-        // Counted once, however often the completion arrives.
-        yield* world.finished(threadId, "turn-1", { totalCostUsd: costUsd });
-        yield* world.finished(threadId, "turn-1", { totalCostUsd: costUsd });
-      }
-      yield* world.finished(world.ownerThreadId, "turn-1", { totalCostUsd: 1 });
+        yield* engine.dispatch({
+          type: "channel.update",
+          commandId: CommandId.make("cmd-lead-channels"),
+          channelId,
+          leadAgentId: world.agentId,
+        });
+        for (const [role, costUsd] of [
+          ["lead", 0.5],
+          ["conversation", 0.25],
+        ] as const) {
+          const threadId = ThreadId.make(`run-${role}`);
+          const run = startChannelRun(world.agentId, channelId, threadId) as Extract<
+            OrchestrationCommand,
+            { type: "channel.run.start" }
+          >;
+          yield* engine.dispatch({
+            ...run,
+            commandId: CommandId.make(`cmd-run-${role}`),
+            ...(role === "lead" ? { role } : {}),
+          });
+          yield* engine.dispatch({
+            type: "thread.create",
+            commandId: CommandId.make(`cmd-thread-run-${role}`),
+            threadId,
+            projectId,
+            title: "Run",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("claudeAgent"),
+              model: "any-model",
+            },
+            runtimeMode: "approval-required",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            createdAt: now,
+          });
+          // Counted once, however often the completion arrives.
+          yield* world.finished(threadId, "turn-1", { turnCostUsd: costUsd });
+          yield* world.finished(threadId, "turn-1", { turnCostUsd: costUsd });
+        }
+        yield* world.finished(world.ownerThreadId, "turn-1", { turnCostUsd: 1 });
 
-      const events = Array.from(yield* Stream.runCollect(engine.readEvents(0)));
-      expect(
-        events.flatMap((event) =>
-          // The suite shares one database: only this world's records.
-          event.type === "project.spend-recorded" && event.payload.projectId === projectId
-            ? [`${event.payload.projectId} ${event.payload.role} ${event.payload.costUsd}`]
-            : event.type === "card.spend-recorded" && event.payload.cardId === world.cardId
-              ? [`${event.payload.cardId} ${event.payload.role} ${event.payload.costUsd}`]
-              : [],
-        ),
-      ).toEqual([`${projectId} lead 0.5`, `${projectId} conversation 0.25`, `${world.cardId} owner 1`]);
-      const project = (yield* snapshotQuery.getCommandReadModel()).projects.find(
-        (candidate) => candidate.id === projectId,
-      );
-      expect(project?.spend).toMatchObject({ totalUsd: 1.75 });
-    }),
+        const events = Array.from(yield* Stream.runCollect(engine.readEvents(0)));
+        expect(
+          events.flatMap((event) =>
+            // The suite shares one database: only this world's records.
+            event.type === "project.spend-recorded" && event.payload.projectId === projectId
+              ? [`${event.payload.projectId} ${event.payload.role} ${event.payload.costUsd}`]
+              : event.type === "card.spend-recorded" && event.payload.cardId === world.cardId
+                ? [`${event.payload.cardId} ${event.payload.role} ${event.payload.costUsd}`]
+                : [],
+          ),
+        ).toEqual([
+          `${projectId} lead 0.5`,
+          `${projectId} conversation 0.25`,
+          `${world.cardId} owner 1`,
+        ]);
+        const project = (yield* snapshotQuery.getCommandReadModel()).projects.find(
+          (candidate) => candidate.id === projectId,
+        );
+        expect(project?.spend).toMatchObject({ totalUsd: 1.75 });
+      }),
   );
 
   it.effect("counts a turn on a model with no price, and ignores threads outside cards", () =>
     Effect.gen(function* () {
       const world = yield* makeWorld("unpriced", "mystery-model");
       yield* world.finished(world.ownerThreadId, "turn-1", { outputTokens: 500 });
-      yield* world.finished(world.plainThreadId, "turn-1", { totalCostUsd: 3 });
+      yield* world.finished(world.plainThreadId, "turn-1", { turnCostUsd: 3 });
 
       expect(yield* world.card).toMatchObject({ spentUsd: 0, unpricedTurns: 1 });
       expect(yield* world.agentSpend).toBe(0);

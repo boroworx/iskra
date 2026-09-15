@@ -710,7 +710,7 @@ const makeWorld = Effect.fn("makeWorld")(function* (
       createdAt: now,
       turnId: TurnId.make(turnId),
       type: "turn.completed",
-      payload: { state: "completed", totalCostUsd: costUsd },
+      payload: { state: "completed", turnCostUsd: costUsd },
     });
 
   return {
