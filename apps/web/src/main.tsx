@@ -2,9 +2,6 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { createHashHistory, createBrowserHistory } from "@tanstack/react-router";
 
-import "@fontsource-variable/ibm-plex-sans";
-import "@fontsource-variable/ibm-plex-sans/wght-italic.css";
-import "@fontsource/michroma";
 import "./index.css";
 
 import { isElectron } from "./env";
