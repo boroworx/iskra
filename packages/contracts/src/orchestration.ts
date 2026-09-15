@@ -805,8 +805,18 @@ export const OrchestrationAgent = Schema.Struct({
 });
 export type OrchestrationAgent = typeof OrchestrationAgent.Type;
 
-export const ChannelKind = Schema.Literals(["channel", "dm"]);
+export const ChannelKind = Schema.Literals(["channel", "dm", "requests"]);
 export type ChannelKind = typeof ChannelKind.Type;
+
+/**
+ * A project's built-in Requests conversation: exactly one per project, at this fixed id, created
+ * when a person first sets its lead. It can't be renamed or archived.
+ */
+export const requestsChannelId = (projectId: string): ChannelId =>
+  ChannelId.make(`requests:${projectId}`);
+
+/** The name a Requests conversation always has. */
+export const REQUESTS_CHANNEL_NAME = "Requests";
 
 /** Messages of channel history handed to an agent when it wakes. */
 export const DEFAULT_CHANNEL_WAKE_DEPTH = 30;
