@@ -139,6 +139,10 @@
       "types": "./src/state/cards.ts",
       "default": "./src/state/cards.ts"
     },
+    "./state/card-activity": {
+      "types": "./src/state/cardActivity.ts",
+      "default": "./src/state/cardActivity.ts"
+    },
     "./state/attachments": {
       "types": "./src/state/attachments.ts",
       "default": "./src/state/attachments.ts"

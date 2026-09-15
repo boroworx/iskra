@@ -649,6 +649,24 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
+    id: "project-triggers",
+    title: "Triggers",
+    to: "/settings/projects",
+    searchTerms: ["schedule cron ci failure failed runs pr comment @iskra automation intake template"],
+  },
+  {
+    id: "project-budgets",
+    title: "Budgets",
+    to: "/settings/projects",
+    searchTerms: ["monthly spend cost cap limit agent usd dollars card default"],
+  },
+  {
+    id: "project-knowledge",
+    title: "Knowledge",
+    to: "/settings/projects",
+    searchTerms: ["lessons quirks playbooks approve dismiss proposed memory"],
+  },
+  {
     id: "environment-icon",
     title: "Environment icon",
     to: "/settings/connections",

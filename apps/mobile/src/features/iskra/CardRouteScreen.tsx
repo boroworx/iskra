@@ -11,6 +11,7 @@ import {
 } from "@iskra/client-runtime/cards";
 import type { CardDecisionInput } from "@iskra/client-runtime/operations";
 import { PLAN_CHILD_STATE_LABEL, planSlices } from "@iskra/client-runtime/plan-view";
+import { EMPTY_CARD_ACTIVITY, applyCardStreamItem } from "@iskra/client-runtime/state/card-activity";
 import { UNDOABLE_LABEL, undoCommandOf, type UndoCommand } from "@iskra/client-runtime/undo";
 import {
   CardId,
@@ -24,6 +25,7 @@ import {
   type EnvironmentId,
   type OrchestrationAgentShell,
   type OrchestrationCardShell,
+  type OrchestrationCardStreamItem,
 } from "@iskra/contracts";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { memo, useEffect, useMemo, useState } from "react";
@@ -56,7 +58,6 @@ import {
   useEnvironmentAgents,
   useEnvironmentCards,
   useRefusableCommand,
-  withOlderActivities,
 } from "./state";
 
 type CardParams = StaticScreenProps<{ readonly environmentId: string; readonly cardId: string }>;
@@ -719,12 +720,20 @@ function ActivitySection(props: {
   readonly agents: ReadonlyArray<OrchestrationAgentShell>;
 }) {
   const loadOlder = useAtomCommand(olderCardActivity);
-  const [older, setOlder] = useState<{ readonly activities: ReadonlyArray<CardActivity>; readonly hasMore: boolean } | null>(null);
+  // Fetched older pages in fetch order, applied over the live activities like a card stream.
+  const [pages, setPages] = useState<ReadonlyArray<OrchestrationCardStreamItem>>([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState<CardActivityFilter>("all");
   const [shown, setShown] = useState(PAGE_SIZE);
-  const all = useMemo(() => withOlderActivities(older?.activities ?? NO_ACTIVITIES, props.live), [older, props.live]);
-  const hasMore = older === null ? props.liveHasMore : older.hasMore;
+  const { activities: all, hasMore } = useMemo(
+    () =>
+      pages.reduce(applyCardStreamItem, {
+        ...EMPTY_CARD_ACTIVITY,
+        activities: props.live,
+        hasMore: props.liveHasMore,
+      }),
+    [pages, props.live, props.liveHasMore],
+  );
   const newestFirst = useMemo(() => [...filterCardActivities(all, filter)].reverse(), [all, filter]);
   const names = useMemo(() => new Map(props.agents.map((agent) => [agent.id as string, agent.name])), [props.agents]);
   const oldestId = all[0]?.activityId;
@@ -742,10 +751,7 @@ function ActivitySection(props: {
       return;
     }
     const page = result.value;
-    setOlder((current) => ({
-      activities: [...page.activities, ...(current?.activities ?? NO_ACTIVITIES)],
-      hasMore: page.hasMore,
-    }));
+    setPages((current) => [...current, page]);
     setShown((current) => current + PAGE_SIZE);
   };
 

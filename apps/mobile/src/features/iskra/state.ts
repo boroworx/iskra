@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { cardOwnerSessions, needsYouItems } from "@iskra/client-runtime/cards";
-import { subscribe } from "@iskra/client-runtime/rpc";
+import { loadOlderCardActivity } from "@iskra/client-runtime/state/card-activity";
 import { createCardEnvironmentAtoms } from "@iskra/client-runtime/state/cards";
 import { createChannelEnvironmentAtoms } from "@iskra/client-runtime/state/channels";
 import { enabledEnvironmentIds } from "@iskra/client-runtime/state/connections";
@@ -12,19 +12,12 @@ import {
   type AtomCommand,
 } from "@iskra/client-runtime/state/runtime";
 import {
-  ORCHESTRATION_WS_METHODS,
-  type CardActivity,
-  type CardId,
   type EnvironmentId,
   type OrchestrationAgentShell,
   type OrchestrationCardShell,
-  type OrchestrationCardStreamItem,
   type OrchestrationChannelShell,
   type OrchestrationProjectShell,
 } from "@iskra/contracts";
-import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
-import * as Stream from "effect/Stream";
 import { Atom } from "effect/unstable/reactivity";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert } from "react-native";
@@ -40,32 +33,12 @@ export const channelEnvironment = createChannelEnvironmentAtoms(connectionAtomRu
 export const environmentAgentChannels = createEnvironmentAgentChannelAtoms({
   snapshotAtom: environmentSnapshotAtom,
 });
-type CardActivityPage = Extract<OrchestrationCardStreamItem, { readonly kind: "page" }>;
 
-// ponytail: mirrors client-runtime `loadOlderCardActivity` and the reducer's page merge, because
-// `@iskra/client-runtime/state/cardActivity` is not a package export yet; import both once it is.
 /** One older page of a card's activity: subscribeCard with `before` sends one page and ends. */
 export const olderCardActivity = createEnvironmentCommand(connectionAtomRuntime, {
   label: "environment-data:cards:activity-page",
-  execute: (input: { readonly cardId: CardId; readonly before: string }) =>
-    subscribe(ORCHESTRATION_WS_METHODS.subscribeCard, input).pipe(
-      Stream.filter((item): item is CardActivityPage => item.kind === "page"),
-      Stream.runHead,
-      Effect.map(
-        Option.getOrElse((): CardActivityPage => ({ kind: "page", activities: [], hasMore: false })),
-      ),
-    ),
+  execute: loadOlderCardActivity,
 });
-
-/** Older pages (oldest first) before the live activities, keeping the live copy of any repeat. */
-export function withOlderActivities(
-  older: ReadonlyArray<CardActivity>,
-  live: ReadonlyArray<CardActivity>,
-): ReadonlyArray<CardActivity> {
-  if (older.length === 0) return live;
-  const held = new Set(live.map((activity) => activity.activityId));
-  return [...older.filter((activity) => !held.has(activity.activityId)), ...live];
-}
 
 const EMPTY_LIST_ATOM = Atom.make<ReadonlyArray<never>>([]).pipe(
   Atom.withLabel("mobile-iskra-list:empty"),
