@@ -6868,6 +6868,8 @@ describe("ClaudeAdapterLive", () => {
         "mcp__iskra__request_checkpoint",
         "mcp__iskra__ask_owner",
         "mcp__iskra__propose_criteria_change",
+        "mcp__iskra__request_help",
+        "mcp__iskra__request_critique",
       ]);
       assert.deepEqual(Object.keys(options?.mcpServers ?? {}), ["iskra"]);
     }).pipe(
@@ -6904,6 +6906,43 @@ describe("ClaudeAdapterLive", () => {
       assert.deepEqual(options?.allowedTools, [
         "mcp__iskra__propose_triage_card",
         "mcp__iskra__ask_clarification",
+      ]);
+      assert.deepEqual(Object.keys(options?.mcpServers ?? {}), ["iskra"]);
+    }).pipe(
+      Effect.scoped,
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("connects a card verifier's run to its verdict tools", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      McpProviderSession.setMcpProviderSession({
+        environmentId: EnvironmentId.make("environment-verifier"),
+        threadId: THREAD_ID,
+        providerSessionId: "provider-session-verifier",
+        providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+        endpoint: "http://127.0.0.1:1/mcp",
+        authorizationHeader: "Bearer verifier-token",
+        capabilities: new Set(["verifier"]),
+      });
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => McpProviderSession.clearMcpProviderSession(THREAD_ID)),
+      );
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+        run: { systemPrompt: "", capabilities: ["read"] },
+      });
+
+      const options = harness.getLastCreateQueryInput()?.options;
+      assert.deepEqual(options?.allowedTools, [
+        "mcp__iskra__record_verdict",
+        "mcp__iskra__view_evidence",
+        "mcp__iskra__view_screenshot",
       ]);
       assert.deepEqual(Object.keys(options?.mcpServers ?? {}), ["iskra"]);
     }).pipe(

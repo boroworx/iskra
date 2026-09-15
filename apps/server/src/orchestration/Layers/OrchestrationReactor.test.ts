@@ -16,6 +16,7 @@ import * as RunReactor from "../RunReactor.ts";
 import * as AgentDefinitionSync from "../AgentDefinitionSync.ts";
 import * as CardLandingReactor from "../CardLandingReactor.ts";
 import * as CardReviewReactor from "../CardReviewReactor.ts";
+import * as CardVerifierReactor from "../CardVerifierReactor.ts";
 import * as CardSpendReactor from "../CardSpendReactor.ts";
 import * as LinearSyncReactor from "../LinearSyncReactor.ts";
 import * as CardSessionReactor from "../CardSessionReactor.ts";
@@ -205,6 +206,15 @@ describe("OrchestrationReactor", () => {
           }),
         ),
         Layer.provideMerge(
+          Layer.succeed(CardVerifierReactor.CardVerifierReactor, {
+            start: () => {
+              started.push("card-verifier-reactor");
+              return Effect.void;
+            },
+            drain: Effect.void,
+          }),
+        ),
+        Layer.provideMerge(
           Layer.succeed(CardLandingReactor.CardLandingReactor, {
             start: () => {
               started.push("card-landing-reactor");
@@ -255,6 +265,7 @@ describe("OrchestrationReactor", () => {
       "card-session-reactor",
       "card-review-reactor",
       "card-landing-reactor",
+      "card-verifier-reactor",
       "card-spend-reactor",
       "linear-sync-reactor",
       "card-scheduler",

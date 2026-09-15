@@ -90,11 +90,13 @@ import * as RunReactor from "./orchestration/RunReactor.ts";
 import * as AgentDefinitionSync from "./orchestration/AgentDefinitionSync.ts";
 import * as CardLandingReactor from "./orchestration/CardLandingReactor.ts";
 import * as CardReviewReactor from "./orchestration/CardReviewReactor.ts";
+import * as CardVerifierReactor from "./orchestration/CardVerifierReactor.ts";
 import * as CardSpendReactor from "./orchestration/CardSpendReactor.ts";
 import * as LinearSyncReactor from "./orchestration/LinearSyncReactor.ts";
 import * as LinearClient from "./linear/LinearClient.ts";
 import * as CardSessionReactor from "./orchestration/CardSessionReactor.ts";
 import * as HostAdmission from "./orchestration/HostAdmission.ts";
+import * as HoldoutStore from "./orchestration/HoldoutStore.ts";
 import * as CardScheduler from "./orchestration/CardScheduler.ts";
 import * as CardRefGuard from "./orchestration/CardRefGuard.ts";
 import * as CardWatchdog from "./orchestration/CardWatchdog.ts";
@@ -268,7 +270,7 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(CardScheduler.layer),
   Layer.provideMerge(CardWatchdog.layer),
   Layer.provideMerge(
-    Layer.mergeAll(CardReviewReactor.layer, CardLandingReactor.layer).pipe(
+    Layer.mergeAll(CardReviewReactor.layer, CardLandingReactor.layer, CardVerifierReactor.layer).pipe(
       Layer.provide(ProcessRunner.layer),
     ),
   ),
@@ -286,7 +288,9 @@ const ReactorLayerLive = Layer.empty.pipe(
       Layer.provide(ServerSecretStore.layer),
     ),
   ),
-  Layer.provideMerge(HostAdmission.layer),
+  // The verifier reads hidden scenarios; the ws RPCs and MCP routes take the store optionally and
+  // see it because the routes are built over this runtime (see makeServerLayer).
+  Layer.provideMerge(Layer.mergeAll(HostAdmission.layer, HoldoutStore.HoldoutStore.layer)),
   Layer.provideMerge(AgentAwarenessRelay.layer.pipe(Layer.provide(ServerSecretStore.layer))),
   Layer.provideMerge(RuntimeReceiptBusLive),
 );
