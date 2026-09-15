@@ -96,7 +96,7 @@ export function ServerUpdatesAction({
   targets,
   label = "Update all",
   variant = "outline",
-  size = "xs",
+  size = "sm",
   className,
 }: UpdateButtonProps & {
   readonly targets: ReadonlyArray<ServerUpdateTarget>;
@@ -195,7 +195,7 @@ export function ServerUpdateAction({
   targetVersion,
   label = "Update",
   variant = "outline",
-  size = "xs",
+  size = "sm",
   className,
   appearance = "button",
 }: Omit<ServerUpdateTarget, "continueThreadsAfterServerUpdate"> & UpdateButtonProps) {
