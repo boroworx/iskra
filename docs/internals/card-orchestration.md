@@ -5,7 +5,7 @@ Decisions and traps behind cards running on their own. The user-facing flow is i
 drive it end to end are [cardFlow.integration.test.ts](../../apps/server/integration/cardFlow.integration.test.ts)
 and, for verifiers, hidden scenarios and agent instances,
 [cardVerifier.integration.test.ts](../../apps/server/integration/cardVerifier.integration.test.ts),
-and for plans, migrations, triggers, budgets, knowledge, outcomes and reverts,
+and for plans, migrations, triggers, budgets, the wiki, outcomes and reverts,
 [cardFactory.integration.test.ts](../../apps/server/integration/cardFactory.integration.test.ts).
 
 ## Where policy lives
@@ -165,9 +165,8 @@ A plan card's session is a coordinator: a read-only run with no worktree, briefe
 ([coordinatorBrief.ts](../../apps/server/src/orchestration/coordinatorBrief.ts)). Its tools
 ([coordinator toolkit](../../apps/server/src/mcp/toolkits/coordinator/handlers.ts)) take the plan
 card and agent from the run behind the thread credential, never from tool input, and resolve a
-child key only under that plan. The question and lesson tools are named `ask_plan_owner` and
-`propose_plan_lesson` because every toolkit registers on one MCP server, where a second tool with the
-same name replaces the first.
+child key only under that plan. Its question tool is named `ask_plan_owner` because every toolkit
+registers on one MCP server, where a second tool with the same name replaces the first.
 
 Authority stays with people:
 
@@ -182,6 +181,25 @@ Authority stays with people:
   integration branch.
 - A child spends from its plan's budget (`budgetCardOf`): its turns are charged to the plan card, so
   the plan's cap sees what its children cost.
+
+## The wiki
+
+Agents write the project's wiki freely and people watch, which decides where it lives and who may
+change it ([wikiRules.ts](../../apps/server/src/orchestration/wikiRules.ts)):
+
+- Pages are Iskra's, event-sourced per project, not files in the repository. An agent writing one
+  never touches its card's diff, and a page reaches every later session without a merge.
+- A write names the revision it read (`expectedRevision`), so two agents can't silently overwrite
+  each other, and an agent that never read the page is told to read it instead of duplicating it.
+- Locking, restoring and deleting are a person's; no tool sends them. A deleted page keeps its
+  revisions and loses its text, so revision numbers never repeat and a restore continues its history.
+- Verifiers and critics only read (`wiki-read`), so nothing a verifier knows about hidden scenarios
+  can reach a page every builder reads.
+- A card's brief carries every page's name and the full text of the pages whose paths touch the
+  card's areas ([cardBrief.ts](../../apps/server/src/orchestration/cardBrief.ts) `projectWikiBody`).
+
+Approved lessons from the feature the wiki replaced became pages in migration 084, one per set of
+paths; the old `project.knowledge-*` events still decode and project to nothing.
 
 ## Migrations
 

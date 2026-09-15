@@ -327,12 +327,28 @@ cards to approve, specs to review, open cards with no agent or no acceptance cri
 agent can only read, questions from agents, comments on a card's pull request from
 people outside the repository, merges the host refused, verifiers that didn't finish, card services
 or previews that went down, branches or tags that changed outside a card while its agent worked,
-plans to approve, plan slices that landed, lessons agents proposed, flawed outcomes, conflicting
+plans to approve, plan slices that landed, flawed outcomes, conflicting
 reverts, network access agents request, and monthly budgets that hold work. Decide most of them right in the list: answer a question in one click,
-approve or dismiss a lesson,
 forward a comment to the agent or dismiss it, retry a landing, rerun a verifier, restart a card's
 services, allow an agent's network access for the project, or restore or keep changed refs and then
 resume the card. **Approve & Start** on a proposal starts it with the owner you pick.
+
+## Project wiki
+
+**Wiki** in the project's sidebar holds what agents and people wrote down about the project: setup
+gotchas, how a module works, commands that must run, dead ends and why. Agents search, read and write
+it as they work, so nothing waits for your approval.
+
+A page can name repository paths, such as `src/api/**`. A card touching one of them gets the page in
+its brief, and a page about `**` reaches every card.
+
+You watch what agents write. Every edit says which agent wrote it and on which card. **Recent
+changes** lists the newest edits with **Revert** on each, a page's **History** puts an earlier
+revision back with **Restore**, and **Lock** closes a page to agents, which are then told to ask you
+instead. You can write, edit and delete pages yourself; a deleted page keeps its history, so Recent
+changes can bring it back.
+
+Lessons agents used to propose for your approval became wiki pages when you updated Iskra.
 
 ## Project orchestration
 
@@ -404,13 +420,6 @@ with. At a cap, new work waits with **Budget reached**, messages to agents are r
 and Needs you links here to raise it. A turn that runs well past a cap is interrupted and its card
 paused. The whole machine's monthly budget across projects is under **Card runtime** in **Settings →
 Agents & Providers**. A new month starts from zero.
-
-### Knowledge
-
-While they work, agents can propose lessons about the project, such as a command that must run before
-the tests. Lessons wait in Needs you and under **Knowledge** until you **Approve** or **Dismiss** them.
-An approved lesson goes into the brief of every card that touches its paths, or every card when it
-names none. **Remove** takes one back.
 
 ### Network for agent shells
 
