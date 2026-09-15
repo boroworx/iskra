@@ -182,7 +182,7 @@ it.each(["direct", "gnome-extension", "kde"] as const)(
       stopPropagation: vi.fn(),
     });
     await finish(bridge.checkSnapShotShortcut.mock.results[0]!.value);
-    expect(recorder(render()).size).toBe("xs");
+    expect(recorder(render()).size).toBe("sm");
     expect(recorder(render())["aria-label"]).toBe("Record snapshot shortcut, currently Ctrl+Alt+Y");
     button(render(), "Save").onClick();
     await finish(settingsStore.update.mock.results[0]!.value);

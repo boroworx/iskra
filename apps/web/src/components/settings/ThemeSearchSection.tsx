@@ -405,7 +405,7 @@ export function ThemeSearchSection({
                     <Button
                       aria-label={`${isInstalling ? progressAction : action} ${extension.name}`}
                       disabled={installingId !== null}
-                      size="xs"
+                      size="sm"
                       variant="outline"
                       onClick={() => void handleInstall(extension, false)}
                     >

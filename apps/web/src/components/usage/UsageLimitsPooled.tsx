@@ -192,7 +192,7 @@ function SegmentPopover({
           <span className="flex items-center gap-3">
             <span className="tabular-nums">{resetCreditsSummary(credits, now, true)}</span>
             <Button
-              size="xs"
+              size="sm"
               variant="outline"
               disabled={redeem.busy}
               className="ms-auto"
