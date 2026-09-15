@@ -35,6 +35,11 @@ import { ThreadRouteScreen } from "./features/threads/ThreadRouteScreen";
 import { ConnectionsRouteScreen } from "./features/connection/ConnectionsRouteScreen";
 import { ConnectionsNewRouteScreen } from "./features/connection/ConnectionsNewRouteScreen";
 import { HomeRouteScreen } from "./features/home/HomeRouteScreen";
+import { BoardRouteScreen } from "./features/iskra/BoardRouteScreen";
+import { CardRouteScreen } from "./features/iskra/CardRouteScreen";
+import { AgentDmRouteScreen, ChannelRouteScreen } from "./features/iskra/ChannelRouteScreen";
+import { ChannelsRouteScreen } from "./features/iskra/ChannelsRouteScreen";
+import { NeedsYouRouteScreen } from "./features/iskra/NeedsYouRouteScreen";
 import { AddProjectDestinationRoute } from "./features/projects/AddProjectDestinationRoute";
 import { AddProjectLocalRoute } from "./features/projects/AddProjectLocalRoute";
 import { AddProjectRepositoryRoute } from "./features/projects/AddProjectRepositoryRoute";
@@ -690,6 +695,37 @@ export const RootStack = createNativeStackNavigator({
               sheetGrabberVisible: true,
             }),
       },
+    }),
+    // Iskra's cards and channels, flat in the root stack like threads so their headers morph.
+    IskraNeedsYou: createNativeStackScreen({
+      screen: NeedsYouRouteScreen,
+      linking: "needs-you",
+      options: { ...GLASS_HEADER_OPTIONS, title: "Needs you" },
+    }),
+    IskraChannels: createNativeStackScreen({
+      screen: ChannelsRouteScreen,
+      linking: "channels",
+      options: { ...GLASS_HEADER_OPTIONS, title: "Channels" },
+    }),
+    IskraChannel: createNativeStackScreen({
+      screen: ChannelRouteScreen,
+      linking: "channels/:environmentId/:channelId",
+      options: SOLID_HEADER_OPTIONS,
+    }),
+    IskraAgentDm: createNativeStackScreen({
+      screen: AgentDmRouteScreen,
+      linking: "dms/:environmentId/:agentId",
+      options: SOLID_HEADER_OPTIONS,
+    }),
+    IskraBoard: createNativeStackScreen({
+      screen: BoardRouteScreen,
+      linking: "board/:environmentId/:projectId",
+      options: GLASS_HEADER_OPTIONS,
+    }),
+    IskraCard: createNativeStackScreen({
+      screen: CardRouteScreen,
+      linking: "cards/:environmentId/:cardId",
+      options: GLASS_HEADER_OPTIONS,
     }),
     NotFound: createNativeStackScreen({
       screen: NotFoundScreen,

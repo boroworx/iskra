@@ -1,6 +1,7 @@
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import type { EnvironmentId, SidebarThreadSortOrder } from "@iskra/contracts";
 import type { MenuAction } from "@react-native-menu/menu";
+import { useNavigation } from "@react-navigation/native";
 import Constants from "expo-constants";
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
 import { useCallback, useMemo, useRef } from "react";
@@ -14,6 +15,8 @@ import { IskraWordmark } from "../../components/IskraWordmark";
 import { HOME_HORIZONTAL_INSET } from "../../lib/layoutMetrics";
 import { resolveMobileStageLabel } from "../../lib/mobileBranding";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
+import { SparkGlyph } from "../iskra/components";
+import { useNeedsYouCount } from "../iskra/state";
 import { useThreadListV2Enabled } from "../threads/use-thread-list-v2-enabled";
 import { useHardwareKeyboardCommand } from "../keyboard/hardwareKeyboardCommands";
 import { withNativeGlassHeaderItem } from "../layout/native-glass-header-items";
@@ -68,6 +71,8 @@ function checkedMenuState(checked: boolean) {
 
 function AndroidHomeHeader(props: HomeHeaderProps) {
   const { materialYouStyleLayoutActive } = useAppearancePreferences();
+  const navigation = useNavigation();
+  const needsYouCount = useNeedsYouCount();
   const insets = useSafeAreaInsets();
   const stageLabel = resolveMobileStageLabel(Constants.expoConfig?.extra?.appVariant);
   // Thread List v2 lays the list out in fixed creation order, so the
@@ -232,6 +237,17 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
               }
             />
 
+            <Pressable
+              accessibilityLabel={`Needs you, ${needsYouCount}`}
+              accessibilityRole="button"
+              onPress={() => navigation.navigate("IskraNeedsYou")}
+              className="h-11 flex-row items-center gap-1.5 rounded-full bg-subtle px-3.5"
+            >
+              <SparkGlyph state={needsYouCount > 0 ? "needsYou" : "idle"} size={16} />
+              {needsYouCount > 0 ? (
+                <RNText className="text-sm font-iskra-bold text-foreground">{needsYouCount}</RNText>
+              ) : null}
+            </Pressable>
             <ControlPillMenu
               actions={menuActions}
               isAnchoredToRight
@@ -318,6 +334,8 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
 function IosHomeHeader(props: HomeHeaderProps) {
   const searchBarRef = useRef<SearchBarCommands>(null);
   const iconColor = useUniwindTheme()["--color-icon"];
+  const navigation = useNavigation();
+  const needsYouCount = useNeedsYouCount();
   // Thread List v2 lays the list out in fixed creation order, so the
   // sort/group filter controls would be silently ignored — hide them and
   // key the "customized" icon state off the environment filter alone.
@@ -334,11 +352,16 @@ function IosHomeHeader(props: HomeHeaderProps) {
     ...props,
     listOrganization: !threadListV2Enabled,
   });
+  // Reapplies the header when the menu or the Needs you count changes, not on every render.
+  const headerVersion = useMemo(
+    () => ({ items: filterMenu.items, needsYouCount }),
+    [filterMenu.items, needsYouCount],
+  );
 
   return (
     <>
       <NativeStackScreenOptions
-        optionsVersion={filterMenu.items}
+        optionsVersion={headerVersion}
         options={{
           // Static header config (glass, title, fonts) lives in Stack.tsx
           // (GLASS_HEADER_OPTIONS). Only dynamic values are set here.
@@ -346,6 +369,14 @@ function IosHomeHeader(props: HomeHeaderProps) {
           unstable_headerRightItems:
             Platform.OS === "ios"
               ? () => [
+                  withNativeGlassHeaderItem({
+                    accessibilityLabel: `Needs you, ${needsYouCount}`,
+                    icon: { name: "sparkle", type: "sfSymbol" } as const,
+                    identifier: "home-needs-you",
+                    label: needsYouCount > 0 ? String(needsYouCount) : "",
+                    onPress: () => navigation.navigate("IskraNeedsYou"),
+                    type: "button",
+                  }),
                   withNativeGlassHeaderItem({
                     accessibilityLabel: "Open settings",
                     icon: { name: "ellipsis", type: "sfSymbol" } as const,

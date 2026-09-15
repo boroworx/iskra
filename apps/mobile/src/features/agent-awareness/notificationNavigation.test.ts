@@ -1,6 +1,10 @@
 import type { NotificationResponse } from "expo-notifications";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import {
+  extractCardNotificationDeepLink,
+  routeNotificationResponseOnce,
+} from "../iskra/cardDeepLink";
 import { consumeLastAgentNotificationResponse } from "./notificationResponseConsumer";
 
 import {
@@ -151,6 +155,44 @@ describe("extractAgentNotificationDeepLink", () => {
       extractAgentNotificationDeepLink(responseWithData({ deepLink: "/threads/env/thread?x=1" })),
     ).toBeNull();
     expect(extractAgentNotificationDeepLink({})).toBeNull();
+  });
+});
+
+describe("card notifications", () => {
+  it("opens the card from an explicit deep link or from environment and card ids", () => {
+    expect(
+      extractCardNotificationDeepLink(responseWithData({ deepLink: "/cards/env%201/card%2F2" })),
+    ).toBe("/cards/env%201/card%2F2");
+    expect(
+      extractCardNotificationDeepLink(responseWithData({ environmentId: "env 1", cardId: "card/2" })),
+    ).toBe("/cards/env%201/card%2F2");
+  });
+
+  it("leaves thread and malformed links to thread routing", () => {
+    expect(
+      extractCardNotificationDeepLink(responseWithData({ deepLink: "/threads/env/thread" })),
+    ).toBeNull();
+    expect(
+      extractCardNotificationDeepLink(responseWithData({ deepLink: "/cards/env/card?x=1" })),
+    ).toBeNull();
+    expect(extractCardNotificationDeepLink(responseWithData({ deepLink: "/cards/env" }))).toBeNull();
+  });
+
+  it("routes a card once, and a thread notification still to its thread", () => {
+    const handledResponseIds = new Set<string>();
+    const navigations: Array<string> = [];
+    const navigate = (deepLink: string) => navigations.push(deepLink);
+    const card = responseWithData({ environmentId: "env", cardId: "card" }, "card-notification");
+
+    routeNotificationResponseOnce({ handledResponseIds, response: card, navigate });
+    routeNotificationResponseOnce({ handledResponseIds, response: card, navigate });
+    routeNotificationResponseOnce({
+      handledResponseIds,
+      response: responseWithData({ environmentId: "env", threadId: "thread" }, "thread-notification"),
+      navigate,
+    });
+
+    expect(navigations).toEqual(["/cards/env/card", "/threads/env/thread"]);
   });
 });
 
