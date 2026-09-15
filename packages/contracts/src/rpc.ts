@@ -1297,6 +1297,41 @@ const WsProjectRemoveSecretRpc = Rpc.make(ORCHESTRATION_WS_METHODS.removeProject
   error: Schema.Union([ProjectSecretError, EnvironmentAuthorizationError]),
 });
 
+/** A project's hidden scenarios couldn't be listed, read or changed. */
+export class ProjectHoldoutError extends Schema.TaggedError<ProjectHoldoutError>()(
+  "ProjectHoldoutError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
+const ProjectHoldoutErrors = Schema.Union([ProjectHoldoutError, EnvironmentAuthorizationError]);
+
+const WsProjectListHoldoutsRpc = Rpc.make(ORCHESTRATION_WS_METHODS.listProjectHoldouts, {
+  payload: OrchestrationRpcSchemas.listProjectHoldouts.input,
+  success: OrchestrationRpcSchemas.listProjectHoldouts.output,
+  error: ProjectHoldoutErrors,
+});
+
+const WsProjectGetHoldoutRpc = Rpc.make(ORCHESTRATION_WS_METHODS.getProjectHoldout, {
+  payload: OrchestrationRpcSchemas.getProjectHoldout.input,
+  success: OrchestrationRpcSchemas.getProjectHoldout.output,
+  error: ProjectHoldoutErrors,
+});
+
+const WsProjectSetHoldoutRpc = Rpc.make(ORCHESTRATION_WS_METHODS.setProjectHoldout, {
+  payload: OrchestrationRpcSchemas.setProjectHoldout.input,
+  success: OrchestrationRpcSchemas.setProjectHoldout.output,
+  error: ProjectHoldoutErrors,
+});
+
+const WsProjectRemoveHoldoutRpc = Rpc.make(ORCHESTRATION_WS_METHODS.removeProjectHoldout, {
+  payload: OrchestrationRpcSchemas.removeProjectHoldout.input,
+  success: OrchestrationRpcSchemas.removeProjectHoldout.output,
+  error: ProjectHoldoutErrors,
+});
+
 const WsOrchestrationSaveAgentDefinitionRpc = Rpc.make(
   ORCHESTRATION_WS_METHODS.saveAgentDefinition,
   {
@@ -1547,4 +1582,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationListArchivedChannelsRpc,
   WsProjectSetSecretRpc,
   WsProjectRemoveSecretRpc,
+  WsProjectListHoldoutsRpc,
+  WsProjectGetHoldoutRpc,
+  WsProjectSetHoldoutRpc,
+  WsProjectRemoveHoldoutRpc,
 );

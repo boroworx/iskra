@@ -41,6 +41,11 @@ export const RPC_REQUIRED_SCOPES = {
   // Write-only, like the settings that declare the secret names.
   [ORCHESTRATION_WS_METHODS.setProjectSecret]: AuthOrchestrationOperateScope,
   [ORCHESTRATION_WS_METHODS.removeProjectSecret]: AuthOrchestrationOperateScope,
+  // Hidden scenarios are withheld from agents; even listing them takes the write scope.
+  [ORCHESTRATION_WS_METHODS.listProjectHoldouts]: AuthOrchestrationOperateScope,
+  [ORCHESTRATION_WS_METHODS.getProjectHoldout]: AuthOrchestrationOperateScope,
+  [ORCHESTRATION_WS_METHODS.setProjectHoldout]: AuthOrchestrationOperateScope,
+  [ORCHESTRATION_WS_METHODS.removeProjectHoldout]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverProbe]: AuthOrchestrationReadScope,
   [WS_METHODS.serverGetConfig]: AuthOrchestrationReadScope,
   [WS_METHODS.serverRefreshProviders]: AuthOrchestrationOperateScope,

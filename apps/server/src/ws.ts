@@ -40,6 +40,7 @@ import {
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
   ProjectSecretError,
+  ProjectHoldoutError,
   OrchestrationSearchThreadsError,
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
@@ -106,6 +107,7 @@ import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSna
 import * as AgentDefinitionSync from "./orchestration/AgentDefinitionSync.ts";
 import * as CardWorkspace from "./orchestration/CardWorkspace.ts";
 import { cardActivitiesOf } from "./orchestration/cardRules.ts";
+import * as HoldoutStore from "./orchestration/HoldoutStore.ts";
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor.ts";
 import {
   observeRpcEffect as instrumentRpcEffect,
@@ -510,6 +512,44 @@ const makeWsRpcLayer = (
       const agentDefinitionSync = yield* AgentDefinitionSync.AgentDefinitionSync;
       const cardWorkspace = yield* CardWorkspace.CardWorkspace;
       const secretStore = yield* ServerSecretStore.ServerSecretStore;
+      // Optional so servers built without the card runtime still answer; the RPCs then refuse.
+      const holdoutStore = yield* Effect.serviceOption(HoldoutStore.HoldoutStore);
+      /** Runs `use` on the store for a project that exists, with errors a client can show. */
+      const withHoldouts = <A>(
+        projectId: ProjectId,
+        use: (
+          store: HoldoutStore.HoldoutStore["Service"],
+        ) => Effect.Effect<A, HoldoutStore.HoldoutStoreError | ProjectHoldoutError>,
+      ) =>
+        Option.match(holdoutStore, {
+          onNone: () =>
+            Effect.fail(
+              new ProjectHoldoutError({ message: "Hidden scenarios aren't available on this server." }),
+            ),
+          onSome: (store) =>
+            projectionSnapshotQuery.getProjectShellById(projectId).pipe(
+              Effect.mapError(
+                (cause) => new ProjectHoldoutError({ message: "The project couldn't be read.", cause }),
+              ),
+              Effect.flatMap(
+                Option.match({
+                  onNone: () =>
+                    Effect.fail(new ProjectHoldoutError({ message: `No project ${projectId}.` })),
+                  onSome: () =>
+                    use(store).pipe(
+                      Effect.mapError((error) =>
+                        error._tag === "ProjectHoldoutError"
+                          ? error
+                          : new ProjectHoldoutError({
+                              message: error.message || "The hidden scenarios couldn't be changed.",
+                              cause: error.cause,
+                            }),
+                      ),
+                    ),
+                }),
+              ),
+            ),
+        });
       /** Where a project's secret value lives in the secret store; refuses an unknown project. */
       const projectSecretKey = (input: { readonly projectId: ProjectId; readonly name: string }) =>
         projectionSnapshotQuery.getProjectShellById(input.projectId).pipe(
@@ -2455,6 +2495,61 @@ const makeWsRpcLayer = (
               ),
               Effect.as({}),
             ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        // Listing never carries a scenario's body or command; only `get` does, for a person editing it.
+        [ORCHESTRATION_WS_METHODS.listProjectHoldouts]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.listProjectHoldouts,
+            withHoldouts(input.projectId, (store) =>
+              store.list(input.projectId).pipe(
+                Effect.map((scenarios) => ({
+                  scenarios: scenarios.map(({ scenarioId, title, kind }) => ({ scenarioId, title, kind })),
+                })),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.getProjectHoldout]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.getProjectHoldout,
+            withHoldouts(input.projectId, (store) =>
+              store.get(input.projectId, input.scenarioId).pipe(
+                Effect.flatMap(
+                  Option.match({
+                    onNone: () =>
+                      Effect.fail(
+                        new ProjectHoldoutError({
+                          message: `No hidden scenario ${input.scenarioId} in this project.`,
+                        }),
+                      ),
+                    onSome: (scenario) => Effect.succeed({ scenario }),
+                  }),
+                ),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.setProjectHoldout]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.setProjectHoldout,
+            withHoldouts(input.projectId, (store) =>
+              (input.scenario.kind === "command") !== (input.scenario.command !== null)
+                ? Effect.fail(
+                    new ProjectHoldoutError({
+                      message: "A command scenario needs a command, and a text scenario has none.",
+                    }),
+                  )
+                : store.set(input.projectId, input.scenario),
+            ).pipe(Effect.as({})),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.removeProjectHoldout]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.removeProjectHoldout,
+            withHoldouts(input.projectId, (store) =>
+              store.remove(input.projectId, input.scenarioId),
+            ).pipe(Effect.as({})),
             { "rpc.aggregate": "orchestration" },
           ),
         [ORCHESTRATION_WS_METHODS.getCardDiff]: (input) =>
