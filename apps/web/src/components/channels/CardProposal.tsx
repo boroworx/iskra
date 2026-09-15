@@ -21,6 +21,7 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { cardShortId } from "@iskra/client-runtime/card-face";
 import { StatusPill } from "../iskra/StatusPill";
 import { cardProposalStatus, ownerCandidates, type AgentEntry } from "./channels.logic";
 
@@ -66,7 +67,14 @@ export function CardProposal(props: {
       className="mt-2 flex min-w-0 max-w-[520px] flex-col gap-3.5 rounded-[14px] bg-card p-4 shadow-[0_0_0_0.5px_rgb(0_0_0/8%),0_4px_16px_rgb(0_0_0/8%)] dark:shadow-[0_0_0_0.5px_rgb(255_255_255/7%),0_4px_16px_rgb(0_0_0/24%)]"
     >
       <div className="flex min-w-0 items-center gap-2">
-        {status === null ? <StatusPill label="Proposed" tone="orange" /> : null}
+        {status === null ? (
+          <StatusPill label="Proposed" tone="orange" />
+        ) : (
+          <StatusPill label={status} tone={PROPOSAL_STATUS_TONE[card.status]} />
+        )}
+        <span className="text-[11px] font-medium tabular-nums text-tertiary-label">
+          {cardShortId(card.id)}
+        </span>
         {card.estimate !== null ? (
           <span
             role="img"
@@ -141,7 +149,6 @@ export function CardProposal(props: {
         </div>
       ) : (
         <div className="flex flex-wrap items-center justify-end gap-3 pt-0.5">
-          <StatusPill label={status} tone={PROPOSAL_STATUS_TONE[card.status]} />
           <Link
             {...boardLink}
             className="text-[13px] font-medium text-info-foreground hover:underline"

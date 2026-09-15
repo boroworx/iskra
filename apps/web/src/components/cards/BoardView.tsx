@@ -302,7 +302,7 @@ function BoardColumnView(props: {
       ref={setNodeRef}
       aria-label={BOARD_COLUMN_LABEL[props.column]}
       className={cn(
-        "-m-1 flex w-[280px] shrink-0 flex-col gap-2.5 rounded-[14px] p-1",
+        "-m-1 flex max-w-[280px] min-w-[208px] flex-1 basis-0 flex-col gap-2.5 rounded-[14px] p-1",
         isOver && "bg-[rgb(120_120_128/10%)]",
       )}
     >
