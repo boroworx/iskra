@@ -9,6 +9,7 @@ import {
 import { Link, useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import {
   ArchiveIcon,
+  BookTextIcon,
   CheckIcon,
   ChevronsUpDownIcon,
   LayoutGridIcon,
@@ -132,6 +133,10 @@ export default function IskraSidebar() {
   const projects = useProjects();
   const navigate = useNavigate();
   const pathname = useLocation({ select: (location) => location.pathname });
+  // The wiki lives on the board's route behind `?view=wiki`, so Board isn't active there.
+  const wikiOpen = useLocation({
+    select: (location) => (location.search as { readonly view?: string }).view === "wiki",
+  });
   const routeChannelId = useParams({
     strict: false,
     select: (params) => (params.channelId ?? null) as ChannelId | null,
@@ -234,7 +239,10 @@ export default function IskraSidebar() {
               <SidebarMenuItem>
                 <SidebarMenuButton
                   className={ROW}
-                  isActive={pathname.startsWith(`/board/${selected.environmentId}/${selected.id}`)}
+                  isActive={
+                    pathname.startsWith(`/board/${selected.environmentId}/${selected.id}`) &&
+                    !wikiOpen
+                  }
                   render={
                     <Link
                       to="/board/$environmentId/$projectId"
@@ -256,6 +264,7 @@ export default function IskraSidebar() {
               project={selected}
               activeChannelId={routeChannelId}
               activeAgentId={routeAgentId}
+              wikiActive={wikiOpen}
             />
           )}
         </SidebarContent>
@@ -269,6 +278,7 @@ const ProjectChannels = memo(function ProjectChannels(props: {
   readonly project: EnvironmentProject;
   readonly activeChannelId: ChannelId | null;
   readonly activeAgentId: AgentId | null;
+  readonly wikiActive: boolean;
 }) {
   const { environmentId, id: projectId } = props.project;
   const channels = useEnvironmentChannels(environmentId);
@@ -334,6 +344,22 @@ const ProjectChannels = memo(function ProjectChannels(props: {
               New channel — a separate topic with its own lead, or a room for several agents
             </TooltipPopup>
           </Tooltip>
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            className={ROW}
+            isActive={props.wikiActive}
+            render={
+              <Link
+                to="/board/$environmentId/$projectId"
+                params={{ environmentId, projectId }}
+                search={{ view: "wiki" as const }}
+              />
+            }
+          >
+            <BookTextIcon className="text-info-foreground!" />
+            <span className="truncate">Wiki</span>
+          </SidebarMenuButton>
         </SidebarMenuItem>
       </SidebarMenu>
       {/* Most projects only need Requests: the section shows once a channel exists, or an archived one waits. */}

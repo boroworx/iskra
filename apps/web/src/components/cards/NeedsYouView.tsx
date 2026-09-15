@@ -13,7 +13,6 @@ import {
   DEFAULT_CARD_BUDGET_USD,
   type CardId,
   type EnvironmentId,
-  type ProjectId,
 } from "@iskra/contracts";
 import { Link } from "@tanstack/react-router";
 import {
@@ -24,7 +23,6 @@ import {
   EllipsisIcon,
   FlagIcon,
   GitBranchIcon,
-  LightbulbIcon,
   ListChecksIcon,
   LockIcon,
   PauseIcon,
@@ -43,7 +41,6 @@ import {
 } from "~/logicalProject";
 import { cn } from "~/lib/utils";
 import { cardEnvironment } from "~/state/cards";
-import { channelEnvironment } from "~/state/channels";
 import { useUndoToast } from "./useUndoToast";
 import { useEnvironmentAgents, useEnvironmentCards, useProjects } from "~/state/entities";
 import { usePrimaryEnvironmentId } from "~/state/environments";
@@ -94,7 +91,6 @@ const KIND_ICON: Partial<Record<NeedsYouKind, LucideIcon>> = {
   budgetReached: CircleDollarSignIcon,
   budgetCap: CircleDollarSignIcon,
   unpricedModel: CircleDollarSignIcon,
-  lessonProposed: LightbulbIcon,
   outcomeFlawed: FlagIcon,
 };
 
@@ -115,8 +111,6 @@ export function NeedsYouView() {
   const unsnooze = useAtomCommand(cardEnvironment.unsnooze);
   const decide = useAtomCommand(cardEnvironment.decide);
   const setBudget = useAtomCommand(cardEnvironment.setBudget);
-  const approveLesson = useAtomCommand(channelEnvironment.approveLesson);
-  const dismissLesson = useAtomCommand(channelEnvironment.dismissLesson);
   const undoToast = useUndoToast();
   // Waiting times read in minutes, so a minute's tick keeps them honest without animating.
   const [now, setNow] = useState(() => Date.now());
@@ -185,16 +179,6 @@ export function NeedsYouView() {
         if (result._tag === "Success")
           undoToast(environmentId, { type: "card.snooze", cardId: id });
       });
-    }
-  };
-  const decideLesson = (
-    command: typeof approveLesson,
-    projectId: ProjectId,
-    lessonId: string,
-    failure: string,
-  ) => {
-    if (environmentId !== null) {
-      void command({ environmentId, input: { projectId, lessonId } }).then(refused(failure));
     }
   };
   const decideOn = (
@@ -276,7 +260,6 @@ export function NeedsYouView() {
                     const Icon = KIND_ICON[item.kind];
                     const why =
                       item.reason !== null &&
-                      item.kind !== "lessonProposed" &&
                       item.kind !== "checkpoint" &&
                       item.kind !== "sliceCheckpoint" &&
                       item.activityId === null
@@ -422,34 +405,6 @@ export function NeedsYouView() {
                         </ActionButton>
                       ) : item.kind === "sideEffectGuard" ? (
                         <GuardLink search={orchestrationSettingsSearch(item.projectId)} />
-                      ) : item.kind === "lessonProposed" && item.lessonId !== null ? (
-                        <>
-                          <ActionButton
-                            onClick={() =>
-                              decideLesson(
-                                dismissLesson,
-                                item.projectId,
-                                item.lessonId!,
-                                "The lesson was not dismissed",
-                              )
-                            }
-                          >
-                            Dismiss
-                          </ActionButton>
-                          <ActionButton
-                            tone="primary"
-                            onClick={() =>
-                              decideLesson(
-                                approveLesson,
-                                item.projectId,
-                                item.lessonId!,
-                                "The lesson was not approved",
-                              )
-                            }
-                          >
-                            Approve lesson
-                          </ActionButton>
-                        </>
                       ) : item.kind === "planApproval" && environmentId !== null ? (
                         <ActionButton
                           tone="primary"
@@ -559,11 +514,6 @@ export function NeedsYouView() {
                               </span>
                             </DisabledReason>
                           )}
-                          {item.kind === "lessonProposed" && item.reason !== null ? (
-                            <p className="line-clamp-4 whitespace-pre-wrap break-words text-[13px] text-muted-foreground">
-                              {item.reason}
-                            </p>
-                          ) : null}
                           {attention?.code === "accessRequest" ? (
                             <AccessRequestDetails
                               item={attention}

@@ -13,7 +13,7 @@ export function useUndoToast() {
   return useCallback(
     (environmentId: EnvironmentId, command: UndoableCommand) => {
       const reverse = undoCommandOf(command);
-      if (reverse === null || command.type === "project.knowledge.dismiss") return;
+      if (reverse === null) return;
       const toastId = toastManager.add({
         type: "success",
         title: UNDOABLE_LABEL[command.type],

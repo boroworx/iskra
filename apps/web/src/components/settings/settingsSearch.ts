@@ -698,10 +698,10 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["monthly spend cost cap limit agent usd dollars card default"],
   },
   {
-    id: "project-knowledge",
-    title: "Knowledge",
+    id: "project-wiki",
+    title: "Wiki",
     to: "/settings/projects",
-    searchTerms: ["lessons quirks playbooks approve dismiss proposed memory"],
+    searchTerms: ["wiki pages what agents learned lessons notes revert lock memory"],
   },
   {
     id: "environment-icon",

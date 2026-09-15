@@ -26,7 +26,7 @@ import { Textarea } from "../ui/textarea";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
 import { ProjectBudgetsSettings } from "./ProjectBudgetsSettings";
 import { ProjectHoldoutsSettings } from "./ProjectHoldoutsSettings";
-import { ProjectKnowledgeSettings } from "./ProjectKnowledgeSettings";
+import { ProjectWikiSettings } from "./ProjectWikiSettings";
 import { ProjectTriggersSettings } from "./ProjectTriggersSettings";
 import { AUTO_MERGE_NEEDS_VERIFIER_TEXT } from "@iskra/client-runtime/cards";
 import {
@@ -520,7 +520,7 @@ function ProjectOrchestrationForm(props: {
         saving={saving}
         onSave={save}
       />
-      <ProjectKnowledgeSettings project={props.representative} />
+      <ProjectWikiSettings project={props.representative} />
       <ProjectHoldoutsSettings project={props.representative} />
       <ProjectSecrets project={props.representative} />
       {guardReviewed ? guard : null}
