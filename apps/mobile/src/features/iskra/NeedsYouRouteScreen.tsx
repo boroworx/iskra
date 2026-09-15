@@ -59,7 +59,7 @@ export function NeedsYouRouteScreen() {
 
   return (
     <>
-      <NativeStackScreenOptions options={{ title: "Needs you", headerRight: ChannelsHeaderButton }} />
+      <NativeStackScreenOptions options={{ title: "Needs you", headerRight: () => <ChannelsHeaderButton /> }} />
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         className="flex-1 bg-screen"
