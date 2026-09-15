@@ -2,9 +2,12 @@ import {
   ORCHESTRATION_WS_METHODS,
   type CardActivity,
   type CardEvidenceItem,
+  type CardId,
   type CardVerdict,
   type OrchestrationCardStreamItem,
 } from "@iskra/contracts";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import type { Atom } from "effect/unstable/reactivity";
 
@@ -13,8 +16,10 @@ import { subscribe, type EnvironmentRpcInput } from "../rpc/client.ts";
 import { createEnvironmentSubscriptionAtomFamily } from "./runtime.ts";
 
 export interface CardActivityState {
-  /** Oldest first. The subscription starts from the newest 200; older entries aren't paged in yet. */
+  /** Oldest first. The subscription starts from the newest 200; `loadOlderCardActivity` pages further. */
   readonly activities: ReadonlyArray<CardActivity>;
+  /** Whether older activities than the first one held exist on the server. */
+  readonly hasMore: boolean;
   /** The items of the card's latest evidence recording. */
   readonly evidence: {
     readonly evidenceId: string;
@@ -24,7 +29,28 @@ export interface CardActivityState {
   readonly verdict: CardVerdict | null;
 }
 
-export const EMPTY_CARD_ACTIVITY: CardActivityState = { activities: [], evidence: null, verdict: null };
+export const EMPTY_CARD_ACTIVITY: CardActivityState = {
+  activities: [],
+  hasMore: false,
+  evidence: null,
+  verdict: null,
+};
+
+type CardActivityPage = Extract<OrchestrationCardStreamItem, { readonly kind: "page" }>;
+
+/**
+ * The page of a card's activities older than `before` (an activity id): the card subscription
+ * sends one page and ends. Apply it to the live state with `applyCardStreamItem`, oldest page last.
+ */
+export function loadOlderCardActivity(input: { readonly cardId: CardId; readonly before: string }) {
+  return subscribe(ORCHESTRATION_WS_METHODS.subscribeCard, input).pipe(
+    Stream.filter((item): item is CardActivityPage => item.kind === "page"),
+    Stream.runHead,
+    Effect.map(
+      Option.getOrElse((): CardActivityPage => ({ kind: "page", activities: [], hasMore: false })),
+    ),
+  );
+}
 
 /**
  * A card's activity after one stream item. A snapshot replaces everything, so a resubscription
@@ -37,12 +63,18 @@ export function applyCardStreamItem(
 ): CardActivityState {
   switch (item.kind) {
     case "snapshot":
-      return { activities: item.activities, evidence: item.evidence, verdict: item.verdict ?? null };
+      return {
+        activities: item.activities,
+        hasMore: item.hasMore ?? false,
+        evidence: item.evidence,
+        verdict: item.verdict ?? null,
+      };
     // An older page goes before what is held, skipping any activity already held.
     case "page": {
       const held = new Set(state.activities.map((activity) => activity.activityId));
       return {
         ...state,
+        hasMore: item.hasMore,
         activities: [
           ...item.activities.filter((activity) => !held.has(activity.activityId)),
           ...state.activities,

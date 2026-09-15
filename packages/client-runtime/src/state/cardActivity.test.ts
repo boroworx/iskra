@@ -43,4 +43,36 @@ describe("applyCardStreamItem", () => {
     );
     expect(state.evidence).toEqual({ evidenceId: "e1", items: [] });
   });
+
+  it("puts older pages before the live activities, in fetch order, and follows hasMore", () => {
+    type Item = Parameters<typeof applyCardStreamItem>[1];
+    const live = [
+      { kind: "snapshot", activities: [activity("c"), activity("d")], evidence: null, hasMore: true },
+      { kind: "activity", activity: activity("e") },
+    ].reduce((current, item) => applyCardStreamItem(current, item as Item), EMPTY_CARD_ACTIVITY);
+    expect(live.hasMore).toBe(true);
+
+    // The first page overlaps the live state by one activity; it is kept once.
+    const firstPage = applyCardStreamItem(live, {
+      kind: "page",
+      activities: [activity("b"), activity("c")],
+      hasMore: true,
+    });
+    const secondPage = applyCardStreamItem(firstPage, {
+      kind: "page",
+      activities: [activity("a")],
+      hasMore: false,
+    });
+
+    expect(secondPage.activities.map((entry) => entry.activityId)).toEqual(["a", "b", "c", "d", "e"]);
+    expect(secondPage.hasMore).toBe(false);
+    // A resubscription's snapshot starts clean; held pages are applied again over it.
+    const resubscribed = applyCardStreamItem(secondPage, {
+      kind: "snapshot",
+      activities: [activity("d"), activity("e")],
+      evidence: null,
+    });
+    expect(resubscribed).toMatchObject({ hasMore: false });
+    expect(resubscribed.activities.map((entry) => entry.activityId)).toEqual(["d", "e"]);
+  });
 });
