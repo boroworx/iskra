@@ -114,8 +114,8 @@ function NeedsYouRow(props: { readonly active: boolean }) {
 }
 
 /**
- * The Iskra sidebar: a project picker, Needs You and the selected project's
- * board, channels and agents. The URL decides the selected project (see
+ * The Iskra sidebar: Needs You across every project, then a project picker and
+ * the selected project's board, channels and agents. The URL decides the selected project (see
  * `useRouteProject`); picking a project navigates into it rather than
  * selecting it locally.
  */
@@ -161,6 +161,10 @@ export default function IskraSidebar() {
     <>
       <SidebarChromeHeader isElectron={isElectron} />
       <div className="flex min-h-0 flex-1 flex-col px-2.5">
+        {/* Needs You spans every project, so it sits above the picker that scopes the rows below. */}
+        <SidebarMenu className="mb-2.5">
+          <NeedsYouRow active={pathname === "/needs-you"} />
+        </SidebarMenu>
         <Menu>
           <MenuTrigger
             render={
@@ -212,7 +216,6 @@ export default function IskraSidebar() {
         </Menu>
         <SidebarContent className="gap-0 pb-2">
           <SidebarMenu className="gap-0.5">
-            <NeedsYouRow active={pathname === "/needs-you"} />
             {selected === null ? null : (
               <SidebarMenuItem>
                 <SidebarMenuButton
