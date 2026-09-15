@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { ArchiveIcon, AtSignIcon, HashIcon, InboxIcon, PlusIcon, SettingsIcon } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
+import { openCommandPalette } from "../commandPaletteBus";
 import { isElectron } from "../env";
 import { cn } from "../lib/utils";
 import {
@@ -151,6 +152,21 @@ export default function IskraSidebar() {
               </Tooltip>
             );
           })}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label="Add project"
+                  onClick={() => openCommandPalette({ open: "add-project" })}
+                  className="flex size-10 shrink-0 items-center justify-center rounded-xl text-sidebar-muted-foreground outline-hidden ring-ring hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-2 [&>svg]:size-4"
+                >
+                  <PlusIcon />
+                </button>
+              }
+            />
+            <TooltipPopup side="right">Add project</TooltipPopup>
+          </Tooltip>
         </nav>
         <SidebarContent className="gap-0">
           <NeedsYouEntry />

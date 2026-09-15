@@ -1050,7 +1050,7 @@ function OpenCommandPaletteDialog(props: {
     [browseNavigation],
   );
 
-  // A project opens on its first channel; without one it lands on the shell home.
+  // A project opens on its first channel; without one it opens on its board, as the project rail does.
   const openProjectFromSearch = useCallback(
     async (project: (typeof projects)[number]) => {
       const channel =
@@ -1058,7 +1058,10 @@ function OpenCommandPaletteDialog(props: {
           ? channelListEntries(primaryChannels, project.id)[0]
           : undefined;
       if (channel === undefined) {
-        await navigate({ to: "/" });
+        await navigate({
+          to: "/board/$environmentId/$projectId",
+          params: { environmentId: project.environmentId, projectId: project.id },
+        });
         return;
       }
       await navigate({
@@ -1950,8 +1953,11 @@ function OpenCommandPaletteDialog(props: {
         return;
       }
 
-      // A new project has no channels yet: land on the shell, where they are created.
-      await navigate({ to: "/" });
+      // A new project has no channels yet, so it opens on its board, as the project rail would.
+      await navigate({
+        to: "/board/$environmentId/$projectId",
+        params: { environmentId: input.environmentId, projectId },
+      });
       setOpen(false);
     },
     [
