@@ -57,7 +57,7 @@ const makeSession = Effect.gen(function* () {
 
   const evidenceItem = (session: VerifierSession, itemId: string) =>
     Effect.gen(function* () {
-      const activity = yield* snapshots.getCardActivity(session.card.id, 1).pipe(Effect.mapError(failed));
+      const activity = yield* snapshots.getCardActivity(session.card.id, { limit: 1 }).pipe(Effect.mapError(failed));
       const item = activity.evidence?.items.find((candidate) => candidate.itemId === itemId);
       if (item === undefined) {
         return yield* new VerifierCommandRefusedError({

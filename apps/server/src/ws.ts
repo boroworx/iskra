@@ -861,6 +861,12 @@ const makeWsRpcLayer = (
           case "project.created":
           case "project.meta-updated":
           case "project.orchestration-set":
+          case "project.trigger-fired":
+          case "project.spend-recorded":
+          case "project.knowledge-proposed":
+          case "project.knowledge-added":
+          case "project.knowledge-dismissed":
+          case "project.knowledge-removed":
             return projectUpsertOrRemove(ProjectId.make(event.aggregateId), event.sequence);
           case "project.deleted":
             return Effect.succeed(
@@ -2386,6 +2392,26 @@ const makeWsRpcLayer = (
           observeRpcStreamEffect(
             ORCHESTRATION_WS_METHODS.subscribeCard,
             Effect.gen(function* () {
+              const loadFailed = (cause: unknown) =>
+                new OrchestrationGetSnapshotError({
+                  message: `Failed to load the activity of card ${input.cardId}`,
+                  cause,
+                });
+              // An older page is one answer, with no live events: the first subscription carries those.
+              if (input.before !== undefined) {
+                const older = yield* projectionSnapshotQuery
+                  .getCardActivity(input.cardId, {
+                    before: input.before,
+                    limit: CARD_SUBSCRIBE_ACTIVITY_LIMIT,
+                  })
+                  .pipe(Effect.mapError(loadFailed));
+                const page: OrchestrationCardStreamItem = {
+                  kind: "page",
+                  activities: older.activities,
+                  hasMore: older.hasMore,
+                };
+                return Stream.make(page);
+              }
               // Attach live events before reading the snapshot so nothing recorded meanwhile is
               // lost; an activity can then arrive twice, and clients keep one per id.
               const live = yield* Queue.unbounded<OrchestrationCardStreamItem>();
@@ -2419,20 +2445,10 @@ const makeWsRpcLayer = (
                 { startImmediately: true },
               );
               const snapshot = yield* projectionSnapshotQuery
-                .getCardActivity(input.cardId, CARD_SUBSCRIBE_ACTIVITY_LIMIT)
-                .pipe(
-                  Effect.mapError(
-                    (cause) =>
-                      new OrchestrationGetSnapshotError({
-                        message: `Failed to load the activity of card ${input.cardId}`,
-                        cause,
-                      }),
-                  ),
-                );
-              return Stream.concat(
-                Stream.make({ kind: "snapshot" as const, ...snapshot }),
-                Stream.fromQueue(live),
-              );
+                .getCardActivity(input.cardId, { limit: CARD_SUBSCRIBE_ACTIVITY_LIMIT })
+                .pipe(Effect.mapError(loadFailed));
+              const first: OrchestrationCardStreamItem = { kind: "snapshot", ...snapshot };
+              return Stream.concat(Stream.make(first), Stream.fromQueue(live));
             }),
             { "rpc.aggregate": "orchestration" },
           ),

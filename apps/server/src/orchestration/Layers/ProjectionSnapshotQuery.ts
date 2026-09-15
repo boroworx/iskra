@@ -40,6 +40,11 @@ import {
   TrimmedNonEmptyString,
   runSessionState,
   OrchestrationLiveRun,
+  PROJECT_SHELL_TRIGGER_FIRES_LIMIT,
+  ProjectLesson,
+  ProjectTriggerFire,
+  Reason,
+  type ProjectSpend,
   type OrchestrationCardShell,
 } from "@iskra/contracts";
 import { legacyLinkedPullRequestOf } from "@iskra/shared/threadPullRequests";
@@ -432,9 +437,21 @@ function mapSessionRow(
   };
 }
 
+/** A project's spend this month, its lessons and its newest trigger fires, each absent when it has none. */
+type ProjectExtras = Pick<OrchestrationProjectShell, "spend" | "knowledge" | "recentTriggerFires">;
+
+/** The read model carries a project's spend and lessons; recent fires are only for clients. */
+const projectReadExtras = (
+  extras: ProjectExtras | undefined,
+): Pick<OrchestrationProject, "spend" | "knowledge"> => ({
+  ...(extras?.spend === undefined ? {} : { spend: extras.spend }),
+  ...(extras?.knowledge === undefined ? {} : { knowledge: extras.knowledge }),
+});
+
 function mapProjectShellRow(
   row: Schema.Schema.Type<typeof ProjectionProjectDbRowSchema>,
   repositoryIdentity: OrchestrationProject["repositoryIdentity"],
+  extras: ProjectExtras | undefined,
 ): OrchestrationProjectShell {
   return {
     id: row.projectId,
@@ -448,6 +465,7 @@ function mapProjectShellRow(
     projectIcon: row.projectIcon ?? null,
     scripts: row.scripts,
     ...(row.orchestration === null ? {} : { orchestration: row.orchestration }),
+    ...extras,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -2548,6 +2566,7 @@ pending_approval_requests AS (
                 { includeDeleted: true },
               );
 
+              const projectExtras = yield* loadProjectExtras();
               const projects: ReadonlyArray<OrchestrationProject> = projectRows.map((row) => ({
                 id: row.projectId,
                 title: row.title,
@@ -2560,6 +2579,7 @@ pending_approval_requests AS (
                 projectIcon: row.projectIcon ?? null,
                 scripts: row.scripts,
                 ...(row.orchestration === null ? {} : { orchestration: row.orchestration }),
+                ...projectReadExtras(projectExtras.get(row.projectId)),
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
                 deletedAt: row.deletedAt,
@@ -2723,6 +2743,7 @@ pending_approval_requests AS (
                 projectRows.filter((row) => linkedProjectIds.has(row.projectId)),
               );
               let updatedAt: string | null = null;
+              const projectExtras = yield* loadProjectExtras();
               const projects: OrchestrationProject[] = [];
               const threads: OrchestrationThread[] = [];
 
@@ -2744,6 +2765,7 @@ pending_approval_requests AS (
                   projectIcon: row.projectIcon ?? null,
                   scripts: row.scripts,
                   ...(row.orchestration === null ? {} : { orchestration: row.orchestration }),
+                  ...projectReadExtras(projectExtras.get(row.projectId)),
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
                   deletedAt: row.deletedAt,
@@ -2974,12 +2996,13 @@ pending_approval_requests AS (
               );
               const pullRequestsByThread = groupPullRequestRowsByThread(pullRequestRows);
 
+              const projectExtras = yield* loadProjectExtras();
               const snapshot = {
                 snapshotSequence: computeSnapshotSequence(stateRows),
                 projects: Arr.filterMap(projectRows, (row) =>
                   row.deletedAt === null
                     ? Result.succeed(
-                        mapProjectShellRow(row, repositoryIdentities.get(row.projectId) ?? null),
+                        mapProjectShellRow(row, repositoryIdentities.get(row.projectId) ?? null, projectExtras.get(row.projectId)),
                       )
                     : Result.failVoid,
                 ),
@@ -3168,12 +3191,13 @@ pending_approval_requests AS (
                 sessionRows.map((row) => [row.threadId, mapSessionRow(row)] as const),
               );
 
+              const projectExtras = yield* loadProjectExtras();
               const snapshot = {
                 snapshotSequence: computeSnapshotSequence(stateRows),
                 projects: Arr.filterMap(projectRows, (row) =>
                   row.deletedAt === null && activeProjectIds.has(row.projectId)
                     ? Result.succeed(
-                        mapProjectShellRow(row, repositoryIdentities.get(row.projectId) ?? null),
+                        mapProjectShellRow(row, repositoryIdentities.get(row.projectId) ?? null, projectExtras.get(row.projectId)),
                       )
                     : Result.failVoid,
                 ),
@@ -3351,9 +3375,11 @@ pending_approval_requests AS (
         ),
       ),
       Effect.flatMap((projects) =>
-        resolveRepositoryIdentitiesForProjects(projects).pipe(
-          Effect.map((identities) =>
-            projects.map((row) => mapProjectShellRow(row, identities.get(row.projectId) ?? null)),
+        Effect.all([resolveRepositoryIdentitiesForProjects(projects), loadProjectExtras()]).pipe(
+          Effect.map(([identities, extras]) =>
+            projects.map((row) =>
+              mapProjectShellRow(row, identities.get(row.projectId) ?? null, extras.get(row.projectId)),
+            ),
           ),
         ),
       ),
@@ -3371,13 +3397,16 @@ pending_approval_requests AS (
       Effect.flatMap((option) =>
         Option.isNone(option)
           ? Effect.succeed(Option.none<OrchestrationProjectShell>())
-          : repositoryIdentityResolver
-              .resolve(option.value.workspaceRoot)
-              .pipe(
-                Effect.map((repositoryIdentity) =>
-                  Option.some(mapProjectShellRow(option.value, repositoryIdentity)),
+          : Effect.all([
+              repositoryIdentityResolver.resolve(option.value.workspaceRoot),
+              loadProjectExtras(option.value.projectId),
+            ]).pipe(
+              Effect.map(([repositoryIdentity, extras]) =>
+                Option.some(
+                  mapProjectShellRow(option.value, repositoryIdentity, extras.get(option.value.projectId)),
                 ),
               ),
+            ),
       ),
     );
 
@@ -4147,17 +4176,30 @@ pending_approval_requests AS (
       }),
     );
 
+  // One more row than asked for says whether an older page exists.
   const listCardActivityRows = SqlSchema.findAll({
-    Request: Schema.Struct({ cardId: Schema.String, limit: Schema.Number }),
+    Request: Schema.Struct({
+      cardId: Schema.String,
+      limit: Schema.Number,
+      before: Schema.UndefinedOr(Schema.String),
+    }),
     Result: ProjectionCardActivity,
-    execute: ({ cardId, limit }) =>
+    execute: ({ cardId, limit, before }) =>
       sql`
         SELECT * FROM (
           SELECT ${sql.literal(PROJECTION_CARD_ACTIVITY_COLUMNS)}, rowid AS "activityRowid"
           FROM projection_card_activities
           WHERE card_id = ${cardId}
+            ${
+              before === undefined
+                ? sql``
+                : sql`AND (created_at, rowid) < (
+                    SELECT created_at, rowid FROM projection_card_activities
+                    WHERE activity_id = ${before} AND card_id = ${cardId}
+                  )`
+            }
           ORDER BY created_at DESC, rowid DESC
-          LIMIT ${limit}
+          LIMIT ${limit + 1}
         )
         ORDER BY "createdAt" ASC, "activityRowid" ASC
       `,
@@ -4194,15 +4236,142 @@ pending_approval_requests AS (
       `,
   });
 
-  const getCardActivity: ProjectionSnapshotQueryShape["getCardActivity"] = (cardId, limit) =>
+  // A project's spend in the latest month it has any, by agent, as the in-memory projection keeps it.
+  const listProjectSpendRows = SqlSchema.findAll({
+    Request: Schema.Struct({ projectId: Schema.UndefinedOr(Schema.String) }),
+    Result: Schema.Struct({
+      projectId: ProjectId,
+      month: TrimmedNonEmptyString,
+      agentId: AgentId,
+      costUsd: Schema.Number,
+    }),
+    execute: ({ projectId }) =>
+      sql`
+        SELECT
+          spend.project_id AS "projectId",
+          spend.month,
+          spend.agent_id AS "agentId",
+          SUM(spend.cost_usd) AS "costUsd"
+        FROM projection_spend_monthly AS spend
+        WHERE spend.month = (
+            SELECT MAX(latest.month) FROM projection_spend_monthly AS latest
+            WHERE latest.project_id = spend.project_id
+          )
+          AND ${projectId === undefined ? sql`1 = 1` : sql`spend.project_id = ${projectId}`}
+        GROUP BY spend.project_id, spend.month, spend.agent_id
+        ORDER BY spend.project_id ASC, MIN(spend.rowid) ASC
+      `,
+  });
+
+  const listProjectLessonRows = SqlSchema.findAll({
+    Request: Schema.Struct({ projectId: Schema.UndefinedOr(Schema.String) }),
+    Result: Schema.Struct({
+      ...ProjectLesson.fields,
+      projectId: ProjectId,
+      paths: Schema.fromJsonString(ProjectLesson.fields.paths),
+    }),
+    execute: ({ projectId }) =>
+      sql`
+        SELECT
+          lesson_id AS "lessonId",
+          project_id AS "projectId",
+          kind,
+          text,
+          paths_json AS "paths",
+          state,
+          source_card_id AS "sourceCardId",
+          created_at AS "createdAt"
+        FROM projection_project_knowledge
+        WHERE state IN ('proposed', 'approved')
+          AND ${projectId === undefined ? sql`1 = 1` : sql`project_id = ${projectId}`}
+        ORDER BY created_at ASC, rowid ASC
+      `,
+  });
+
+  const listRecentTriggerFireRows = SqlSchema.findAll({
+    Request: Schema.Struct({ projectId: Schema.UndefinedOr(Schema.String) }),
+    Result: Schema.Struct({
+      ...ProjectTriggerFire.fields,
+      projectId: ProjectId,
+      reason: Schema.NullOr(Schema.fromJsonString(Reason)),
+    }),
+    execute: ({ projectId }) =>
+      sql`
+        SELECT
+          project_id AS "projectId",
+          trigger_id AS "triggerId",
+          source_key AS "sourceKey",
+          outcome,
+          card_id AS "cardId",
+          reason_json AS "reason",
+          fired_at AS "firedAt"
+        FROM (
+          SELECT
+            *,
+            ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY fired_at DESC, rowid DESC) AS position
+          FROM projection_trigger_fires
+          WHERE ${projectId === undefined ? sql`1 = 1` : sql`project_id = ${projectId}`}
+        )
+        WHERE position <= ${PROJECT_SHELL_TRIGGER_FIRES_LIMIT}
+        ORDER BY project_id ASC, fired_at DESC
+      `,
+  });
+
+  /** Each project's spend, lessons and recent fires, by project id; one project's when given. */
+  const loadProjectExtras = (projectId?: ProjectId) =>
     Effect.all([
-      listCardActivityRows({ cardId, limit }),
+      listProjectSpendRows({ projectId }),
+      listProjectLessonRows({ projectId }),
+      listRecentTriggerFireRows({ projectId }),
+    ]).pipe(
+      Effect.mapError(queryError("loadProjectExtras")),
+      Effect.map(([spendRows, lessonRows, fireRows]): ReadonlyMap<string, ProjectExtras> => {
+        const extras = new Map<
+          string,
+          {
+            spend?: ProjectSpend;
+            knowledge?: ReadonlyArray<ProjectLesson>;
+            recentTriggerFires?: ReadonlyArray<ProjectTriggerFire>;
+          }
+        >();
+        const entryOf = (id: string) => {
+          const entry = extras.get(id) ?? {};
+          extras.set(id, entry);
+          return entry;
+        };
+        for (const { projectId: id, month, agentId, costUsd } of spendRows) {
+          const entry = entryOf(id);
+          const spend = entry.spend ?? { month, totalUsd: 0, byAgent: [] };
+          entry.spend = {
+            month,
+            totalUsd: spend.totalUsd + costUsd,
+            byAgent: [...spend.byAgent, { agentId, usd: costUsd }],
+          };
+        }
+        for (const { projectId: id, ...lesson } of lessonRows) {
+          const entry = entryOf(id);
+          entry.knowledge = [...(entry.knowledge ?? []), lesson];
+        }
+        for (const { projectId: id, ...fire } of fireRows) {
+          const entry = entryOf(id);
+          entry.recentTriggerFires = [...(entry.recentTriggerFires ?? []), fire];
+        }
+        return extras;
+      }),
+    );
+
+  const getCardActivity: ProjectionSnapshotQueryShape["getCardActivity"] = (cardId, { limit, before }) =>
+    Effect.all([
+      listCardActivityRows({ cardId, limit, before }),
       listLatestCardEvidenceRows({ cardId }),
       listLatestCardVerdictRows({ cardId }),
     ]).pipe(
       Effect.mapError(queryError("getCardActivity")),
       Effect.map(([activityRows, evidenceRows, [verdictRow]]) => ({
-        activities: activityRows.map((row) => Struct.omit(row, ["deliveryThreadId"])),
+        activities: activityRows
+          .slice(activityRows.length > limit ? 1 : 0)
+          .map((row) => Struct.omit(row, ["deliveryThreadId"])),
+        hasMore: activityRows.length > limit,
         verdict: verdictRow === undefined ? null : { ...verdictRow, passed: verdictRow.passed === 1 },
         evidence:
           evidenceRows[0] === undefined

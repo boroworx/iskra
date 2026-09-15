@@ -49,7 +49,8 @@ layer("078_ProjectionCardVerification", (it) => {
           '{"instanceId":"claudeAgent","model":"claude-sonnet-5"}', '["read"]',
           '2026-03-01T00:00:00.000Z', '2026-03-01T00:00:00.000Z', NULL)
       `;
-      yield* runMigrations({ toMigrationInclusive: 78 });
+      // The repositories read today's columns, so the rows are read after every later migration too.
+      yield* runMigrations();
 
       const cards = yield* ProjectionCardRepository;
       const agents = yield* ProjectionAgentRepository;

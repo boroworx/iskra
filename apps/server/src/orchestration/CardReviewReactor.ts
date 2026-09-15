@@ -594,7 +594,7 @@ const make = Effect.gen(function* () {
     const model = yield* readModel();
     for (const card of model.cards ?? []) {
       if (card.status !== "inProgress" || card.worktreePath === null) continue;
-      const { activities } = yield* snapshotQuery.getCardActivity(card.id, 200);
+      const { activities } = yield* snapshotQuery.getCardActivity(card.id, { limit: 200 });
       const answered = new Set(
         activities.flatMap((activity) =>
           activity.reason?.code === RUN_CHECKS_RESULT_CODE ? [activity.activityId] : [],

@@ -391,7 +391,7 @@ const makeWorld = Effect.fn("makeWorld")(function* (
         Effect.map((model) => (model.cards ?? []).find((candidate) => candidate.id === cardId)!),
       );
   const activities = (cardId: CardId) =>
-    snapshotQuery.getCardActivity(cardId, 200).pipe(Effect.map((stream) => stream.activities));
+    snapshotQuery.getCardActivity(cardId, { limit: 200 }).pipe(Effect.map((stream) => stream.activities));
   const activityWith = (
     cardId: CardId,
     matches: (activity: Effect.Success<ReturnType<typeof activities>>[number]) => boolean,

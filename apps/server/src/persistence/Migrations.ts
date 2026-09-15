@@ -90,6 +90,11 @@ import Migration0075 from "./Migrations/075_ProjectionCardActivityRefChanges.ts"
 import Migration0076 from "./Migrations/076_ProjectionCardAttention.ts";
 import Migration0077 from "./Migrations/077_ProjectionAgentTemplates.ts";
 import Migration0078 from "./Migrations/078_ProjectionCardVerification.ts";
+import Migration0079 from "./Migrations/079_ProjectionCardPlans.ts";
+import Migration0080 from "./Migrations/080_ProjectionTriggerFires.ts";
+import Migration0081 from "./Migrations/081_ProjectionSpendMonthly.ts";
+import Migration0082 from "./Migrations/082_ProjectionProjectKnowledge.ts";
+import Migration0083 from "./Migrations/083_ProjectionCardOutcomes.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -180,6 +185,11 @@ const migrationEntries = [
   [76, "ProjectionCardAttention", Migration0076],
   [77, "ProjectionAgentTemplates", Migration0077],
   [78, "ProjectionCardVerification", Migration0078],
+  [79, "ProjectionCardPlans", Migration0079],
+  [80, "ProjectionTriggerFires", Migration0080],
+  [81, "ProjectionSpendMonthly", Migration0081],
+  [82, "ProjectionProjectKnowledge", Migration0082],
+  [83, "ProjectionCardOutcomes", Migration0083],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

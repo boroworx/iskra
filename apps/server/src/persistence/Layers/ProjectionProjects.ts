@@ -160,11 +160,78 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
       Effect.mapError(toPersistenceSqlError("ProjectionProjectRepository.deleteById:query")),
     );
 
+  const addMonthlySpend: ProjectionProjectRepositoryShape["addMonthlySpend"] = (input) =>
+    sql`
+      INSERT INTO projection_spend_monthly (project_id, month, agent_id, role, cost_usd)
+      VALUES (${input.projectId}, ${input.month}, ${input.agentId}, ${input.role}, ${input.costUsd})
+      ON CONFLICT (project_id, month, agent_id, role)
+      DO UPDATE SET cost_usd = cost_usd + excluded.cost_usd
+    `.pipe(
+      Effect.asVoid,
+      Effect.mapError(toPersistenceSqlError("ProjectionProjectRepository.addMonthlySpend:query")),
+    );
+
+  const upsertLesson: ProjectionProjectRepositoryShape["upsertLesson"] = ({ projectId, lesson }) =>
+    sql`
+      INSERT INTO projection_project_knowledge (
+        lesson_id, project_id, kind, text, paths_json, state, source_card_id, created_at, decided_at
+      )
+      VALUES (
+        ${lesson.lessonId}, ${projectId}, ${lesson.kind}, ${lesson.text}, ${JSON.stringify(lesson.paths)},
+        ${lesson.state}, ${lesson.sourceCardId}, ${lesson.createdAt}, NULL
+      )
+      ON CONFLICT (lesson_id)
+      DO UPDATE SET
+        project_id = excluded.project_id,
+        kind = excluded.kind,
+        text = excluded.text,
+        paths_json = excluded.paths_json,
+        state = excluded.state,
+        source_card_id = excluded.source_card_id,
+        created_at = excluded.created_at,
+        decided_at = NULL
+    `.pipe(
+      Effect.asVoid,
+      Effect.mapError(toPersistenceSqlError("ProjectionProjectRepository.upsertLesson:query")),
+    );
+
+  const decideLesson: ProjectionProjectRepositoryShape["decideLesson"] = (input) =>
+    sql`
+      UPDATE projection_project_knowledge
+      SET state = ${input.state}, decided_at = ${input.decidedAt}
+      WHERE lesson_id = ${input.lessonId}
+    `.pipe(
+      Effect.asVoid,
+      Effect.mapError(toPersistenceSqlError("ProjectionProjectRepository.decideLesson:query")),
+    );
+
+  const recordTriggerFire: ProjectionProjectRepositoryShape["recordTriggerFire"] = ({
+    projectId,
+    fire,
+  }) =>
+    sql`
+      INSERT INTO projection_trigger_fires (
+        project_id, trigger_id, source_key, outcome, card_id, reason_json, fired_at
+      )
+      VALUES (
+        ${projectId}, ${fire.triggerId}, ${fire.sourceKey}, ${fire.outcome}, ${fire.cardId},
+        ${fire.reason === null ? null : JSON.stringify(fire.reason)}, ${fire.firedAt}
+      )
+      ON CONFLICT (trigger_id, source_key) DO NOTHING
+    `.pipe(
+      Effect.asVoid,
+      Effect.mapError(toPersistenceSqlError("ProjectionProjectRepository.recordTriggerFire:query")),
+    );
+
   return {
     upsert,
     getById,
     listAll,
     deleteById,
+    addMonthlySpend,
+    upsertLesson,
+    decideLesson,
+    recordTriggerFire,
   } satisfies ProjectionProjectRepositoryShape;
 });
 

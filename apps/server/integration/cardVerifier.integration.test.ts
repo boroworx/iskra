@@ -552,7 +552,7 @@ fetch("http://127.0.0.1:" + port + "/health").then(
         Effect.map((model) => (model.cards ?? []).find((candidate) => candidate.id === cardId)!),
       );
   const activities = (cardId: CardId) =>
-    snapshotQuery.getCardActivity(cardId, 500).pipe(Effect.map((stream) => stream.activities));
+    snapshotQuery.getCardActivity(cardId, { limit: 500 }).pipe(Effect.map((stream) => stream.activities));
   const activityWith = (
     cardId: CardId,
     matches: (activity: Effect.Success<ReturnType<typeof activities>>[number]) => boolean,
@@ -971,7 +971,7 @@ it.live(
         expect(journeyRuns).toHaveLength(3);
 
         // Nothing stored or streamed for the card carries a scenario's words, and verdicts keep ids only.
-        const stream = yield* world.snapshotQuery.getCardActivity(cardId, 500);
+        const stream = yield* world.snapshotQuery.getCardActivity(cardId, { limit: 500 });
         expectNoSecrets(stream);
         const latest = yield* (yield* ProjectionCardRepository).latestVerdict({ cardId });
         expect(Option.getOrThrow(latest).scenarios).toEqual([
@@ -1413,7 +1413,7 @@ it.live(
             (activity) => activity.reason?.code === "previewHostConnected",
           ),
         ).toHaveLength(2);
-        const recaptured = yield* world.snapshotQuery.getCardActivity(cardId, 500);
+        const recaptured = yield* world.snapshotQuery.getCardActivity(cardId, { limit: 500 });
         expect(recaptured.evidence?.evidenceId).toBe(evidence.payload.evidenceId);
         // Re-recording replaces the evidence's items instead of stacking another screenshot row.
         expect(

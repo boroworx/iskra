@@ -618,6 +618,60 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "project.spend-recorded": {
+          const { projectId, agentId, role, costUsd, recordedAt } = event.payload;
+          yield* projectionProjectRepository.addMonthlySpend({
+            projectId,
+            month: recordedAt.slice(0, 7),
+            agentId,
+            role,
+            costUsd,
+          });
+          return;
+        }
+
+        // A card session's turn counts toward its card's project too.
+        case "card.spend-recorded": {
+          const { cardId, agentId, role, costUsd, recordedAt } = event.payload;
+          const card = yield* projectionCardRepository.getById({ cardId });
+          if (Option.isNone(card)) {
+            return;
+          }
+          yield* projectionProjectRepository.addMonthlySpend({
+            projectId: card.value.projectId,
+            month: recordedAt.slice(0, 7),
+            agentId,
+            role: role ?? "owner",
+            costUsd,
+          });
+          return;
+        }
+
+        case "project.knowledge-proposed":
+          yield* projectionProjectRepository.upsertLesson(event.payload);
+          return;
+
+        case "project.knowledge-added":
+        case "project.knowledge-dismissed":
+        case "project.knowledge-removed":
+          yield* projectionProjectRepository.decideLesson({
+            lessonId: event.payload.lessonId,
+            state:
+              event.type === "project.knowledge-added"
+                ? "approved"
+                : event.type === "project.knowledge-dismissed"
+                  ? "dismissed"
+                  : "removed",
+            decidedAt: event.payload.decidedAt,
+          });
+          return;
+
+        case "project.trigger-fired": {
+          const { projectId, ...fire } = event.payload;
+          yield* projectionProjectRepository.recordTriggerFire({ projectId, fire });
+          return;
+        }
+
         default:
           return;
       }

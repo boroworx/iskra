@@ -251,13 +251,17 @@ export interface ProjectionSnapshotQueryShape {
     projectId: ProjectId,
   ) => Effect.Effect<ReadonlyArray<OrchestrationArchivedChannel>, ProjectionRepositoryError>;
 
-  /** A card's newest `limit` activities, oldest first, the items of its latest evidence and its latest verdict. */
+  /**
+   * A card's newest `limit` activities (or the `limit` before activity `before`), oldest first,
+   * whether older ones exist, the items of its latest evidence and its latest verdict.
+   */
   readonly getCardActivity: (
     cardId: CardId,
-    limit: number,
+    page: { readonly limit: number; readonly before?: string | undefined },
   ) => Effect.Effect<
     {
       readonly activities: ReadonlyArray<CardActivity>;
+      readonly hasMore: boolean;
       readonly evidence: {
         readonly evidenceId: string;
         readonly items: ReadonlyArray<CardEvidenceItem>;

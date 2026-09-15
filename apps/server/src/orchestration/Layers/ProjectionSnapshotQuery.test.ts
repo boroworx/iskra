@@ -82,7 +82,8 @@ it.effect("reads project shells without loading threads or resolving excluded pr
     const counter = makeSqlStatementCounter();
     const projects = yield* query.getProjectShells().pipe(Effect.withTracer(counter.tracer));
     assert.deepStrictEqual(projects, expected);
-    assert.strictEqual(counter.count(), 1);
+    // The project rows, then their spend, lessons and recent trigger fires; never the threads.
+    assert.strictEqual(counter.count(), 4);
     assert.deepStrictEqual(resolved.toSorted(), ["/first", "/second"]);
     resolved.length = 0;
     yield* sql`UPDATE projection_projects SET scripts_json = 'invalid-json' WHERE project_id IN ('p1', 'p3')`;

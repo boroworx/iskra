@@ -7,6 +7,10 @@
  * @module ProjectionProjectRepository
  */
 import {
+  type AgentId,
+  type ProjectLesson,
+  type ProjectTriggerFire,
+  type RunRole,
   IsoDateTime,
   ModelSelection,
   ProjectIconOverride,
@@ -84,6 +88,34 @@ export interface ProjectionProjectRepositoryShape {
   readonly deleteById: (
     input: DeleteProjectionProjectInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /** Add one priced turn to its project's month, by agent and run role. */
+  readonly addMonthlySpend: (input: {
+    readonly projectId: ProjectId;
+    readonly month: string;
+    readonly agentId: AgentId;
+    readonly role: RunRole;
+    readonly costUsd: number;
+  }) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /** Insert or replace a proposed lesson. */
+  readonly upsertLesson: (input: {
+    readonly projectId: ProjectId;
+    readonly lesson: ProjectLesson;
+  }) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /** Record a person's decision on a lesson; a removed one stays in the table, out of every read. */
+  readonly decideLesson: (input: {
+    readonly lessonId: string;
+    readonly state: "approved" | "dismissed" | "removed";
+    readonly decidedAt: string;
+  }) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /** Record a trigger's fire; the same trigger and source again is a no-op. */
+  readonly recordTriggerFire: (input: {
+    readonly projectId: ProjectId;
+    readonly fire: ProjectTriggerFire;
+  }) => Effect.Effect<void, ProjectionRepositoryError>;
 }
 
 /**

@@ -4704,6 +4704,21 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
         CardId.make("card-2"),
         CardId.make("card-3"),
       ];
+      const [planCard, planChildCard, migrationCard] = [
+        CardId.make("card-plan"),
+        CardId.make("card-plan-c1"),
+        CardId.make("card-migration"),
+      ];
+      const planCriteria = [{ id: "c1", text: "GET /health answers ok.", verification: "automated" as const }];
+      const planChild = (key: string, slice: number) => ({
+        key,
+        title: `Route ${key}`,
+        spec: "",
+        criteria: planCriteria,
+        suggestedAgent: "api",
+        dependsOn: [],
+        slice,
+      });
       const [message, cardMessage] = [
         MessageId.make("message-1"),
         MessageId.make("card-message-1"),
@@ -5529,6 +5544,177 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
             recordedAt: at(66),
           },
         ],
+        // M3: a coordinator's plan is proposed and approved with one child and its next slice
+        // released; a migration lists and samples its items; a trigger fires; a lead's spend, a
+        // lesson, an outcome, a revert and a restore are recorded.
+        [
+          "card.created",
+          planCard,
+          {
+            ...cardDefaults,
+            cardId: planCard,
+            channelId: null,
+            baseBranch: null,
+            title: "Health and version",
+            kind: "plan",
+            createdAt: at(66),
+            updatedAt: at(66),
+          },
+        ],
+        [
+          "card.plan-proposed",
+          planCard,
+          {
+            cardId: planCard,
+            revision: 1,
+            premise: "Two routes.",
+            children: [planChild("c1", 1), planChild("c2", 2)],
+            proposedAt: at(66),
+          },
+        ],
+        [
+          "card.created",
+          planChildCard,
+          {
+            ...cardDefaults,
+            cardId: planChildCard,
+            channelId: null,
+            parentCardId: planCard,
+            title: "Route c1",
+            status: "ready",
+            specState: "approved",
+            baseBranch: "iskra/plan-health",
+            acceptance: { criteria: planCriteria, state: "confirmed" },
+            origin: { kind: "plan", id: planCard },
+            planKey: "c1",
+            slice: 1,
+            heldByCheckpoint: false,
+            createdAt: at(66),
+            updatedAt: at(66),
+          },
+        ],
+        [
+          "card.plan-approved",
+          planCard,
+          { cardId: planCard, revision: 1, integrationBranch: "iskra/plan-health", approvedAt: at(66) },
+        ],
+        [
+          "card.plan-slice-released",
+          planCard,
+          { cardId: planCard, slice: 2, releasedCardIds: [planChildCard], releasedAt: at(66) },
+        ],
+        [
+          "card.created",
+          migrationCard,
+          {
+            ...cardDefaults,
+            cardId: migrationCard,
+            channelId: null,
+            baseBranch: null,
+            title: "Logger",
+            kind: "migration",
+            migration: {
+              enumerateCommand: "node list-files.js",
+              instructions: "Use the logger.",
+              phase: "enumerating",
+              items: [],
+              sampleSize: 3,
+            },
+            createdAt: at(66),
+            updatedAt: at(66),
+          },
+        ],
+        [
+          "card.migration-enumerated",
+          migrationCard,
+          { cardId: migrationCard, items: ["a.ts", "b.ts"], enumeratedAt: at(66) },
+        ],
+        [
+          "card.migration-phase-changed",
+          migrationCard,
+          {
+            cardId: migrationCard,
+            phase: "sampling",
+            started: [{ key: "a.ts", cardId: card3 }],
+            changedAt: at(66),
+          },
+        ],
+        [
+          "card.migration-items-updated",
+          migrationCard,
+          { cardId: migrationCard, items: [{ key: "a.ts", state: "landed" }], updatedAt: at(66) },
+        ],
+        [
+          "card.migration-instructions-set",
+          migrationCard,
+          { cardId: migrationCard, instructions: "Use the logger everywhere.", setAt: at(66) },
+        ],
+        [
+          "project.trigger-fired",
+          projectId,
+          {
+            projectId,
+            triggerId: "nightly",
+            sourceKey: "2026-03-01T01:06",
+            outcome: "refused",
+            cardId: null,
+            reason: { code: "triggerRefused", text: "Trigger 'nightly' is off or no longer exists." },
+            firedAt: at(66),
+          },
+        ],
+        [
+          "project.spend-recorded",
+          projectId,
+          {
+            projectId,
+            agentId: api,
+            threadId: conversation,
+            turnId: TurnId.make("turn-lead-1"),
+            role: "lead",
+            costUsd: 0.25,
+            costSource: "unpriced",
+            recordedAt: at(66),
+          },
+        ],
+        [
+          "project.knowledge-proposed",
+          projectId,
+          {
+            projectId,
+            lesson: {
+              lessonId: "lesson-1",
+              kind: "quirk",
+              text: "Run the migrations before the tests.",
+              paths: ["src/api/**"],
+              state: "proposed",
+              sourceCardId: card1,
+              createdAt: at(66),
+            },
+          },
+        ],
+        ["project.knowledge-added", projectId, { projectId, lessonId: "lesson-1", decidedAt: at(66) }],
+        [
+          "card.outcome-recorded",
+          card2,
+          {
+            cardId: card2,
+            outcome: {
+              state: "blocked",
+              decidedAt: at(66),
+              signals: [{ code: "fixRoundsExhausted", text: "Out of fix rounds." }],
+            },
+          },
+        ],
+        [
+          "card.revert-requested",
+          card2,
+          { cardId: card2, revertCardId: card3, landedSha: "abc1234def", requestedAt: at(66) },
+        ],
+        [
+          "card.checkpoint-restore-requested",
+          card1,
+          { cardId: card1, turnCount: 1, requestedAt: at(66) },
+        ],
         [
           "channel.message-posted",
           general,
@@ -5609,7 +5795,8 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
         agentById: yield* snapshotQuery.getAgentById(api),
         agentShellById: yield* snapshotQuery.getAgentShellById(web),
         cardShellById: yield* snapshotQuery.getCardShellById(card1),
-        cardActivity: yield* snapshotQuery.getCardActivity(card1, 3),
+        projectShellById: yield* snapshotQuery.getProjectShellById(projectId),
+        cardActivity: yield* snapshotQuery.getCardActivity(card1, { limit: 3 }),
         channelShellById: yield* snapshotQuery.getChannelShellById(general),
         channelMessages: yield* snapshotQuery.listChannelMessages(general, 10),
         runsByAgent: yield* snapshotQuery.listRunsByAgent(api, 10),
@@ -5694,6 +5881,55 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
       expect(items.map((item) => [item.itemId, item.unavailable, item.artifactPath])).toEqual([
         ["limits-page", null, "/tmp/evidence/limits-page.png"],
       ]);
+    }),
+  );
+
+  it.effect("pages a card's activity older than an activity, saying whether more remain", () =>
+    Effect.gen(function* () {
+      const eventStore = yield* OrchestrationEventStore;
+      const pipeline = yield* OrchestrationProjectionPipeline;
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const cardId = CardId.make("card-paging");
+      for (const index of [1, 2, 3, 4, 5]) {
+        const createdAt = `2026-03-03T00:0${index}:00.000Z`;
+        const event = yield* eventStore.append({
+          type: "card.activity-recorded",
+          eventId: EventId.make(`evt-paging-${index}`),
+          aggregateKind: "card",
+          aggregateId: cardId,
+          occurredAt: createdAt,
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          payload: {
+            activityId: `paging-${index}`,
+            cardId,
+            kind: "message",
+            author: { kind: "human", id: "human" },
+            body: `Message ${index}`,
+            runThreadId: null,
+            deliverTo: null,
+            delivery: null,
+            elicitation: null,
+            answers: null,
+            status: null,
+            evidenceId: null,
+            reason: null,
+            createdAt,
+          },
+        });
+        yield* pipeline.projectEvent(event);
+      }
+      const page = (before?: string) =>
+        snapshotQuery
+          .getCardActivity(cardId, { limit: 2, before })
+          .pipe(Effect.map(({ activities, hasMore }) => [activities.map((activity) => activity.activityId), hasMore]));
+
+      expect(yield* page()).toEqual([["paging-4", "paging-5"], true]);
+      expect(yield* page("paging-4")).toEqual([["paging-2", "paging-3"], true]);
+      expect(yield* page("paging-2")).toEqual([["paging-1"], false]);
+      expect(yield* page("paging-unknown")).toEqual([[], false]);
     }),
   );
 });
