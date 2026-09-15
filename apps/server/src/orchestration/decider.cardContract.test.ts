@@ -639,7 +639,17 @@ it.layer(NodeServices.layer)("decider card contract", (it) => {
 
       const running = yield* applyTo(reviewed, [select("abc123")]);
       expect(cardIn(running)?.verification).toMatchObject({ state: "running", headSha: "abc123" });
-      expect(yield* refusal(running, rerun)).toBe(VERIFIER_RUNNING_REASON);
+      // A verifier that never started, or died without a verdict, doesn't hold the card.
+      expect((yield* decide(running, rerun)).map((event) => event.type)).toEqual([
+        "card.verifier-rerun-requested",
+      ]);
+      expect((yield* decide(running, select("abc123"))).map((event) => event.type)).toEqual([
+        "card.verifier-selected",
+      ]);
+      const verifierLive = yield* applyTo(running, [
+        recordSession("session-verifier", reviewer, "verifier", ["read"]),
+      ]);
+      expect(yield* refusal(verifierLive, rerun)).toBe(VERIFIER_RUNNING_REASON);
       expect(yield* refusal(running, override("Checked by hand."))).toBe(OVERRIDE_STATE_REASON);
       expect(yield* refusal(running, verdict("old123", true))).toBe(VERDICT_STALE_REASON);
       expect(yield* refusal(running, verdict("abc123", true, []))).toBe(VERDICT_INCOMPLETE_REASON);

@@ -231,16 +231,15 @@ describe("verifier refusals", () => {
     expect(verifierMergeRefusal(reviewed("off"), false)).toBeNull();
   });
 
-  it("overrides only a failed or pending verification, and reruns only an idle one in review", () => {
+  it("overrides only a failed or pending verification, and reruns any verification in review", () => {
     expect(overrideVerifierRefusal(reviewed("failed"), true)).toBeNull();
     expect(overrideVerifierRefusal(reviewed("off"), true)).toBeNull();
     expect(overrideVerifierRefusal(reviewed("passed"), true)).toBe(
       "Only a failed or pending verification can be overridden.",
     );
     expect(rerunVerifierRefusal(reviewed("failed"))).toBeNull();
-    expect(rerunVerifierRefusal(reviewed("running"))).toBe(
-      "The verifier is already checking this commit.",
-    );
+    // A verifier that died leaves the card "running"; the server refuses only a live one.
+    expect(rerunVerifierRefusal(reviewed("running"))).toBeNull();
     expect(rerunVerifierRefusal({ ...reviewed("failed"), status: "inProgress" })).toBe(
       "Only a card in review is verified.",
     );

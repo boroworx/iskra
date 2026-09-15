@@ -429,7 +429,6 @@ export const REASON_LABEL: Readonly<Record<string, ReasonLabel>> = {
 export const VERIFIER_NOT_PASSED_TEXT = "The verifier hasn't passed every criterion yet.";
 export const OVERRIDE_REASON_REQUIRED_TEXT = "Say why you're overriding the verifier.";
 const OVERRIDE_STATE_TEXT = "Only a failed or pending verification can be overridden.";
-const VERIFIER_RUNNING_TEXT = "The verifier is already checking this commit.";
 const VERIFY_IN_REVIEW_TEXT = "Only a card in review is verified.";
 
 type VerificationFacts = Pick<OrchestrationCard, "status" | "verification" | "evidence">;
@@ -469,10 +468,12 @@ export function overrideVerifierRefusal(card: VerificationFacts, required: boole
   return state === "failed" || state === "pending" ? null : OVERRIDE_STATE_TEXT;
 }
 
-/** Why the verifier can't be rerun now, or null. */
+/**
+ * Why the verifier can't be rerun now, or null. A "running" verification can be rerun: only the
+ * server sees whether its verifier run is still live, and refuses when it is.
+ */
 export function rerunVerifierRefusal(card: VerificationFacts): string | null {
-  if (card.status !== "inReview") return VERIFY_IN_REVIEW_TEXT;
-  return card.verification.state === "running" ? VERIFIER_RUNNING_TEXT : null;
+  return card.status === "inReview" ? null : VERIFY_IN_REVIEW_TEXT;
 }
 
 /**

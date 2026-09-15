@@ -143,9 +143,8 @@ function channelLeadProblem(input: {
     : null;
 }
 
-/** Where a wake's message goes, as its request records it: into a live run, or a DM's queue. */
+/** Where a wake's message goes, as its request records it: into a live run, or a new one. */
 const wakeTarget = (decision: Exclude<WakeDecision, { readonly kind: "refuse" }>) => {
-  if (decision.kind === "queue") return { queued: true };
   return decision.liveRunThreadId === undefined
     ? {}
     : { liveRunThreadId: decision.liveRunThreadId };
@@ -3497,9 +3496,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       if (card.evidence?.headSha !== command.headSha) {
         return yield* refuse(command, VERIFY_LATEST_COMMIT_REASON);
       }
-      if (card.verification.state === "running" && card.verification.headSha === command.headSha) {
-        return yield* refuse(command, VERIFIER_RUNNING_REASON);
-      }
       // The builder's own template verifies only as a fallback; any other agent must be a verifier.
       const verifierAgentId = command.verifier.agentId;
       yield* requireCardAgentAs({
@@ -3578,7 +3574,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       if (card.status !== "inReview") {
         return yield* refuse(command, VERIFY_IN_REVIEW_REASON);
       }
-      if (card.verification.state === "running") {
+      // Only a live verifier run blocks: one that died without a verdict leaves the card "running".
+      if (
+        (readModel.liveRuns ?? []).some((run) => run.role === "verifier" && run.cardId === card.id)
+      ) {
         return yield* refuse(command, VERIFIER_RUNNING_REASON);
       }
       const occurredAt = yield* nowIso;
@@ -3668,8 +3667,19 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         if (beyond.length > 0) {
           return yield* refuse(command, `@${agent.name} is not allowed ${beyond.join(", ")}.`);
         }
-      } else if (command.capabilities.some((capability) => capability !== "read")) {
-        // Invariant 11: helpers and critics are read-only.
+      } else if (
+        command.capabilities.some(
+          (capability) =>
+            capability !== "read" &&
+            !(
+              command.role === "verifier" &&
+              capability === "shell" &&
+              agent.capabilities.includes("shell")
+            ),
+        )
+      ) {
+        // Invariant 11: helpers, critics and verifiers are read-only; a verifier may run shell
+        // commands for its checks when its agent may.
         return yield* refuse(command, `A ${command.role} session is read-only.`);
       }
       yield* refuseAtSessionCap(readModel, command, card.projectId);

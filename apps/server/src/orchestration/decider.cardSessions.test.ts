@@ -29,6 +29,7 @@ import {
   postMessage,
   projectId,
   recordSession,
+  reviewer,
   setSession,
   setWorkspace,
   startChannelRun,
@@ -71,6 +72,41 @@ it.layer(NodeServices.layer)("decider card sessions", (it) => {
         ]),
       );
       expect(fresh.message).toContain("one session writes at a time");
+    }),
+  );
+
+  it.effect("lets a verifier session run shell when its agent may, and never write", () =>
+    Effect.gen(function* () {
+      const verifier = (
+        capabilities: NonNullable<NonNullable<Parameters<typeof createAgent>[1]>["capabilities"]>,
+      ) =>
+        createAgent(reviewer, { roles: ["verifier"], capabilities });
+      const withShell = yield* applyCommands([
+        ...setup,
+        verifier(["read", "shell"]),
+        recordSession("session-verifier", reviewer, "verifier", ["read", "shell"]),
+      ]);
+      expect(withShell.liveRuns).toEqual([
+        expect.objectContaining({ threadId: "session-verifier", role: "verifier", cardId }),
+      ]);
+
+      const noShell = yield* Effect.flip(
+        applyCommands([
+          ...setup,
+          verifier(["read"]),
+          recordSession("session-verifier", reviewer, "verifier", ["read", "shell"]),
+        ]),
+      );
+      expect(noShell.message).toContain("A verifier session is read-only.");
+
+      const writing = yield* Effect.flip(
+        applyCommands([
+          ...setup,
+          verifier(["read", "write", "shell"]),
+          recordSession("session-verifier", reviewer, "verifier", ["read", "write", "shell"]),
+        ]),
+      );
+      expect(writing.message).toContain("A verifier session is read-only.");
     }),
   );
 

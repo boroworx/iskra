@@ -10,9 +10,6 @@ import {
 
 export type WakeDecision =
   | { readonly kind: "wake"; readonly liveRunThreadId?: ThreadId }
-  // Never decided any more: every wake is its own run. Kept only while decider.ts's `wakeTarget`
-  // still names it; the integration patch removes both.
-  | { readonly kind: "queue" }
   | { readonly kind: "refuse"; readonly reason: string };
 
 /**
