@@ -1043,6 +1043,19 @@ const makeWsRpcLayer = (
           ),
         );
 
+      // A card turn's spend adds to its project's month, which the project shell shows.
+      const cardProjectUpsert = (
+        cardId: CardId,
+        sequence: number,
+      ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> =>
+        retryShellProjectionRead("card", cardId, projectionSnapshotQuery.getCardShellById(cardId)).pipe(
+          Effect.flatMap((card) =>
+            Option.isSome(card) && Option.isSome(card.value)
+              ? projectUpsertOrRemove(card.value.value.projectId, sequence)
+              : Effect.succeed(Option.none<OrchestrationShellStreamEvent>()),
+          ),
+        );
+
       // A run thread never reaches the thread list; its activity changes its agent's presence.
       const threadOrRunPresence = (
         threadId: ThreadId,
@@ -1147,8 +1160,19 @@ const makeWsRpcLayer = (
             (event) => delegateAgentUpsert(CardId.make(event.aggregateId), event.sequence),
             { concurrency: SHELL_REFETCH_CONCURRENCY },
           );
+          // From every spend in the window, not only survivors: a later event on the card replaces it there.
+          const spentCards = new Map(
+            events
+              .filter((event) => event.type === "card.spend-recorded")
+              .map((event) => [event.aggregateId, event] as const),
+          );
+          const projectFollowUps = yield* Effect.forEach(
+            spentCards.values(),
+            (event) => cardProjectUpsert(CardId.make(event.aggregateId), event.sequence),
+            { concurrency: SHELL_REFETCH_CONCURRENCY },
+          );
           // A stable sort keeps a card's update after the agent update sharing its sequence.
-          return [...agentFollowUps, ...shellEvents, ...cardFollowUps]
+          return [...agentFollowUps, ...projectFollowUps, ...shellEvents, ...cardFollowUps]
             .flatMap((option) => (Option.isSome(option) ? [option.value] : []))
             .toSorted((left, right) => left.sequence - right.sequence);
         });

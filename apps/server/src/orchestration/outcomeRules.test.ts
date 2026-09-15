@@ -3,7 +3,8 @@ import { describe, expect, it } from "vite-plus/test";
 import { firstCommitSha, outcomeOf, type LandedSignals } from "./outcomeRules.ts";
 
 const landedAt = "2026-01-01T00:00:00.000Z";
-const day = (n: number) => new Date(Date.parse(landedAt) + n * 24 * 60 * 60 * 1000).toISOString();
+// Days after landing, within January.
+const day = (n: number) => `2026-01-${String(1 + n).padStart(2, "0")}T00:00:00.000Z`;
 
 const quiet: LandedSignals = {
   landedAt,
