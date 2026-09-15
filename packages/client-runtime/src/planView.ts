@@ -141,3 +141,15 @@ export const PLAN_CHILD_STATE_LABEL: Record<PlanChildState, string> = {
   landed: "Landed",
   abandoned: "Abandoned",
 };
+
+/**
+ * What a plan card says while its plan is a draft: until the card is approved, what it needs first;
+ * approved but not started, when drafting begins; once it works, that its coordinator is drafting.
+ */
+export function planDraftLine(status: OrchestrationCard["status"]): string {
+  return status === "triage"
+    ? "Confirm its criteria and approve it with an agent that can coordinate; its coordinator then drafts a plan."
+    : status === "ready"
+      ? "Its coordinator drafts a plan once the card starts."
+      : "Its coordinator is drafting a plan.";
+}

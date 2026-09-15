@@ -10,7 +10,7 @@ import {
   type CardActivityFilter,
 } from "@iskra/client-runtime/cards";
 import type { CardDecisionInput } from "@iskra/client-runtime/operations";
-import { PLAN_CHILD_STATE_LABEL, planSlices } from "@iskra/client-runtime/plan-view";
+import { PLAN_CHILD_STATE_LABEL, planDraftLine, planSlices } from "@iskra/client-runtime/plan-view";
 import { EMPTY_CARD_ACTIVITY, applyCardStreamItem } from "@iskra/client-runtime/state/card-activity";
 import { UNDOABLE_LABEL, undoCommandOf, type UndoCommand } from "@iskra/client-runtime/undo";
 import {
@@ -484,7 +484,7 @@ function PlanSection(props: {
         <Row first>
           <Body>
             {plan.state === "drafting"
-              ? "The coordinator is drafting the plan."
+              ? planDraftLine(card.status)
               : plan.state === "proposed"
                 ? "Proposed: approve it to create its children, ready to start."
                 : `Approved · slice ${plan.currentSlice}`}

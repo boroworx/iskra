@@ -1,6 +1,7 @@
 import type { PillTone } from "@iskra/client-runtime/card-face";
 import {
   PLAN_CHILD_STATE_LABEL,
+  planDraftLine,
   planSlices,
   type PlanChildState,
 } from "@iskra/client-runtime/plan-view";
@@ -85,7 +86,7 @@ export function PlanReview(props: {
     <div className="flex flex-col gap-3">
       <p className="text-xs text-muted-foreground">
         {plan.state === "drafting"
-          ? "Its coordinator is drafting a plan."
+          ? planDraftLine(card.status)
           : plan.state === "proposed"
             ? `Revision ${plan.revision}, waiting for your approval.`
             : `Revision ${plan.revision} approved · ${landed} of ${children.length} landed`}

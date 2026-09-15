@@ -1,7 +1,7 @@
 import { AgentId, CardId, type CardPlanChild, type OrchestrationCard } from "@iskra/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { migrationCounts, planSlices } from "./planView.ts";
+import { migrationCounts, planDraftLine, planSlices } from "./planView.ts";
 
 const planId = CardId.make("plan");
 const child = (key: string, slice: number, dependsOn: string[] = []): CardPlanChild => ({
@@ -82,5 +82,13 @@ describe("migrationCounts", () => {
         ],
       }),
     ).toEqual({ pending: 1, running: 0, landed: 2, blocked: 1 });
+  });
+});
+
+describe("planDraftLine", () => {
+  it("says drafting only once the plan card works, and what's needed before that", () => {
+    expect(planDraftLine("triage")).toMatch(/^Confirm its criteria and approve it/);
+    expect(planDraftLine("ready")).toBe("Its coordinator drafts a plan once the card starts.");
+    expect(planDraftLine("inProgress")).toBe("Its coordinator is drafting a plan.");
   });
 });
