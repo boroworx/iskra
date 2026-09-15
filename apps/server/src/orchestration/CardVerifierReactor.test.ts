@@ -302,6 +302,107 @@ it.effect(
     ),
 );
 
+it.effect(
+  "releases a paused card's verifier, starts a new one when it resumes, and treats an interrupted one as no verdict",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const events = yield* Queue.unbounded<OrchestrationEvent>();
+        const commands: Array<OrchestrationCommand> = [];
+        let released = 0;
+        let current = card;
+        const doubles = Layer.mergeAll(
+          Layer.mock(OrchestrationEngineService)({
+            dispatch: (command) =>
+              Effect.sync(() => {
+                commands.push(command);
+                return { sequence: commands.length };
+              }),
+            subscribeDomainEvents: Effect.succeed(Stream.fromQueue(events)),
+          }),
+          Layer.mock(ProjectionSnapshotQuery)({
+            getCommandReadModel: () =>
+              Effect.sync(() => ({ ...readModel, cards: [current] }) as unknown as OrchestrationReadModel),
+          }),
+          Layer.mock(CardWorkspace.CardWorkspace)({
+            snapshot: () =>
+              Effect.succeed({
+                path: "/tmp/card-health-verify",
+                portBase: 43_000,
+                ports: {},
+                ensureServices: Effect.void,
+                release: Effect.sync(() => {
+                  released += 1;
+                }),
+              }),
+            diff: () => Effect.succeed({ baseBranch: "main", diff: "" }),
+          }),
+          Layer.mock(HostAdmission)({ run: (_job, effect) => effect }),
+          Layer.mock(ProcessRunner)({}),
+          Layer.mock(ProviderRegistry)({
+            getProviders: Effect.succeed([provider("claudeAgent", ["claude-a", "claude-b"], "ready")]),
+          }),
+          Layer.mock(HoldoutStore)({ list: () => Effect.succeed([]) }),
+        );
+        const layer = CardVerifierReactor.layer.pipe(
+          Layer.provide(doubles),
+          Layer.provide(SqlitePersistenceMemory),
+          Layer.provide(NodeServices.layer),
+        );
+        const sessions = () =>
+          commands.flatMap((command) => (command.type === "card.session.record" ? [command.threadId] : []));
+        const until = (done: () => boolean) => Effect.sync(done).pipe(Effect.repeat({ until: (ok) => ok }));
+        const cardEvent = (type: "card.paused" | "card.resumed") =>
+          ({ type, eventId: `evt-${type}`, payload: { cardId } }) as unknown as OrchestrationEvent;
+        const sessionSet = (threadId: string, status: "stopped" | "interrupted") =>
+          ({
+            type: "thread.session-set",
+            eventId: `evt-${status}-${threadId}`,
+            payload: { threadId, session: { threadId, status, activeTurnId: null, updatedAt: now } },
+          }) as unknown as OrchestrationEvent;
+        const verifierErrors = () =>
+          commands.filter(
+            (command) => command.type === "card.activity.record" && command.reason?.code === "verifierError",
+          );
+
+        yield* Effect.gen(function* () {
+          const reactor = yield* CardVerifierReactor.CardVerifierReactor;
+          yield* reactor.start();
+          yield* reactor.drain;
+          expect(sessions()).toHaveLength(1);
+
+          // The watchdog pauses the card mid-verification: its verifier goes, and nothing restarts.
+          current = {
+            ...card,
+            verification: { ...card.verification, state: "running" },
+            paused: { reason: { code: "memoryPressure", text: "Short on memory." }, by: "system", pausedAt: now },
+          } as unknown as OrchestrationCard;
+          yield* Queue.offer(events, cardEvent("card.paused"));
+          yield* until(() => released === 1);
+          yield* Queue.offer(events, sessionSet(sessions()[0]!, "stopped"));
+          yield* reactor.drain;
+          expect(commands.filter((command) => command.type === "thread.session.stop")).toHaveLength(1);
+          expect(sessions()).toHaveLength(1);
+
+          // Resumed with the verification still "running" and no session: a new verifier starts.
+          current = { ...current, paused: null } as unknown as OrchestrationCard;
+          yield* Queue.offer(events, cardEvent("card.resumed"));
+          yield* until(() => sessions().length === 2);
+          yield* reactor.drain;
+
+          // Its session is interrupted without a verdict: one automatic rerun, then a person is asked.
+          yield* Queue.offer(events, sessionSet(sessions()[1]!, "interrupted"));
+          yield* until(() => sessions().length === 3);
+          yield* reactor.drain;
+          expect(verifierErrors()).toHaveLength(0);
+          yield* Queue.offer(events, sessionSet(sessions()[2]!, "interrupted"));
+          yield* until(() => verifierErrors().length === 1);
+          expect(sessions()).toHaveLength(3);
+        }).pipe(Effect.provide(layer));
+      }),
+    ),
+);
+
 // A real verifier paraphrased a hidden scenario in a diff concern; redaction can't catch that.
 it("keeps the verifier's diff concerns out of the builder's feedback", () => {
   const { headline, body } = CardVerifierReactor.verifierFeedback({

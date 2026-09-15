@@ -258,7 +258,7 @@ export const createThread = (threadId: string): OrchestrationCommand => ({
 /** Sets a thread's provider session; a turn id means it is mid-turn. */
 export const setSession = (
   threadId: string,
-  status: "ready" | "running" | "stopped",
+  status: "ready" | "running" | "interrupted" | "stopped",
   turnId: string | null = null,
 ): OrchestrationCommand => ({
   type: "thread.session.set",

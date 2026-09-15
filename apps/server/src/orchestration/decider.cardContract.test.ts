@@ -74,6 +74,8 @@ import {
   projectId,
   recordSession,
   reviewer,
+  createThread,
+  setSession,
   setWorkspace,
 } from "./decider.testkit.ts";
 
@@ -680,6 +682,22 @@ it.layer(NodeServices.layer)("decider card contract", (it) => {
         recordSession("session-verifier", reviewer, "verifier", ["read"]),
       ]);
       expect(yield* refusal(verifierLive, rerun)).toBe(VERIFIER_RUNNING_REASON);
+      const verifierAtWork = yield* applyTo(verifierLive, [
+        createThread("session-verifier"),
+        setSession("session-verifier", "running", "turn-verify"),
+      ]);
+      expect(yield* refusal(verifierAtWork, rerun)).toBe(VERIFIER_RUNNING_REASON);
+      // Interrupted (a pause, memory pressure) without a verdict: its run row is still open, but a
+      // person can rerun it.
+      const verifierInterrupted = yield* applyTo(verifierAtWork, [
+        setSession("session-verifier", "interrupted"),
+      ]);
+      expect(verifierInterrupted.liveRuns).toEqual([
+        expect.objectContaining({ threadId: "session-verifier", role: "verifier" }),
+      ]);
+      expect((yield* decide(verifierInterrupted, rerun)).map((event) => event.type)).toEqual([
+        "card.verifier-rerun-requested",
+      ]);
       expect(yield* refusal(running, override("Checked by hand."))).toBe(OVERRIDE_STATE_REASON);
       expect(yield* refusal(running, verdict("old123", true))).toBe(VERDICT_STALE_REASON);
       expect(yield* refusal(running, verdict("abc123", true, []))).toBe(VERDICT_INCOMPLETE_REASON);

@@ -3647,9 +3647,20 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       if (card.status !== "inReview") {
         return yield* refuse(command, VERIFY_IN_REVIEW_REASON);
       }
-      // Only a live verifier run blocks: one that died without a verdict leaves the card "running".
+      // Only a verifier at work blocks: one just recorded, starting or running. One that settled,
+      // was interrupted or died without a verdict leaves the card "running" and blocks nothing.
       if (
-        (readModel.liveRuns ?? []).some((run) => run.role === "verifier" && run.cardId === card.id)
+        (readModel.liveRuns ?? []).some((run) => {
+          if (run.role !== "verifier" || run.cardId !== card.id) return false;
+          const status = readModel.threads.find((thread) => thread.id === run.threadId)?.session
+            ?.status;
+          return (
+            status === undefined ||
+            status === "idle" ||
+            status === "starting" ||
+            status === "running"
+          );
+        })
       ) {
         return yield* refuse(command, VERIFIER_RUNNING_REASON);
       }

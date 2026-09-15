@@ -62,6 +62,7 @@ type VerifierRequest =
   | { readonly kind: "verdict"; readonly verdict: CardVerdict }
   | { readonly kind: "session"; readonly threadId: ThreadId }
   | { readonly kind: "release"; readonly cardId: CardId }
+  | { readonly kind: "resume"; readonly cardId: CardId; readonly trigger: string }
   | { readonly kind: "recover" };
 
 /** A verifier at work on a card: its session and the snapshot it reads. */
@@ -349,10 +350,16 @@ const make = Effect.gen(function* () {
     );
   });
 
+  /**
+   * Starts a verifier for the card's latest commit unless one already ran there. `resume` also
+   * restarts one left `running` by a pause, since a paused card's verifier session is released.
+   */
   const verify = Effect.fn("CardVerifierReactor.verify")(function* (
     cardId: CardId,
     trigger: string,
+    resume = false,
   ) {
+    if (resume && verifying.has(cardId)) return;
     const model = yield* readModel();
     const card = model.cards?.find((candidate) => candidate.id === cardId);
     const project = model.projects.find((candidate) => candidate.id === card?.projectId);
@@ -375,7 +382,8 @@ const make = Effect.gen(function* () {
     if (
       verification.headSha === headSha &&
       verification.state !== "pending" &&
-      verification.state !== "off"
+      verification.state !== "off" &&
+      !(resume && verification.state === "running")
     ) {
       return;
     }
@@ -434,7 +442,10 @@ const make = Effect.gen(function* () {
       );
   });
 
-  /** A verifier's turn ended or its session did, without the verdict that would have released it. */
+  /**
+   * A verifier's turn ended, or its session stopped, failed or was interrupted, without the verdict
+   * that would have released it. On a paused card it only goes: resuming starts a new one.
+   */
   const onSession = Effect.fn("CardVerifierReactor.onSession")(function* (threadId: ThreadId) {
     const entry = [...verifying.entries()].find(([, current]) => current.threadId === threadId);
     if (entry === undefined) return;
@@ -444,6 +455,7 @@ const make = Effect.gen(function* () {
     const card = model.cards?.find((candidate) => candidate.id === cardId);
     if (
       card === undefined ||
+      card.paused !== null ||
       card.status !== "inReview" ||
       card.evidence?.headSha !== current.headSha
     ) {
@@ -496,6 +508,8 @@ const make = Effect.gen(function* () {
         return onSession(request.threadId);
       case "release":
         return release(request.cardId);
+      case "resume":
+        return verify(request.cardId, request.trigger, true);
       case "recover":
         return recover();
     }
@@ -531,10 +545,19 @@ const make = Effect.gen(function* () {
         });
       case "card.verdict-recorded":
         return worker.enqueue({ kind: "verdict", verdict: event.payload.verdict });
+      // A paused card holds no verifier; its session goes, and resuming starts a new one.
+      case "card.paused":
+        return verifying.has(event.payload.cardId)
+          ? worker.enqueue({ kind: "release", cardId: event.payload.cardId })
+          : Effect.void;
+      case "card.resumed":
+        return worker.enqueue({ kind: "resume", cardId: event.payload.cardId, trigger: event.eventId });
       case "thread.session-set": {
         const change = runSessionChange(event.payload.session);
         const { threadId } = event.payload;
-        return (change === "settled" || change === "ended") &&
+        return (change === "settled" ||
+          change === "ended" ||
+          event.payload.session.status === "interrupted") &&
           [...verifying.values()].some((current) => current.threadId === threadId)
           ? worker.enqueue({ kind: "session", threadId })
           : Effect.void;
