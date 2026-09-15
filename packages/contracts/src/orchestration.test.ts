@@ -1647,7 +1647,9 @@ it("a card activity decodes with its optional parts defaulted", () => {
 
 it.effect("keeps the criteria a person confirms with Approve & start", () =>
   Effect.gen(function* () {
-    const criteria = [{ id: "limit", text: "100 requests a minute.", verification: "automated" }];
+    const criteria = [
+      { id: "limit", text: "100 requests a minute.", verification: "automated" as const },
+    ];
     const command = yield* decodeClientOrchestrationCommand({
       type: "card.approve",
       commandId: "cmd-approve",

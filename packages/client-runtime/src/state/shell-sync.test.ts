@@ -246,7 +246,7 @@ describe("environment shell synchronization", () => {
       const client = {
         [ORCHESTRATION_WS_METHODS.subscribeShell]: () => Stream.fromQueue(events),
       } as unknown as WsRpcProtocolClient;
-      const supervisorState = yield* SubscriptionRef.make({
+      const supervisorState = yield* SubscriptionRef.make<typeof AVAILABLE_CONNECTION_STATE>({
         ...AVAILABLE_CONNECTION_STATE,
         desired: true,
         network: "online" as const,
