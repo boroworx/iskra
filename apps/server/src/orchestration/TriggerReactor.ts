@@ -59,6 +59,9 @@ const make = Effect.gen(function* () {
   // the project's latest fire instead if a restart dropping them matters.
   let startedAt: number | null = null;
   const polledAt = new Map<ProjectId, number>();
+  // When each enabled schedule was first seen on, so a newly saved one never fires the minute
+  // before it. ponytail: in memory, so the first tick after a restart skips the previous minute too.
+  const scheduleSeenAt = new Map<string, number>();
 
   const fire = (project: OrchestrationProject, trigger: ProjectTrigger, source: TriggerSource, createdAt: string) =>
     engine.dispatch(triggerIntakeCommand({ projectId: project.id, trigger, source, createdAt })).pipe(
@@ -78,12 +81,18 @@ const make = Effect.gen(function* () {
     readModel: OrchestrationReadModel,
     nowMs: number,
     sinceMs: number,
+    liveSchedules: Set<string>,
   ) {
     const createdAt = isoOf(nowMs);
     const policy = projectOrchestrationOf(project);
     const triggers = policy.triggers.filter((trigger) => trigger.enabled);
     for (const trigger of triggers) {
-      for (const minute of dueScheduleMinutes(trigger, nowMs)) {
+      if (trigger.kind !== "schedule" || trigger.schedule === null) continue;
+      const key = `${project.id}\n${trigger.id}\n${trigger.schedule.cron}\n${trigger.schedule.timezone}`;
+      liveSchedules.add(key);
+      const seenAt = scheduleSeenAt.get(key) ?? nowMs;
+      scheduleSeenAt.set(key, seenAt);
+      for (const minute of dueScheduleMinutes(trigger, nowMs, seenAt)) {
         yield* fire(project, trigger, { sourceKey: minute, label: "a schedule", text: null, author: null }, createdAt);
       }
     }
@@ -139,9 +148,14 @@ const make = Effect.gen(function* () {
     const nowMs = yield* Clock.currentTimeMillis;
     const sinceMs = (startedAt ??= nowMs);
     const readModel = yield* snapshotQuery.getCommandReadModel();
+    const liveSchedules = new Set<string>();
     for (const project of readModel.projects) {
       if (project.deletedAt !== null) continue;
-      yield* pollProject(project, readModel, nowMs, sinceMs);
+      yield* pollProject(project, readModel, nowMs, sinceMs, liveSchedules);
+    }
+    // A schedule turned off, changed or removed starts over when it is on again.
+    for (const key of scheduleSeenAt.keys()) {
+      if (!liveSchedules.has(key)) scheduleSeenAt.delete(key);
     }
   });
 

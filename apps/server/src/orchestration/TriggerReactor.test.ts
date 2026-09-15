@@ -152,6 +152,36 @@ it.layer(layer())("TriggerReactor schedules", (it) => {
   );
 });
 
+it.layer(layer())("TriggerReactor new schedules", (it) => {
+  it.effect("fires a schedule first seen mid-minute for that minute only, not the one before it", () =>
+    Effect.gen(function* () {
+      const reactor = yield* TriggerReactor.TriggerReactor;
+      const world = yield* makeProject("every-minute", {
+        id: "every-minute",
+        kind: "schedule",
+        enabled: true,
+        agentId: AgentId.make("agent-builder"),
+        intake: "ready",
+        schedule: { cron: "* * * * *", timezone: "UTC" },
+        branch: null,
+      });
+
+      yield* TestClock.setTime(Date.parse("2026-03-02T11:34:05.000Z"));
+      yield* reactor.pollNow;
+      expect((yield* world.fires).map((fire) => fire.sourceKey)).toEqual(["2026-03-02T11:34:00.000Z"]);
+
+      // Later ticks catch up the minute before as usual.
+      yield* TestClock.setTime(Date.parse("2026-03-02T11:36:02.000Z"));
+      yield* reactor.pollNow;
+      expect((yield* world.fires).map((fire) => fire.sourceKey)).toEqual([
+        "2026-03-02T11:34:00.000Z",
+        "2026-03-02T11:35:00.000Z",
+        "2026-03-02T11:36:00.000Z",
+      ]);
+    }),
+  );
+});
+
 it.layer(layer())("TriggerReactor CI failures", (it) => {
   it.effect("turns a failed run on the watched branch into one triage card, however often it is read", () =>
     Effect.gen(function* () {

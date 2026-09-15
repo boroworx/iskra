@@ -151,6 +151,13 @@ describe("trigger sources", () => {
     expect(dueScheduleMinutes(nightly, Date.parse("2026-03-02T03:00:40.000Z"))).toEqual(["2026-03-02T03:00:00.000Z"]);
     expect(dueScheduleMinutes(nightly, Date.parse("2026-03-02T03:01:05.000Z"))).toEqual(["2026-03-02T03:00:00.000Z"]);
     expect(dueScheduleMinutes(nightly, Date.parse("2026-03-02T03:02:05.000Z"))).toEqual([]);
+    // Turned on during 03:01, it never fires 03:00; turned on during 03:00, it still does.
+    expect(
+      dueScheduleMinutes(nightly, Date.parse("2026-03-02T03:01:05.000Z"), Date.parse("2026-03-02T03:01:02.000Z")),
+    ).toEqual([]);
+    expect(
+      dueScheduleMinutes(nightly, Date.parse("2026-03-02T03:01:05.000Z"), Date.parse("2026-03-02T03:00:30.000Z")),
+    ).toEqual(["2026-03-02T03:00:00.000Z"]);
     const newYork = trigger({ kind: "schedule", schedule: { cron: "0 9 * * *", timezone: "America/New_York" } });
     expect(dueScheduleMinutes(newYork, Date.parse("2026-01-05T14:00:10.000Z"))).toEqual(["2026-01-05T14:00:00.000Z"]);
     expect(dueScheduleMinutes(trigger({ kind: "schedule", schedule: { cron: "not a cron", timezone: "UTC" } }), 0)).toEqual([]);

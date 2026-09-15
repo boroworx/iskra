@@ -68,15 +68,21 @@ const MINUTE = 60_000;
 /**
  * The scheduled minutes (ISO) a schedule trigger is due for at `nowMs`: this minute and the one
  * before, so a tick that drifts past a minute boundary still fires it. A repeat is a no-op.
- * An unparsable cron or time zone is never due.
+ * Minutes before the one `enabledSinceMs` falls in are skipped, so a trigger never fires for a
+ * minute from before it was on. An unparsable cron or time zone is never due.
  */
-export function dueScheduleMinutes(trigger: ProjectTrigger, nowMs: number): ReadonlyArray<string> {
+export function dueScheduleMinutes(
+  trigger: ProjectTrigger,
+  nowMs: number,
+  enabledSinceMs = Number.NEGATIVE_INFINITY,
+): ReadonlyArray<string> {
   if (trigger.kind !== "schedule" || trigger.schedule === null) return [];
   const cron = Cron.parse(trigger.schedule.cron, trigger.schedule.timezone);
   if (Result.isFailure(cron)) return [];
   const thisMinute = Math.floor(nowMs / MINUTE) * MINUTE;
+  const firstMinute = Math.floor(enabledSinceMs / MINUTE) * MINUTE;
   return [thisMinute - MINUTE, thisMinute]
-    .filter((minute) => Cron.match(cron.success, minute))
+    .filter((minute) => minute >= firstMinute && Cron.match(cron.success, minute))
     .map((minute) => DateTime.formatIso(DateTime.makeUnsafe(minute)));
 }
 
