@@ -182,7 +182,7 @@ export function GuidedFirstRun() {
               <Step
                 done={reviewed}
                 title="Watch it reach review"
-                tip="The builder fixes the test; Iskra runs the checks and the verifier before it asks you."
+                tip="The builder fixes the test; Iskra runs the checks, and the verifier when it's on, before it asks you."
               >
                 {started && !reviewed ? boardLink("Watch the card") : null}
               </Step>
