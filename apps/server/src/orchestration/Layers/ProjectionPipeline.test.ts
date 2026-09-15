@@ -10,6 +10,7 @@ import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
   MessageId,
+  type CardEvidenceItem,
   type OrchestrationEvent,
   ProjectId,
   ThreadId,
@@ -5630,6 +5631,69 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
           channelId: general,
         }),
       }).toMatchSnapshot();
+    }),
+  );
+
+  it.effect("recording the same evidence again replaces its items", () =>
+    Effect.gen(function* () {
+      const eventStore = yield* OrchestrationEventStore;
+      const pipeline = yield* OrchestrationProjectionPipeline;
+      const cardRepository = yield* ProjectionCardRepository;
+      const cardId = CardId.make("card-evidence-retry");
+      const recordedAt = "2026-03-02T00:00:00.000Z";
+      const screenshot = (overrides: Partial<CardEvidenceItem>): CardEvidenceItem => ({
+        itemId: "limits-page",
+        kind: "screenshot",
+        source: "preview",
+        name: "limits page",
+        criterionId: null,
+        exitCode: null,
+        timedOut: false,
+        durationMs: null,
+        logTail: "",
+        artifactPath: null,
+        unavailable: null,
+        ...overrides,
+      });
+      const record = (index: number, item: CardEvidenceItem) =>
+        eventStore
+          .append({
+            type: "card.evidence-recorded",
+            eventId: EventId.make(`evt-evidence-retry-${index}`),
+            aggregateKind: "card",
+            aggregateId: cardId,
+            occurredAt: recordedAt,
+            commandId: null,
+            causationEventId: null,
+            correlationId: null,
+            metadata: {},
+            payload: {
+              cardId,
+              evidenceId: "evidence-retry",
+              headSha: "abc1234def",
+              purpose: "review",
+              items: [item],
+              flags: [],
+              risks: null,
+              passed: true,
+              recordedAt,
+            },
+          })
+          .pipe(Effect.flatMap((event) => pipeline.projectEvent(event)));
+
+      yield* record(
+        0,
+        screenshot({
+          unavailable: { code: "noPreviewHost", text: "No desktop preview host is connected." },
+        }),
+      );
+      // A desktop host connected: the retry records the same evidence with the screenshot taken.
+      yield* record(1, screenshot({ artifactPath: "/tmp/evidence/limits-page.png" }));
+
+      const items = yield* cardRepository.listEvidenceItems({ cardId, evidenceId: "evidence-retry" });
+      expect(items.map((item) => [item.itemId, item.unavailable, item.artifactPath])).toEqual([
+        ["limits-page", null, "/tmp/evidence/limits-page.png"],
+      ]);
     }),
   );
 });

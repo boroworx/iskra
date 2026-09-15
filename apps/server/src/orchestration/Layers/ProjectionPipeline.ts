@@ -679,6 +679,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         switch (event.type) {
           case "card.evidence-recorded": {
             const { cardId, evidenceId, headSha, purpose, items, recordedAt } = event.payload;
+            // A screenshot retry records the same evidence again, whole: its items replace the old.
+            yield* projectionCardRepository.deleteEvidenceItems({ cardId, evidenceId });
             yield* projectionCardRepository.appendEvidenceItems(
               items.map((item) => ({
                 ...item,

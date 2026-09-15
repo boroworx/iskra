@@ -411,6 +411,15 @@ const makeProjectionCardRepository = Effect.gen(function* () {
       `,
   });
 
+  const deleteEvidenceRows = SqlSchema.void({
+    Request: ListProjectionCardEvidenceInput,
+    execute: ({ cardId, evidenceId }) =>
+      sql`
+        DELETE FROM projection_card_evidence
+        WHERE card_id = ${cardId} AND evidence_id = ${evidenceId}
+      `,
+  });
+
   return {
     upsert: (row) => upsertProjectionCardRow(row).pipe(query("upsert")),
     getById: (input) => getProjectionCardRow(input).pipe(query("getById")),
@@ -427,6 +436,7 @@ const makeProjectionCardRepository = Effect.gen(function* () {
       Effect.forEach(rows, insertEvidenceRow, { discard: true }).pipe(
         query("appendEvidenceItems"),
       ),
+    deleteEvidenceItems: (input) => deleteEvidenceRows(input).pipe(query("deleteEvidenceItems")),
     appendVerdict: (verdict) => insertVerdictRow(verdict).pipe(query("appendVerdict")),
     latestVerdict: (input) =>
       latestVerdictRow(input).pipe(

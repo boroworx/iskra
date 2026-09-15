@@ -363,6 +363,11 @@ export interface ProjectionCardRepositoryShape {
     rows: ReadonlyArray<ProjectionCardEvidenceItem>,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
 
+  /** Remove the items of one recording, so recording it again replaces them. */
+  readonly deleteEvidenceItems: (
+    input: ListProjectionCardEvidenceInput,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+
   /** Record a verdict; recording the same verdict again is a no-op. */
   readonly appendVerdict: (verdict: CardVerdict) => Effect.Effect<void, ProjectionRepositoryError>;
 
