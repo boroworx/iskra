@@ -1,6 +1,11 @@
 import * as NodeURL from "node:url";
 
-import type { ChatAttachment, ProviderApprovalDecision, RuntimeMode } from "@iskra/contracts";
+import type {
+  ChatAttachment,
+  ProviderApprovalDecision,
+  ProviderRunRestrictions,
+  RuntimeMode,
+} from "@iskra/contracts";
 import {
   createOpencodeClient,
   type Agent,
@@ -524,6 +529,71 @@ export function buildOpenCodePermissionRules(runtimeMode: RuntimeMode): Permissi
     { permission: "doom_loop", pattern: "*", action: "ask" },
     { permission: "question", pattern: "*", action: "allow" },
   ];
+}
+
+const runAction = (granted: boolean): "allow" | "deny" => (granted ? "allow" : "deny");
+const RUN_DENIED_PERMISSIONS = [
+  "external_directory",
+  "bash",
+  "webfetch",
+  "websearch",
+  "codesearch",
+  "task",
+  "doom_loop",
+];
+
+/**
+ * Deny-by-default rules for an Iskra run. OpenCode applies the last matching rule and has no OS
+ * sandbox, so a run never gets a shell, web tools or subagents: only file tools inside its
+ * directory, edits with `write`, and Iskra's MCP tools.
+ * Evidence: docs/findings/m2-opencode-run-enforcement.md.
+ */
+export function buildOpenCodeRunPermissionRules(run: ProviderRunRestrictions): PermissionRuleset {
+  const read = runAction(run.capabilities.includes("read"));
+  return [
+    { permission: "*", pattern: "*", action: "deny" },
+    { permission: "read", pattern: "*", action: read },
+    { permission: "glob", pattern: "*", action: read },
+    { permission: "grep", pattern: "*", action: read },
+    { permission: "list", pattern: "*", action: read },
+    { permission: "edit", pattern: "*", action: runAction(run.capabilities.includes("write")) },
+    { permission: "iskra_*", pattern: "*", action: "allow" },
+    ...RUN_DENIED_PERMISSIONS.map((permission) => ({
+      permission,
+      pattern: "*",
+      action: "deny" as const,
+    })),
+  ];
+}
+
+const decodeInheritedOpenCodeConfig = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Struct({ provider: Schema.optional(Schema.Unknown) })),
+);
+
+/**
+ * OPENCODE_CONFIG_CONTENT for a run: no MCP servers (Iskra's is added per session), no sharing,
+ * no formatters or LSP servers (both execute project binaries), and the run's rules as the agent
+ * defaults as well. Only the inherited `provider` block is kept, so custom model providers resolve.
+ */
+export function openCodeRunConfigContent(
+  run: ProviderRunRestrictions,
+  inherited: string | undefined,
+): string {
+  const provider =
+    inherited === undefined
+      ? undefined
+      : Option.getOrUndefined(decodeInheritedOpenCodeConfig(inherited))?.provider;
+  return JSON.stringify({
+    ...(provider !== undefined ? { provider } : {}),
+    mcp: {},
+    share: "disabled",
+    autoupdate: false,
+    formatter: false,
+    lsp: false,
+    permission: Object.fromEntries(
+      buildOpenCodeRunPermissionRules(run).map((rule) => [rule.permission, rule.action]),
+    ),
+  });
 }
 
 export function toOpenCodePermissionReply(

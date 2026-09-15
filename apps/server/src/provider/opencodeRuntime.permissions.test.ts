@@ -3,7 +3,14 @@ import * as NodeAssert from "node:assert/strict";
 import * as RegExpUtils from "effect/RegExp";
 import { describe, it } from "vite-plus/test";
 
-import { buildOpenCodePermissionRules, toOpenCodePermissionReply } from "./opencodeRuntime.ts";
+import type { RunCapability } from "@iskra/contracts";
+
+import {
+  buildOpenCodePermissionRules,
+  buildOpenCodeRunPermissionRules,
+  openCodeRunConfigContent,
+  toOpenCodePermissionReply,
+} from "./opencodeRuntime.ts";
 
 function actionFor(
   runtimeMode: Parameters<typeof buildOpenCodePermissionRules>[0],
@@ -73,6 +80,60 @@ describe("buildOpenCodePermissionRules", () => {
       { permission: "*", pattern: "*", action: "allow" },
       { permission: "external_directory", pattern: "*", action: "allow" },
     ]);
+  });
+});
+
+describe("buildOpenCodeRunPermissionRules", () => {
+  const wildcard = (glob: string) =>
+    new RegExp(`^${RegExpUtils.escape(glob).replaceAll("\\*", ".*")}$`, "s");
+  const actionForRun = (capabilities: ReadonlyArray<RunCapability>, permission: string) =>
+    buildOpenCodeRunPermissionRules({ systemPrompt: "", capabilities }).findLast(
+      (rule) => wildcard(rule.permission).test(permission) && wildcard(rule.pattern).test("*"),
+    )?.action;
+
+  it("lets a read run use file tools and Iskra's tools, and nothing else", () => {
+    for (const permission of ["read", "glob", "grep", "list", "iskra_record_verdict"]) {
+      NodeAssert.equal(actionForRun(["read"], permission), "allow");
+    }
+    for (const permission of [
+      "edit",
+      "bash",
+      "webfetch",
+      "websearch",
+      "codesearch",
+      "task",
+      "external_directory",
+      "doom_loop",
+      "question",
+      "skill",
+      "decoy_tool",
+    ]) {
+      NodeAssert.equal(actionForRun(["read"], permission), "deny", permission);
+    }
+  });
+
+  it("allows edits only with write, and never a shell", () => {
+    NodeAssert.equal(actionForRun(["read", "write"], "edit"), "allow");
+    NodeAssert.equal(actionForRun(["read", "write", "shell"], "bash"), "deny");
+  });
+});
+
+describe("openCodeRunConfigContent", () => {
+  it("keeps only the inherited model providers and carries the run's rules", () => {
+    const inherited = JSON.stringify({
+      provider: { probe: { npm: "@ai-sdk/openai-compatible" } },
+      mcp: { decoy: { type: "remote", url: "http://127.0.0.1:1" } },
+      permission: { "*": "allow" },
+    });
+    const config = JSON.parse(
+      openCodeRunConfigContent({ systemPrompt: "", capabilities: ["read"] }, inherited),
+    );
+    NodeAssert.deepEqual(config.provider, { probe: { npm: "@ai-sdk/openai-compatible" } });
+    NodeAssert.deepEqual(config.mcp, {});
+    NodeAssert.equal(config.permission["*"], "deny");
+    NodeAssert.equal(config.permission.edit, "deny");
+    NodeAssert.equal(config.formatter, false);
+    NodeAssert.equal(config.lsp, false);
   });
 });
 

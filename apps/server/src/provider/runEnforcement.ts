@@ -212,6 +212,31 @@ export function claudeRunEnvNames(env: Readonly<Record<string, string | undefine
 }
 
 /**
+ * OpenCode's credentials and model catalog, and the model provider's API key (`OPENAI_API_KEY`
+ * for `openai/...`). Not every `OPENCODE_*`: OPENCODE_CONFIG and OPENCODE_CONFIG_DIR would load
+ * the user's config, MCP servers included. The adapter sets the isolation flags itself.
+ * ponytail: `<PROVIDER>_API_KEY` only; providers keyed differently authenticate through auth.json.
+ */
+export function opencodeRunEnvNames(model: string | undefined) {
+  const providerID = model?.split("/")[0]?.trim();
+  return {
+    names: [
+      "OPENCODE_SERVER_PASSWORD",
+      "OPENCODE_AUTH_CONTENT",
+      "OPENCODE_MODELS_PATH",
+      "OPENCODE_DISABLE_MODELS_FETCH",
+      ...(providerID ? [`${providerID.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_API_KEY`] : []),
+    ],
+    prefixes: [],
+  };
+}
+
+/** The Codex CLI's API keys; its home is generated per run, so CODEX_HOME is set by the adapter. */
+export function codexRunEnvNames() {
+  return { names: ["OPENAI_API_KEY", "CODEX_API_KEY"], prefixes: [] };
+}
+
+/**
  * A run's environment: an allowlist of shell basics, non-secret ISKRA_* variables and the
  * provider's own variables, with git never prompting for credentials.
  */
@@ -237,18 +262,36 @@ const RUN_ENFORCEMENT: Readonly<
   Record<string, { capabilities: ReadonlyArray<RunCapability>; egressAllowlist: boolean }>
 > = {
   claudeAgent: { capabilities: ["read", "write", "shell", "network"], egressAllowlist: true },
-  // Codex's network is all-or-nothing, and its sandbox isn't verified on a real binary yet.
+  // No OS sandbox, so never a shell or network. Probed on 1.18.27:
+  // docs/findings/m2-opencode-run-enforcement.md.
+  opencode: { capabilities: ["read", "write"], egressAllowlist: false },
+  // Codex's network is all-or-nothing, and its sandbox isn't verified on a real binary yet
+  // (docs/findings/m2-codex-run-enforcement.md).
   codex: { capabilities: [], egressAllowlist: false },
 };
 
-/** Why `provider` can't host this run, or null when it can enforce everything the run needs. */
-export function runRefusal(provider: string, run: ProviderRunRestrictions): string | null {
+/**
+ * Why `provider` can't host this run, or null when it can enforce everything the run needs.
+ * `external` is set when the instance talks to a server Iskra didn't start, whose config it can't control.
+ */
+export function runRefusal(
+  provider: string,
+  run: ProviderRunRestrictions,
+  options: { readonly external?: boolean } = {},
+): string | null {
+  if (options.external) {
+    return `Agent runs on '${provider}' can't use an external OpenCode server; choose a provider that can.`;
+  }
   const enforcement = RUN_ENFORCEMENT[provider] ?? { capabilities: [], egressAllowlist: false };
+  // Egress only reaches a run that has a shell or network.
+  const reachesNetwork = run.capabilities.includes("shell") || run.capabilities.includes("network");
   const missing =
-    run.egress?.mode === "allowlist" && !enforcement.egressAllowlist
-      ? "an egress allowlist"
+    enforcement.capabilities.length === 0
+      ? "its restrictions"
       : (run.capabilities.find((capability) => !enforcement.capabilities.includes(capability)) ??
-        (enforcement.capabilities.length === 0 ? "its restrictions" : undefined));
+        (reachesNetwork && run.egress?.mode === "allowlist" && !enforcement.egressAllowlist
+          ? "an egress allowlist"
+          : undefined));
   return missing === undefined
     ? null
     : `Agent runs on '${provider}' can't enforce ${missing}; choose a provider that can.`;

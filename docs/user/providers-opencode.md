@@ -32,6 +32,14 @@ using the same workspace. It is broader than the current thread, especially on a
 shared external server. Use **Allow once** for a single request. Denying an action
 does not stop the whole turn.
 
+## Agent runs
+
+Agents on the board and in channels can use an OpenCode model when their capabilities are read,
+or read and edit. OpenCode can't sandbox a shell, so an agent with shell or network access needs
+a Claude model. Agent runs start their own OpenCode server without your OpenCode configuration or
+MCP servers: providers you signed in to work, but models defined only in your OpenCode config file
+aren't available to them. Agent runs aren't possible when **Server URL** is set.
+
 ## Refresh models, commands, and skills
 
 After changing an OpenCode login or configuration, use **Refresh provider status**

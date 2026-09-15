@@ -47,6 +47,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as P from "effect/Predicate";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -882,6 +883,31 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
    * "off" silently becoming "on" would violate the user's stated choice,
    * whereas the reverse costs an agent one toolset and is visible immediately.
    */
+  /** Whether an OpenCode instance talks to a server Iskra didn't start, whose config it can't isolate. */
+  const usesExternalOpenCodeServer = (
+    instanceId: ProviderInstanceId,
+    provider: ProviderDriverKind,
+  ) =>
+    provider !== "opencode"
+      ? Effect.succeed(false)
+      : serverSettings.getSettings.pipe(
+          Effect.map((settings) => {
+            // As deriveProviderInstanceConfigMap: an explicit instance entry wins over the legacy field.
+            const config = Object.hasOwn(settings.providerInstances, instanceId)
+              ? settings.providerInstances[instanceId]?.config
+              : instanceId === "opencode"
+                ? settings.providers.opencode
+                : undefined;
+            return (
+              P.hasProperty(config, "serverUrl") &&
+              P.isString(config.serverUrl) &&
+              config.serverUrl.trim().length > 0
+            );
+          }),
+          // The adapter refuses a run on its own serverUrl too, so unreadable settings stay closed.
+          Effect.orElseSucceed(() => false),
+        );
+
   const agentAccessSettings = Effect.fn("ProviderService.agentAccessSettings")(
     function* (threadId: ThreadId) {
       const settings = yield* serverSettings.getSettings;
@@ -1546,7 +1572,12 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         }
         const adapter = yield* registry.getByInstance(resolvedInstanceId);
         // An adapter that can't enforce a run's restrictions would ignore them and run unrestricted.
-        const refusal = input.run === undefined ? null : runRefusal(adapter.provider, input.run);
+        const refusal =
+          input.run === undefined
+            ? null
+            : runRefusal(adapter.provider, input.run, {
+                external: yield* usesExternalOpenCodeServer(resolvedInstanceId, adapter.provider),
+              });
         if (refusal !== null) {
           return yield* toValidationError("ProviderService.startSession", refusal);
         }

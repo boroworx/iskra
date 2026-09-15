@@ -3,6 +3,7 @@ import {
   type OpenCodeSettings,
   ProviderDriverKind,
   ProviderInstanceId,
+  type ProviderRunRestrictions,
   type ProviderRuntimeEvent,
   type ProviderSendTurnInput,
   type ProviderSession,
@@ -14,6 +15,8 @@ import {
   TurnId,
   type UserInputQuestion,
 } from "@iskra/contracts";
+import * as NodeOS from "node:os";
+
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -45,8 +48,11 @@ import {
 } from "../Errors.ts";
 import { buildRuntimeInstructions } from "../RuntimeInstructions.ts";
 import { type OpenCodeAdapterShape } from "../Services/OpenCodeAdapter.ts";
+import { opencodeRunEnvNames, runEnvironment, runRefusal } from "../runEnforcement.ts";
 import {
   buildOpenCodePermissionRules,
+  buildOpenCodeRunPermissionRules,
+  openCodeRunConfigContent,
   OpenCodeRuntime,
   OpenCodeRuntimeError,
   openCodeQuestionId,
@@ -335,6 +341,8 @@ type OpenCodeStepUsage = Pick<Extract<Part, { readonly type: "step-finish" }>, "
 
 interface OpenCodeSessionContext {
   session: ProviderSession;
+  /** Set for an Iskra run: its rules decide every tool, and nobody is asked to approve one. */
+  readonly run: ProviderRunRestrictions | undefined;
   readonly client: OpencodeClient;
   readonly server: OpenCodeServerConnection;
   readonly directory: string;
@@ -1781,6 +1789,35 @@ export function makeOpenCodeAdapter(
       }
     });
 
+    // A run's rules decide every tool up front. An ask still reaches a run through paths that
+    // skip session rules (doom-loop detection, subagents); nobody approves a run's tools, so the
+    // ask is refused and reported like any other denial.
+    const rejectRunPermission = Effect.fn("rejectRunPermission")(function* (
+      context: OpenCodeSessionContext,
+      request: PermissionRequest,
+    ) {
+      yield* emit({
+        ...(yield* buildEventBase({
+          threadId: context.session.threadId,
+          turnId: context.activeTurnId,
+          requestId: request.id,
+        })),
+        type: "tool.denied",
+        payload: {
+          toolName: request.permission,
+          reason: `This run may not use ${request.permission}.`,
+        },
+      });
+      yield* runOpenCodeSdk("permission.reply", (signal) =>
+        context.client.permission.reply({ requestID: request.id, reply: "reject" }, { signal }),
+      ).pipe(
+        Effect.timeout("10 seconds"),
+        Effect.catchCause((cause) =>
+          Effect.logWarning("OpenCode run permission reject failed", { cause }),
+        ),
+      );
+    });
+
     const emitPendingOpenCodeRequest = Effect.fn("emitPendingOpenCodeRequest")(function* (
       context: OpenCodeSessionContext,
       event: OpenCodeAskedRequestEvent,
@@ -1796,6 +1833,12 @@ export function makeOpenCodeAdapter(
       if (event.type === "permission.asked") {
         const request = event.properties;
         if (context.pendingPermissions.has(request.id)) {
+          return;
+        }
+        if (context.run) {
+          context.resolvedRequestIds.add(request.id);
+          context.autoRepliedRequestIds.add(request.id);
+          yield* rejectRunPermission(context, request).pipe(Effect.forkIn(context.sessionScope));
           return;
         }
         if (context.session.runtimeMode === "full-access") {
@@ -2804,13 +2847,57 @@ export function makeOpenCodeAdapter(
       );
     });
 
+    /**
+     * A run's environment: a throwaway HOME and config dir, so neither ~/.opencode nor
+     * ~/.config/opencode (nor their MCP servers) load, project config off, and a config holding
+     * only the model providers. Auth and the model cache stay in the user's data dirs.
+     * Evidence: docs/findings/m2-opencode-run-enforcement.md.
+     */
+    const openCodeRunEnvironment = Effect.fn("openCodeRunEnvironment")(function* (
+      run: ProviderRunRestrictions,
+      model: string | undefined,
+    ) {
+      const inherited = options?.environment ?? process.env;
+      const userHome = inherited.HOME ?? NodeOS.homedir();
+      const runHome = yield* fileSystem.makeTempDirectoryScoped({ prefix: "iskra-opencode-run-" });
+      return {
+        ...runEnvironment(inherited, opencodeRunEnvNames(model)),
+        HOME: runHome,
+        XDG_CONFIG_HOME: path.join(runHome, "config"),
+        XDG_DATA_HOME: inherited.XDG_DATA_HOME ?? path.join(userHome, ".local", "share"),
+        XDG_CACHE_HOME: inherited.XDG_CACHE_HOME ?? path.join(userHome, ".cache"),
+        XDG_STATE_HOME: inherited.XDG_STATE_HOME ?? path.join(userHome, ".local", "state"),
+        OPENCODE_CONFIG_CONTENT: openCodeRunConfigContent(run, inherited.OPENCODE_CONFIG_CONTENT),
+        OPENCODE_DISABLE_PROJECT_CONFIG: "1",
+        OPENCODE_DISABLE_CLAUDE_CODE: "1",
+        OPENCODE_DISABLE_EXTERNAL_SKILLS: "1",
+        OPENCODE_DISABLE_AUTOUPDATE: "1",
+        OPENCODE_PURE: "1",
+      };
+    });
+
     const startSession: OpenCodeAdapterShape["startSession"] = Effect.fn("startSession")(
       function* (input) {
         const binaryPath = openCodeSettings.binaryPath;
         const serverUrl = openCodeSettings.serverUrl;
         const serverPassword = openCodeSettings.serverPassword;
         const directory = input.cwd ?? serverConfig.cwd;
-        const resumeSessionId = parseOpenCodeResume(input.resumeCursor)?.sessionId;
+        // A server Iskra didn't start reads its own config, so a run's isolation can't hold there.
+        const externalRefusal =
+          input.run && serverUrl.trim().length > 0
+            ? runRefusal(PROVIDER, input.run, { external: true })
+            : null;
+        if (externalRefusal !== null) {
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "startSession",
+            issue: externalRefusal,
+          });
+        }
+        // A run is rebuilt from its context on every wake, so it never resumes.
+        const resumeSessionId = input.run
+          ? undefined
+          : parseOpenCodeResume(input.resumeCursor)?.sessionId;
         const existing = sessions.get(input.threadId);
         if (existing) {
           if (existing.session.status === "connecting" && !(yield* Ref.get(existing.stopped))) {
@@ -2828,15 +2915,16 @@ export function makeOpenCodeAdapter(
               // we provide below — closing `sessionScope` kills the child
               // process automatically. No manual `server.close()` needed.
               const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
+              const environment = input.run
+                ? yield* openCodeRunEnvironment(input.run, input.modelSelection?.model)
+                : (options?.environment ?? process.env);
               const server = yield* openCodeRuntime.connectToOpenCodeServer({
                 binaryPath,
                 directory,
-                serverUrl,
+                // Every session spawns its own server; a run's is started with its isolated env.
+                ...(input.run ? {} : { serverUrl }),
                 ...(serverPassword ? { serverPassword } : {}),
-                environment: McpProviderSession.withAgentDeviceEnvironment(
-                  options?.environment ?? process.env,
-                  mcpSession,
-                ),
+                environment: McpProviderSession.withAgentDeviceEnvironment(environment, mcpSession),
               });
               const client = openCodeRuntime.createOpenCodeSdkClient({
                 baseUrl: server.url,
@@ -2931,7 +3019,9 @@ export function makeOpenCodeAdapter(
                 const createdSession = yield* runOpenCodeSdk("session.create", () =>
                   client.session.create({
                     ...(input.title ? { title: input.title } : {}),
-                    permission: buildOpenCodePermissionRules(input.runtimeMode),
+                    permission: input.run
+                      ? buildOpenCodeRunPermissionRules(input.run)
+                      : buildOpenCodePermissionRules(input.runtimeMode),
                   }),
                 );
                 if (!createdSession.data) {
@@ -2981,6 +3071,7 @@ export function makeOpenCodeAdapter(
 
         const context: OpenCodeSessionContext = {
           session,
+          run: input.run,
           client: started.client,
           server: started.server,
           directory,
@@ -3220,10 +3311,12 @@ export function makeOpenCodeAdapter(
                 ...(context.activeAgent ? { agent: context.activeAgent } : {}),
                 ...(context.activeVariant ? { variant: context.activeVariant } : {}),
                 // OpenCode appends this after its own agent/provider prompts.
-                system: buildRuntimeInstructions({
-                  harness: "OpenCode",
-                  model: `${parsedModel.providerID}/${parsedModel.modelID}`,
-                }),
+                system:
+                  context.run?.systemPrompt ??
+                  buildRuntimeInstructions({
+                    harness: "OpenCode",
+                    model: `${parsedModel.providerID}/${parsedModel.modelID}`,
+                  }),
                 parts: [...(text ? [{ type: "text" as const, text }] : []), ...fileParts],
               },
               { signal },
@@ -3861,7 +3954,9 @@ export function makeOpenCodeAdapter(
           yield* runOpenCodeSdk("session.update", () =>
             context.client.session.update({
               sessionID: forkedSessionId,
-              permission: buildOpenCodePermissionRules(context.session.runtimeMode),
+              permission: context.run
+                ? buildOpenCodeRunPermissionRules(context.run)
+                : buildOpenCodePermissionRules(context.session.runtimeMode),
             }),
           ).pipe(Effect.mapError(toRequestError));
           yield* clearPendingOpenCodeRequests(context, { type: "session.fork" });

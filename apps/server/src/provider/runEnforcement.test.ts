@@ -4,6 +4,7 @@ import {
   DEFAULT_HEAVY_COMMANDS,
   claudeRunEnvNames,
   isHeavyCommand,
+  opencodeRunEnvNames,
   runEnvironment,
   runRefusal,
 } from "./runEnforcement.ts";
@@ -119,18 +120,58 @@ describe("runRefusal", () => {
     ).toBeNull();
   });
 
-  it("refuses Codex runs, naming the allowlist when the project uses one", () => {
-    expect(
-      runRefusal("codex", run({ egress: { mode: "allowlist", allow: ["x.dev"], deny: [] } })),
-    ).toBe("Agent runs on 'codex' can't enforce an egress allowlist; choose a provider that can.");
-    expect(runRefusal("codex", run())).toBe(
-      "Agent runs on 'codex' can't enforce read; choose a provider that can.",
+  it("refuses Codex runs until its sandbox is verified on a real binary", () => {
+    for (const restrictions of [
+      run({ capabilities: ["read"] }),
+      run({ egress: { mode: "allowlist", allow: ["x.dev"], deny: [] } }),
+    ]) {
+      expect(runRefusal("codex", restrictions)).toBe(
+        "Agent runs on 'codex' can't enforce its restrictions; choose a provider that can.",
+      );
+    }
+  });
+
+  it.each(["cursor", "grok", "antigravity"])("refuses %s runs", (provider) => {
+    expect(runRefusal(provider, run({ capabilities: ["read"] }))).toBe(
+      `Agent runs on '${provider}' can't enforce its restrictions; choose a provider that can.`,
     );
   });
 
-  it.each(["opencode", "cursor", "grok", "antigravity"])("refuses %s runs", (provider) => {
-    expect(runRefusal(provider, run({ capabilities: ["read"] }))).toBe(
-      `Agent runs on '${provider}' can't enforce read; choose a provider that can.`,
+  it("lets OpenCode host read and write runs, never a shell or network", () => {
+    const allowlist = { mode: "allowlist" as const, allow: ["x.dev"], deny: [] };
+    expect(runRefusal("opencode", run({ capabilities: ["read"], egress: allowlist }))).toBeNull();
+    expect(runRefusal("opencode", run({ capabilities: ["read", "write"] }))).toBeNull();
+    expect(runRefusal("opencode", run())).toBe(
+      "Agent runs on 'opencode' can't enforce shell; choose a provider that can.",
     );
+    expect(runRefusal("opencode", run({ capabilities: ["read", "network"] }))).toBe(
+      "Agent runs on 'opencode' can't enforce network; choose a provider that can.",
+    );
+  });
+
+  it("refuses a run on an external OpenCode server", () => {
+    expect(runRefusal("opencode", run({ capabilities: ["read"] }), { external: true })).toBe(
+      "Agent runs on 'opencode' can't use an external OpenCode server; choose a provider that can.",
+    );
+  });
+});
+
+describe("opencodeRunEnvNames", () => {
+  it("keeps OpenCode's credentials and only the model provider's API key", () => {
+    const host = {
+      PATH: "/usr/bin",
+      OPENCODE_SERVER_PASSWORD: "pw",
+      OPENCODE_CONFIG: "/Users/dev/.config/opencode/work.json",
+      OPENCODE_CONFIG_DIR: "/Users/dev/.config/opencode-work",
+      OPENAI_API_KEY: "openai",
+      ANTHROPIC_API_KEY: "anthropic",
+      GH_TOKEN: "gh",
+    };
+    expect(runEnvironment(host, opencodeRunEnvNames("openai/gpt-5"))).toEqual({
+      PATH: "/usr/bin",
+      OPENCODE_SERVER_PASSWORD: "pw",
+      OPENAI_API_KEY: "openai",
+      GIT_TERMINAL_PROMPT: "0",
+    });
   });
 });

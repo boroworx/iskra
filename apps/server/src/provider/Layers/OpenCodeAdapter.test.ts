@@ -38,6 +38,7 @@ import { buildRuntimeInstructions } from "../RuntimeInstructions.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
 import type { OpenCodeAdapterShape } from "../Services/OpenCodeAdapter.ts";
 import {
+  buildOpenCodeRunPermissionRules,
   OpenCodeRuntime,
   OpenCodeRuntimeError,
   type OpenCodeRuntimeShape,
@@ -131,6 +132,10 @@ const runtimeMock = {
     questionListImplementation: null as (() => Promise<Array<QuestionRequest>>) | null,
     sessionUpdateCalls: [] as Array<{ sessionID: string; permission: unknown }>,
     forkCalls: [] as Array<{ sessionID: string; directory?: string; messageID?: string }>,
+    connectInputs: [] as Array<{
+      serverUrl: string | null | undefined;
+      environment: NodeJS.ProcessEnv | undefined;
+    }>,
   },
   reset() {
     this.state.startCalls.length = 0;
@@ -188,6 +193,7 @@ const runtimeMock = {
     this.state.questionListImplementation = null;
     this.state.sessionUpdateCalls.length = 0;
     this.state.forkCalls.length = 0;
+    this.state.connectInputs.length = 0;
   },
 };
 
@@ -212,8 +218,9 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
         isRunning: Effect.succeed(true),
       };
     }),
-  connectToOpenCodeServer: ({ serverUrl, serverPassword }) =>
+  connectToOpenCodeServer: ({ serverUrl, serverPassword, environment }) =>
     Effect.gen(function* () {
+      runtimeMock.state.connectInputs.push({ serverUrl, environment });
       const url = serverUrl ?? "http://127.0.0.1:4301";
       // Always register a finalizer so the closeCalls/closeError probes fire;
       // production attaches none for external servers.
@@ -7688,6 +7695,137 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       NodeAssert.equal(sessions.length, 1);
       NodeAssert.equal(sessions[0]?.threadId, "thread-native-log-failure");
       NodeAssert.deepEqual(closeCallsDuringRun, []);
+    }),
+  );
+});
+
+const readRun = { systemPrompt: "You are @verifier.", capabilities: ["read" as const] };
+
+it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapter run refusals", (it) => {
+  it.effect("refuses a run on a configured external server", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const error = yield* adapter
+        .startSession({
+          provider: ProviderDriverKind.make("opencode"),
+          threadId: asThreadId("thread-run-external"),
+          runtimeMode: "full-access",
+          run: readRun,
+        })
+        .pipe(Effect.flip);
+
+      NodeAssert.equal(
+        "issue" in error ? error.issue : undefined,
+        "Agent runs on 'opencode' can't use an external OpenCode server; choose a provider that can.",
+      );
+      NodeAssert.deepEqual(runtimeMock.state.sessionCreateInputs, []);
+    }),
+  );
+});
+
+const OpenCodeAdapterLocalTestLayer = Layer.effect(
+  OpenCodeAdapter,
+  makeOpenCodeAdapter(Schema.decodeSync(OpenCodeSettings)({ binaryPath: "fake-opencode" }), {
+    environment: {
+      PATH: "/usr/bin",
+      HOME: "/Users/dev",
+      GH_TOKEN: "gh",
+      OPENCODE_CONFIG: "/Users/dev/.config/opencode/work.json",
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({
+        provider: { probe: { npm: "@ai-sdk/openai-compatible" } },
+        mcp: { decoy: { type: "remote", url: "http://127.0.0.1:1" } },
+      }),
+    },
+  }),
+).pipe(
+  Layer.provideMerge(Layer.succeed(OpenCodeRuntime, OpenCodeRuntimeTestDouble)),
+  Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+  Layer.provideMerge(ServerSettingsService.layerTest({})),
+  Layer.provideMerge(providerSessionDirectoryTestLayer),
+  Layer.provideMerge(NodeServices.layer),
+);
+
+it.layer(OpenCodeAdapterLocalTestLayer)("OpenCodeAdapter runs", (it) => {
+  it.effect("starts a run fresh on its own server, isolated from the user's config", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId: asThreadId("thread-run-isolated"),
+        runtimeMode: "full-access",
+        resumeCursor: { schemaVersion: 1, sessionId: "ses_previous" },
+        run: readRun,
+      });
+
+      NodeAssert.deepEqual(runtimeMock.state.sessionGetIds, []);
+      const connect = runtimeMock.state.connectInputs.at(-1);
+      NodeAssert.equal(connect?.serverUrl, undefined);
+      const env = connect?.environment ?? {};
+      NodeAssert.equal(env.OPENCODE_DISABLE_PROJECT_CONFIG, "1");
+      NodeAssert.notEqual(env.HOME, "/Users/dev");
+      NodeAssert.ok(env.XDG_CONFIG_HOME?.startsWith(env.HOME ?? "missing"));
+      NodeAssert.equal(env.XDG_DATA_HOME, "/Users/dev/.local/share");
+      NodeAssert.equal(env.GH_TOKEN, undefined);
+      NodeAssert.equal(env.OPENCODE_CONFIG, undefined);
+      // @effect-diagnostics-next-line preferSchemaOverJson:off - asserts on the raw env value.
+      const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? "{}");
+      NodeAssert.deepEqual(config.mcp, {});
+      NodeAssert.deepEqual(config.provider, { probe: { npm: "@ai-sdk/openai-compatible" } });
+      NodeAssert.deepEqual(
+        runtimeMock.state.sessionCreateInputs.at(-1)?.permission,
+        buildOpenCodeRunPermissionRules(readRun),
+      );
+
+      yield* adapter.stopSession(asThreadId("thread-run-isolated"));
+    }),
+  );
+
+  it.effect("refuses a run's permission ask and reports it as a denied tool", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-run-ask");
+      runtimeMock.state.subscribedEvents = [
+        {
+          id: "evt-run-doom-loop",
+          type: "permission.asked",
+          properties: {
+            id: "per_run_doom_loop",
+            sessionID: "http://127.0.0.1:4301/session",
+            permission: "doom_loop",
+            patterns: ["read"],
+            metadata: {},
+            always: [],
+          },
+        },
+      ];
+
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId),
+        Stream.takeUntil((event) => event.type === "tool.denied"),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "approval-required",
+        run: readRun,
+      });
+      const events = Array.from(yield* Fiber.join(eventsFiber).pipe(Effect.timeout("1 second")));
+      const denied = events.find((event) => event.type === "tool.denied");
+
+      NodeAssert.equal(
+        denied?.type === "tool.denied" ? denied.payload.toolName : undefined,
+        "doom_loop",
+      );
+      NodeAssert.equal(
+        events.some((event) => event.type === "request.opened"),
+        false,
+      );
+      yield* adapter.stopSession(threadId);
+      NodeAssert.deepEqual(runtimeMock.state.permissionReplyCalls, [
+        { requestID: "per_run_doom_loop", reply: "reject" },
+      ]);
     }),
   );
 });

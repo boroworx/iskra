@@ -986,6 +986,62 @@ it.effect("ProviderServiceLive rejects new sessions for disabled custom instance
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
+it.effect("refuses a run on an OpenCode instance configured with an external server", () =>
+  Effect.gen(function* () {
+    const opencodeDriver = ProviderDriverKind.make("opencode");
+    const opencode = makeFakeCodexAdapter(opencodeDriver);
+    const providerLayer = makeProviderServiceLive().pipe(
+      Layer.provide(NodeServices.layer),
+      Layer.provide(
+        Layer.succeed(
+          ProviderAdapterRegistry.ProviderAdapterRegistry,
+          makeAdapterRegistryMock({ [opencodeDriver]: opencode.adapter }),
+        ),
+      ),
+      Layer.provide(
+        ProviderSessionDirectoryLive.pipe(
+          Layer.provide(ProviderSessionRuntime.layer.pipe(Layer.provide(SqlitePersistenceMemory))),
+        ),
+      ),
+      Layer.provide(
+        ServerSettings.ServerSettingsService.layerTest({
+          providers: { opencode: { serverUrl: "http://127.0.0.1:4096" } },
+        }),
+      ),
+      Layer.provide(serverConfigTestLayer),
+      Layer.provide(AnalyticsService.layerTest),
+      Layer.provide(
+        Layer.succeed(
+          ProviderEventLoggers.ProviderEventLoggers,
+          ProviderEventLoggers.NoOpProviderEventLoggers,
+        ),
+      ),
+    );
+    const threadId = asThreadId("thread-opencode-external-run");
+
+    const error = yield* Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      return yield* provider
+        .startSession(threadId, {
+          provider: opencodeDriver,
+          providerInstanceId: ProviderInstanceId.make("opencode"),
+          threadId,
+          cwd: fixtureCwd("project-opencode-external-run"),
+          runtimeMode: "full-access",
+          run: { systemPrompt: "You are @verifier.", capabilities: ["read" as const] },
+        })
+        .pipe(Effect.flip);
+    }).pipe(Effect.provide(providerLayer));
+
+    assert.instanceOf(error, ProviderValidationError);
+    assert.equal(
+      (error as ProviderValidationError).issue,
+      "Agent runs on 'opencode' can't use an external OpenCode server; choose a provider that can.",
+    );
+    assert.equal(opencode.startSession.mock.calls.length, 0);
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
 const routing = makeProviderServiceLayer();
 
 const customCompactionDriver = ProviderDriverKind.make("custom-compaction-provider");
@@ -2889,7 +2945,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
       driver: CODEX_DRIVER,
       instanceId: codexInstanceId,
       run: { systemPrompt: "You are @backend.", capabilities: ["read" as const] },
-      issue: "Agent runs on 'codex' can't enforce read; choose a provider that can.",
+      issue: "Agent runs on 'codex' can't enforce its restrictions; choose a provider that can.",
     },
     {
       driver: CODEX_DRIVER,
@@ -2899,13 +2955,13 @@ routing.layer("ProviderServiceLive routing", (it) => {
         capabilities: ["read" as const, "write" as const, "shell" as const],
         egress: { mode: "allowlist" as const, allow: ["registry.npmjs.org"], deny: [] },
       },
-      issue: "Agent runs on 'codex' can't enforce an egress allowlist; choose a provider that can.",
+      issue: "Agent runs on 'codex' can't enforce its restrictions; choose a provider that can.",
     },
     {
       driver: CURSOR_DRIVER,
       instanceId: ProviderInstanceId.make("cursor"),
       run: { systemPrompt: "You are @backend.", capabilities: ["read" as const] },
-      issue: "Agent runs on 'cursor' can't enforce read; choose a provider that can.",
+      issue: "Agent runs on 'cursor' can't enforce its restrictions; choose a provider that can.",
     },
   ])("refuses a run $driver can't enforce: $issue", ({ driver, instanceId, run, issue }) =>
     Effect.gen(function* () {
