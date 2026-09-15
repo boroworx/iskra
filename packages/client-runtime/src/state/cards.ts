@@ -14,6 +14,7 @@ import {
   createCard,
   decideCard,
   dismissCardAttention,
+  allowCardAccess,
   forwardCardComment,
   keepCardRefs,
   overrideCardVerifier,
@@ -84,6 +85,10 @@ export function createCardEnvironmentAtoms<R, E>(
     dismissAttention: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:card:dismiss-attention",
       execute: dismissCardAttention,
+    }),
+    allowAccess: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:card:allow-access",
+      execute: allowCardAccess,
     }),
     acknowledgeFlags: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:card:acknowledge-flags",

@@ -310,6 +310,10 @@ export const REASON_LABEL: Readonly<Record<string, ReasonLabel>> = {
     label: "No checks",
     hint: "The project has no checks, so the card can't enter review. Add one or waive checks.",
   },
+  accessRequest: {
+    label: "Network access",
+    hint: "Its agent needs domains this project's network list doesn't allow yet.",
+  },
   untrustedComment: {
     label: "Comment from outside the repository",
     hint: "Its author can't direct work here; forward it to the agent if it should count.",
@@ -832,7 +836,8 @@ export type NeedsYouKind =
   | "lessonProposed"
   | "outcomeFlawed"
   | "revertConflict"
-  | "budgetCap";
+  | "budgetCap"
+  | "accessRequest";
 
 /** Linear's priority names, most urgent first, then none. */
 export const CARD_PRIORITIES: ReadonlyArray<CardPriority> = [1, 2, 3, 4, 0];
@@ -860,6 +865,8 @@ interface NeedsYouItem {
   readonly activityId: string | null;
   /** The proposed lesson it decides; null unless it is a lessonProposed item. */
   readonly lessonId: string | null;
+  /** The domains an access request asks for; empty for every other item. */
+  readonly domains: ReadonlyArray<string>;
   /** A session waiting on an answer is never snoozed away. */
   readonly snoozable: boolean;
 }
@@ -890,10 +897,19 @@ export const NEEDS_YOU_LABEL: Record<NeedsYouKind, string> = {
   outcomeFlawed: "It turned out flawed; add a hidden scenario",
   revertConflict: "Its revert conflicts; assign an agent",
   budgetCap: "A monthly budget holds its work; raise it to continue",
+  accessRequest: "Its agent needs network access",
 };
 
 /** A Needs you item's label: its pause's own name when Iskra knows the code, else its kind's. */
-export function needsYouLabel(item: Pick<NeedsYouItem, "kind" | "code" | "reason">): string {
+export function needsYouLabel(
+  item: Pick<NeedsYouItem, "kind" | "code" | "reason"> & {
+    readonly domains?: ReadonlyArray<string>;
+  },
+  agentName?: string,
+): string {
+  if (item.kind === "accessRequest" && item.domains !== undefined && item.domains.length > 0) {
+    return `${agentName === undefined ? "Its agent" : `@${agentName}`} needs access to ${item.domains.join(", ")}`;
+  }
   // These kinds say what to do; their codes only say what happened.
   return item.code !== null &&
     Object.hasOwn(REASON_LABEL, item.code) &&
@@ -919,6 +935,7 @@ const PERSON_WAIT_CODES: ReadonlySet<string> = new Set([
 const ATTENTION_KINDS: Readonly<Record<string, NeedsYouKind>> = {
   outcomeFlawed: "outcomeFlawed",
   revertConflict: "revertConflict",
+  accessRequest: "accessRequest",
 };
 const SIDE_EFFECT_GUARD_REASON =
   "Agents don't start work until someone checks this project's scheduled jobs and outbound APIs in project settings.";
@@ -963,6 +980,7 @@ export function needsYouItems(input: {
       code: null,
       activityId: null,
       lessonId: null,
+      domains: [],
     };
     const open = isOpenStatus(card.status);
     // A flawed outcome is found after a card lands, so it waits on a person on a finished card.
@@ -1097,6 +1115,9 @@ export function needsYouItems(input: {
         reason: item.text,
         code: item.code,
         activityId: item.activityId,
+        domains: item.domains ?? [],
+        // The owner waits on the answer, so it can't be snoozed away.
+        snoozable: item.code !== "accessRequest",
       });
     }
     // A person's own pause is their decision, not a wait; Iskra's pause asks for one.
@@ -1226,6 +1247,7 @@ export function needsYouItems(input: {
       code: null,
       activityId: null,
       lessonId: null,
+      domains: [],
     };
     if (session.state === "awaitingInput") {
       // An open question already says what the session waits on.
@@ -1251,6 +1273,7 @@ export function needsYouItems(input: {
         code: null,
         activityId: null,
         lessonId: lesson.lessonId,
+        domains: [],
         snoozable: false,
       });
     }

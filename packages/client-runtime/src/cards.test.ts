@@ -782,6 +782,7 @@ describe("reasonLabel", () => {
     // needs you
     "checksMissing",
     "untrustedComment",
+    "accessRequest",
     "landingBlocked",
     "pullRequestOpenFailed",
     "pullRequestClosed",
@@ -1017,6 +1018,42 @@ describe("needsYouItems for plans, lessons, outcomes, reverts and budgets", () =
         card("capped-1", { waitReason: { code: "budgetCap", text: "x", since: at(5) } }),
       ]),
     ).toEqual([]);
+  });
+});
+
+describe("needsYouItems for access requests", () => {
+  it("names the agent and the domains it needs, and never snoozes the wait", () => {
+    const [item] = needsYouItems({
+      cards: [
+        card("blocked", {
+          status: "inProgress",
+          specState: "approved",
+          attention: [
+            {
+              activityId: "access-1",
+              code: "accessRequest",
+              text: "gh needs the GitHub API.",
+              createdAt: at(2),
+              actions: ["allowAccess", "dismiss"],
+              domains: ["api.github.com", "github.com"],
+            },
+          ],
+        }),
+      ],
+      sessions: [],
+      now: Date.parse(at(10)),
+    });
+    expect(item).toMatchObject({
+      kind: "accessRequest",
+      activityId: "access-1",
+      reason: "gh needs the GitHub API.",
+      domains: ["api.github.com", "github.com"],
+      snoozable: false,
+    });
+    expect(needsYouLabel(item!, "builder1")).toBe(
+      "@builder1 needs access to api.github.com, github.com",
+    );
+    expect(needsYouLabel(item!)).toBe("Its agent needs access to api.github.com, github.com");
   });
 });
 

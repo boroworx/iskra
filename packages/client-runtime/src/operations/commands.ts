@@ -212,6 +212,8 @@ export const keepCardRefs = command("keepCardRefs", "card.refs.keep");
 export const forwardCardComment = command("forwardCardComment", "card.comment.forward");
 /** A person setting aside something waiting on them that allows it, such as a comment. */
 export const dismissCardAttention = command("dismissCardAttention", "card.attention.dismiss");
+/** A person allowing an access request's domains for the card's project, which wakes its owner. */
+export const allowCardAccess = command("allowCardAccess", "card.access.allow");
 /** A person letting a card past a failed or pending verifier, saying why. */
 export const overrideCardVerifier = command("overrideCardVerifier", "card.verifier.override");
 export const acknowledgeCardFlags = command("acknowledgeCardFlags", "card.flags.acknowledge");
