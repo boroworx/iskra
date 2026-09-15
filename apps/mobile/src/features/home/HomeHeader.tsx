@@ -11,7 +11,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ControlPillMenu } from "../../components/ControlPill";
 import { SymbolView } from "../../components/AppSymbol";
-import { IskraWordmark } from "../../components/IskraWordmark";
 import { HOME_HORIZONTAL_INSET } from "../../lib/layoutMetrics";
 import { resolveMobileStageLabel } from "../../lib/mobileBranding";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
@@ -226,8 +225,14 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
               onPress={props.onOpenEnvironments}
               brand={
                 <View className="flex-row items-center gap-2">
-                  {/* Mirrors the desktop SidebarBrand: the Iskra wordmark. */}
-                  <IskraWordmark colorClassName="accent-icon" height={15} />
+                  {/* Mirrors the web SidebarBrand: the spark and the name in the system font. */}
+                  <View
+                    accessibilityElementsHidden
+                    importantForAccessibility="no-hide-descendants"
+                  >
+                    <SparkGlyph state="working" size={15} />
+                  </View>
+                  <RNText className="text-[17px] font-semibold text-foreground">Iskra</RNText>
                   <View className="rounded-full bg-subtle px-2 py-0.75">
                     <RNText className="text-[11px] font-iskra-bold tracking-[1.1px] text-foreground-muted uppercase">
                       {stageLabel}

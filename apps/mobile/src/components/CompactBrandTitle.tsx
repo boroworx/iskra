@@ -3,9 +3,9 @@ import type { NativeStackNavigationOptions } from "@react-navigation/native-stac
 import { Platform, View } from "react-native";
 
 import { AppText as Text } from "./AppText";
-import { IskraWordmark } from "./IskraWordmark";
 import { IPAD_HOME_TITLE_OFFSET } from "../lib/layoutMetrics";
 import { resolveMobileStageLabel } from "../lib/mobileBranding";
+import { SparkGlyph } from "../features/iskra/components";
 
 /**
  * Horizontal correction applied to content rendered in the brand title slot,
@@ -36,7 +36,14 @@ export function CompactBrandTitle(
       className="flex-row items-center gap-2"
       style={{ marginLeft: titleOffset }}
     >
-      <IskraWordmark colorClassName="accent-icon" height={15} />
+      <SparkGlyph state="working" size={15} />
+      <Text
+        allowFontScaling={props.allowFontScaling}
+        style={{ fontSize: 17, fontWeight: "600" }}
+        className="text-foreground"
+      >
+        Iskra
+      </Text>
       <View className="rounded-full bg-subtle px-1.5 py-0.5">
         <Text
           allowFontScaling={props.allowFontScaling}
