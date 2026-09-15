@@ -96,6 +96,11 @@ const ROLES: ReadonlyArray<{
   { value: "helper", label: "Helper", hint: "Answers a builder's questions." },
   { value: "critic", label: "Critic", hint: "Critiques specs and diffs." },
   { value: "verifier", label: "Verifier", hint: "Checks cards in review against their criteria." },
+  {
+    value: "coordinator",
+    label: "Coordinator",
+    hint: "Plans a plan card's children, read-only.",
+  },
 ];
 
 /** The roles in their canonical order, as an agent file stores them. */
