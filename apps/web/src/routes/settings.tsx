@@ -158,14 +158,17 @@ function SettingsContentLayout() {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
         <WorkspacePageHeader electron={isElectron}>
           <div className="flex w-full items-center gap-3">
-            {/* Every page keeps the same crumb slot; device-local pages name the device instead. */}
-            <SettingsBreadcrumb
-              scope={
-                showScope
-                  ? { value: search, groups, environments, onChange: selectScope }
-                  : undefined
-              }
-            />
+            {/* Device-local pages name the device instead. The project list is itself the project
+                picker and ignores the environment, so it has no scope to show until one is opened. */}
+            {location.pathname === "/settings/projects" && !search.project ? null : (
+              <SettingsBreadcrumb
+                scope={
+                  showScope
+                    ? { value: search, groups, environments, onChange: selectScope }
+                    : undefined
+                }
+              />
+            )}
             {location.pathname === "/settings/general" ||
             location.pathname === "/settings/appearance" ? (
               <div className="ms-auto flex shrink-0 items-center">
