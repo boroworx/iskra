@@ -1645,6 +1645,20 @@ it("a card activity decodes with its optional parts defaulted", () => {
   );
 });
 
+it.effect("keeps the criteria a person confirms with Approve & start", () =>
+  Effect.gen(function* () {
+    const criteria = [{ id: "limit", text: "100 requests a minute.", verification: "automated" }];
+    const command = yield* decodeClientOrchestrationCommand({
+      type: "card.approve",
+      commandId: "cmd-approve",
+      cardId: "card-1",
+      delegateAgentId: "agent-1",
+      criteria,
+    });
+    assert.deepStrictEqual(command.type === "card.approve" ? command.criteria : null, criteria);
+  }),
+);
+
 it("isProviderSendTurnSupportedImageMimeType accepts raster formats and rejects svg", () => {
   assert.strictEqual(isProviderSendTurnSupportedImageMimeType("image/png"), true);
   assert.strictEqual(isProviderSendTurnSupportedImageMimeType("IMAGE/JPEG"), true);
