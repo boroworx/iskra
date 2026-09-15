@@ -158,6 +158,38 @@ describe("pending CI in review", () => {
   });
 });
 
+describe("review with a verdict", () => {
+  it("lets the verdict decide each automated criterion it judged, never a manual one", () => {
+    const review = reviewByCriterion({
+      cardId,
+      criteria: [
+        { id: "route", text: "GET /health answers", verification: "automated" },
+        { id: "json", text: "It answers JSON", verification: "automated" },
+        { id: "look", text: "Looks right", verification: "manual" },
+        { id: "unjudged", text: "Not judged", verification: "automated" },
+      ],
+      items: [item("unit", { criterionId: "json" }), item("health", { kind: "journey", exitCode: 1 })],
+      verdict: {
+        criteria: [
+          { criterionId: "route", pass: true, evidence: "journey health", note: "" },
+          { criterionId: "json", pass: false, evidence: "curl", note: "Returns text, not JSON." },
+          { criterionId: "look", pass: true, evidence: "", note: "" },
+        ],
+      },
+    });
+
+    expect(review.criteria.map((entry) => [entry.criterion.id, entry.state, entry.verdict?.note ?? null])).toEqual([
+      ["route", "passed", ""],
+      // The verdict outweighs the passing test tied to it.
+      ["json", "failed", "Returns text, not JSON."],
+      ["look", "needsYourCheck", null],
+      // A failed journey is a failed project check, so nothing stands in for the unjudged one.
+      ["unjudged", "noEvidence", null],
+    ]);
+    expect(review.general.map((view) => [view.item.itemId, view.state])).toEqual([["health", "failed"]]);
+  });
+});
+
 describe("riskClaimsOf", () => {
   const activity = (activityId: string, body: string, code: string | null): CardActivity => ({
     activityId,

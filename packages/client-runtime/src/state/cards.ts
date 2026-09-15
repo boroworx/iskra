@@ -15,6 +15,7 @@ import {
   dismissCardAttention,
   forwardCardComment,
   keepCardRefs,
+  overrideCardVerifier,
   postCardMessage,
   removeCardRelation,
   restoreCardRefs,
@@ -54,6 +55,10 @@ export function createCardEnvironmentAtoms<R, E>(
     forwardComment: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:card:forward-comment",
       execute: forwardCardComment,
+    }),
+    overrideVerifier: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:card:override-verifier",
+      execute: overrideCardVerifier,
     }),
     dismissAttention: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:card:dismiss-attention",

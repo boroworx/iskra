@@ -13,6 +13,7 @@ import {
   type OrchestrationCardShell,
   type OrchestrationProjectShell,
   type ProjectId,
+  type ProjectOrchestration,
   type Reason,
   type RunSessionState,
   type CardPriority,
@@ -63,7 +64,12 @@ type CardDropDecision =
  * hand; a drop anywhere else snaps back with the reason. The server can still
  * refuse a decision (an open sub-card, a blocker) and its reason is shown then.
  */
-export function cardDropDecision(status: CardStatus, to: BoardColumn): CardDropDecision {
+export function cardDropDecision(
+  status: CardStatus,
+  to: BoardColumn,
+  /** Why the merge can't be approved yet, such as a verifier that hasn't passed. */
+  mergeRefusal: string | null = null,
+): CardDropDecision {
   if (boardColumnOf(status) === to) {
     return { kind: "none" };
   }
@@ -90,9 +96,11 @@ export function cardDropDecision(status: CardStatus, to: BoardColumn): CardDropD
             reason: "Only a ready card whose work has not started can go back to triage.",
           };
     case "landing":
-      return status === "inReview"
-        ? { kind: "command", type: "card.merge.approve" }
-        : { kind: "refuse", reason: "Only a card in review can be approved to merge." };
+      return status !== "inReview"
+        ? { kind: "refuse", reason: "Only a card in review can be approved to merge." }
+        : mergeRefusal !== null
+          ? { kind: "refuse", reason: mergeRefusal }
+          : { kind: "command", type: "card.merge.approve" };
     case "inReview":
       return status === "landing"
         ? { kind: "command", type: "card.merge.cancel" }
@@ -124,12 +132,19 @@ interface CardMoveAction {
 }
 
 /** A card's move buttons, from the same rules as a drop so a button and a drag never disagree. */
-export function cardMoveActions(status: CardStatus): ReadonlyArray<CardMoveAction> {
+export function cardMoveActions(
+  status: CardStatus,
+  mergeRefusal: string | null = null,
+): ReadonlyArray<CardMoveAction> {
   if (status === "landed") {
     return [];
   }
   return BOARD_COLUMNS.flatMap((column): CardMoveAction[] => {
-    const decision = cardDropDecision(status, column);
+    const decision = cardDropDecision(status, column, mergeRefusal);
+    // A merge held back by its verifier keeps its label, disabled with the reason.
+    if (decision.kind === "refuse" && column === "landing" && status === "inReview") {
+      return [{ column, label: CARD_DECISION_LABEL["card.merge.approve"], type: null, reason: decision.reason }];
+    }
     if (decision.kind === "none") {
       return [];
     }
@@ -350,7 +365,115 @@ export const REASON_LABEL: Readonly<Record<string, ReasonLabel>> = {
     label: "Merged on the host",
     hint: "A person merged its pull request on the host, which counts as approving it.",
   },
+  // The verifier: why this one checks the card, and what came of it.
+  differentProvider: {
+    label: "Different provider",
+    hint: "The verifier runs on another provider than the builder, so it doesn't share its blind spots.",
+  },
+  sameProviderVerifier: {
+    label: "Another model",
+    hint: "No other provider could verify here, so a different model on the builder's provider checks it.",
+  },
+  sameModelVerifier: {
+    label: "Same model, fresh session",
+    hint: "No other provider or model could verify here, so the builder's own model checks it from scratch.",
+  },
+  verifierFailed: {
+    label: "The verifier found criteria not met",
+    hint: "Its agent got the verifier's notes on the failed criteria and fixes them.",
+  },
+  verifierError: {
+    label: "The verifier didn't finish",
+    hint: "The verifier's session failed, even after a retry. Rerun it, or override it with a reason.",
+  },
+  verdictStale: {
+    label: "Verdict for an older commit",
+    hint: "The card changed after the verdict; the verifier checks the latest commit.",
+  },
+  verifierOverridden: {
+    label: "Verifier overridden",
+    hint: "A person let the card past its verifier and said why.",
+  },
+  // Runtime: journeys, services and setup.
+  journeyFailed: {
+    label: "Journey failed",
+    hint: "A user journey failed against the card's running services; its agent got the output.",
+  },
+  serviceDown: {
+    label: "Service down",
+    hint: "One of the card's services stopped answering on its port.",
+  },
+  previewDown: {
+    label: "Preview down",
+    hint: "The card's preview stopped answering on its port.",
+  },
+  setupTimedOut: {
+    label: "Setup timed out",
+    hint: "The card's setup script ran past its time limit.",
+  },
+  reactorFailed: {
+    label: "Iskra hit an error",
+    hint: "One of Iskra's steps failed on this card; its activity says which.",
+  },
+  exclusivePathBusy: {
+    label: "Waiting for shared files",
+    hint: "Another card is changing files only one card may change at a time; this one starts after it lands.",
+  },
+  previewHostConnected: {
+    label: "Screenshots captured",
+    hint: "A desktop app connected, so Iskra captured the screenshots review was missing.",
+  },
 };
+
+/** The approve-merge refusal while a required verifier hasn't passed, in the server's words. */
+export const VERIFIER_NOT_PASSED_TEXT = "The verifier hasn't passed every criterion yet.";
+export const OVERRIDE_REASON_REQUIRED_TEXT = "Say why you're overriding the verifier.";
+const OVERRIDE_STATE_TEXT = "Only a failed or pending verification can be overridden.";
+const VERIFIER_RUNNING_TEXT = "The verifier is already checking this commit.";
+const VERIFY_IN_REVIEW_TEXT = "Only a card in review is verified.";
+
+type VerificationFacts = Pick<OrchestrationCard, "status" | "verification" | "evidence">;
+
+/**
+ * Whether a card needs a passing verifier, as the server decides it: its project turned the
+ * verifier on, its builder's template always verifies, or a verification already started.
+ */
+export function cardVerificationRequired(
+  card: Pick<OrchestrationCard, "verification">,
+  policy: Pick<ProjectOrchestration, "verifier">,
+  builder: Pick<OrchestrationAgentShell, "blueprint"> | undefined,
+): boolean {
+  return (
+    policy.verifier.mode === "on" ||
+    builder?.blueprint?.verify === "always" ||
+    card.verification.state !== "off"
+  );
+}
+
+/** Why a person can't approve the merge for its verifier yet, or null (mirrors the decider). */
+export function verifierMergeRefusal(
+  card: Pick<OrchestrationCard, "verification" | "evidence">,
+  required: boolean,
+): string | null {
+  if (!required || card.verification.state === "overridden") return null;
+  return card.verification.state === "passed" &&
+    card.verification.headSha === (card.evidence?.headSha ?? null)
+    ? null
+    : VERIFIER_NOT_PASSED_TEXT;
+}
+
+/** Why the verifier can't be overridden now (a reason is checked apart, as the form types it). */
+export function overrideVerifierRefusal(card: VerificationFacts, required: boolean): string | null {
+  const state =
+    card.verification.state === "off" && required ? "pending" : card.verification.state;
+  return state === "failed" || state === "pending" ? null : OVERRIDE_STATE_TEXT;
+}
+
+/** Why the verifier can't be rerun now, or null. */
+export function rerunVerifierRefusal(card: VerificationFacts): string | null {
+  if (card.status !== "inReview") return VERIFY_IN_REVIEW_TEXT;
+  return card.verification.state === "running" ? VERIFIER_RUNNING_TEXT : null;
+}
 
 /**
  * The warning a card's start shows when the chosen agent can't write, in the scheduler's words;
@@ -699,6 +822,11 @@ export function needsYouItems(input: {
       .filter((project) => projectOrchestrationOf(project).sideEffectGuard.acknowledgedAt === null)
       .map((project) => project.id),
   );
+  const verifyingProjects = new Set(
+    (input.projects ?? [])
+      .filter((project) => projectOrchestrationOf(project).verifier.mode === "on")
+      .map((project) => project.id),
+  );
   for (const card of input.cards) {
     const base = {
       cardId: card.id,
@@ -867,7 +995,15 @@ export function needsYouItems(input: {
               .map((flag) => `${flag.path}: ${flag.detail}`)
               .join("; "),
           });
-        } else if (card.evidence.passed && (card.evidence.pendingCi ?? []).length === 0) {
+        } else if (
+          card.evidence.passed &&
+          (card.evidence.pendingCi ?? []).length === 0 &&
+          // A verifier still checking, or failed, holds the merge; the card waits on it, not a person.
+          verifierMergeRefusal(
+            card,
+            verifyingProjects.has(card.projectId) || card.verification.state !== "off",
+          ) === null
+        ) {
           // With CI still pending the merge is refused, so the card waits on CI, not a person.
           add({
             ...base,

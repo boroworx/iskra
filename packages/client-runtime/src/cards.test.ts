@@ -1,6 +1,8 @@
 import {
+  AUTOMATION_REASON_CODES,
   AgentId,
   CardId,
+  DEFAULT_PROJECT_ORCHESTRATION,
   LEGACY_CARD_CONTRACT,
   ProjectId,
   ThreadId,
@@ -14,9 +16,14 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   BOARD_COLUMNS,
   REASON_LABEL,
+  VERIFIER_NOT_PASSED_TEXT,
   cardBadges,
   cardDropDecision,
   cardMoveActions,
+  cardVerificationRequired,
+  overrideVerifierRefusal,
+  rerunVerifierRefusal,
+  verifierMergeRefusal,
   cardWaitItems,
   delegateReadOnlyWarning,
   elicitationAnswer,
@@ -159,6 +166,108 @@ describe("cardMoveActions", () => {
     expect(cardMoveActions("ready").find((action) => action.column === "inProgress")?.reason).toBe(
       "Work starts when the card's agent starts its first session; assign an agent instead.",
     );
+  });
+
+  it("keeps Approve merge disabled with the verifier's reason until it passes", () => {
+    const merge = cardMoveActions("inReview", VERIFIER_NOT_PASSED_TEXT).find(
+      (action) => action.column === "landing",
+    );
+    expect(merge).toEqual({
+      column: "landing",
+      label: "Approve merge",
+      type: null,
+      reason: "The verifier hasn't passed every criterion yet.",
+    });
+    expect(cardDropDecision("inReview", "landing", VERIFIER_NOT_PASSED_TEXT).kind).toBe("refuse");
+  });
+});
+
+describe("verifier refusals", () => {
+  const verification = (
+    state: OrchestrationCard["verification"]["state"],
+    headSha: string | null = "abc",
+  ): OrchestrationCard["verification"] => ({
+    state,
+    headSha,
+    verdictId: null,
+    verifier: null,
+    satisfaction: null,
+    override: null,
+  });
+  const evidence = (headSha: string): OrchestrationCard["evidence"] => ({
+    evidenceId: "e1",
+    headSha,
+    purpose: "review",
+    passed: true,
+    checkCount: 1,
+    failedChecks: [],
+    unavailable: [],
+    flags: [],
+    flagsAcknowledgedAt: null,
+    recordedAt: at(1),
+  });
+  const reviewed = (state: OrchestrationCard["verification"]["state"], headSha = "abc") =>
+    card("v", { status: "inReview", verification: verification(state), evidence: evidence(headSha) });
+  const off = { verifier: { mode: "off" as const } };
+  const on = { verifier: { mode: "on" as const } };
+
+  it("requires the verifier from the project, the builder's template or a started verification", () => {
+    expect(cardVerificationRequired(reviewed("off"), off, undefined)).toBe(false);
+    expect(cardVerificationRequired(reviewed("off"), on, undefined)).toBe(true);
+    expect(
+      cardVerificationRequired(reviewed("off"), off, {
+        blueprint: { preflight: "none", uiCapture: "auto", uiPaths: [], verify: "always" },
+      }),
+    ).toBe(true);
+    expect(cardVerificationRequired(reviewed("running"), off, undefined)).toBe(true);
+  });
+
+  it("holds the merge until the verifier passed the latest commit or a person overrode it", () => {
+    expect(verifierMergeRefusal(reviewed("off"), true)).toBe(VERIFIER_NOT_PASSED_TEXT);
+    expect(verifierMergeRefusal(reviewed("failed"), true)).toBe(VERIFIER_NOT_PASSED_TEXT);
+    expect(verifierMergeRefusal(reviewed("passed", "newer"), true)).toBe(VERIFIER_NOT_PASSED_TEXT);
+    expect(verifierMergeRefusal(reviewed("passed"), true)).toBeNull();
+    expect(verifierMergeRefusal(reviewed("overridden"), true)).toBeNull();
+    expect(verifierMergeRefusal(reviewed("off"), false)).toBeNull();
+  });
+
+  it("overrides only a failed or pending verification, and reruns only an idle one in review", () => {
+    expect(overrideVerifierRefusal(reviewed("failed"), true)).toBeNull();
+    expect(overrideVerifierRefusal(reviewed("off"), true)).toBeNull();
+    expect(overrideVerifierRefusal(reviewed("passed"), true)).toBe(
+      "Only a failed or pending verification can be overridden.",
+    );
+    expect(rerunVerifierRefusal(reviewed("failed"))).toBeNull();
+    expect(rerunVerifierRefusal(reviewed("running"))).toBe(
+      "The verifier is already checking this commit.",
+    );
+    expect(rerunVerifierRefusal({ ...reviewed("failed"), status: "inProgress" })).toBe(
+      "Only a card in review is verified.",
+    );
+  });
+
+  it("doesn't ask for a merge while a verifier still checks or failed the card", () => {
+    const now = Date.parse(at(10));
+    const kinds = (cards: ReadonlyArray<OrchestrationCard>, verifier: "off" | "on") =>
+      needsYouItems({
+        cards,
+        sessions: [],
+        projects: [
+          {
+            id: projectId,
+            orchestration: {
+              ...DEFAULT_PROJECT_ORCHESTRATION,
+              sideEffectGuard: { acknowledgedAt: at(0), killSwitchEnv: null },
+              verifier: { mode: verifier },
+            },
+          },
+        ],
+        now,
+      }).map((item) => item.kind);
+    expect(kinds([reviewed("off")], "off")).toEqual(["readyToMerge"]);
+    expect(kinds([reviewed("off")], "on")).toEqual([]);
+    expect(kinds([reviewed("running")], "off")).toEqual([]);
+    expect(kinds([reviewed("passed")], "on")).toEqual(["readyToMerge"]);
   });
 });
 
@@ -679,7 +788,7 @@ describe("reasonLabel", () => {
   ];
 
   it("gives every emitted code a short label and a tooltip", () => {
-    const missing = EMITTED_CODES.filter(
+    const missing = [...EMITTED_CODES, ...AUTOMATION_REASON_CODES].filter(
       (code) => !Object.hasOwn(REASON_LABEL, code) || REASON_LABEL[code]!.hint.length === 0,
     );
     expect(missing).toEqual([]);

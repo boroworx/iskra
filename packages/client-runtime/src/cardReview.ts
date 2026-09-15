@@ -8,6 +8,8 @@ import {
   type CardId,
   type CardRiskClaims,
   type CardScopeFlag,
+  type CardVerdict,
+  type CardVerdictCriterion,
   type ProjectOrchestration,
   type Reason,
 } from "@iskra/contracts";
@@ -43,6 +45,8 @@ export interface CriterionReview {
   readonly criterion: CardCriterion;
   readonly state: CriterionState;
   readonly items: ReadonlyArray<EvidenceItemView>;
+  /** The verifier's judgement of it, when the verdict covers it. */
+  readonly verdict: CardVerdictCriterion | null;
 }
 
 export const CRITERION_STATE_LABEL: Record<CriterionState, string> = {
@@ -102,7 +106,7 @@ function evidenceItemState(item: CardEvidenceItem): EvidenceItemState {
     ? "pending"
     : item.unavailable !== null
       ? "unavailable"
-      : item.kind === "check"
+      : item.kind === "check" || item.kind === "journey"
       ? item.exitCode === 0 && !item.timedOut
           ? "passed"
           : "failed"
@@ -115,7 +119,10 @@ export function evidenceItemView(item: CardEvidenceItem, cardId: CardId): Eviden
     state: evidenceItemState(item),
     unavailableText: item.unavailable === null ? null : unavailableText(item.unavailable),
     artifact: evidenceArtifactResource(item.artifactPath, cardId),
-    log: item.kind === "check" ? checkLogResource(item.artifactPath, cardId) : null,
+    log:
+      item.kind === "check" || item.kind === "journey"
+        ? checkLogResource(item.artifactPath, cardId)
+        : null,
   };
 }
 
@@ -123,11 +130,13 @@ export function evidenceItemView(item: CardEvidenceItem, cardId: CardId): Eviden
  * Review organized by acceptance criteria: each criterion with the evidence recorded for it, and
  * the evidence tied to no criterion (such as the project checks) apart. A manual criterion always
  * needs a person's check, whatever evidence sits under it; the diff is secondary to all of this.
+ * A verdict, when given for the same commit, decides each automated criterion it judged.
  */
 export function reviewByCriterion(input: {
   readonly cardId: CardId;
   readonly criteria: ReadonlyArray<CardCriterion>;
   readonly items: ReadonlyArray<CardEvidenceItem>;
+  readonly verdict?: Pick<CardVerdict, "criteria"> | null;
 }): {
   readonly criteria: ReadonlyArray<CriterionReview>;
   readonly general: ReadonlyArray<EvidenceItemView>;
@@ -144,10 +153,16 @@ export function reviewByCriterion(input: {
     generalChecks.length > 0 && generalChecks.every((view) => view.state === "passed");
   const criteria = input.criteria.map((criterion): CriterionReview => {
     const items = views.filter((view) => view.item.criterionId === criterion.id);
+    const verdict =
+      input.verdict?.criteria.find((entry) => entry.criterionId === criterion.id) ?? null;
     const state: CriterionState =
       criterion.verification === "manual"
         ? "needsYourCheck"
-        : items.length === 0
+        : verdict !== null
+          ? verdict.pass
+            ? "passed"
+            : "failed"
+          : items.length === 0
           ? checksPassed
             ? "coveredByChecks"
             : "noEvidence"
@@ -158,7 +173,7 @@ export function reviewByCriterion(input: {
               : items.some((view) => view.state === "unavailable")
                 ? "unavailable"
                 : "passed";
-    return { criterion, state, items };
+    return { criterion, state, items, verdict: criterion.verification === "manual" ? null : verdict };
   });
   return { criteria, general };
 }
