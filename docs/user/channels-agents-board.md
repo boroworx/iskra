@@ -13,6 +13,13 @@ gets an owner agent that works on it in its own session. You review the work, an
   first, open the card and choose **Capture evidence** under Review: Iskra runs the checks on its
   current commit and records the result without moving the card.
 
+## Guided first run
+
+To see the whole loop before using your own project, choose **Guided first run** in the command
+palette. It creates a small sample app with a failing test, its checks, and three agents, and walks
+you through reviewing its side-effect guard, approving and starting its card, watching it reach
+review, and approving the merge. Each step ticks off as it happens.
+
 ## Channels
 
 Create a channel from **+** next to Channels in the sidebar, or with **New channel** in the command
@@ -235,6 +242,55 @@ Checks that only run in CI need a pull request. A card enters review with those 
 pending, and its merge waits until CI reports on its latest commit. Without a remote, such a
 project's cards can't enter review.
 
+### Plan cards
+
+For work too big for one card, create a card with kind **Plan** and give it acceptance criteria.
+Assign it an agent with the coordinator role and approve it. The coordinator reads the project and
+proposes child cards, grouped into slices, with what each depends on. It can't change anything or
+approve its own plan.
+
+Needs you shows **Plan to approve**. The card's **Plan** section lists the children by slice, with
+their criteria and suggested agent. **Approve plan** creates them all, ready to start, or
+**Redirect** tells the coordinator what to change and it proposes a new revision to approve.
+
+Children land into the plan's own branch, never the base branch. A child waits on the children it
+depends on, and children in a later slice show **Held for slice checkpoint** until you continue:
+when a slice lands, Needs you asks **A plan slice landed; continue?** with **Continue**,
+**Redirect**, or **Stop**. When every child has landed, the plan card goes to review with one pull
+request for the whole plan, and you approve its merge. Children spend from the plan's budget.
+
+### Migration cards
+
+To make one change across many files, create a card with kind **Migration**, with the command that
+prints one item per line and the instructions for each item. Iskra runs the command, starts a sample
+of three items as child cards, and then waits: check the sample's cards, change the instructions if
+they need it with **Save instructions**, and choose **Sweep the rest**. Items then start in batches as
+session slots allow. An item that keeps failing is marked blocked and the rest carry on. A migration
+lists at most 1000 items; split a longer one.
+
+### Undo, revert, and restore
+
+- **Undo**: pausing, abandoning, sending a card back to triage, snoozing, and adding a relation each
+  show a toast with **Undo** for a few seconds.
+- **Revert**: on a landed card, **Revert…** under Outcome makes a new card that reverts its commit,
+  runs the checks, and goes straight to review without an agent. You approve its merge like any
+  other. If the revert conflicts, Needs you offers **Assign an agent** to resolve it.
+- **Restore**: on a paused card, choose a turn and **Restore** to put its worktree back to how it was
+  before that turn of its agent. Pause the card first; Iskra refuses while its agent is working.
+
+### Outcomes
+
+A week after a card lands, Iskra labels how it turned out: **Success**, **Flawed** if it was reverted
+or broke CI on the base branch, or **Manual** if a person changed its branch outside Iskra. A card
+abandoned after its fix rounds ran out or its session failed is **Blocked** at once. These are
+heuristics; set the outcome yourself under **Outcome** with a note saying why.
+
+A flawed card shows in Needs you with **Add hidden scenario**, prefilled from its criteria, so the
+verifier checks future cards for the same mistake.
+
+The same records show as a hint in **Before it starts** and on an agent's page, for example
+"@builder: 8/10 merged, 1 flawed, $3.40 per merged card" over the last 30 days.
+
 ### Branches or tags changed outside a card
 
 An agent's shell can reach the repository's other branches. If a branch or tag other than the card's
@@ -248,7 +304,10 @@ back on its own, since you may have made them yourself. Choose **Restore** to pu
 cards to approve, specs to review, open cards with no agent or no acceptance criteria, cards whose
 agent can only read, questions from agents, comments on a card's pull request from
 people outside the repository, merges the host refused, verifiers that didn't finish, card services
-or previews that went down, and branches or tags that changed outside a card while its agent worked. Decide most of them right in the list: answer a question in one click,
+or previews that went down, branches or tags that changed outside a card while its agent worked,
+plans to approve, plan slices that landed, lessons agents proposed, flawed outcomes, conflicting
+reverts, and monthly budgets that hold work. Decide most of them right in the list: answer a question in one click,
+approve or dismiss a lesson,
 forward a comment to the agent or dismiss it, retry a landing, rerun a verifier, restart a card's
 services, or restore or keep changed refs and then resume the card. **Approve & start** on a proposal starts it with the owner you pick.
 
@@ -280,6 +339,47 @@ open **Edit** to see or change one. Owners only learn how many scenarios failed.
 verifier's session keeps them in its history on this machine, so anyone who opens that session can
 read them, and a provider that can't keep an agent out of
 Iskra's data folder, like Codex, can't run agents here for that reason.
+
+### Auto-merge
+
+**Auto-merge**, off by default, lands cards without a click. It needs the [verifier](#verifier) on,
+so Iskra refuses to turn it on otherwise. A card then lands on its own only when its checks and
+evidence pass, the verifier passed its latest commit, at least one hidden scenario ran, and at least
+the share set under **Scenarios held** passed. A card still waits for you when it has flagged changes
+to acknowledge, when a person overrode its verifier, or when a trigger started it. Its activity says
+why it waits.
+
+### Triggers
+
+**Triggers** turn outside events into cards:
+
+- **CI fails on a branch**: a failed CI run on the base branch, or the branch you name.
+- **A pull request comment mentions @iskra**: on a pull request no card owns. Only comments from
+  people with write access to the repository count; others are refused and listed under **Recent
+  fires**.
+- **On a schedule**: a cron expression in a time zone.
+
+Each trigger has the title, spec, and acceptance criteria of the cards it makes. The text that
+fired it, such as the comment, is added to the spec as untrusted input for the agent to read, never
+as instructions. Criteria always come from the trigger. Cards go to triage, except that a schedule
+trigger with criteria and an agent may **Start work** on its own. That work opens a draft pull request
+and always waits for a person to merge it. The same event never makes two cards.
+
+### Budgets
+
+**Budgets** shows what the project spent this month, by agent, counting cards, channel leads, and
+conversations. Set a monthly cap for the project and for each agent, and the budget new cards start
+with. At a cap, new work waits with **Budget reached**, messages to agents are refused with the reason,
+and Needs you links here to raise it. A turn that runs well past a cap is interrupted and its card
+paused. The whole machine's monthly budget across projects is under **Card runtime** in Connections
+settings. A new month starts from zero.
+
+### Knowledge
+
+While they work, agents can propose lessons about the project, such as a command that must run before
+the tests. Lessons wait in Needs you and under **Knowledge** until you **Approve** or **Dismiss** them.
+An approved lesson goes into the brief of every card that touches its paths, or every card when it
+names none. **Remove** takes one back.
 
 ### Network for agent shells
 
