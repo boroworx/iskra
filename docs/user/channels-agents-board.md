@@ -59,22 +59,55 @@ palette. Each agent is a Markdown file in the project's `.iskra/agents` folder. 
 editing the agent's settings change the same thing.
 
 Open an agent's settings from the gear on its sidebar row or on its page. There you can set its
-name, model, role, tags, and capabilities. Only Claude models can run agents on cards. Capabilities
-apply to card sessions. A new agent can read, write, and run shell commands; network is off. An
-agent without write can't work on cards, so its cards wait until you give it write. Channel
-conversations and direct messages can read the project but never change it.
+name, model, role, tags, roles, and capabilities. Capabilities apply to card sessions. A new agent
+can read, write, and run shell commands; network is off. An agent without write can't work on cards,
+so its cards wait until you give it write. Channel conversations and direct messages can read the
+project but never change it.
 
 **Archive** deletes the agent's file. Archived agents are listed under **Archived** in the Agents
 group, and their settings offer **Unarchive**.
 
+### Models and providers
+
+An agent's model can be on any provider that can enforce what the agent may do. Under
+**Capabilities**, the settings say what the chosen provider's runs can do, or why they can't run,
+and **Save** stays off until the two agree:
+
+- **Claude** runs can read, edit, use a shell, and reach the domains the project allows.
+- **OpenCode** runs can read and edit files but can't use a shell or the network. That suits
+  verifiers, helpers, and critics; an agent that builds with shell commands stays on Claude. An
+  OpenCode instance set to use an external server can't run agents.
+- **Codex** models are listed but can't run agents yet.
+
+### Roles
+
+Roles say what an agent may be asked to do. Each piece of work is its own session of the agent, so
+one agent can work on a card, answer in two channels, and verify another card at once.
+
+- **Builder** works on cards.
+- **Lead** turns channel requests into cards.
+- **Helper** answers a builder's question.
+- **Critic** critiques a card's spec or diff.
+- **Verifier** checks cards in review against their criteria.
+
+Agents made before roles keep builder, lead, helper, and critic. Verifying is something you turn on
+for an agent.
+
+For a builder, **Verified by** names the agent that checks its cards first; **Automatic** lets Iskra
+choose (see [Verifier](#verifier)). **Blueprint** adds steps to its cards: **Preflight** runs
+targeted checks before the full checks, **Screenshots** chooses when review captures the preview,
+**UI paths** lists pages to capture, and **Verify its cards** can require the verifier even when the
+project doesn't. A blueprint only adds steps; checks, journeys, and the scope judge always run.
+
 ### Direct messages
 
 Select an agent in the sidebar to message it directly. The agent can read the project but not
-change it; changes need a card. If the agent is busy in a channel, your message waits in a queue,
-and the agent picks it up when that conversation ends.
+change it; changes need a card. A message starts its own session right away, even while the agent
+works somewhere else. When every session slot on this machine is taken, it waits for one.
 
-**Sessions** on the agent's page lists its work in channels and on cards. Stop a live session
-there, or choose it as the composer's target to message it.
+**Live now** on the agent's page lists what it is doing at the moment and where. **Sessions** lists
+its work in channels and on cards. Stop a live session there, or choose it as the composer's target
+to message it.
 
 ## The board
 
@@ -127,6 +160,13 @@ the card or in Needs you, with one click or in your own words.
 Before a costly direction, an owner can ask for a checkpoint. Iskra captures evidence of the work so
 far, and you choose **Continue**, **Redirect** with a note, or **Stop**, which pauses the card.
 
+### Helpers and critics
+
+While it works, an owner can ask a helper a question or ask a critic to look at its spec or its
+diff. The answer comes back to the owner as its next message, and shows on the card's activity. A
+card has at most two helper or critic sessions open at once. Only agents with the helper or critic
+role are asked, and they can read the project but not change it.
+
 ### Review
 
 Agents can't move their own cards into review. When an owner asks for review, Iskra commits what it
@@ -143,6 +183,30 @@ such as deleted tests before approving the merge.
 
 A project without checks can't send cards to review. Add check scripts, or turn on **Review without
 checks** in [project orchestration](#project-orchestration) for a project with nothing to run.
+
+### Verifier
+
+Turn on **Verifier** in [project orchestration](#project-orchestration), or set a builder's
+blueprint to always verify its cards. A card entering review is then checked by a second agent before
+you can approve its merge. The verifier sees the criteria, the evidence, and the diff, but not the
+owner's plan, decisions, or messages.
+
+Iskra picks the verifier in this order: the builder's **Verified by** agent, an agent with the
+verifier role on another provider that can run it, another model on the builder's provider, and
+last the builder's own model in a fresh session. Review names the verifier and says which of these
+it is.
+
+Review then shows each criterion as passed or failed with the verifier's note, its concerns about
+the diff, and how many [hidden scenarios](#hidden-scenarios) held. A failed verdict sends the card
+back to its owner with the notes, which counts as a review fix round. **Approve merge** stays off,
+saying so, until the verifier passes the card's latest commit.
+
+- **Rerun verifier** checks the latest commit again. It is also in the command palette for cards in
+  review.
+- **Override** lets the card merge without a passing verdict. Say why; the reason stays on the card.
+
+If the verifier's session fails twice, Needs you shows **The verifier didn't finish** with **Rerun
+verifier**.
 
 ### Fix rounds
 
@@ -183,8 +247,8 @@ back on its own, since you may have made them yourself. Choose **Restore** to pu
 **Needs you** at the top of the sidebar collects everything waiting on you across projects:
 cards to approve, specs to review, open cards with no agent or no acceptance criteria, cards whose
 agent can only read, questions from agents, comments on a card's pull request from
-people outside the repository, merges the host refused, and branches or tags that changed outside a
-card while its agent worked. Decide most of them right in the list: answer a question in one click,
+people outside the repository, merges the host refused, verifiers that didn't finish, card services
+or previews that went down, and branches or tags that changed outside a card while its agent worked. Decide most of them right in the list: answer a question in one click,
 forward a comment to the agent or dismiss it, retry a landing, or restore or keep changed refs and
 then resume the card. **Approve & start** on a proposal starts it with the owner you pick.
 
@@ -193,7 +257,8 @@ then resume the card. **Approve & start** on a proposal starts it with the owner
 Choose the project in the Settings breadcrumb (see [settings](./project-settings.md)) to find its
 **Agent orchestration** section. It sets the base branch cards
 start from and land into, how cards land, the project's session cap, how many agent pull requests may
-wait for review, fix rounds, **Review without checks**, and the sections below.
+wait for review, fix rounds, **Review without checks**, the [verifier](#verifier), and the sections
+below.
 
 ### Side-effect guard
 
@@ -202,6 +267,18 @@ check the project's scheduled jobs and workers for anything that could act on re
 which outbound APIs it calls (publishing, email, payments) and deny the risky ones, and optionally
 name the environment variable that turns those actions off, after verifying that the code reads it.
 Projects created before this update need it too.
+
+### Hidden scenarios
+
+**Hidden scenarios** are checks only the verifier knows about, so an owner can't write its work to
+pass them. Add one with a title and either a description of what to check or a command to run, with
+a time limit of up to 30 minutes. A command runs in the verifier's copy of the card, and passes when
+it exits 0.
+
+Scenarios are stored on the machine running Iskra, never in the repository. The list shows titles;
+open **Edit** to see or change one. Owners only learn how many scenarios failed. The limits: anyone
+who opens the verifier's session can read them, and a provider that can't keep an agent out of
+Iskra's data folder, like Codex, can't run agents here for that reason.
 
 ### Network for agent shells
 
@@ -276,6 +353,15 @@ change an agent makes to it on its own branch has no effect until it is merged:
   gets 10 minutes by default and 60 at most, and a timeout keeps the end of its output. `source` is
   `local`, `ci` (read from the pull request's checks), or `both`. Without a checks list, the
   project's scripts with the check role run instead.
+- **Journeys** run after the checks against the card's running services, such as
+  `{ "id": "health", "name": "Health", "command": "node journey.js" }`, with the card's ports in
+  `ISKRA_PORT_<NAME>`. Each gets 10 minutes by default and 60 at most.
+  A failing journey sends the card back to its owner. Review lists each journey with its output,
+  and a local landing runs them again after rebasing.
+
+If the server restarts, Iskra starts a card's services again when the card next needs them. When a
+service or the preview stops answering while a card is in review, Needs you shows **Service down**
+or **Preview down**.
 
 ## Secrets
 
