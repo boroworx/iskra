@@ -54,6 +54,11 @@ export const WAITING_FOR_CAPACITY: Reason = {
   text: "Waiting for machine capacity",
 };
 
+export const WAITING_FOR_MEMORY: Reason = {
+  code: "waitingForMemory",
+  text: "Waiting for the machine to free memory",
+};
+
 /** How long a denied heavy job waits before the machine is asked again. */
 export const ADMISSION_RETRY = "15 seconds";
 
@@ -131,8 +136,8 @@ interface Entry {
   startedAt: number | null;
   admit: Deferred.Deferred<void>;
   cancel: Deferred.Deferred<HeavyJobCancel>;
-  // Whether the card currently shows this job's wait reason.
-  noted: boolean;
+  // The wait reason code the card currently shows for this job, if any.
+  noted: Reason["code"] | null;
 }
 
 const byQueueOrder = (a: Entry, b: Entry) =>
@@ -206,10 +211,11 @@ export const make = (sample: Effect.Effect<HostSample>) =>
           thresholds: runtime.admission,
         });
         if (!admission.ok) {
+          const reason = admission.reason === "memory" ? WAITING_FOR_MEMORY : WAITING_FOR_CAPACITY;
           for (const entry of waiting) {
-            if (!entry.noted) {
-              entry.noted = true;
-              notes.push([entry, WAITING_FOR_CAPACITY]);
+            if (entry.noted !== reason.code) {
+              entry.noted = reason.code;
+              notes.push([entry, reason]);
             }
           }
           break;
@@ -217,8 +223,8 @@ export const make = (sample: Effect.Effect<HostSample>) =>
         waiting.shift();
         head.startedAt = now;
         running.push(head);
-        if (head.noted) {
-          head.noted = false;
+        if (head.noted !== null) {
+          head.noted = null;
           notes.push([head, null]);
         }
         yield* Deferred.succeed(head.admit, undefined);

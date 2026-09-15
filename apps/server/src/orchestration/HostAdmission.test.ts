@@ -55,9 +55,12 @@ const job = (name: string, priority: HeavyJob["priority"], cardId?: string): Hea
 
 const makeWorld = Effect.gen(function* () {
   const freeMem = yield* Ref.make(0.5);
+  const load = yield* Ref.make(1);
   const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationCommand>>([]);
   const layer = layerWithSample(
-    Effect.map(Ref.get(freeMem), (freeMemRatio) => ({ load1: 1, cores: 8, freeMemRatio })),
+    Effect.gen(function* () {
+      return { load1: yield* Ref.get(load), cores: 8, freeMemRatio: yield* Ref.get(freeMem) };
+    }),
   ).pipe(
     Layer.provide(
       Layer.mock(OrchestrationEngineService)({
@@ -67,7 +70,7 @@ const makeWorld = Effect.gen(function* () {
     ),
     Layer.provide(ServerSettings.layerTest()),
   );
-  return { freeMem, dispatched, layer };
+  return { freeMem, load, dispatched, layer };
 });
 
 const until = (predicate: (snapshot: HostAdmissionSnapshot) => boolean) =>
@@ -126,7 +129,7 @@ describe("HostAdmission", () => {
 
   it.effect("holds a job while memory is short, notes why on its card, and runs it once memory frees", () =>
     Effect.gen(function* () {
-      const { freeMem, dispatched, layer } = yield* makeWorld;
+      const { freeMem, load, dispatched, layer } = yield* makeWorld;
       yield* Effect.gen(function* () {
         const admission = yield* HostAdmission;
         yield* Ref.set(freeMem, 0.1);
@@ -134,17 +137,27 @@ describe("HostAdmission", () => {
           .run(job("checks", 2, "card-a"), Effect.succeed("ran"))
           .pipe(Effect.forkChild);
         yield* until((snapshot) => snapshot.waiting.length === 1 && snapshot.memoryPressureSince !== null);
-        expect(waitNotes(yield* Ref.get(dispatched))).toEqual([["card-a", "waitingForCapacity"]]);
+        expect(waitNotes(yield* Ref.get(dispatched))).toEqual([["card-a", "waitingForMemory"]]);
 
         // Still short at the next retry: nothing runs and the note is not repeated.
         yield* TestClock.adjust(ADMISSION_RETRY);
         expect((yield* admission.snapshot).waiting).toHaveLength(1);
         expect(waitNotes(yield* Ref.get(dispatched))).toHaveLength(1);
 
+        // Memory frees but the load is high: the card says the new reason.
         yield* Ref.set(freeMem, 0.5);
+        yield* Ref.set(load, 9);
+        yield* TestClock.adjust(ADMISSION_RETRY);
+        expect(waitNotes(yield* Ref.get(dispatched))).toEqual([
+          ["card-a", "waitingForMemory"],
+          ["card-a", "waitingForCapacity"],
+        ]);
+
+        yield* Ref.set(load, 1);
         yield* TestClock.adjust(ADMISSION_RETRY);
         expect(yield* Fiber.join(waiting)).toBe("ran");
         expect(waitNotes(yield* Ref.get(dispatched))).toEqual([
+          ["card-a", "waitingForMemory"],
           ["card-a", "waitingForCapacity"],
           ["card-a", null],
         ]);

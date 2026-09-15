@@ -24,7 +24,7 @@ import {
 } from "./cardRules.ts";
 import { areaOverlapsGlob, exclusivePathConflicts } from "./CardWorkspace.ts";
 import { budgetCardOf } from "./decider.ts";
-import { priorityRank } from "./HostAdmission.ts";
+import { priorityRank, WAITING_FOR_MEMORY } from "./HostAdmission.ts";
 import { busyRunsOf, holdsSlot } from "./wakeRouting.ts";
 
 /** An idle owner whose card waited this long on a person's answer is stopped to free its slot. */
@@ -47,10 +47,7 @@ export const SCHEDULER_WAIT_CODES = [
 ] as const;
 export type SchedulerWaitCode = (typeof SCHEDULER_WAIT_CODES)[number];
 
-export const WAITING_FOR_MEMORY: Reason = {
-  code: "waitingForMemory",
-  text: "Waiting for the machine to free memory",
-};
+export { WAITING_FOR_MEMORY };
 
 const SIDE_EFFECT_GUARD_WAIT: Reason = {
   code: "sideEffectGuard",
@@ -280,7 +277,9 @@ export function planStarts(input: PlanStartsInput): StartPlan {
     const next = desired.get(card.id) ?? null;
     const current = card.waitReason;
     if (next === null) {
-      return current !== null && schedulerCodes.has(current.code)
+      // A heavy job waiting on memory notes the same code on its card; it clears its own note.
+      const admissionOwned = input.memoryPressure && current?.code === WAITING_FOR_MEMORY.code;
+      return current !== null && schedulerCodes.has(current.code) && !admissionOwned
         ? [{ cardId: card.id, reason: null }]
         : [];
     }
