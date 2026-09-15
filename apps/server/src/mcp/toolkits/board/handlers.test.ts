@@ -524,6 +524,12 @@ describe("board toolkit handlers", () => {
           },
         },
       ]);
+      // A request to plan work becomes one plan card for a coordinator.
+      yield* lead.call("propose_triage_card", { ...triageInput, kind: "plan" }, ["lead"]);
+      expect((yield* Ref.get(lead.commands)).at(-1)).toMatchObject({
+        type: "card.propose",
+        kind: "plan",
+      });
       expect(
         yield* lead.call("propose_card", { title: "Other", spec: "" }, ["lead"]).pipe(Effect.flip),
       ).toMatchObject({ _tag: "McpCapabilityUnavailableError", capability: "board" });

@@ -252,6 +252,7 @@ const make = Effect.gen(function* () {
           criteria: criteriaOf(input.criteria),
           estimate: input.estimate,
           premise: input.premise,
+          ...(input.kind === undefined ? {} : { kind: input.kind }),
           lead: {
             sourceMessageId: session.triggerMessageId,
             reasoning: input.reasoning,

@@ -347,6 +347,12 @@ const ProposeTriageCardTool = Tool.make("propose_triage_card", {
       }),
     ),
     tags: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+    kind: Schema.optional(
+      Schema.Literals(["task", "plan"]).annotate({
+        description:
+          "plan for a request to plan, break down or map out work as cards: once a person approves it, a coordinator agent proposes its child cards. task, the default, for one piece of work.",
+      }),
+    ),
   }),
   success: Schema.Struct({ cardId: Schema.String }),
   failure: BoardToolError,

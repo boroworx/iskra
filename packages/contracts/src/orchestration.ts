@@ -3541,6 +3541,8 @@ const CardProposeCommand = Schema.Struct({
   premise: Schema.optional(CardPremise),
   // A builder's sub-card of its own card: ready at once, on the parent's budget and spec approval.
   subCard: Schema.optional(Schema.Boolean),
+  // A lead proposes a plan card for a request to plan or break down work; a task otherwise.
+  kind: Schema.optional(Schema.Literals(["task", "plan"])),
   createdAt: IsoDateTime,
 });
 

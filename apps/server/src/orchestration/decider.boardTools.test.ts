@@ -133,6 +133,55 @@ it.layer(NodeServices.layer)("decider board tools", (it) => {
       }),
   );
 
+  it.effect("proposes a plan card for a coordinator, dropping a suggested owner that can't coordinate", () =>
+    Effect.gen(function* () {
+      const channelId = ChannelId.make("channel-general");
+      const coordinator = AgentId.make("agent-coordinator");
+      const readModel = yield* applyCommands([
+        ...setup,
+        createAgent(coordinator, { name: "coordinator", roles: ["coordinator"] }),
+        createChannel(channelId, "channel", [backend], reviewer),
+      ]);
+      const proposePlan = (suggestedAgentName: string): OrchestrationCommand => ({
+        type: "card.propose",
+        commandId: nextCommandId(),
+        cardId: CardId.make("card-v1-plan"),
+        agentId: reviewer,
+        projectId,
+        channelId,
+        title: "Plan what's left for v1",
+        spec: "Break the remaining v1 work into cards.",
+        tags: [],
+        kind: "plan",
+        criteria: [{ id: "c1", text: "Every v1 blocker has a child card.", verification: "manual" }],
+        lead: {
+          sourceMessageId: MessageId.make("message-v1"),
+          reasoning: "The message asks for a plan of the remaining v1 work.",
+          likelyDuplicateCardIds: [],
+          suggestedAgentName,
+        },
+        createdAt: now,
+      });
+
+      const [planned] = yield* decide(readModel, proposePlan("coordinator"));
+      expect(planned).toMatchObject({
+        type: "card.created",
+        payload: { kind: "plan", status: "triage", suggestedAgentId: coordinator },
+      });
+      const proposed = yield* applyCommands([
+        ...setup,
+        createAgent(coordinator, { name: "coordinator", roles: ["coordinator"] }),
+        createChannel(channelId, "channel", [backend], reviewer),
+        proposePlan("coordinator"),
+      ]);
+      expect(cardIn(proposed, "card-v1-plan")).toMatchObject({ kind: "plan", status: "triage" });
+
+      // A builder can't own a plan, so the suggestion is dropped rather than refused.
+      const [builderSuggested] = yield* decide(readModel, proposePlan("backend"));
+      expect(builderSuggested).toMatchObject({ payload: { kind: "plan", suggestedAgentId: null } });
+    }),
+  );
+
   it.effect("records a Requests lead's proposal in Requests, so its notes post there", () =>
     Effect.gen(function* () {
       const channelId = requestsChannelId(projectId);
