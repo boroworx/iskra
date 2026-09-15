@@ -67,7 +67,7 @@ const ROW =
 
 /** A row's hover-only control, such as a channel's settings. */
 const ROW_ACTION =
-  "absolute top-0.5 right-1 flex size-6 items-center justify-center rounded-md text-tertiary-label opacity-0 outline-hidden ring-ring group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100 pointer-coarse:opacity-100 hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 [&>svg]:size-3.5";
+  "absolute top-0 right-0.5 flex size-7 items-center justify-center rounded-md text-tertiary-label opacity-0 outline-hidden ring-ring group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100 pointer-coarse:opacity-100 hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 [&>svg]:size-3.5";
 
 /** A project's tile: its initials on Iskra blue. */
 function ProjectTile(props: { readonly initials: string; readonly className?: string }) {
@@ -550,7 +550,7 @@ function SidebarListGroup(props: {
       <SidebarGroupAction
         aria-label={props.addLabel}
         onClick={props.onAdd}
-        className="top-2.5 right-1 text-tertiary-label opacity-0 group-focus-within/section:opacity-100 group-hover/section:opacity-100 pointer-coarse:opacity-100 hover:text-sidebar-foreground [&>svg:not([class*='size-'])]:size-3.5"
+        className="top-2 right-0.5 size-7 rounded-md text-tertiary-label opacity-0 group-focus-within/section:opacity-100 group-hover/section:opacity-100 pointer-coarse:opacity-100 hover:text-sidebar-foreground [&>svg:not([class*='size-'])]:size-3.5"
       >
         <PlusIcon />
       </SidebarGroupAction>

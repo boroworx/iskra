@@ -54,7 +54,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
       <SidebarBrand />
       {pillLabel ? (
         <span
-          className="ml-auto mr-3 hidden truncate text-[11px] font-medium text-tertiary-label @[12rem]/sidebar-header:inline"
+          className="ml-auto mr-3 hidden h-[18px] max-w-28 truncate rounded-full bg-secondary px-1.5 text-[11px] leading-[18px] font-medium text-muted-foreground @[12rem]/sidebar-header:inline-block"
           data-environment-identification="pill"
         >
           {pillLabel}
@@ -67,13 +67,20 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
 /** Iskra's spark beside the sidebar toggle: quiet, and a way home. */
 function SidebarBrand() {
   return (
-    <Link
-      aria-label="Go home"
-      className="ml-[var(--workspace-titlebar-content-left)] hidden size-7 shrink-0 items-center justify-center rounded-md text-tertiary-label outline-hidden ring-ring hover:text-sidebar-foreground focus-visible:ring-2 md:flex"
-      to="/"
-    >
-      <SparkGlyph state="idle" size={14} className="text-current" />
-    </Link>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Link
+            aria-label="Go home"
+            className="ml-[var(--workspace-titlebar-content-left)] hidden size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-hidden ring-ring hover:text-sidebar-foreground focus-visible:ring-2 md:flex"
+            to="/"
+          />
+        }
+      >
+        <SparkGlyph state="idle" size={14} className="text-current" />
+      </TooltipTrigger>
+      <TooltipPopup side="bottom">Home</TooltipPopup>
+    </Tooltip>
   );
 }
 

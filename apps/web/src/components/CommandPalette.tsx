@@ -1653,7 +1653,7 @@ function OpenCommandPaletteDialog(props: {
     kind: "action",
     value: "action:needs-you",
     searchTerms: ["needs you", "inbox", "decisions", "approve", "review"],
-    title: "Needs you",
+    title: "Needs You",
     icon: <InboxIcon className={ITEM_ICON_CLASS} />,
     shortcutCommand: "needsYou.open",
     run: async () => {
@@ -2743,7 +2743,7 @@ function OpenCommandPaletteDialog(props: {
             {remoteProjectContext.icon}
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="truncate text-foreground text-sm">{remoteProjectContext.title}</span>
-              <span className="truncate text-muted-foreground/85 text-xs">
+              <span className="truncate text-muted-foreground text-xs">
                 {remoteProjectContext.description}
               </span>
             </span>

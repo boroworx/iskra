@@ -66,7 +66,7 @@ export function AttemptsView(props: {
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <WorkspacePageHeader className="shadow-[inset_0_-0.5px_var(--border)]">
+        <WorkspacePageHeader>
           {cardLink !== undefined ? (
             <Button
               size="icon-sm"

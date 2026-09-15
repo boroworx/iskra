@@ -70,7 +70,7 @@ function ThreadContentMatch(props: {
 }) {
   const isUser = props.match.source === "user";
   return (
-    <span className="truncate text-xs text-muted-foreground/85">
+    <span className="truncate text-xs text-muted-foreground">
       <span className={isUser ? "text-blue-400" : "text-emerald-400"}>
         {isUser ? "You:" : "Agent:"}
       </span>{" "}
@@ -126,33 +126,37 @@ export function CommandPaletteResults(props: CommandPaletteResultsProps) {
   );
 }
 
+/** A result on one 28px line: its title, then its project or path as trailing tertiary text. */
+function CommandPaletteResultLabel(props: {
+  item: CommandPaletteActionItem | CommandPaletteSubmenuItem;
+}) {
+  const { item } = props;
+  const line = (
+    <span className="flex min-w-0 items-center gap-1.5 text-[13px] text-foreground">
+      {item.titleLeadingContent}
+      <span className="truncate">{item.title}</span>
+      {item.description ? (
+        <span className="min-w-0 shrink-[2] truncate text-tertiary-label">{item.description}</span>
+      ) : null}
+    </span>
+  );
+  return item.threadContentMatch ? (
+    <span className="flex min-w-0 flex-1 flex-col">
+      {line}
+      <ThreadContentMatch match={item.threadContentMatch} />
+    </span>
+  ) : (
+    <span className="flex min-w-0 flex-1 items-center">{line}</span>
+  );
+}
+
 function DisabledCommandPaletteResultRow(props: {
   item: CommandPaletteActionItem | CommandPaletteSubmenuItem;
 }) {
   return (
-    <div className="flex min-h-8 select-none items-center gap-2 rounded-sm px-2 py-1.5 text-base opacity-64 sm:min-h-7 sm:text-sm">
+    <div className="flex min-h-7 select-none items-center gap-2 rounded-[6px] px-2 py-1 text-[13px] opacity-64">
       {props.item.icon}
-      {props.item.description || props.item.threadContentMatch ? (
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
-            {props.item.titleLeadingContent}
-            <span className="truncate">{props.item.title}</span>
-          </span>
-          {props.item.threadContentMatch ? (
-            <ThreadContentMatch match={props.item.threadContentMatch} />
-          ) : null}
-          {props.item.description ? (
-            <span className="min-w-0 text-muted-foreground/70 text-xs">
-              {props.item.description}
-            </span>
-          ) : null}
-        </span>
-      ) : (
-        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-foreground">
-          {props.item.titleLeadingContent}
-          <span className="truncate">{props.item.title}</span>
-        </span>
-      )}
+      <CommandPaletteResultLabel item={props.item} />
       {props.item.titleTrailingContent}
     </div>
   );
@@ -183,36 +187,16 @@ function CommandPaletteResultRow(props: {
       }}
     >
       {props.item.icon}
-      {props.item.description || props.item.threadContentMatch ? (
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
-            {props.item.titleLeadingContent}
-            <span className="truncate">{props.item.title}</span>
-          </span>
-          {props.item.threadContentMatch ? (
-            <ThreadContentMatch match={props.item.threadContentMatch} />
-          ) : null}
-          {props.item.description ? (
-            <span className="min-w-0 text-muted-foreground/70 text-xs">
-              {props.item.description}
-            </span>
-          ) : null}
-        </span>
-      ) : (
-        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-foreground">
-          {props.item.titleLeadingContent}
-          <span className="truncate">{props.item.title}</span>
-        </span>
-      )}
+      <CommandPaletteResultLabel item={props.item} />
       {props.item.titleTrailingContent}
       {props.item.timestamp ? (
-        <span className="min-w-12 shrink-0 text-right text-xs tabular-nums text-muted-foreground/70">
+        <span className="min-w-12 shrink-0 text-right text-xs tabular-nums text-tertiary-label">
           {props.item.timestamp}
         </span>
       ) : null}
       {shortcutLabel ? <CommandShortcut>{shortcutLabel}</CommandShortcut> : null}
       {props.item.kind === "submenu" ? (
-        <ChevronRightIcon className="-me-0.5 ms-auto size-4 shrink-0 text-muted-foreground/70" />
+        <ChevronRightIcon className="-me-0.5 ms-auto size-4 shrink-0 text-tertiary-label" />
       ) : null}
     </CommandItem>
   );
