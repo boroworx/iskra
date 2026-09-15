@@ -97,6 +97,7 @@ import * as LinearSyncReactor from "../src/orchestration/LinearSyncReactor.ts";
 import * as CardSessionReactor from "../src/orchestration/CardSessionReactor.ts";
 import * as CardScheduler from "../src/orchestration/CardScheduler.ts";
 import * as CardWatchdog from "../src/orchestration/CardWatchdog.ts";
+import * as CardRefGuard from "../src/orchestration/CardRefGuard.ts";
 import * as CardWorkspace from "../src/orchestration/CardWorkspace.ts";
 import * as PullRequestService from "../src/pullRequest/PullRequestService.ts";
 
@@ -457,6 +458,13 @@ export const makeOrchestrationIntegrationHarness = (
           openCardChangedFiles: () =>
             Effect.die("card workspaces are not used by the engine harness"),
           withCardLock: (_cardId, effect) => effect,
+        }),
+      ),
+      Layer.provideMerge(
+        Layer.succeed(CardRefGuard.CardRefGuard, {
+          start: () => Effect.void,
+          drain: Effect.void,
+          serverRefWrite: (_root, _ref, effect) => effect,
         }),
       ),
       Layer.provideMerge(

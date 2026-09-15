@@ -22,6 +22,7 @@ import * as CardSessionReactor from "../CardSessionReactor.ts";
 import * as CardScheduler from "../CardScheduler.ts";
 import * as CardWatchdog from "../CardWatchdog.ts";
 import * as CardWorkspace from "../CardWorkspace.ts";
+import * as CardRefGuard from "../CardRefGuard.ts";
 import * as AgentAwarenessRelay from "../../relay/AgentAwarenessRelay.ts";
 
 export const makeOrchestrationReactor = Effect.gen(function* () {
@@ -43,6 +44,7 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
   const linearSyncReactor = yield* LinearSyncReactor.LinearSyncReactor;
   const cardScheduler = yield* CardScheduler.CardScheduler;
   const cardWatchdog = yield* CardWatchdog.CardWatchdog;
+  const cardRefGuard = yield* CardRefGuard.CardRefGuard;
 
   const start: OrchestrationReactorShape["start"] = Effect.fn("start")(function* () {
     yield* providerRuntimeIngestion.start();
@@ -63,6 +65,7 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
     yield* linearSyncReactor.start();
     yield* cardScheduler.start();
     yield* cardWatchdog.start();
+    yield* cardRefGuard.start();
   });
 
   return {

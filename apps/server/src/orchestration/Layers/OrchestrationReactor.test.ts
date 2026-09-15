@@ -22,6 +22,7 @@ import * as CardSessionReactor from "../CardSessionReactor.ts";
 import * as CardScheduler from "../CardScheduler.ts";
 import * as CardWatchdog from "../CardWatchdog.ts";
 import * as CardWorkspace from "../CardWorkspace.ts";
+import * as CardRefGuard from "../CardRefGuard.ts";
 import { OrchestrationReactor } from "../Services/OrchestrationReactor.ts";
 import { makeOrchestrationReactor } from "./OrchestrationReactor.ts";
 import * as AgentAwarenessRelay from "../../relay/AgentAwarenessRelay.ts";
@@ -154,6 +155,16 @@ describe("OrchestrationReactor", () => {
           }),
         ),
         Layer.provideMerge(
+          Layer.succeed(CardRefGuard.CardRefGuard, {
+            start: () => {
+              started.push("card-ref-guard");
+              return Effect.void;
+            },
+            drain: Effect.void,
+            serverRefWrite: (_root, _ref, effect) => effect,
+          }),
+        ),
+        Layer.provideMerge(
           Layer.succeed(CardWatchdog.CardWatchdog, {
             start: () => {
               started.push("card-watchdog");
@@ -244,6 +255,7 @@ describe("OrchestrationReactor", () => {
       "linear-sync-reactor",
       "card-scheduler",
       "card-watchdog",
+      "card-ref-guard",
     ]);
 
     await Effect.runPromise(Scope.close(scope, Exit.void));

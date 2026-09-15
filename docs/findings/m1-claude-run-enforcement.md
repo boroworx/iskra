@@ -89,9 +89,25 @@ and the server still commits leftovers before review.
 Residual risk: a builder's shell can write anything in the shared `.git` but hooks and config. It
 can move or create any ref (including the branch checked out in the person's main checkout, via
 `update-ref`), write objects, edit `info/exclude` and run `gc`. It can't run code through hooks or
-config, and can't touch the main checkout's files. Review evidence is pinned to the card's head commit, but
-a ref moved elsewhere is not detected. Worktrees under `~/.claude`
-still get a read-only shell (finding 5).
+config, and can't touch the main checkout's files. Review evidence is pinned to the card's head
+commit. Worktrees under `~/.claude` still get a read-only shell (finding 5).
+
+Ref guard (`apps/server/src/orchestration/CardRefGuard.ts`): Iskra installs no hooks in the user's
+repository. Instead, each card run's turn snapshots `refs/heads` and `refs/tags` in the
+repository's common dir when the turn is requested, and compares when it settles or the session
+ends. A ref other than a card branch that was created, moved or deleted is put back with a
+compare-and-swap `update-ref`. The card gets an `error` activity (`refMovedOutsideCard`) listing
+each ref's old and new ids, and it is paused. This detects and restores after the turn; it does
+not prevent the write, and objects, `info/exclude` and `gc` are not covered.
+
+- Iskra's own branch writes (creating and deleting a card branch, landing's fast-forward of the
+  base) run under the same per-repository lock and move open turns' baselines.
+- Pushes only touch `refs/remotes`, and checkpoints live under `refs/iskra`, so neither is compared.
+- Card branches are excluded because their own agents and landing's rebase move them. So a card's
+  agent moving another card's branch goes unnoticed.
+- A person's own branch or tag changes in the same repository during a guarded turn are
+  indistinguishable from the agent's, and are reverted too. The activity keeps the ids for recovery.
+- Snapshots live in memory, so a turn that spans a server restart is not checked.
 
 ## Not verified
 

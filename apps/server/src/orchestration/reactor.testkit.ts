@@ -24,6 +24,7 @@ import * as ProcessRunner from "../processRunner.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
+import * as CardRefGuard from "./CardRefGuard.ts";
 import * as CardWorkspace from "./CardWorkspace.ts";
 import * as HostAdmission from "./HostAdmission.ts";
 import { OrchestrationEngineLive } from "./Layers/OrchestrationEngine.ts";
@@ -55,6 +56,7 @@ export const cardWorkspaceTestLayer = (
   terminals = Layer.mock(TerminalManager.TerminalManager)({ close: () => Effect.void }),
 ) =>
   CardWorkspace.layer.pipe(
+    Layer.provideMerge(CardRefGuard.layer),
     Layer.provideMerge(
       HostAdmission.layerWithSample(Effect.succeed({ load1: 0, cores: 8, freeMemRatio: 1 })),
     ),

@@ -46,6 +46,7 @@ import { ProcessRunner } from "../processRunner.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as ServerSettingsService from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
+import { CardRefGuard } from "./CardRefGuard.ts";
 import { isFinishedCardStatus } from "./cardRules.ts";
 import { HostAdmission } from "./HostAdmission.ts";
 import {
@@ -321,6 +322,7 @@ const make = Effect.gen(function* () {
   const platform = yield* HostProcessPlatform;
   const secretStore = yield* ServerSecretStore;
   const admission = yield* HostAdmission;
+  const refGuard = yield* CardRefGuard;
 
   // Per-card locks serialize one card's ensure, land and teardown; per-project locks guard only
   // port allocation, worktree add and the local fast-forward; per-glob locks serialize landings
@@ -503,7 +505,11 @@ const make = Effect.gen(function* () {
       yield* optionalGit(cardId, root, ["worktree", "prune"]);
       // Only branches Iskra named for a card are deleted, never a branch the card was based on.
       if (branch.startsWith("iskra/")) {
-        yield* optionalGit(cardId, root, ["branch", "-D", branch]);
+        yield* refGuard.serverRefWrite(
+          root,
+          `refs/heads/${branch}`,
+          optionalGit(cardId, root, ["branch", "-D", branch]),
+        );
       }
     });
 
@@ -1072,10 +1078,13 @@ const make = Effect.gen(function* () {
               yield* git(cardId, root, ["worktree", "list", "--porcelain"]),
               baseBranch,
             );
-            const merge =
+            const merge = yield* refGuard.serverRefWrite(
+              root,
+              `refs/heads/${baseBranch}`,
               checkedOutAt === null
-                ? yield* gitRun(cardId, root, ["fetch", "--quiet", ".", `${branch}:${baseBranch}`])
-                : yield* gitRun(cardId, checkedOutAt, ["merge", "--ff-only", "--quiet", branch]);
+                ? gitRun(cardId, root, ["fetch", "--quiet", ".", `${branch}:${baseBranch}`])
+                : gitRun(cardId, checkedOutAt, ["merge", "--ff-only", "--quiet", branch]),
+            );
             if (merge.code !== 0) {
               return {
                 kind: "notMerged" as const,
@@ -1125,9 +1134,13 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const { model: current } = yield* readCard(cardId);
           const base = yield* allocatePortBase(cardId, current);
-          yield* git(cardId, root, ["worktree", "add", "-b", branch, worktreePath, baseRef]).pipe(
-            Effect.tapError(() => Effect.sync(() => reservedPortBases.delete(base))),
-          );
+          yield* refGuard
+            .serverRefWrite(
+              root,
+              `refs/heads/${branch}`,
+              git(cardId, root, ["worktree", "add", "-b", branch, worktreePath, baseRef]),
+            )
+            .pipe(Effect.tapError(() => Effect.sync(() => reservedPortBases.delete(base))));
           return base;
         }),
       );
