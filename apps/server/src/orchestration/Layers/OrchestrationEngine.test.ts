@@ -440,6 +440,7 @@ describe("OrchestrationEngine", () => {
           getCardShellById: () => Effect.die("unused"),
           listChannelMessages: () => Effect.die("unused"),
           listRunsByAgent: () => Effect.die("unused"),
+          listLiveChannelRuns: () => Effect.die("unused"),
           getAgentById: () => Effect.die("unused"),
           getCommandReadModel: () => Effect.succeed(commandReadModel),
           getSnapshot: () =>

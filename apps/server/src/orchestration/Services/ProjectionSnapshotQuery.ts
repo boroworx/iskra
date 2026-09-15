@@ -23,6 +23,7 @@ import type {
   OrchestrationAgent,
   OrchestrationAgentRun,
   OrchestrationChannelMessage,
+  OrchestrationChannelRun,
   OrchestrationCardShell,
   OrchestrationChannelShell,
   OrchestrationArchivedChannel,
@@ -276,6 +277,11 @@ export interface ProjectionSnapshotQueryShape {
     channelId: ChannelId,
     limit: number,
   ) => Effect.Effect<ReadonlyArray<OrchestrationChannelMessage>, ProjectionRepositoryError>;
+
+  /** A channel's runs whose sessions have not stopped, oldest first. */
+  readonly listLiveChannelRuns: (
+    channelId: ChannelId,
+  ) => Effect.Effect<ReadonlyArray<OrchestrationChannelRun>, ProjectionRepositoryError>;
 
   /** An agent's newest `limit` runs, newest first, live or ended. */
   readonly listRunsByAgent: (

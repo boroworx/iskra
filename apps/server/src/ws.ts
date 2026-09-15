@@ -527,12 +527,15 @@ const makeWsRpcLayer = (
         Option.match(holdoutStore, {
           onNone: () =>
             Effect.fail(
-              new ProjectHoldoutError({ message: "Hidden scenarios aren't available on this server." }),
+              new ProjectHoldoutError({
+                message: "Hidden scenarios aren't available on this server.",
+              }),
             ),
           onSome: (store) =>
             projectionSnapshotQuery.getProjectShellById(projectId).pipe(
               Effect.mapError(
-                (cause) => new ProjectHoldoutError({ message: "The project couldn't be read.", cause }),
+                (cause) =>
+                  new ProjectHoldoutError({ message: "The project couldn't be read.", cause }),
               ),
               Effect.flatMap(
                 Option.match({
@@ -1001,14 +1004,11 @@ const makeWsRpcLayer = (
         ).pipe(
           Effect.map(
             Option.flatMap((card) =>
-              Option.map(
-                card,
-                (nextCard): OrchestrationShellStreamEvent => ({
-                  kind: "card-upserted",
-                  sequence,
-                  card: nextCard,
-                }),
-              ),
+              Option.map(card, (nextCard): OrchestrationShellStreamEvent => ({
+                kind: "card-upserted",
+                sequence,
+                card: nextCard,
+              })),
             ),
           ),
         );
@@ -1038,9 +1038,15 @@ const makeWsRpcLayer = (
         cardId: CardId,
         sequence: number,
       ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> =>
-        retryShellProjectionRead("card", cardId, projectionSnapshotQuery.getCardShellById(cardId)).pipe(
+        retryShellProjectionRead(
+          "card",
+          cardId,
+          projectionSnapshotQuery.getCardShellById(cardId),
+        ).pipe(
           Effect.flatMap((card) =>
-            Option.isSome(card) && Option.isSome(card.value) && card.value.value.delegateAgentId !== null
+            Option.isSome(card) &&
+            Option.isSome(card.value) &&
+            card.value.value.delegateAgentId !== null
               ? agentUpsertOrRemove(card.value.value.delegateAgentId, sequence)
               : Effect.succeed(Option.none<OrchestrationShellStreamEvent>()),
           ),
@@ -1051,7 +1057,11 @@ const makeWsRpcLayer = (
         cardId: CardId,
         sequence: number,
       ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> =>
-        retryShellProjectionRead("card", cardId, projectionSnapshotQuery.getCardShellById(cardId)).pipe(
+        retryShellProjectionRead(
+          "card",
+          cardId,
+          projectionSnapshotQuery.getCardShellById(cardId),
+        ).pipe(
           Effect.flatMap((card) =>
             Option.isSome(card) && Option.isSome(card.value)
               ? projectUpsertOrRemove(card.value.value.projectId, sequence)
@@ -2011,7 +2021,8 @@ const makeWsRpcLayer = (
                   : stream.pipe(
                       Stream.filter(
                         (item) =>
-                          (input.includeAgentChannels === true || !agentChannelKinds.has(item.kind)) &&
+                          (input.includeAgentChannels === true ||
+                            !agentChannelKinds.has(item.kind)) &&
                           (input.includeCards === true || !cardKinds.has(item.kind)),
                       ),
                     );
@@ -2390,6 +2401,15 @@ const makeWsRpcLayer = (
                           })),
                         );
                       }
+                      case "channel.run-started":
+                        return Queue.offer(live, {
+                          kind: "run",
+                          run: {
+                            threadId: event.payload.threadId,
+                            agentId: event.payload.agentId,
+                            startedAt: event.payload.startedAt,
+                          },
+                        });
                       default:
                         return Effect.void;
                     }
@@ -2397,19 +2417,23 @@ const makeWsRpcLayer = (
                 ),
                 { startImmediately: true },
               );
-              const messages = yield* projectionSnapshotQuery
-                .listChannelMessages(input.channelId, CHANNEL_SUBSCRIBE_MESSAGE_LIMIT)
-                .pipe(
-                  Effect.mapError(
-                    (cause) =>
-                      new OrchestrationGetSnapshotError({
-                        message: `Failed to load channel ${input.channelId}`,
-                        cause,
-                      }),
-                  ),
-                );
+              const [messages, runs] = yield* Effect.all([
+                projectionSnapshotQuery.listChannelMessages(
+                  input.channelId,
+                  CHANNEL_SUBSCRIBE_MESSAGE_LIMIT,
+                ),
+                projectionSnapshotQuery.listLiveChannelRuns(input.channelId),
+              ]).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new OrchestrationGetSnapshotError({
+                      message: `Failed to load channel ${input.channelId}`,
+                      cause,
+                    }),
+                ),
+              );
               return Stream.concat(
-                Stream.make({ kind: "snapshot" as const, messages }),
+                Stream.make({ kind: "snapshot" as const, messages, runs }),
                 Stream.fromQueue(live),
               );
             }),
@@ -2453,7 +2477,11 @@ const makeWsRpcLayer = (
                     );
                     if (event.type === "card.delivery-updated") {
                       for (const activityId of event.payload.messageIds) {
-                        items.push({ kind: "delivery", activityId, delivery: event.payload.status });
+                        items.push({
+                          kind: "delivery",
+                          activityId,
+                          delivery: event.payload.status,
+                        });
                       }
                     }
                     if (event.type === "card.evidence-recorded") {
@@ -2514,11 +2542,14 @@ const makeWsRpcLayer = (
             ORCHESTRATION_WS_METHODS.setProjectSecret,
             projectSecretKey(input).pipe(
               Effect.flatMap((key) =>
-                secretStore.set(key, new TextEncoder().encode(input.value)).pipe(
-                  Effect.mapError(
-                    (cause) => new ProjectSecretError({ message: "The secret couldn't be saved.", cause }),
+                secretStore
+                  .set(key, new TextEncoder().encode(input.value))
+                  .pipe(
+                    Effect.mapError(
+                      (cause) =>
+                        new ProjectSecretError({ message: "The secret couldn't be saved.", cause }),
+                    ),
                   ),
-                ),
               ),
               Effect.as({}),
             ),
@@ -2529,12 +2560,17 @@ const makeWsRpcLayer = (
             ORCHESTRATION_WS_METHODS.removeProjectSecret,
             projectSecretKey(input).pipe(
               Effect.flatMap((key) =>
-                secretStore.remove(key).pipe(
-                  Effect.mapError(
-                    (cause) =>
-                      new ProjectSecretError({ message: "The secret couldn't be removed.", cause }),
+                secretStore
+                  .remove(key)
+                  .pipe(
+                    Effect.mapError(
+                      (cause) =>
+                        new ProjectSecretError({
+                          message: "The secret couldn't be removed.",
+                          cause,
+                        }),
+                    ),
                   ),
-                ),
               ),
               Effect.as({}),
             ),
@@ -2547,7 +2583,11 @@ const makeWsRpcLayer = (
             withHoldouts(input.projectId, (store) =>
               store.list(input.projectId).pipe(
                 Effect.map((scenarios) => ({
-                  scenarios: scenarios.map(({ scenarioId, title, kind }) => ({ scenarioId, title, kind })),
+                  scenarios: scenarios.map(({ scenarioId, title, kind }) => ({
+                    scenarioId,
+                    title,
+                    kind,
+                  })),
                 })),
               ),
             ),
@@ -2600,8 +2640,14 @@ const makeWsRpcLayer = (
             ORCHESTRATION_WS_METHODS.createSampleProject,
             createSampleProject(input).pipe(
               Effect.provideService(AgentDefinitionSync.AgentDefinitionSync, agentDefinitionSync),
-              Effect.provideService(OrchestrationEngine.OrchestrationEngineService, orchestrationEngine),
-              Effect.provideService(ProjectionSnapshotQuery.ProjectionSnapshotQuery, projectionSnapshotQuery),
+              Effect.provideService(
+                OrchestrationEngine.OrchestrationEngineService,
+                orchestrationEngine,
+              ),
+              Effect.provideService(
+                ProjectionSnapshotQuery.ProjectionSnapshotQuery,
+                projectionSnapshotQuery,
+              ),
               Effect.provideService(Crypto.Crypto, crypto),
               Effect.provide(ProcessRunner.layer),
               Effect.mapError(

@@ -4709,7 +4709,9 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
         CardId.make("card-plan-c1"),
         CardId.make("card-migration"),
       ];
-      const planCriteria = [{ id: "c1", text: "GET /health answers ok.", verification: "automated" as const }];
+      const planCriteria = [
+        { id: "c1", text: "GET /health answers ok.", verification: "automated" as const },
+      ];
       const planChild = (key: string, slice: number) => ({
         key,
         title: `Route ${key}`,
@@ -5234,7 +5236,9 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
           {
             cardId: card1,
             acceptance: {
-              criteria: [{ id: "c1", text: "Bursts over 100 get a 429.", verification: "automated" }],
+              criteria: [
+                { id: "c1", text: "Bursts over 100 get a 429.", verification: "automated" },
+              ],
               state: "confirmed",
             },
             updatedAt: at(52),
@@ -5363,10 +5367,15 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
                 durationMs: null,
                 logTail: "",
                 artifactPath: null,
-                unavailable: { code: "noPreviewHost", text: "No desktop preview host is connected." },
+                unavailable: {
+                  code: "noPreviewHost",
+                  text: "No desktop preview host is connected.",
+                },
               },
             ],
-            flags: [{ kind: "deletedTest", path: "limits.test.ts", detail: "Deleted.", hard: true }],
+            flags: [
+              { kind: "deletedTest", path: "limits.test.ts", detail: "Deleted.", hard: true },
+            ],
             risks: { sideEffect: "low", performance: "medium", compatibility: "low", notes: "" },
             passed: false,
             recordedAt: at(59),
@@ -5500,7 +5509,12 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
               headSha: "abc1234def",
               verifier: webVerifier,
               criteria: [
-                { criterionId: "c1", pass: false, evidence: "test", note: "No 429 on request 101." },
+                {
+                  criterionId: "c1",
+                  pass: false,
+                  evidence: "test",
+                  note: "No 429 on request 101.",
+                },
               ],
               diffJudge: { matchesCriteria: true, concerns: ["No burst test."] },
               scenarios: [{ scenarioId: "holdout-1", satisfied: false }],
@@ -5596,7 +5610,12 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
         [
           "card.plan-approved",
           planCard,
-          { cardId: planCard, revision: 1, integrationBranch: "iskra/plan-health", approvedAt: at(66) },
+          {
+            cardId: planCard,
+            revision: 1,
+            integrationBranch: "iskra/plan-health",
+            approvedAt: at(66),
+          },
         ],
         [
           "card.plan-slice-released",
@@ -5658,7 +5677,10 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
             sourceKey: "2026-03-01T01:06",
             outcome: "refused",
             cardId: null,
-            reason: { code: "triggerRefused", text: "Trigger 'nightly' is off or no longer exists." },
+            reason: {
+              code: "triggerRefused",
+              text: "Trigger 'nightly' is off or no longer exists.",
+            },
             firedAt: at(66),
           },
         ],
@@ -5692,7 +5714,11 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
             },
           },
         ],
-        ["project.knowledge-added", projectId, { projectId, lessonId: "lesson-1", decidedAt: at(66) }],
+        [
+          "project.knowledge-added",
+          projectId,
+          { projectId, lessonId: "lesson-1", decidedAt: at(66) },
+        ],
         [
           "card.outcome-recorded",
           card2,
@@ -5788,6 +5814,13 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
         cards: model.cards,
         liveRuns: model.liveRuns,
       });
+      // A channel subscription starts with the channel's live runs, the same ones the read model holds.
+      const generalRuns = (model.liveRuns ?? []).filter((run) => run.channelId === general);
+      expect(generalRuns).toHaveLength(1);
+      assert.deepEqual(
+        yield* snapshotQuery.listLiveChannelRuns(general),
+        generalRuns.map(({ threadId, agentId, startedAt }) => ({ threadId, agentId, startedAt })),
+      );
       const shell = yield* snapshotQuery.getShellSnapshot();
       expect({
         readModel,
@@ -5877,7 +5910,10 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
       // A desktop host connected: the retry records the same evidence with the screenshot taken.
       yield* record(1, screenshot({ artifactPath: "/tmp/evidence/limits-page.png" }));
 
-      const items = yield* cardRepository.listEvidenceItems({ cardId, evidenceId: "evidence-retry" });
+      const items = yield* cardRepository.listEvidenceItems({
+        cardId,
+        evidenceId: "evidence-retry",
+      });
       expect(items.map((item) => [item.itemId, item.unavailable, item.artifactPath])).toEqual([
         ["limits-page", null, "/tmp/evidence/limits-page.png"],
       ]);
@@ -5924,7 +5960,12 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
       const page = (before?: string) =>
         snapshotQuery
           .getCardActivity(cardId, { limit: 2, before })
-          .pipe(Effect.map(({ activities, hasMore }) => [activities.map((activity) => activity.activityId), hasMore]));
+          .pipe(
+            Effect.map(({ activities, hasMore }) => [
+              activities.map((activity) => activity.activityId),
+              hasMore,
+            ]),
+          );
 
       expect(yield* page()).toEqual([["paging-4", "paging-5"], true]);
       expect(yield* page("paging-4")).toEqual([["paging-2", "paging-3"], true]);

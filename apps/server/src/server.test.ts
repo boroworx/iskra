@@ -9843,177 +9843,179 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("subscribeShell sends card updates, including an owner session's, only to subscribers that ask", () =>
-    Effect.gen(function* () {
-      const now = "2026-01-01T00:00:00.000Z";
-      const projectId = ProjectId.make("project-cards");
-      const agentId = AgentId.make("agent-card-owner");
-      const cardId = CardId.make("card-shell");
-      const ownerThreadId = ThreadId.make("card-session-owner");
-      const eventBase = {
-        occurredAt: now,
-        commandId: null,
-        causationEventId: null,
-        correlationId: null,
-        metadata: {},
-        payload: {} as never,
-      };
-      const events: ReadonlyArray<OrchestrationEvent> = [
-        {
-          ...eventBase,
-          sequence: 1,
-          eventId: EventId.make("event-card"),
-          aggregateKind: "card",
-          aggregateId: cardId,
-          type: "card.created",
-        },
-        {
-          ...eventBase,
-          sequence: 2,
-          eventId: EventId.make("event-owner-session"),
-          aggregateKind: "thread",
-          aggregateId: ownerThreadId,
-          type: "thread.session-set",
-        },
-      ];
-
-      yield* buildAppUnderTest({
-        layers: {
-          orchestrationEngine: {
-            latestSequence: Effect.succeed(2),
-            readEvents: () => Stream.fromIterable(events),
+  it.effect(
+    "subscribeShell sends card updates, including an owner session's, only to subscribers that ask",
+    () =>
+      Effect.gen(function* () {
+        const now = "2026-01-01T00:00:00.000Z";
+        const projectId = ProjectId.make("project-cards");
+        const agentId = AgentId.make("agent-card-owner");
+        const cardId = CardId.make("card-shell");
+        const ownerThreadId = ThreadId.make("card-session-owner");
+        const eventBase = {
+          occurredAt: now,
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          payload: {} as never,
+        };
+        const events: ReadonlyArray<OrchestrationEvent> = [
+          {
+            ...eventBase,
+            sequence: 1,
+            eventId: EventId.make("event-card"),
+            aggregateKind: "card",
+            aggregateId: cardId,
+            type: "card.created",
           },
-          projectionSnapshotQuery: {
-            getCardShellById: () =>
-              Effect.succeed(
-                Option.some({
-                  id: cardId,
-                  projectId,
-                  channelId: null,
-                  parentCardId: null,
-                  title: "Rate limiting",
-                  spec: "",
-                  specState: "skipped" as const,
-                  tags: [],
-                  status: "inProgress" as const,
-                  ownerHumanId: "human",
-                  delegateAgentId: agentId,
-                  baseBranch: null,
-                  branch: "iskra/rate-limiting-shell",
-                  worktreePath: "/tmp/worktrees/rate-limiting",
-                  portBase: 42000,
-                  relations: [],
-                  snoozedUntil: null,
-                  snoozedAt: null,
-                  activityAt: now,
-                  diffStat: null,
-                  checks: null,
-                  spentUsd: 0,
-                  budgetCapUsd: 10,
-                  unpricedTurns: 0,
-                  acceptsUnpriced: false,
-                  reviewReturns: 0,
-                  attemptGroupId: null,
-                  linearIssue: null,
-                  sourceMessageId: null,
-                  proposalReasoning: null,
-                  suggestedAgentId: null,
-                  priority: 0,
-                  ...LEGACY_CARD_CONTRACT,
-                  createdBy: { kind: "human" as const, id: "human" },
-                  createdAt: now,
-                  updatedAt: now,
-                  ownerSession: {
-                    threadId: ownerThreadId,
-                    agentId,
-                    state: "active" as const,
-                    since: now,
-                    planProgress: null,
-                  },
-                }),
-              ),
-            getAgentShellById: () =>
-              Effect.succeed(
-                Option.some({
-                  id: agentId,
-                  projectId,
-                  name: "backend",
-                  avatar: null,
-                  roleTags: [],
-                  modelSelection: {
-                    instanceId: ProviderInstanceId.make("claudeAgent"),
-                    model: "claude-haiku-4-5",
-                  },
-                  presence: "running" as const,
-                }),
-              ),
-            getRunByThreadId: () =>
-              Effect.succeed(
-                Option.some({
-                  threadId: ownerThreadId,
-                  role: "owner" as const,
-                  channelId: null,
-                  cardId,
-                  agentId,
-                  triggerMessageId: null,
-                  capabilities: ["read" as const, "write" as const],
-                  context: {
-                    agent: { id: agentId, name: "backend", rolePrompt: "" },
-                    role: "owner" as const,
-                    card: {
-                      id: cardId,
-                      title: "Rate limiting",
-                      spec: "",
-                      branch: null,
-                      baseBranch: "main",
+          {
+            ...eventBase,
+            sequence: 2,
+            eventId: EventId.make("event-owner-session"),
+            aggregateKind: "thread",
+            aggregateId: ownerThreadId,
+            type: "thread.session-set",
+          },
+        ];
+
+        yield* buildAppUnderTest({
+          layers: {
+            orchestrationEngine: {
+              latestSequence: Effect.succeed(2),
+              readEvents: () => Stream.fromIterable(events),
+            },
+            projectionSnapshotQuery: {
+              getCardShellById: () =>
+                Effect.succeed(
+                  Option.some({
+                    id: cardId,
+                    projectId,
+                    channelId: null,
+                    parentCardId: null,
+                    title: "Rate limiting",
+                    spec: "",
+                    specState: "skipped" as const,
+                    tags: [],
+                    status: "inProgress" as const,
+                    ownerHumanId: "human",
+                    delegateAgentId: agentId,
+                    baseBranch: null,
+                    branch: "iskra/rate-limiting-shell",
+                    worktreePath: "/tmp/worktrees/rate-limiting",
+                    portBase: 42000,
+                    relations: [],
+                    snoozedUntil: null,
+                    snoozedAt: null,
+                    activityAt: now,
+                    diffStat: null,
+                    checks: null,
+                    spentUsd: 0,
+                    budgetCapUsd: 10,
+                    unpricedTurns: 0,
+                    acceptsUnpriced: false,
+                    reviewReturns: 0,
+                    attemptGroupId: null,
+                    linearIssue: null,
+                    sourceMessageId: null,
+                    proposalReasoning: null,
+                    suggestedAgentId: null,
+                    priority: 0,
+                    ...LEGACY_CARD_CONTRACT,
+                    createdBy: { kind: "human" as const, id: "human" },
+                    createdAt: now,
+                    updatedAt: now,
+                    ownerSession: {
+                      threadId: ownerThreadId,
+                      agentId,
+                      state: "active" as const,
+                      since: now,
+                      planProgress: null,
                     },
-                    decisions: [],
-                    diff: "",
-                    diffTruncated: false,
-                    question: null,
-                  },
-                  rendered: { systemPrompt: "system", firstMessage: "brief" },
-                  startedAt: now,
-                }),
-              ),
+                  }),
+                ),
+              getAgentShellById: () =>
+                Effect.succeed(
+                  Option.some({
+                    id: agentId,
+                    projectId,
+                    name: "backend",
+                    avatar: null,
+                    roleTags: [],
+                    modelSelection: {
+                      instanceId: ProviderInstanceId.make("claudeAgent"),
+                      model: "claude-haiku-4-5",
+                    },
+                    presence: "running" as const,
+                  }),
+                ),
+              getRunByThreadId: () =>
+                Effect.succeed(
+                  Option.some({
+                    threadId: ownerThreadId,
+                    role: "owner" as const,
+                    channelId: null,
+                    cardId,
+                    agentId,
+                    triggerMessageId: null,
+                    capabilities: ["read" as const, "write" as const],
+                    context: {
+                      agent: { id: agentId, name: "backend", rolePrompt: "" },
+                      role: "owner" as const,
+                      card: {
+                        id: cardId,
+                        title: "Rate limiting",
+                        spec: "",
+                        branch: null,
+                        baseBranch: "main",
+                      },
+                      decisions: [],
+                      diff: "",
+                      diffTruncated: false,
+                      question: null,
+                    },
+                    rendered: { systemPrompt: "system", firstMessage: "brief" },
+                    startedAt: now,
+                  }),
+                ),
+            },
           },
-        },
-      });
+        });
 
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const subscribeKinds = (
-        include: { readonly agentChannels: boolean; readonly cards: boolean },
-        count: number,
-      ) =>
-        Effect.scoped(
-          withWsRpcClient(wsUrl, (client) =>
-            client[ORCHESTRATION_WS_METHODS.subscribeShell]({
-              afterSequence: 0,
-              requestCompletionMarker: true,
-              ...(include.agentChannels ? { includeAgentChannels: true } : {}),
-              ...(include.cards ? { includeCards: true } : {}),
-            }).pipe(Stream.take(count), Stream.runCollect),
-          ),
-        ).pipe(Effect.map((items) => Array.from(items, (item) => item.kind)));
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const subscribeKinds = (
+          include: { readonly agentChannels: boolean; readonly cards: boolean },
+          count: number,
+        ) =>
+          Effect.scoped(
+            withWsRpcClient(wsUrl, (client) =>
+              client[ORCHESTRATION_WS_METHODS.subscribeShell]({
+                afterSequence: 0,
+                requestCompletionMarker: true,
+                ...(include.agentChannels ? { includeAgentChannels: true } : {}),
+                ...(include.cards ? { includeCards: true } : {}),
+              }).pipe(Stream.take(count), Stream.runCollect),
+            ),
+          ).pipe(Effect.map((items) => Array.from(items, (item) => item.kind)));
 
-      // Older builds, mobile included, never see a kind they cannot decode.
-      assert.deepEqual(yield* subscribeKinds({ agentChannels: false, cards: false }, 1), [
-        "synchronized",
-      ]);
-      // The owner session's thread event moves the card's face as well as its agent's presence.
-      assert.deepEqual(yield* subscribeKinds({ agentChannels: false, cards: true }, 3), [
-        "card-upserted",
-        "card-upserted",
-        "synchronized",
-      ]);
-      assert.deepEqual(yield* subscribeKinds({ agentChannels: true, cards: true }, 5), [
-        "agent-upserted",
-        "card-upserted",
-        "agent-upserted",
-        "card-upserted",
-        "synchronized",
-      ]);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+        // Older builds, mobile included, never see a kind they cannot decode.
+        assert.deepEqual(yield* subscribeKinds({ agentChannels: false, cards: false }, 1), [
+          "synchronized",
+        ]);
+        // The owner session's thread event moves the card's face as well as its agent's presence.
+        assert.deepEqual(yield* subscribeKinds({ agentChannels: false, cards: true }, 3), [
+          "card-upserted",
+          "card-upserted",
+          "synchronized",
+        ]);
+        assert.deepEqual(yield* subscribeKinds({ agentChannels: true, cards: true }, 5), [
+          "agent-upserted",
+          "card-upserted",
+          "agent-upserted",
+          "card-upserted",
+          "synchronized",
+        ]);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("subscribeChannel sends a channel's recent messages, then messages posted to it", () =>
@@ -10060,27 +10062,47 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   createdAt: now,
                 },
               ]),
+            listLiveChannelRuns: () =>
+              Effect.succeed([
+                {
+                  threadId: ThreadId.make("run-earlier"),
+                  agentId: AgentId.make("lead"),
+                  startedAt: now,
+                },
+              ]),
           },
         },
       });
+      const runStarted = (sequence: number, threadId: string) =>
+        ({
+          ...posted(sequence, channelId, ""),
+          type: "channel.run-started",
+          payload: {
+            threadId: ThreadId.make(threadId),
+            channelId,
+            agentId: AgentId.make("lead"),
+            startedAt: now,
+          } as never,
+        }) satisfies OrchestrationEvent;
 
       const wsUrl = yield* getWsServerUrl("/ws");
       const items = yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) =>
           client[ORCHESTRATION_WS_METHODS.subscribeChannel]({ channelId }).pipe(
-            // Post only once the snapshot is out, so the message must arrive live.
+            // Post only once the snapshot is out, so the message and run must arrive live.
             Stream.tap((item) =>
               item.kind === "snapshot"
                 ? Effect.forEach(
                     [
                       posted(1, ChannelId.make("channel-other"), "elsewhere"),
-                      posted(2, channelId, "later"),
+                      runStarted(2, "run-later"),
+                      posted(3, channelId, "later"),
                     ],
                     (event) => PubSub.publish(liveEvents, event),
                   )
                 : Effect.void,
             ),
-            Stream.take(2),
+            Stream.take(3),
             Stream.runCollect,
           ),
         ),
@@ -10089,12 +10111,17 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.deepEqual(
         Array.from(items, (item) =>
           item.kind === "snapshot"
-            ? item.messages.map((message) => message.body)
+            ? [
+                ...item.messages.map((message) => message.body),
+                ...item.runs.map((run) => run.threadId),
+              ]
             : item.kind === "message"
               ? [item.message.body]
-              : [],
+              : item.kind === "run"
+                ? [item.run.threadId]
+                : [],
         ),
-        [["earlier"], ["later"]],
+        [["earlier", "run-earlier"], ["run-later"], ["later"]],
       );
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );

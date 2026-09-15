@@ -680,7 +680,9 @@ export const ProjectOrchestration = Schema.Struct({
   builderSubCardsMax: PositiveInt.pipe(Schema.withDecodingDefault(Effect.succeed(8))),
   // A second agent checks each card in review against its criteria before it can merge.
   verifier: Schema.Struct({
-    mode: Schema.Literals(["off", "on"]).pipe(Schema.withDecodingDefault(Effect.succeed("off" as const))),
+    mode: Schema.Literals(["off", "on"]).pipe(
+      Schema.withDecodingDefault(Effect.succeed("off" as const)),
+    ),
   }).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   triggers: Schema.Array(ProjectTrigger).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
 });
@@ -762,7 +764,12 @@ export type AgentRole = typeof AgentRole.Type;
 export const AgentRoles = Schema.Array(AgentRole);
 
 /** Agents from before roles keep the powers they had; verifying and coordinating are opted into. */
-export const DEFAULT_AGENT_ROLES: ReadonlyArray<AgentRole> = ["builder", "lead", "helper", "critic"];
+export const DEFAULT_AGENT_ROLES: ReadonlyArray<AgentRole> = [
+  "builder",
+  "lead",
+  "helper",
+  "critic",
+];
 
 /**
  * Steps a template adds to the card blueprint. Every field only adds work: none drops checks,
@@ -959,7 +966,9 @@ export const CardLinearIssue = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
   // The newest prompt from that session already brought into the card.
-  promptsSyncedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  promptsSyncedAt: Schema.NullOr(IsoDateTime).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
 });
 export type CardLinearIssue = typeof CardLinearIssue.Type;
 
@@ -972,7 +981,16 @@ export type CardKind = typeof CardKind.Type;
 
 /** What started a card: a person, a channel's lead, a builder, a plan, a migration, a trigger, Linear or a revert. */
 export const CardOrigin = Schema.Struct({
-  kind: Schema.Literals(["human", "lead", "owner", "plan", "migration", "trigger", "linear", "revert"]),
+  kind: Schema.Literals([
+    "human",
+    "lead",
+    "owner",
+    "plan",
+    "migration",
+    "trigger",
+    "linear",
+    "revert",
+  ]),
   // The lead or builder agent, the plan or migration card, the trigger, the Linear issue or the reverted card.
   id: Schema.NullOr(TrimmedNonEmptyString),
 });
@@ -1260,9 +1278,9 @@ export const CardOpenElicitation = Schema.Struct({
   askedAt: IsoDateTime,
   // The question as asked, so it is answered from the card shell without its activity.
   question: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
-  options: Schema.Array(Schema.Struct({ id: TrimmedNonEmptyString, label: TrimmedNonEmptyString })).pipe(
-    Schema.withDecodingDefault(Effect.succeed([])),
-  ),
+  options: Schema.Array(
+    Schema.Struct({ id: TrimmedNonEmptyString, label: TrimmedNonEmptyString }),
+  ).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   recommendedOptionId: Schema.NullOr(TrimmedNonEmptyString).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
@@ -1448,11 +1466,15 @@ export const OrchestrationCard = Schema.Struct({
   reviewReturns: NonNegativeInt,
   // Set on the sibling sub-cards of one best-of-N run; an attempt never lands on its own.
   attemptGroupId: Schema.NullOr(TrimmedNonEmptyString),
-  linearIssue: Schema.NullOr(CardLinearIssue).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  linearIssue: Schema.NullOr(CardLinearIssue).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   // The channel message a lead proposed the card from.
   sourceMessageId: Schema.NullOr(MessageId).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   // Why the channel's lead proposed the card, for the person triaging it.
-  proposalReasoning: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  proposalReasoning: Schema.NullOr(Schema.String).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   // The agent the lead suggested to own the card; set as its delegate only when a person starts it.
   suggestedAgentId: Schema.NullOr(AgentId).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   priority: CardPriority.pipe(Schema.withDecodingDefault(Effect.succeed(0 as const))),
@@ -1482,20 +1504,26 @@ export const OrchestrationCard = Schema.Struct({
   attention: Schema.Array(CardAttention).pipe(
     Schema.withDecodingDefault(Effect.succeed([] as ReadonlyArray<CardAttention>)),
   ),
-  verification: CardVerification.pipe(Schema.withDecodingDefault(Effect.succeed(CARD_VERIFICATION_OFF))),
+  verification: CardVerification.pipe(
+    Schema.withDecodingDefault(Effect.succeed(CARD_VERIFICATION_OFF)),
+  ),
   // Absent on cards from servers before origins; read it through `cardOriginOf`.
   origin: Schema.optional(CardOrigin),
   plan: Schema.NullOr(CardPlan).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   migration: Schema.NullOr(CardMigration).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   // A plan's or migration's child: its key there, its slice, and whether it waits for the slice checkpoint.
-  planKey: Schema.NullOr(TrimmedNonEmptyString).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  planKey: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   slice: Schema.NullOr(PositiveInt).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   heldByCheckpoint: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   // Started by a trigger with no person approving it: it opens a draft pull request and never auto-merges.
   unattended: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   outcome: Schema.NullOr(CardOutcome).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   // The commit the card landed as, which a revert undoes.
-  landedSha: Schema.NullOr(TrimmedNonEmptyString).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  landedSha: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   revertsCardId: Schema.NullOr(CardId).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   relations: Schema.Array(CardRelation),
   createdBy: CardAuthor,
@@ -1731,7 +1759,13 @@ export const RunRole = Schema.Literals([
 ]);
 export type RunRole = typeof RunRole.Type;
 
-export const CardSessionRole = Schema.Literals(["owner", "helper", "critic", "verifier", "coordinator"]);
+export const CardSessionRole = Schema.Literals([
+  "owner",
+  "helper",
+  "critic",
+  "verifier",
+  "coordinator",
+]);
 export type CardSessionRole = typeof CardSessionRole.Type;
 
 /** A decision on a card as a session is handed it, with its author named. */
@@ -3663,7 +3697,9 @@ const CardMigrationPhaseCommand = Schema.Struct({
   commandId: CommandId,
   cardId: CardId,
   phase: CardMigration.fields.phase,
-  children: Schema.optional(Schema.Array(Schema.Struct({ key: TrimmedNonEmptyString, cardId: CardId }))),
+  children: Schema.optional(
+    Schema.Array(Schema.Struct({ key: TrimmedNonEmptyString, cardId: CardId })),
+  ),
 });
 
 const CardMigrationItemsUpdateCommand = Schema.Struct({
@@ -5650,7 +5686,9 @@ export type OrchestrationSaveAgentDefinitionResult =
 
 /** A project secret's name, as setup scripts and env templates refer to it. */
 export const PROJECT_SECRET_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const ProjectSecretName = TrimmedNonEmptyString.check(Schema.isPattern(PROJECT_SECRET_NAME_PATTERN));
+const ProjectSecretName = TrimmedNonEmptyString.check(
+  Schema.isPattern(PROJECT_SECRET_NAME_PATTERN),
+);
 
 /** Stores a project secret's value on the environment. Write-only: no RPC returns a value. */
 export const OrchestrationSetProjectSecretInput = Schema.Struct({
@@ -5664,17 +5702,26 @@ export const OrchestrationRemoveProjectSecretInput = Schema.Struct({
   projectId: ProjectId,
   name: ProjectSecretName,
 });
-export type OrchestrationRemoveProjectSecretInput = typeof OrchestrationRemoveProjectSecretInput.Type;
+export type OrchestrationRemoveProjectSecretInput =
+  typeof OrchestrationRemoveProjectSecretInput.Type;
 
 /** A project's hidden scenarios as listed: never their bodies or commands. */
 export const ProjectHoldoutsListInput = Schema.Struct({ projectId: ProjectId });
 export const ProjectHoldoutsListResult = Schema.Struct({
-  scenarios: Schema.Array(Schema.Struct(Struct.pick(HoldoutScenario.fields, ["scenarioId", "title", "kind"]))),
+  scenarios: Schema.Array(
+    Schema.Struct(Struct.pick(HoldoutScenario.fields, ["scenarioId", "title", "kind"])),
+  ),
 });
-export const ProjectHoldoutGetInput = Schema.Struct({ projectId: ProjectId, scenarioId: TrimmedNonEmptyString });
+export const ProjectHoldoutGetInput = Schema.Struct({
+  projectId: ProjectId,
+  scenarioId: TrimmedNonEmptyString,
+});
 export const ProjectHoldoutGetResult = Schema.Struct({ scenario: HoldoutScenario });
 /** Adds or replaces one scenario by its id. */
-export const ProjectHoldoutSetInput = Schema.Struct({ projectId: ProjectId, scenario: HoldoutScenario });
+export const ProjectHoldoutSetInput = Schema.Struct({
+  projectId: ProjectId,
+  scenario: HoldoutScenario,
+});
 export const ProjectHoldoutRemoveInput = Schema.Struct({
   projectId: ProjectId,
   scenarioId: TrimmedNonEmptyString,
@@ -5766,15 +5813,31 @@ export const OrchestrationSubscribeChannelInput = Schema.Struct({
 });
 export type OrchestrationSubscribeChannelInput = typeof OrchestrationSubscribeChannelInput.Type;
 
+/** A run working in a channel, so clients can show it before its reply is posted. */
+export const OrchestrationChannelRun = Schema.Struct({
+  threadId: ThreadId,
+  agentId: AgentId,
+  startedAt: IsoDateTime,
+});
+export type OrchestrationChannelRun = typeof OrchestrationChannelRun.Type;
+
 /**
- * A channel subscription: the newest messages, then each message as it is
- * posted and each change in a message's delivery. A message can arrive in
- * both; clients keep one per id.
+ * A channel subscription: the newest messages and live runs, then each message
+ * as it is posted, each run as it starts, and each change in a message's
+ * delivery. A message or run can arrive in both; clients keep one per id.
  */
 export const OrchestrationChannelStreamItem = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("snapshot"),
     messages: Schema.Array(OrchestrationChannelMessage),
+    // Older servers send no runs.
+    runs: Schema.Array(OrchestrationChannelRun).pipe(
+      Schema.withDecodingDefault(Effect.succeed([])),
+    ),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("run"),
+    run: OrchestrationChannelRun,
   }),
   Schema.Struct({
     kind: Schema.Literal("message"),

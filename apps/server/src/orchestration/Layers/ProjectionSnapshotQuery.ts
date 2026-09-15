@@ -39,6 +39,7 @@ import {
   OrchestrationSessionStatus,
   TrimmedNonEmptyString,
   runSessionState,
+  OrchestrationChannelRun,
   OrchestrationLiveRun,
   PROJECT_SHELL_TRIGGER_FIRES_LIMIT,
   ProjectLesson,
@@ -3002,7 +3003,11 @@ pending_approval_requests AS (
                 projects: Arr.filterMap(projectRows, (row) =>
                   row.deletedAt === null
                     ? Result.succeed(
-                        mapProjectShellRow(row, repositoryIdentities.get(row.projectId) ?? null, projectExtras.get(row.projectId)),
+                        mapProjectShellRow(
+                          row,
+                          repositoryIdentities.get(row.projectId) ?? null,
+                          projectExtras.get(row.projectId),
+                        ),
                       )
                     : Result.failVoid,
                 ),
@@ -3197,7 +3202,11 @@ pending_approval_requests AS (
                 projects: Arr.filterMap(projectRows, (row) =>
                   row.deletedAt === null && activeProjectIds.has(row.projectId)
                     ? Result.succeed(
-                        mapProjectShellRow(row, repositoryIdentities.get(row.projectId) ?? null, projectExtras.get(row.projectId)),
+                        mapProjectShellRow(
+                          row,
+                          repositoryIdentities.get(row.projectId) ?? null,
+                          projectExtras.get(row.projectId),
+                        ),
                       )
                     : Result.failVoid,
                 ),
@@ -3378,7 +3387,11 @@ pending_approval_requests AS (
         Effect.all([resolveRepositoryIdentitiesForProjects(projects), loadProjectExtras()]).pipe(
           Effect.map(([identities, extras]) =>
             projects.map((row) =>
-              mapProjectShellRow(row, identities.get(row.projectId) ?? null, extras.get(row.projectId)),
+              mapProjectShellRow(
+                row,
+                identities.get(row.projectId) ?? null,
+                extras.get(row.projectId),
+              ),
             ),
           ),
         ),
@@ -3403,7 +3416,11 @@ pending_approval_requests AS (
             ]).pipe(
               Effect.map(([repositoryIdentity, extras]) =>
                 Option.some(
-                  mapProjectShellRow(option.value, repositoryIdentity, extras.get(option.value.projectId)),
+                  mapProjectShellRow(
+                    option.value,
+                    repositoryIdentity,
+                    extras.get(option.value.projectId),
+                  ),
                 ),
               ),
             ),
@@ -4360,7 +4377,10 @@ pending_approval_requests AS (
       }),
     );
 
-  const getCardActivity: ProjectionSnapshotQueryShape["getCardActivity"] = (cardId, { limit, before }) =>
+  const getCardActivity: ProjectionSnapshotQueryShape["getCardActivity"] = (
+    cardId,
+    { limit, before },
+  ) =>
     Effect.all([
       listCardActivityRows({ cardId, limit, before }),
       listLatestCardEvidenceRows({ cardId }),
@@ -4372,7 +4392,8 @@ pending_approval_requests AS (
           .slice(activityRows.length > limit ? 1 : 0)
           .map((row) => Struct.omit(row, ["deliveryThreadId"])),
         hasMore: activityRows.length > limit,
-        verdict: verdictRow === undefined ? null : { ...verdictRow, passed: verdictRow.passed === 1 },
+        verdict:
+          verdictRow === undefined ? null : { ...verdictRow, passed: verdictRow.passed === 1 },
         evidence:
           evidenceRows[0] === undefined
             ? null
@@ -4430,6 +4451,25 @@ pending_approval_requests AS (
   const listRunsByAgent: ProjectionSnapshotQueryShape["listRunsByAgent"] = (agentId, limit) =>
     listRunRowsByAgent({ agentId, limit }).pipe(Effect.mapError(queryError("listRunsByAgent")));
 
+  const listLiveChannelRunRows = SqlSchema.findAll({
+    Request: Schema.Struct({ channelId: Schema.String }),
+    Result: OrchestrationChannelRun,
+    execute: ({ channelId }) =>
+      sql`
+        SELECT
+          thread_id AS "threadId",
+          agent_id AS "agentId",
+          started_at AS "startedAt"
+        FROM projection_runs
+        WHERE channel_id = ${channelId}
+          AND ended_at IS NULL
+        ORDER BY started_at ASC, thread_id ASC
+      `,
+  });
+
+  const listLiveChannelRuns: ProjectionSnapshotQueryShape["listLiveChannelRuns"] = (channelId) =>
+    listLiveChannelRunRows({ channelId }).pipe(Effect.mapError(queryError("listLiveChannelRuns")));
+
   const getRunByThreadId: ProjectionSnapshotQueryShape["getRunByThreadId"] = (threadId) =>
     getRunRowByThreadId({ threadId }).pipe(Effect.mapError(queryError("getRunByThreadId")));
 
@@ -4458,6 +4498,7 @@ pending_approval_requests AS (
     getCardShellById,
     getCardActivity,
     listChannelMessages,
+    listLiveChannelRuns,
     listRunsByAgent,
     getAgentById,
     getThreadRuntimeContext,
