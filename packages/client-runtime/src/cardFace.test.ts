@@ -4,6 +4,7 @@ import {
   CardId,
   LEGACY_CARD_CONTRACT,
   ProjectId,
+  ThreadId,
   type OrchestrationCardShell,
 } from "@iskra/contracts";
 import { describe, expect, it } from "vite-plus/test";
@@ -87,7 +88,17 @@ describe("card face", () => {
   it("sparks for work, for a person, and for a landing", () => {
     expect(cardSparkState(card())).toBe("idle");
     expect(
-      cardSparkState(card({ ownerSession: { agentId: AgentId.make("agent"), state: "active", since: at } })),
+      cardSparkState(
+        card({
+          ownerSession: {
+            threadId: ThreadId.make("owner"),
+            agentId: AgentId.make("agent"),
+            state: "active",
+            since: at,
+            planProgress: null,
+          },
+        }),
+      ),
     ).toBe("working");
     expect(cardSparkState(card({ status: "triage" }))).toBe("needsYou");
     expect(cardSparkState(card({ status: "inReview" }))).toBe("needsYou");
