@@ -128,9 +128,17 @@ export function markOfCriterionState(state: CriterionState): CriterionMark {
 
 /**
  * A card's short caption id, as the board, review and proposals show it: `C-` and the first four
- * letters or digits of its id, after any `card-` prefix.
+ * letters or digits of its id, after any `card-` prefix. Structured ids (`trigger:<project>:…`)
+ * share a prefix, so they get four hex digits of an FNV-1a hash instead.
  */
 export function cardShortId(cardId: string): string {
+  if (cardId.includes(":")) {
+    let hash = 0x811c9dc5;
+    for (let index = 0; index < cardId.length; index++) {
+      hash = Math.imul(hash ^ cardId.charCodeAt(index), 0x01000193);
+    }
+    return `C-${((hash >>> 0) & 0xffff).toString(16).padStart(4, "0").toUpperCase()}`;
+  }
   return `C-${cardId
     .replace(/^card-/, "")
     .replace(/[^a-z0-9]/gi, "")

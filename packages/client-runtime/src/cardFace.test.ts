@@ -147,4 +147,13 @@ describe("cardShortId", () => {
     expect(cardShortId("card-5af2e9")).toBe("C-5AF2");
     expect(cardShortId("a-b-c-d-e")).toBe("C-ABCD");
   });
+
+  it("hashes structured ids that share a prefix, so trigger cards don't all read C-TRIG", () => {
+    const first = cardShortId("trigger:project-1:nightly:2026-09-14");
+    const second = cardShortId("trigger:project-1:nightly:2026-09-15");
+    expect(first).toMatch(/^C-[0-9A-F]{4}$/);
+    expect(second).toMatch(/^C-[0-9A-F]{4}$/);
+    expect(first).not.toBe(second);
+    expect(cardShortId("trigger:project-1:nightly:2026-09-14")).toBe(first);
+  });
 });
