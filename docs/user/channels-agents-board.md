@@ -36,7 +36,7 @@ words without mentioning anyone. Once the request is clear, the lead proposes a 
 criteria, an estimate, and a suggested owner. The proposal appears under its reply with **Approve &
 start**, **Edit**, and **Drop**.
 
-**Approve & start** first shows what you are starting: the criteria to confirm or edit, and the
+**Approve & Start** first shows what you are starting: the criteria to confirm or edit, and the
 lead's estimate of size, likely areas, and risks. If the lead thinks the work should be several
 cards, the preview says **Too big, split?** with its reasons. Starting confirms the criteria,
 approves the spec, and assigns the owner you picked. The card then joins the queue.
@@ -147,7 +147,7 @@ To keep cards in step with Linear issues, see [Linear](./linear.md).
 ### Acceptance criteria
 
 Every card is held to its acceptance criteria. Work doesn't start until a person confirms them,
-with **Approve & start** or by approving the card. Mark a criterion **Needs your check** when Iskra
+with **Approve & Start** or by approving the card. Mark a criterion **Needs your check** when Iskra
 can't verify it for you, such as behavior in a mobile app; review then asks you to check it yourself.
 
 ### The queue
@@ -328,7 +328,7 @@ plans to approve, plan slices that landed, lessons agents proposed, flawed outco
 reverts, and monthly budgets that hold work. Decide most of them right in the list: answer a question in one click,
 approve or dismiss a lesson,
 forward a comment to the agent or dismiss it, retry a landing, rerun a verifier, restart a card's
-services, or restore or keep changed refs and then resume the card. **Approve & start** on a proposal starts it with the owner you pick.
+services, or restore or keep changed refs and then resume the card. **Approve & Start** on a proposal starts it with the owner you pick.
 
 ## Project orchestration
 
