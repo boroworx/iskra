@@ -35,6 +35,12 @@ vi.mock("../../hooks/useSettings", async (importOriginal) => ({
   usePrimarySettings: () => DEFAULT_UNIFIED_SETTINGS,
   useUpdatePrimarySettings: () => vi.fn(),
 }));
+// Settings rows put long captions behind an info tooltip, whose focus hook needs a window.
+vi.mock("../ui/tooltip", () => ({
+  Tooltip: ({ children }: { children: ReactNode }) => children,
+  TooltipTrigger: ({ children }: { children: ReactNode }) => <span>{children}</span>,
+  TooltipPopup: () => null,
+}));
 vi.mock("./settingsLayout", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./settingsLayout")>()),
   SettingsPageContainer: ({ children }: { children: ReactNode }) => children,
