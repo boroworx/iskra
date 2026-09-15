@@ -1,6 +1,8 @@
 import { Button } from "../ui/button";
 import { Alert, AlertAction, AlertDescription } from "../ui/alert";
-import { ChevronRightIcon } from "lucide-react";
+import { ChevronRightIcon, InfoIcon } from "lucide-react";
+import { ProjectFavicon } from "../ProjectFavicon";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { SettingsPageContainer, SettingsSection } from "./settingsLayout";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { useEnvironments } from "../../state/environments";
@@ -70,15 +72,35 @@ export function SettingsScopeNotice({
   if (target === "project" && choices.length > 0) {
     return (
       <SettingsPageContainer>
-        <SettingsSection title="Choose a project">
-          {choices.map((choice) => (
+        <SettingsSection
+          title="Choose a project"
+          headerAction={
+            <Tooltip>
+              <TooltipTrigger
+                delay={200}
+                render={
+                  <Button size="icon-sm" variant="ghost-muted" aria-label="About projects">
+                    <InfoIcon className="size-3.5" />
+                  </Button>
+                }
+              />
+              <TooltipPopup side="top" className="max-w-72">
+                {children}
+              </TooltipPopup>
+            </Tooltip>
+          }
+        >
+          {groups.map((group) => (
             <button
-              key={JSON.stringify(choice.search)}
+              key={group.projectKey}
               type="button"
               className="flex min-h-11 w-full items-center gap-3 px-4 text-left text-[13px] outline-none first:rounded-t-xl last:rounded-b-xl hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-              onClick={() => choose(choice)}
+              onClick={() =>
+                choose({ label: group.displayName, search: { project: group.projectKey } })
+              }
             >
-              <span className="min-w-0 flex-1 truncate">{choice.label}</span>
+              <ProjectFavicon project={group} className="size-4 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate">{group.displayName}</span>
               <ChevronRightIcon
                 aria-hidden
                 className="size-3.5 shrink-0 text-muted-foreground/60"
@@ -86,7 +108,6 @@ export function SettingsScopeNotice({
             </button>
           ))}
         </SettingsSection>
-        <p className="px-4 text-xs text-muted-foreground">{children}</p>
       </SettingsPageContainer>
     );
   }

@@ -7,7 +7,7 @@ import type { Project } from "~/types";
 import { SpendBar } from "../iskra/Marks";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { SettingsRow, SettingsSection } from "./settingsLayout";
+import { SETTINGS_NUMBER_WIDTH_CLASSNAME, SettingsRow, SettingsSection } from "./settingsLayout";
 
 const BUDGET_CODES = new Set([
   "budgetCap",
@@ -81,7 +81,7 @@ export function ProjectBudgetsSettings(props: {
         }
       >
         {spend.byAgent.length > 0 ? (
-          <ul className="flex flex-col gap-0.5 px-4 pb-3 text-xs text-muted-foreground">
+          <ul className="flex flex-col gap-0.5 pb-3 text-xs text-muted-foreground">
             {spend.byAgent.map((entry) => (
               <li key={entry.agentId} className="flex gap-2 tabular-nums">
                 <span className="min-w-0 flex-1 truncate">
@@ -95,7 +95,7 @@ export function ProjectBudgetsSettings(props: {
       </SettingsRow>
       <SettingsRow
         title="Monthly caps"
-        description="At the project cap, or an agent's, new work waits and channel messages to agents are refused until you raise it or the month turns. Blank sets no cap."
+        description="Caps on this month's spend. At the project cap, or an agent's, new work waits and channel messages to agents are refused until you raise it or the month turns. Blank sets no cap."
         control={
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             Project $
@@ -127,7 +127,7 @@ export function ProjectBudgetsSettings(props: {
         control={
           <Input
             size="sm"
-            className="w-20"
+            className={SETTINGS_NUMBER_WIDTH_CLASSNAME}
             inputMode="decimal"
             aria-label="Default card budget in dollars"
             value={cardDefaultUsd}
@@ -137,7 +137,7 @@ export function ProjectBudgetsSettings(props: {
       />
       {held.length > 0 ? (
         <SettingsRow title={`${held.length} card${held.length === 1 ? "" : "s"} held by a budget`}>
-          <ul className="flex flex-col gap-0.5 px-4 pb-3 text-xs text-muted-foreground">
+          <ul className="flex flex-col gap-0.5 pb-3 text-xs text-muted-foreground">
             {held.map((card) => {
               const reason = card.paused?.reason ?? card.waitReason;
               return (
@@ -150,7 +150,12 @@ export function ProjectBudgetsSettings(props: {
           </ul>
         </SettingsRow>
       ) : null}
-      <div className="flex flex-wrap items-center gap-2 px-4 py-3">
+      <div className="flex flex-wrap items-center justify-end gap-2 px-4 py-3">
+        {!valid ? (
+          <span className="me-auto text-xs text-destructive-foreground">
+            Budgets are dollar amounts above 0; caps may be blank.
+          </span>
+        ) : null}
         <Button
           size="sm"
           disabled={!edited || props.saving}
@@ -160,11 +165,6 @@ export function ProjectBudgetsSettings(props: {
         >
           Save budgets
         </Button>
-        {!valid ? (
-          <span className="text-xs text-destructive-foreground">
-            Budgets are dollar amounts above 0; caps may be blank.
-          </span>
-        ) : null}
       </div>
     </SettingsSection>
   );

@@ -4,7 +4,7 @@ import {
   squashAtomCommandFailure,
 } from "@iskra/client-runtime/state/runtime";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@iskra/shared/keybindings";
-import { ChevronDownIcon, PlusIcon } from "lucide-react";
+import { ChevronDownIcon } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useIskraProjectFileState } from "../../hooks/useIskraProjectFileScripts";
 import { useEnvironments } from "../../state/environments";
@@ -28,7 +28,7 @@ import {
 } from "../ui/menu";
 import { ProjectActionsList } from "./ProjectActionsList";
 import { useProjectScriptSettings } from "./useProjectScriptSettings";
-import { SettingsRow, SettingsSection } from "./settingsLayout";
+import { SettingsAddButton, SettingsRow, SettingsSection } from "./settingsLayout";
 import { useSettingsScope } from "./SettingsScopeContext";
 
 /**
@@ -135,7 +135,7 @@ export function ProjectActionsSettings() {
         settingKeys={["defaultProjectScripts"]}
         mixed={mixed}
         title="Actions"
-        description="Commands that run in this project's checkout or its worktree, with optional shortcuts."
+        description="Commands to run in this project's checkouts and worktrees."
         onResetOverride={() => void persist(() => null)}
         control={
           <div className="flex flex-wrap items-center gap-1.5">
@@ -145,7 +145,7 @@ export function ProjectActionsSettings() {
                   render={
                     <Button
                       id="import-scripts"
-                      size="xs"
+                      size="sm"
                       variant="ghost"
                       disabled={saving}
                       type="button"
@@ -180,15 +180,12 @@ export function ProjectActionsSettings() {
                 </MenuPopup>
               </Menu>
             ) : null}
-            <Button
-              size="xs"
-              variant="outline"
+            <SettingsAddButton
               disabled={saving || targets.length === 0}
               onClick={() => setRequest({ scriptId: null, initial: EMPTY_PROJECT_SCRIPT_INPUT })}
             >
-              <PlusIcon className="size-3.5" />
               Add action
-            </Button>
+            </SettingsAddButton>
           </div>
         }
       />
@@ -208,7 +205,7 @@ export function ProjectActionsSettings() {
       {iskraFile.status === "invalid" ? (
         <SettingsRow
           title="iskra.json is invalid"
-          description="A iskra.json exists in this checkout but fails to parse, so every action and icon it declares is ignored. Check the JSON syntax and icon values."
+          description="Its actions and icons are ignored until it parses. Check the JSON syntax and icon values."
           className="text-warning"
         />
       ) : null}

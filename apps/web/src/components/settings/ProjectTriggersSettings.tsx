@@ -17,7 +17,12 @@ import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
-import { SettingsRow, SettingsSection } from "./settingsLayout";
+import {
+  SettingsAddButton,
+  SettingsEmptyRow,
+  SettingsRow,
+  SettingsSection,
+} from "./settingsLayout";
 
 const KIND_LABEL: Record<ProjectTrigger["kind"], string> = {
   ciFailure: "CI fails on a branch",
@@ -164,217 +169,217 @@ export function ProjectTriggersSettings(props: {
       <SettingsRow
         title="Triggers"
         description="Only comments from people with write access to the repository fire a trigger. Work a trigger starts on its own opens a draft pull request and always waits for you to merge."
+        control={
+          draft === null ? (
+            <SettingsAddButton onClick={() => setDraft(NEW_DRAFT)}>Add trigger</SettingsAddButton>
+          ) : null
+        }
       >
-        <div className="flex flex-col gap-1.5 px-4 pb-3">
-          {current.triggers.length === 0 && draft === null ? (
-            <p className="text-xs text-muted-foreground">No triggers yet.</p>
-          ) : null}
-          <ul className="flex flex-col divide-y divide-border">
-            {current.triggers.map((trigger) => (
-              <li key={trigger.id} className="flex min-w-0 items-center gap-2 py-1.5">
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-sm">{trigger.id}</span>
-                  <span className="truncate text-xs text-muted-foreground">
-                    {KIND_LABEL[trigger.kind]}
-                    {trigger.schedule !== null
-                      ? ` · ${trigger.schedule.cron} ${trigger.schedule.timezone}`
-                      : ""}
-                    {trigger.intake === "ready" ? " · starts work" : " · to triage"}
-                  </span>
-                </div>
-                <Switch
-                  aria-label={`${trigger.id} on`}
-                  checked={trigger.enabled}
-                  disabled={props.saving}
-                  onCheckedChange={(enabled) =>
-                    void saveTriggers(
-                      current.triggers.map((entry) =>
-                        entry.id === trigger.id ? { ...entry, enabled } : entry,
-                      ),
-                    )
-                  }
-                />
-                <Button size="sm" variant="ghost-muted" onClick={() => setDraft(draftOf(trigger))}>
-                  Edit
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost-muted"
-                  disabled={props.saving}
-                  onClick={() =>
-                    void saveTriggers(current.triggers.filter((entry) => entry.id !== trigger.id))
-                  }
-                >
-                  Remove
-                </Button>
-              </li>
-            ))}
-          </ul>
-          {draft === null ? (
-            <Button
-              size="sm"
-              variant="ghost-muted"
-              className="self-start"
-              onClick={() => setDraft(NEW_DRAFT)}
-            >
-              Add trigger
-            </Button>
-          ) : (
-            <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <Input
-                  size="sm"
-                  className="w-40"
-                  aria-label="Trigger id"
-                  placeholder="nightly-deps"
-                  value={draft.id}
-                  onChange={(event) => change("id", event.target.value)}
-                />
-                <Select
-                  value={draft.kind}
-                  onValueChange={(value) => {
-                    if (value !== null) change("kind", value);
-                  }}
-                >
-                  <SelectTrigger aria-label="When it fires" className="w-auto min-w-48">
-                    <SelectValue>
-                      {(value: ProjectTrigger["kind"] | null) => KIND_LABEL[value ?? "schedule"]}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectPopup>
-                    {(Object.keys(KIND_LABEL) as ProjectTrigger["kind"][]).map((kind) => (
-                      <SelectItem key={kind} value={kind}>
-                        {KIND_LABEL[kind]}
-                      </SelectItem>
-                    ))}
-                  </SelectPopup>
-                </Select>
-              </div>
-              {draft.kind === "schedule" ? (
-                <div className="flex flex-wrap gap-1.5">
+        {current.triggers.length === 0 && draft === null ? null : (
+          <div className="flex flex-col gap-1.5 pb-3">
+            <ul className="flex flex-col divide-y divide-border">
+              {current.triggers.map((trigger) => (
+                <li key={trigger.id} className="flex min-w-0 items-center gap-2 py-1.5">
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-sm">{trigger.id}</span>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {KIND_LABEL[trigger.kind]}
+                      {trigger.schedule !== null
+                        ? ` · ${trigger.schedule.cron} ${trigger.schedule.timezone}`
+                        : ""}
+                      {trigger.intake === "ready" ? " · starts work" : " · to triage"}
+                    </span>
+                  </div>
+                  <Switch
+                    aria-label={`${trigger.id} on`}
+                    checked={trigger.enabled}
+                    disabled={props.saving}
+                    onCheckedChange={(enabled) =>
+                      void saveTriggers(
+                        current.triggers.map((entry) =>
+                          entry.id === trigger.id ? { ...entry, enabled } : entry,
+                        ),
+                      )
+                    }
+                  />
+                  <Button
+                    size="sm"
+                    variant="ghost-muted"
+                    onClick={() => setDraft(draftOf(trigger))}
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost-muted"
+                    disabled={props.saving}
+                    onClick={() =>
+                      void saveTriggers(current.triggers.filter((entry) => entry.id !== trigger.id))
+                    }
+                  >
+                    Remove
+                  </Button>
+                </li>
+              ))}
+            </ul>
+            {draft === null ? null : (
+              <div className="flex flex-col gap-2 rounded-lg bg-background p-3">
+                <div className="flex flex-wrap items-center gap-1.5">
                   <Input
                     size="sm"
                     className="w-40"
-                    aria-label="Cron expression"
-                    placeholder="0 6 * * 1"
-                    value={draft.cron}
-                    onChange={(event) => change("cron", event.target.value)}
+                    aria-label="Trigger id"
+                    placeholder="nightly-deps"
+                    value={draft.id}
+                    onChange={(event) => change("id", event.target.value)}
                   />
+                  <Select
+                    value={draft.kind}
+                    onValueChange={(value) => {
+                      if (value !== null) change("kind", value);
+                    }}
+                  >
+                    <SelectTrigger aria-label="When it fires" className="w-auto min-w-48">
+                      <SelectValue>
+                        {(value: ProjectTrigger["kind"] | null) => KIND_LABEL[value ?? "schedule"]}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup>
+                      {(Object.keys(KIND_LABEL) as ProjectTrigger["kind"][]).map((kind) => (
+                        <SelectItem key={kind} value={kind}>
+                          {KIND_LABEL[kind]}
+                        </SelectItem>
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                </div>
+                {draft.kind === "schedule" ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    <Input
+                      size="sm"
+                      className="w-40"
+                      aria-label="Cron expression"
+                      placeholder="0 6 * * 1"
+                      value={draft.cron}
+                      onChange={(event) => change("cron", event.target.value)}
+                    />
+                    <Input
+                      size="sm"
+                      className="w-48"
+                      aria-label="Time zone"
+                      value={draft.timezone}
+                      onChange={(event) => change("timezone", event.target.value)}
+                    />
+                  </div>
+                ) : draft.kind === "ciFailure" ? (
                   <Input
                     size="sm"
-                    className="w-48"
-                    aria-label="Time zone"
-                    value={draft.timezone}
-                    onChange={(event) => change("timezone", event.target.value)}
+                    aria-label="Branch"
+                    placeholder="Branch to watch (blank watches the base branch)"
+                    value={draft.branch}
+                    onChange={(event) => change("branch", event.target.value)}
                   />
-                </div>
-              ) : draft.kind === "ciFailure" ? (
+                ) : null}
                 <Input
                   size="sm"
-                  aria-label="Branch"
-                  placeholder="Branch to watch (blank watches the base branch)"
-                  value={draft.branch}
-                  onChange={(event) => change("branch", event.target.value)}
+                  aria-label="Card title"
+                  placeholder="Title of the cards it makes"
+                  value={draft.title}
+                  onChange={(event) => change("title", event.target.value)}
                 />
-              ) : null}
-              <Input
-                size="sm"
-                aria-label="Card title"
-                placeholder="Title of the cards it makes"
-                value={draft.title}
-                onChange={(event) => change("title", event.target.value)}
-              />
-              <Textarea
-                aria-label="Card spec"
-                placeholder="What the card asks for; what fired it is added below as untrusted input"
-                value={draft.spec}
-                onChange={(event) => change("spec", event.target.value)}
-              />
-              <Textarea
-                aria-label="Acceptance criteria"
-                placeholder="Acceptance criteria, one per line"
-                value={draft.criteria}
-                onChange={(event) => change("criteria", event.target.value)}
-              />
-              <div className="flex flex-wrap items-center gap-1.5">
-                <Select
-                  value={draft.intake}
-                  onValueChange={(value) => {
-                    if (value !== null) change("intake", value);
-                  }}
-                >
-                  <SelectTrigger aria-label="Intake" className="w-auto min-w-40">
-                    <SelectValue>
-                      {(value: ProjectTrigger["intake"] | null) =>
-                        value === "ready" ? "Start work" : "Send to triage"
-                      }
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectPopup>
-                    <SelectItem value="triage">Send to triage</SelectItem>
-                    <SelectItem value="ready">Start work</SelectItem>
-                  </SelectPopup>
-                </Select>
-                <Select
-                  value={draft.agentId}
-                  onValueChange={(value) => change("agentId", value ?? NO_AGENT)}
-                >
-                  <SelectTrigger aria-label="Agent" className="w-auto min-w-40">
-                    <SelectValue>
-                      {(value: string | null) =>
-                        value === null || value === NO_AGENT
-                          ? "No agent"
-                          : `@${agents.find((agent) => agent.id === value)?.name ?? "archived agent"}`
-                      }
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectPopup>
-                    <SelectItem value={NO_AGENT}>No agent</SelectItem>
-                    {agents.map((agent) => (
-                      <SelectItem key={agent.id} value={agent.id}>
-                        @{agent.name}
-                      </SelectItem>
-                    ))}
-                  </SelectPopup>
-                </Select>
+                <Textarea
+                  aria-label="Card spec"
+                  placeholder="What the card asks for; what fired it is added below as untrusted input"
+                  value={draft.spec}
+                  onChange={(event) => change("spec", event.target.value)}
+                />
+                <Textarea
+                  aria-label="Acceptance criteria"
+                  placeholder="Acceptance criteria, one per line"
+                  value={draft.criteria}
+                  onChange={(event) => change("criteria", event.target.value)}
+                />
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Select
+                    value={draft.intake}
+                    onValueChange={(value) => {
+                      if (value !== null) change("intake", value);
+                    }}
+                  >
+                    <SelectTrigger aria-label="Intake" className="w-auto min-w-40">
+                      <SelectValue>
+                        {(value: ProjectTrigger["intake"] | null) =>
+                          value === "ready" ? "Start work" : "Send to triage"
+                        }
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup>
+                      <SelectItem value="triage">Send to triage</SelectItem>
+                      <SelectItem value="ready">Start work</SelectItem>
+                    </SelectPopup>
+                  </Select>
+                  <Select
+                    value={draft.agentId}
+                    onValueChange={(value) => change("agentId", value ?? NO_AGENT)}
+                  >
+                    <SelectTrigger aria-label="Agent" className="w-auto min-w-40">
+                      <SelectValue>
+                        {(value: string | null) =>
+                          value === null || value === NO_AGENT
+                            ? "No agent"
+                            : `@${agents.find((agent) => agent.id === value)?.name ?? "archived agent"}`
+                        }
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup>
+                      <SelectItem value={NO_AGENT}>No agent</SelectItem>
+                      {agents.map((agent) => (
+                        <SelectItem key={agent.id} value={agent.id}>
+                          @{agent.name}
+                        </SelectItem>
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                </div>
+                <div className="flex flex-wrap items-center justify-end gap-1.5">
+                  {typeof parsed === "string" ? (
+                    <span className="me-auto text-xs text-muted-foreground">{parsed}</span>
+                  ) : null}
+                  <Button size="sm" variant="secondary" onClick={() => setDraft(null)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    disabled={props.saving || parsed === null || typeof parsed === "string"}
+                    onClick={async () => {
+                      if (parsed === null || typeof parsed === "string") return;
+                      const triggers =
+                        draft.original === null
+                          ? [...current.triggers, parsed]
+                          : current.triggers.map((entry) =>
+                              entry.id === draft.original ? parsed : entry,
+                            );
+                      await saveTriggers(triggers);
+                      setDraft(null);
+                    }}
+                  >
+                    Save trigger
+                  </Button>
+                </div>
               </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <Button
-                  size="sm"
-                  disabled={props.saving || parsed === null || typeof parsed === "string"}
-                  onClick={async () => {
-                    if (parsed === null || typeof parsed === "string") return;
-                    const triggers =
-                      draft.original === null
-                        ? [...current.triggers, parsed]
-                        : current.triggers.map((entry) =>
-                            entry.id === draft.original ? parsed : entry,
-                          );
-                    await saveTriggers(triggers);
-                    setDraft(null);
-                  }}
-                >
-                  Save trigger
-                </Button>
-                <Button size="sm" variant="ghost-muted" onClick={() => setDraft(null)}>
-                  Cancel
-                </Button>
-                {typeof parsed === "string" ? (
-                  <span className="text-xs text-muted-foreground">{parsed}</span>
-                ) : null}
-              </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
       </SettingsRow>
+      {current.triggers.length === 0 && draft === null ? (
+        <SettingsEmptyRow>No triggers yet.</SettingsEmptyRow>
+      ) : null}
       <SettingsRow
         title="Recent fires"
         description="The newest times a trigger fired, and what came of it."
       >
-        <div className="px-4 pb-3">
-          {fires.length === 0 ? (
-            <p className="text-xs text-muted-foreground">Nothing has fired yet.</p>
-          ) : (
+        {fires.length === 0 ? null : (
+          <div className="pb-3">
             <ul className="flex flex-col divide-y divide-border">
               {fires.map((fire) => {
                 const card = cards.find((entry) => entry.id === fire.cardId);
@@ -420,9 +425,10 @@ export function ProjectTriggersSettings(props: {
                 );
               })}
             </ul>
-          )}
-        </div>
+          </div>
+        )}
       </SettingsRow>
+      {fires.length === 0 ? <SettingsEmptyRow>Nothing has fired yet.</SettingsEmptyRow> : null}
     </SettingsSection>
   );
 }

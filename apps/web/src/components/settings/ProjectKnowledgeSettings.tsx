@@ -10,7 +10,7 @@ import type { Project } from "~/types";
 import { StatusPill } from "../iskra/StatusPill";
 import { toastCommandFailure } from "../toastCommandFailure";
 import { Button } from "../ui/button";
-import { SettingsRow, SettingsSection } from "./settingsLayout";
+import { SettingsEmptyRow, SettingsRow, SettingsSection } from "./settingsLayout";
 
 const KIND_LABEL: Record<ProjectLesson["kind"], string> = {
   quirk: "Quirk",
@@ -81,7 +81,7 @@ export function ProjectKnowledgeSettings(props: { readonly project: Project }) {
               </Button>
               <Button
                 size="sm"
-                variant="ghost-muted"
+                variant="secondary"
                 disabled={busy}
                 onClick={() => void decide(dismiss(input(lesson)), "The lesson was not dismissed")}
               >
@@ -109,26 +109,20 @@ export function ProjectKnowledgeSettings(props: { readonly project: Project }) {
         title="Proposed"
         description="Lessons agents proposed while working. Approve the ones worth telling every agent that works on these paths."
       >
-        <div className="px-4 pb-3">
-          {proposed.length === 0 ? (
-            <p className="text-xs text-muted-foreground">Nothing proposed.</p>
-          ) : (
-            <ul className="flex flex-col divide-y divide-border">{proposed.map(row)}</ul>
-          )}
-        </div>
+        {proposed.length === 0 ? null : (
+          <ul className="flex flex-col divide-y divide-border pb-3">{proposed.map(row)}</ul>
+        )}
       </SettingsRow>
+      {proposed.length === 0 ? <SettingsEmptyRow>Nothing proposed.</SettingsEmptyRow> : null}
       <SettingsRow
         title="Approved"
-        description="Agents get these in their brief when their card touches the lesson's paths; a lesson without paths goes to every card."
+        description="Lessons agents get in their brief. A lesson reaches cards touching its paths; one without paths goes to every card."
       >
-        <div className="px-4 pb-3">
-          {approved.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No approved lessons yet.</p>
-          ) : (
-            <ul className="flex flex-col divide-y divide-border">{approved.map(row)}</ul>
-          )}
-        </div>
+        {approved.length === 0 ? null : (
+          <ul className="flex flex-col divide-y divide-border pb-3">{approved.map(row)}</ul>
+        )}
       </SettingsRow>
+      {approved.length === 0 ? <SettingsEmptyRow>No approved lessons yet.</SettingsEmptyRow> : null}
     </SettingsSection>
   );
 }

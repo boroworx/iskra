@@ -4,7 +4,7 @@ import { shortcutLabelForCommand } from "../../keybindings";
 import { commandForProjectScript } from "../../projectScripts";
 import { ScriptIcon } from "../projectScriptEditor";
 import { Button } from "../ui/button";
-import { SettingsRow } from "./settingsLayout";
+import { SettingsEmptyRow, SettingsRow } from "./settingsLayout";
 
 export function ProjectActionsList({
   scripts,
@@ -17,12 +17,7 @@ export function ProjectActionsList({
   disabled: boolean;
   onEdit: (script: ProjectScript) => void;
 }) {
-  if (scripts.length === 0)
-    return (
-      <p className="px-3 py-2 text-base text-muted-foreground sm:px-4 sm:text-sm">
-        No actions configured.
-      </p>
-    );
+  if (scripts.length === 0) return <SettingsEmptyRow>No actions yet.</SettingsEmptyRow>;
   return scripts.map((script) => {
     const shortcutLabel = shortcutLabelForCommand(keybindings, commandForProjectScript(script.id));
     return (

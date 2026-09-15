@@ -29,7 +29,15 @@ import { ProjectHoldoutsSettings } from "./ProjectHoldoutsSettings";
 import { ProjectKnowledgeSettings } from "./ProjectKnowledgeSettings";
 import { ProjectTriggersSettings } from "./ProjectTriggersSettings";
 import { AUTO_MERGE_NEEDS_VERIFIER_TEXT } from "@iskra/client-runtime/cards";
-import { SettingsRow, SettingsSection } from "./settingsLayout";
+import {
+  SETTINGS_NUMBER_WIDTH_CLASSNAME,
+  SETTINGS_SECTION_HEAD_CLASSNAME,
+  SETTINGS_SELECT_WIDTH_CLASSNAME,
+  SETTINGS_TEXT_INPUT_WIDTH_CLASSNAME,
+  SettingsAddButton,
+  SettingsRow,
+  SettingsSection,
+} from "./settingsLayout";
 
 /** Publishing and billing APIs agent shells should never reach from a social-publishing product. */
 const PUBLISHING_DENY_TEMPLATE = [
@@ -228,7 +236,7 @@ function ProjectOrchestrationForm(props: {
           control={
             <Input
               size="sm"
-              className="w-full sm:w-48"
+              className={SETTINGS_SELECT_WIDTH_CLASSNAME}
               aria-label="Base branch"
               placeholder="Default branch"
               value={form.baseBranch}
@@ -242,7 +250,7 @@ function ProjectOrchestrationForm(props: {
           control={
             <Input
               size="sm"
-              className="w-24"
+              className={SETTINGS_NUMBER_WIDTH_CLASSNAME}
               aria-label="Session cap"
               inputMode="numeric"
               placeholder="Machine"
@@ -257,7 +265,7 @@ function ProjectOrchestrationForm(props: {
           control={
             <Input
               size="sm"
-              className="w-24"
+              className={SETTINGS_NUMBER_WIDTH_CLASSNAME}
               aria-label="Open agent pull request cap"
               inputMode="numeric"
               value={form.openAgentPrCap}
@@ -267,7 +275,7 @@ function ProjectOrchestrationForm(props: {
         />
         <SettingsRow
           title="Landing"
-          description="Automatic opens a pull request when the repository has a remote and host sign-in, and fast-forwards locally otherwise."
+          description="How a card's work lands. Automatic opens a pull request when the repository has a remote and host sign-in, and fast-forwards locally otherwise."
           control={
             <Select
               value={form.landing}
@@ -277,7 +285,7 @@ function ProjectOrchestrationForm(props: {
                 }
               }}
             >
-              <SelectTrigger aria-label="Landing" className="w-auto min-w-40">
+              <SelectTrigger aria-label="Landing" className={SETTINGS_SELECT_WIDTH_CLASSNAME}>
                 <SelectValue>
                   {(value: LandingChoice | null) => LANDING_LABEL[value ?? "auto"]}
                 </SelectValue>
@@ -294,7 +302,7 @@ function ProjectOrchestrationForm(props: {
         />
         <SettingsRow
           title="Fix rounds"
-          description="How often a card goes back to its agent on its own for failing CI, and for review feedback, before it waits for you."
+          description="Automatic retries for failing CI and for review feedback. After that, the card waits for you."
           control={
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               CI
@@ -335,7 +343,7 @@ function ProjectOrchestrationForm(props: {
         />
         <SettingsRow
           title="Verifier"
-          description="A second agent checks each card in review against its criteria before you can approve the merge. Iskra picks an agent with the verifier role on another provider when one can run, then another model, then the builder's own model in a fresh session. You can override a verdict with a reason."
+          description="A second agent checks each card in review against its criteria. You can approve the merge only after it runs. Iskra picks an agent with the verifier role on another provider when one can run, then another model, then the builder's own model in a fresh session. You can override a verdict with a reason."
           control={
             <Switch
               aria-label="Verifier"
@@ -348,7 +356,7 @@ function ProjectOrchestrationForm(props: {
           title="Auto-merge"
           description={
             form.verifierOn
-              ? "Cards land with no click once checks and evidence pass, the verifier passes their latest commit, and at least one hidden scenario ran and enough held. Flagged changes, and work a trigger started, still wait for you."
+              ? "Cards land without a click once everything passes. That means checks and evidence pass, the verifier passes their latest commit, and at least one hidden scenario ran and enough held. Flagged changes, and work a trigger started, still wait for you."
               : `${AUTO_MERGE_NEEDS_VERIFIER_TEXT} Cards then land with no click once checks, evidence, the verifier and enough hidden scenarios pass.`
           }
           control={
@@ -384,7 +392,10 @@ function ProjectOrchestrationForm(props: {
                 if (value === "none" || value === "allowlist") change("egressMode", value);
               }}
             >
-              <SelectTrigger aria-label="Network for agent shells" className="w-auto min-w-32">
+              <SelectTrigger
+                aria-label="Network for agent shells"
+                className={SETTINGS_SELECT_WIDTH_CLASSNAME}
+              >
                 <SelectValue>
                   {(value: string | null) => (value === "allowlist" ? "Allowlist" : "None")}
                 </SelectValue>
@@ -396,7 +407,7 @@ function ProjectOrchestrationForm(props: {
             </Select>
           }
         >
-          <div className="grid gap-3 px-4 pb-3 sm:grid-cols-2">
+          <div className="grid gap-3 pb-3 sm:grid-cols-2">
             <label className="flex flex-col gap-1 text-xs text-muted-foreground">
               Allowed domains, one per line
               <Textarea
@@ -413,27 +424,33 @@ function ProjectOrchestrationForm(props: {
                 value={form.deny}
                 onChange={(event) => change("deny", event.target.value)}
               />
-              <Button
-                size="sm"
-                variant="ghost-muted"
-                className="self-start"
-                onClick={() =>
-                  change(
-                    "deny",
-                    [...new Set([...lines(form.deny), ...PUBLISHING_DENY_TEMPLATE])].join("\n"),
-                  )
-                }
-              >
-                Deny publishing and billing APIs
-              </Button>
             </label>
           </div>
         </SettingsRow>
         <SettingsRow
+          title="Publishing and billing APIs"
+          description="Adds the common publishing, email and payment domains to the denied list."
+          control={
+            <Button
+              size="sm"
+              variant="secondary"
+              aria-label="Deny publishing and billing APIs"
+              onClick={() =>
+                change(
+                  "deny",
+                  [...new Set([...lines(form.deny), ...PUBLISHING_DENY_TEMPLATE])].join("\n"),
+                )
+              }
+            >
+              Deny these
+            </Button>
+          }
+        />
+        <SettingsRow
           title="Exclusive paths"
-          description="One card at a time lands changes to these globs; the others rebase and run the command after it. One per line, as glob => command."
+          description="One card at a time lands changes to these paths. The others rebase and run the command after it. One per line, as glob => command."
         >
-          <div className="px-4 pb-3">
+          <div className="pb-3">
             <Textarea
               aria-label="Exclusive paths"
               className="font-mono"
@@ -445,9 +462,9 @@ function ProjectOrchestrationForm(props: {
         </SettingsRow>
         <SettingsRow
           title="Heavy commands"
-          description="Commands agents may run only through run_checks, so full suites queue for machine capacity. One pattern per line."
+          description="Commands agents may run only through run_checks. Full suites then queue for machine capacity. One pattern per line."
         >
-          <div className="px-4 pb-3">
+          <div className="pb-3">
             <Textarea
               aria-label="Heavy commands"
               className="font-mono"
@@ -463,7 +480,7 @@ function ProjectOrchestrationForm(props: {
           control={
             <Input
               size="sm"
-              className="w-24"
+              className={SETTINGS_NUMBER_WIDTH_CLASSNAME}
               aria-label="Sub-cards per card"
               inputMode="numeric"
               value={form.builderSubCardsMax}
@@ -471,7 +488,10 @@ function ProjectOrchestrationForm(props: {
             />
           }
         />
-        <div className="flex flex-wrap items-center gap-2 px-4 py-3">
+        <div className="flex flex-wrap items-center justify-end gap-2 px-4 py-3">
+          {"error" in parsed ? (
+            <span className="me-auto text-xs text-destructive-foreground">{parsed.error}</span>
+          ) : null}
           <Button
             size="sm"
             disabled={!edited || saving || !("policy" in parsed)}
@@ -481,12 +501,8 @@ function ProjectOrchestrationForm(props: {
           >
             Save policy
           </Button>
-          {"error" in parsed ? (
-            <span className="text-xs text-destructive-foreground">{parsed.error}</span>
-          ) : null}
         </div>
       </SettingsSection>
-      <SideEffectGuard current={current} saving={saving} onSave={save} />
       <ProjectBudgetsSettings
         project={props.representative}
         current={current}
@@ -500,8 +516,9 @@ function ProjectOrchestrationForm(props: {
         onSave={save}
       />
       <ProjectKnowledgeSettings project={props.representative} />
-      <ProjectSecrets project={props.representative} />
       <ProjectHoldoutsSettings project={props.representative} />
+      <ProjectSecrets project={props.representative} />
+      <SideEffectGuard current={current} saving={saving} onSave={save} />
     </>
   );
 }
@@ -531,13 +548,13 @@ function SideEffectGuard(props: {
         description={
           guard.acknowledgedAt === null
             ? "Agents don't start work on this project until someone goes through this list."
-            : `Reviewed ${new Date(guard.acknowledgedAt).toLocaleString()}${guard.killSwitchEnv === null ? "" : `; cards run with ${guard.killSwitchEnv} set to stop outbound actions`}.`
+            : `Reviewed ${new Date(guard.acknowledgedAt).toLocaleString()}.${guard.killSwitchEnv === null ? "" : ` Cards run with ${guard.killSwitchEnv} set to stop outbound actions.`}`
         }
         control={
           guard.acknowledgedAt === null ? null : (
             <Button
               size="sm"
-              variant="ghost-muted"
+              variant="secondary"
               disabled={props.saving}
               onClick={() =>
                 withGuard({ acknowledgedAt: null, killSwitchEnv: guard.killSwitchEnv })
@@ -574,7 +591,7 @@ function SideEffectGuard(props: {
             </span>
             <Input
               size="sm"
-              className="w-full sm:w-64"
+              className={SETTINGS_TEXT_INPUT_WIDTH_CLASSNAME}
               aria-label="Kill-switch environment variable"
               value={killSwitchEnv}
               onChange={(event) => setKillSwitchEnv(event.target.value)}
@@ -593,7 +610,7 @@ function SideEffectGuard(props: {
           ) : null}
           <Button
             size="sm"
-            className="self-start"
+            className="self-end"
             disabled={!ready || props.saving}
             onClick={() =>
               withGuard({
@@ -638,8 +655,15 @@ function ProjectSecrets(props: { readonly project: Project }) {
       <SettingsRow
         title="Secret names"
         description="Setup-only secrets reach just the setup script. Workspace secrets may be written into the card's worktree, which its agent can read."
+        control={
+          <SettingsAddButton
+            onClick={() => setRows([...rows, { key: randomUUID(), name: "", exposure: "setup" }])}
+          >
+            Add secret
+          </SettingsAddButton>
+        }
       >
-        <div className="flex flex-col gap-1.5 px-4 pb-3">
+        <div className="flex flex-col gap-1.5 pb-3">
           {rows.map((row, index) => (
             <div key={row.key} className="flex items-center gap-1.5">
               <Input
@@ -686,14 +710,7 @@ function ProjectSecrets(props: { readonly project: Project }) {
               </Button>
             </div>
           ))}
-          <div className="flex gap-1.5">
-            <Button
-              size="sm"
-              variant="ghost-muted"
-              onClick={() => setRows([...rows, { key: randomUUID(), name: "", exposure: "setup" }])}
-            >
-              Add secret
-            </Button>
+          <div className="flex justify-end gap-1.5">
             <Button
               size="sm"
               disabled={JSON.stringify(cleaned) === JSON.stringify(saved)}
@@ -716,7 +733,7 @@ function ProjectSecrets(props: { readonly project: Project }) {
           title="Secret values"
           description="Stored on this machine and never shown again. Setting a value replaces the one stored."
         >
-          <div className="flex flex-col gap-1.5 px-4 pb-3">
+          <div className="flex flex-col gap-1.5 pb-3">
             {saved.map((row) => (
               <SecretValue key={row.name} project={props.project} name={row.name} />
             ))}
@@ -890,43 +907,48 @@ function CardRuntimeForm(props: {
       : null;
 
   return (
-    <FoldedSettingsSection
-      id="card-runtime"
-      title="Card runtime"
-      summary={`${current.heavyJobConcurrency} heavy job${current.heavyJobConcurrency === 1 ? "" : "s"} at once`}
-    >
-      <div className="grid gap-3 px-4 py-3 sm:grid-cols-2">
-        {field("heavyJobConcurrency", "Heavy jobs at once (checks, setup, evidence)")}
-        {field("environmentSessionCap", "Agent sessions at once", "Derived")}
-        {field("monthlyBudgetUsd", "Monthly budget across projects ($)", "None")}
-        {field("load", "Hold heavy jobs above load per core")}
-        {field("freeMem", "Hold heavy jobs below free memory (0–1)")}
-        {field("turboConcurrency", "Turbo concurrency", "Derived")}
-        {field("vitestMaxWorkers", "Vitest workers", "Derived")}
-        {field("nodeMaxOldSpaceMb", "Node heap (MB)", "Derived")}
+    <div className="space-y-2">
+      <div className="flex min-h-7 items-end px-4">
+        <h2 className={SETTINGS_SECTION_HEAD_CLASSNAME}>Card runtime</h2>
       </div>
-      <div className="flex flex-wrap items-center gap-2 px-4 py-3">
-        <Button
-          size="sm"
-          disabled={next === null || JSON.stringify(next) === JSON.stringify(current)}
-          onClick={() => {
-            if (next !== null) updateSettings({ cardRuntime: next });
-          }}
-        >
-          Save
-        </Button>
-        {!valid ? (
-          <span className="text-xs text-destructive-foreground">
-            Use whole numbers of at least 1, a budget above 0, a load above 0 and free memory
-            between 0 and 1.
-          </span>
-        ) : (
-          <span className="text-xs text-muted-foreground">
-            macOS reports less free memory than is reclaimable; lower the threshold if heavy jobs
-            wait too often.
-          </span>
-        )}
-      </div>
-    </FoldedSettingsSection>
+      <FoldedSettingsSection
+        id="card-runtime"
+        title="Machine limits"
+        summary={`${current.heavyJobConcurrency} heavy job${current.heavyJobConcurrency === 1 ? "" : "s"} at once`}
+      >
+        <div className="grid gap-3 px-4 py-3 sm:grid-cols-2">
+          {field("heavyJobConcurrency", "Heavy jobs at once (checks, setup, evidence)")}
+          {field("environmentSessionCap", "Agent sessions at once", "Derived")}
+          {field("monthlyBudgetUsd", "Monthly budget across projects ($)", "None")}
+          {field("load", "Hold heavy jobs above load per core")}
+          {field("freeMem", "Hold heavy jobs below free memory (0–1)")}
+          {field("turboConcurrency", "Turbo concurrency", "Derived")}
+          {field("vitestMaxWorkers", "Vitest workers", "Derived")}
+          {field("nodeMaxOldSpaceMb", "Node heap (MB)", "Derived")}
+        </div>
+        <div className="flex items-center justify-end gap-4 px-4 py-3">
+          {!valid ? (
+            <span className="me-auto text-xs text-destructive-foreground">
+              Use whole numbers of at least 1, a budget above 0, a load above 0 and free memory
+              between 0 and 1.
+            </span>
+          ) : (
+            <span className="me-auto text-xs text-muted-foreground">
+              macOS reports less free memory than is reclaimable; lower the threshold if heavy jobs
+              wait too often.
+            </span>
+          )}
+          <Button
+            size="sm"
+            disabled={next === null || JSON.stringify(next) === JSON.stringify(current)}
+            onClick={() => {
+              if (next !== null) updateSettings({ cardRuntime: next });
+            }}
+          >
+            Save
+          </Button>
+        </div>
+      </FoldedSettingsSection>
+    </div>
   );
 }

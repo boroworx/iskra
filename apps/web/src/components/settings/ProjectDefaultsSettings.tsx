@@ -32,6 +32,7 @@ import { searchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
 import {
   SETTINGS_PICKER_TRIGGER_CLASSNAME,
+  SETTINGS_TEXT_INPUT_WIDTH_CLASSNAME,
   SettingResetButton,
   SettingsRow,
   SettingsSection,
@@ -147,7 +148,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
       }
       title={
         category === "general"
-          ? "New agent threads"
+          ? "Defaults for new agents"
           : category === "integrations"
             ? "Agent access & Linear"
             : "Repositories"
@@ -163,8 +164,8 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
             title="Model"
             description={
               isProjectScope
-                ? "Model for new threads in this project."
-                : "Default model for new threads. Projects can override it."
+                ? "Model for new agents in this project."
+                : "Default model for new agents. Projects can override it."
             }
             status={
               unavailable || mixedModel || modelSource === "project"
@@ -234,8 +235,8 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
             {...searchableSetting("default-permissions")}
             description={
               isProjectScope
-                ? "Permissions for new threads in this project."
-                : "Default permissions for new threads. Projects can override them."
+                ? "Permissions for new agents in this project."
+                : "Default permissions for new agents. Projects can override them."
             }
             resetAction={
               settings.defaultRuntimeMode !== DEFAULT_SERVER_SETTINGS.defaultRuntimeMode ? (
@@ -296,8 +297,8 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
             title="Workspace"
             description={
               isProjectScope
-                ? "Where new threads in this project start. A iskra.json preference applies when the project has no override."
-                : "Where new threads start, unless overridden by the project or iskra.json."
+                ? "Where new agents in this project start. An iskra.json preference applies when the project has no override."
+                : "Where new agents start, unless the project or iskra.json overrides it."
             }
             status={
               inheritedEnvModeLabel ? `Repository default: ${inheritedEnvModeLabel}` : undefined
@@ -351,8 +352,8 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
             title="Automatically pull"
             description={
               isProjectScope
-                ? "Keeps this project's default branch current when the checkout has no local changes or commits."
-                : "Keeps the default branch current when the checkout has no local changes or commits. Projects can override it."
+                ? "Keeps this project's default branch current. Only when the checkout has no local changes or commits."
+                : "Keeps the default branch current. Only when the checkout has no local changes or commits; projects can override it."
             }
             resetAction={
               settings.defaultAutoPull ? (
@@ -464,14 +465,14 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
             title="Linear team"
             description={
               isProjectScope
-                ? "Sync this project's cards with issues in this Linear team, by team ID. Leave it empty to not sync."
+                ? "Syncs this project's cards with a Linear team. Enter the team ID, or leave it empty to not sync."
                 : "The Linear team whose issues sync with cards. Projects can set their own."
             }
             control={
               <Input
                 key={mixedLinearTeam ? "mixed" : settings.linearTeamId}
                 aria-label="Linear team ID"
-                className="w-48"
+                className={SETTINGS_TEXT_INPUT_WIDTH_CLASSNAME}
                 placeholder={mixedLinearTeam ? "Mixed" : "Team ID"}
                 defaultValue={mixedLinearTeam ? "" : settings.linearTeamId}
                 onBlur={(event) => {
@@ -487,12 +488,12 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
             mixed={mixedLinearLabel}
             id={searchableSetting("linear-label").id}
             title="Linear label"
-            description="Issues in the Linear team with this label become cards in triage. Issues delegated to Iskra always do. Leave it empty to bring in only delegated issues."
+            description="Issues with this label become cards in triage. Issues delegated to Iskra always do. Leave it empty to bring in only delegated issues."
             control={
               <Input
                 key={mixedLinearLabel ? "mixed" : settings.linearLabel}
                 aria-label="Linear label"
-                className="w-48"
+                className={SETTINGS_TEXT_INPUT_WIDTH_CLASSNAME}
                 placeholder={mixedLinearLabel ? "Mixed" : "Label"}
                 defaultValue={mixedLinearLabel ? "" : settings.linearLabel}
                 onBlur={(event) => {
@@ -508,13 +509,13 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
               settingKeys={["linearClientId", "linearClientSecret"]}
               id={searchableSetting("linear-app").id}
               title="Linear app"
-              description="The client ID and secret of the Linear OAuth app Iskra signs in as, with client credentials turned on. The secret stays on this server."
+              description="The Linear OAuth app Iskra signs in as. Use its client ID and secret, with client credentials turned on. The secret stays on this server."
               control={
                 <div className="flex flex-col items-end gap-1.5">
                   <Input
                     key={settings.linearClientId}
                     aria-label="Linear client ID"
-                    className="w-48"
+                    className={SETTINGS_TEXT_INPUT_WIDTH_CLASSNAME}
                     placeholder="Client ID"
                     defaultValue={settings.linearClientId}
                     onBlur={(event) => {
@@ -528,7 +529,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
                     key={settings.linearClientSecret}
                     type="password"
                     aria-label="Linear client secret"
-                    className="w-48"
+                    className={SETTINGS_TEXT_INPUT_WIDTH_CLASSNAME}
                     placeholder={settings.linearClientSecret.length > 0 ? "Saved" : "Client secret"}
                     defaultValue=""
                     onBlur={(event) => {

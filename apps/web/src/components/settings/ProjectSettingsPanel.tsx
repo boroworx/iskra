@@ -29,6 +29,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import {
+  SETTINGS_TEXT_INPUT_WIDTH_CLASSNAME,
   SettingResetButton,
   SettingsPageContainer,
   SettingsRow,
@@ -310,7 +311,7 @@ function ProjectDetail({
         api.dialogs.confirm(
           [
             projectThreads.length > 0
-              ? `Remove ${targetKind} "${targetLabel}" and delete its ${projectThreads.length} thread${projectThreads.length === 1 ? "" : "s"}?`
+              ? `Remove ${targetKind} "${targetLabel}" and delete its ${projectThreads.length} conversation${projectThreads.length === 1 ? "" : "s"}?`
               : `Remove ${targetKind} "${targetLabel}"?`,
             ...(singleMember
               ? [
@@ -321,9 +322,7 @@ function ProjectDetail({
                 ]
               : [`This removes ${members.length} grouped project entries.`]),
             ...(projectThreads.length > 0
-              ? [
-                  "This permanently clears conversation history for those threads and any archived threads.",
-                ]
+              ? ["This permanently clears their history and any archived conversations."]
               : ["This permanently clears any archived conversation history."]),
             isWholeGroup && !hasOtherMembers
               ? "This removes only the project entries, not the files on disk."
@@ -406,18 +405,16 @@ function ProjectDetail({
 
   return (
     <>
-      <SettingsPageContainer className="gap-6" title={group.displayName}>
-        <ProjectOrchestrationSettings members={group.memberProjects} />
-        <ProjectActionsSettings />
+      <SettingsPageContainer title={group.displayName}>
         <SettingsSection id="project-overview" title="Project">
           <SettingsRow
             title="Name"
-            description="The shared name for this project group in the sidebar and thread lists."
+            description="Shown in the sidebar, on the board and in channels."
             control={
               <Input
                 key={`${group.projectKey}:${group.displayName}`}
                 size="sm"
-                className="w-full sm:w-64"
+                className={SETTINGS_TEXT_INPUT_WIDTH_CLASSNAME}
                 aria-label="Project name"
                 defaultValue={group.displayName}
                 onChange={() => {
@@ -481,6 +478,8 @@ function ProjectDetail({
             }
           />
         </SettingsSection>
+        <ProjectOrchestrationSettings members={group.memberProjects} />
+        <ProjectActionsSettings />
         {hasMultipleCheckouts ? checkoutChoices : null}
         <SettingsSection title="Danger">
           <SettingsRow
@@ -493,10 +492,10 @@ function ProjectDetail({
             }
             description={
               hasOtherMembers
-                ? "Deletes the selected machine's checkout entries and their threads. Other machines and files on disk are not touched."
+                ? "Removes this machine's checkout and its conversations. Other machines and files on disk stay."
                 : group.memberProjects.length > 1
-                  ? `Deletes all ${group.memberProjects.length} checkout entries and their threads on every machine. Files on disk are not touched.`
-                  : "Deletes the project entry and its threads. Files on disk are not touched."
+                  ? `Removes all ${group.memberProjects.length} checkouts and their conversations. Files on disk stay.`
+                  : "Removes the project and its conversations. Files on disk stay."
             }
             control={
               <Button

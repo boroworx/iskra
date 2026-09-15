@@ -11,7 +11,12 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Textarea } from "../ui/textarea";
-import { SettingsRow, SettingsSection } from "./settingsLayout";
+import {
+  SettingsAddButton,
+  SettingsEmptyRow,
+  SettingsRow,
+  SettingsSection,
+} from "./settingsLayout";
 
 const KIND_LABEL: Record<HoldoutScenario["kind"], string> = {
   text: "Described",
@@ -72,8 +77,12 @@ export function ProjectHoldoutsSettings(props: { readonly project: Project }) {
     input: { projectId: props.project.id },
   };
   const list = useEnvironmentQuery(channelEnvironment.projectHoldouts(target));
-  const getScenario = useAtomCommand(channelEnvironment.getProjectHoldout, { reportFailure: false });
-  const setScenario = useAtomCommand(channelEnvironment.setProjectHoldout, { reportFailure: false });
+  const getScenario = useAtomCommand(channelEnvironment.getProjectHoldout, {
+    reportFailure: false,
+  });
+  const setScenario = useAtomCommand(channelEnvironment.setProjectHoldout, {
+    reportFailure: false,
+  });
   const removeScenario = useAtomCommand(channelEnvironment.removeProjectHoldout, {
     reportFailure: false,
   });
@@ -127,46 +136,10 @@ export function ProjectHoldoutsSettings(props: { readonly project: Project }) {
     <SettingsSection id="project-holdouts" title="Hidden scenarios">
       <SettingsRow
         title="Scenarios"
-        description="Checks only the verifier sees, kept on this machine and never in the repository. A builder only learns how many failed. A command scenario runs in the verifier's copy of the card. Anyone who can open the verifier's session can read them."
-      >
-        <div className="flex flex-col gap-1.5 px-4 pb-3">
-          {list.error !== null ? (
-            <p className="text-xs text-destructive-foreground">{list.error}</p>
-          ) : null}
-          {list.data !== null && scenarios.length === 0 && draft === null ? (
-            <p className="text-xs text-muted-foreground">No hidden scenarios yet.</p>
-          ) : null}
-          <ul className="flex flex-col divide-y divide-border">
-            {scenarios.map((scenario) => (
-              <li key={scenario.scenarioId} className="flex min-w-0 items-center gap-2 py-1.5">
-                <span className="min-w-0 flex-1 truncate text-sm">{scenario.title}</span>
-                <span className="shrink-0 text-xs text-muted-foreground">
-                  {KIND_LABEL[scenario.kind]}
-                </span>
-                <Button
-                  size="sm"
-                  variant="ghost-muted"
-                  disabled={busy}
-                  onClick={() => void edit(scenario.scenarioId)}
-                >
-                  Edit
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost-muted"
-                  disabled={busy}
-                  onClick={() => void remove(scenario.scenarioId)}
-                >
-                  Remove
-                </Button>
-              </li>
-            ))}
-          </ul>
-          {draft === null ? (
-            <Button
-              size="sm"
-              variant="ghost-muted"
-              className="self-start"
+        description="Checks only the verifier sees, never stored in the repository. They're kept on this machine, and a builder only learns how many failed. A command scenario runs in the verifier's copy of the card. Anyone who can open the verifier's session can read them."
+        control={
+          draft === null ? (
+            <SettingsAddButton
               onClick={() =>
                 setDraft({
                   scenarioId: randomUUID(),
@@ -179,86 +152,124 @@ export function ProjectHoldoutsSettings(props: { readonly project: Project }) {
               }
             >
               Add scenario
-            </Button>
-          ) : (
-            <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <Input
-                  size="sm"
-                  className="min-w-0 flex-1"
-                  aria-label="Scenario title"
-                  placeholder="Health is JSON"
-                  value={draft.title}
-                  onChange={(event) => change("title", event.target.value)}
-                />
-                <Select
-                  value={draft.kind}
-                  onValueChange={(value) => {
-                    if (value === "text" || value === "command") change("kind", value);
-                  }}
-                >
-                  <SelectTrigger aria-label="Scenario kind" className="w-auto min-w-32">
-                    <SelectValue>
-                      {(value: HoldoutScenario["kind"] | null) => KIND_LABEL[value ?? "text"]}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectPopup>
-                    <SelectItem value="text">{KIND_LABEL.text}</SelectItem>
-                    <SelectItem value="command">{KIND_LABEL.command}</SelectItem>
-                  </SelectPopup>
-                </Select>
-              </div>
-              {draft.kind === "command" ? (
-                <Input
-                  size="sm"
-                  aria-label="Command"
-                  placeholder="node holdout-status.js"
-                  value={draft.command}
-                  onChange={(event) => change("command", event.target.value)}
-                />
-              ) : null}
-              <Textarea
-                aria-label={draft.kind === "command" ? "What it proves" : "What to check"}
-                placeholder={
-                  draft.kind === "command"
-                    ? "What a passing run proves (optional)"
-                    : "GET /health returns JSON with status ok"
-                }
-                value={draft.body}
-                onChange={(event) => change("body", event.target.value)}
-              />
-              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                Time limit in minutes
-                <Input
-                  size="sm"
-                  className="w-16"
-                  inputMode="numeric"
-                  aria-label="Time limit in minutes"
-                  value={draft.timeoutMinutes}
-                  onChange={(event) => change("timeoutMinutes", event.target.value)}
-                />
-              </label>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <Button
-                  size="sm"
-                  disabled={busy || typeof parsed === "string" || parsed === null}
-                  onClick={() => {
-                    if (parsed !== null && typeof parsed !== "string") void save(parsed);
-                  }}
-                >
-                  Save scenario
-                </Button>
-                <Button size="sm" variant="ghost-muted" onClick={() => setDraft(null)}>
-                  Cancel
-                </Button>
-                {typeof parsed === "string" ? (
-                  <span className="text-xs text-muted-foreground">{parsed}</span>
+            </SettingsAddButton>
+          ) : null
+        }
+      >
+        {list.error === null && scenarios.length === 0 && draft === null ? null : (
+          <div className="flex flex-col gap-1.5 pb-3">
+            {list.error !== null ? (
+              <p className="text-xs text-destructive-foreground">{list.error}</p>
+            ) : null}
+            <ul className="flex flex-col divide-y divide-border">
+              {scenarios.map((scenario) => (
+                <li key={scenario.scenarioId} className="flex min-w-0 items-center gap-2 py-1.5">
+                  <span className="min-w-0 flex-1 truncate text-sm">{scenario.title}</span>
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {KIND_LABEL[scenario.kind]}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost-muted"
+                    disabled={busy}
+                    onClick={() => void edit(scenario.scenarioId)}
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost-muted"
+                    disabled={busy}
+                    onClick={() => void remove(scenario.scenarioId)}
+                  >
+                    Remove
+                  </Button>
+                </li>
+              ))}
+            </ul>
+            {draft === null ? null : (
+              <div className="flex flex-col gap-2 rounded-lg bg-background p-3">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Input
+                    size="sm"
+                    className="min-w-0 flex-1"
+                    aria-label="Scenario title"
+                    placeholder="Health is JSON"
+                    value={draft.title}
+                    onChange={(event) => change("title", event.target.value)}
+                  />
+                  <Select
+                    value={draft.kind}
+                    onValueChange={(value) => {
+                      if (value === "text" || value === "command") change("kind", value);
+                    }}
+                  >
+                    <SelectTrigger aria-label="Scenario kind" className="w-auto min-w-32">
+                      <SelectValue>
+                        {(value: HoldoutScenario["kind"] | null) => KIND_LABEL[value ?? "text"]}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup>
+                      <SelectItem value="text">{KIND_LABEL.text}</SelectItem>
+                      <SelectItem value="command">{KIND_LABEL.command}</SelectItem>
+                    </SelectPopup>
+                  </Select>
+                </div>
+                {draft.kind === "command" ? (
+                  <Input
+                    size="sm"
+                    aria-label="Command"
+                    placeholder="node holdout-status.js"
+                    value={draft.command}
+                    onChange={(event) => change("command", event.target.value)}
+                  />
                 ) : null}
+                <Textarea
+                  aria-label={draft.kind === "command" ? "What it proves" : "What to check"}
+                  placeholder={
+                    draft.kind === "command"
+                      ? "What a passing run proves (optional)"
+                      : "GET /health returns JSON with status ok"
+                  }
+                  value={draft.body}
+                  onChange={(event) => change("body", event.target.value)}
+                />
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  Time limit in minutes
+                  <Input
+                    size="sm"
+                    className="w-16"
+                    inputMode="numeric"
+                    aria-label="Time limit in minutes"
+                    value={draft.timeoutMinutes}
+                    onChange={(event) => change("timeoutMinutes", event.target.value)}
+                  />
+                </label>
+                <div className="flex flex-wrap items-center justify-end gap-1.5">
+                  {typeof parsed === "string" ? (
+                    <span className="me-auto text-xs text-muted-foreground">{parsed}</span>
+                  ) : null}
+                  <Button size="sm" variant="secondary" onClick={() => setDraft(null)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    disabled={busy || typeof parsed === "string" || parsed === null}
+                    onClick={() => {
+                      if (parsed !== null && typeof parsed !== "string") void save(parsed);
+                    }}
+                  >
+                    Save scenario
+                  </Button>
+                </div>
               </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
       </SettingsRow>
+      {list.data !== null && scenarios.length === 0 && draft === null ? (
+        <SettingsEmptyRow>No hidden scenarios yet.</SettingsEmptyRow>
+      ) : null}
     </SettingsSection>
   );
 }
