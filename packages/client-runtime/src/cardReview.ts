@@ -6,14 +6,18 @@ import {
   type CardEvidenceItem,
   type CardFixRounds,
   type CardId,
+  type CardRiskClaims,
   type CardScopeFlag,
   type ProjectOrchestration,
   type Reason,
 } from "@iskra/contracts";
 
-import { NO_PREVIEW_HOST_TEXT } from "./cards.ts";
+import { reasonLabel } from "./cards.ts";
 
-export type EvidenceItemState = "passed" | "failed" | "captured" | "unavailable";
+/** The unavailable code of a CI check that hasn't reported on the pull request yet. */
+const PENDING_CI_CODE = "pendingCi";
+
+export type EvidenceItemState = "passed" | "failed" | "pending" | "captured" | "unavailable";
 
 export interface EvidenceItemView {
   readonly item: CardEvidenceItem;
@@ -26,7 +30,13 @@ export interface EvidenceItemView {
   readonly log: AssetResource | null;
 }
 
-export type CriterionState = "passed" | "failed" | "unavailable" | "needsYourCheck" | "noEvidence";
+export type CriterionState =
+  | "passed"
+  | "failed"
+  | "pending"
+  | "unavailable"
+  | "needsYourCheck"
+  | "noEvidence";
 
 export interface CriterionReview {
   readonly criterion: CardCriterion;
@@ -37,13 +47,14 @@ export interface CriterionReview {
 export const CRITERION_STATE_LABEL: Record<CriterionState, string> = {
   passed: "Passed",
   failed: "Failed",
+  pending: "Waiting for CI",
   unavailable: "Not captured",
   needsYourCheck: "Needs your check",
   noEvidence: "No evidence",
 };
 
 export function unavailableText(reason: Reason): string {
-  return reason.code === "noPreviewHost" ? NO_PREVIEW_HOST_TEXT : reason.text;
+  return reasonLabel(reason).label;
 }
 
 /** What the asset route previews in place; check logs go through `checkLogResource` instead. */
@@ -85,13 +96,15 @@ export function checkLogResource(artifactPath: string | null, cardId: CardId): A
 }
 
 function evidenceItemState(item: CardEvidenceItem): EvidenceItemState {
-  return item.unavailable !== null
-    ? "unavailable"
-    : item.kind === "check"
+  return item.unavailable?.code === PENDING_CI_CODE
+    ? "pending"
+    : item.unavailable !== null
+      ? "unavailable"
+      : item.kind === "check"
       ? item.exitCode === 0 && !item.timedOut
-        ? "passed"
-        : "failed"
-      : "captured";
+          ? "passed"
+          : "failed"
+        : "captured";
 }
 
 export function evidenceItemView(item: CardEvidenceItem, cardId: CardId): EvidenceItemView {
@@ -128,9 +141,11 @@ export function reviewByCriterion(input: {
           ? "noEvidence"
           : items.some((view) => view.state === "failed")
             ? "failed"
-            : items.some((view) => view.state === "unavailable")
-              ? "unavailable"
-              : "passed";
+            : items.some((view) => view.state === "pending")
+              ? "pending"
+              : items.some((view) => view.state === "unavailable")
+                ? "unavailable"
+                : "passed";
     return { criterion, state, items };
   });
   const general = views.filter(
@@ -147,16 +162,52 @@ export const SCOPE_FLAG_LABEL: Record<CardScopeFlag["kind"], string> = {
   outsideLikelyAreas: "Outside the estimated areas",
 };
 
-/** The pull request's CI as the evidence reads it: the checks sourced from CI and how many failed. */
+/**
+ * The pull request's CI as the evidence reads it: the checks sourced from CI, which failed, and
+ * which haven't reported yet (a pending check is neither failed nor passed).
+ */
 export function ciSummary(items: ReadonlyArray<CardEvidenceItem>): {
   readonly total: number;
   readonly failed: ReadonlyArray<string>;
+  readonly pending: ReadonlyArray<string>;
 } {
   const ci = items.filter((item) => item.source === "ci" && item.kind === "check");
+  const named = (state: (value: EvidenceItemState) => boolean) =>
+    ci.filter((item) => state(evidenceItemState(item))).map((item) => item.name);
   return {
     total: ci.length,
-    failed: ci.filter((item) => evidenceItemState(item) !== "passed").map((item) => item.name),
+    failed: named((state) => state !== "passed" && state !== "pending"),
+    pending: named((state) => state === "pending"),
   };
+}
+
+/** The reason code the agent's review request is recorded with. */
+const REVIEW_REQUESTED_CODE = "reviewRequested";
+
+const RISK_LINE =
+  /\n\nRisks \(claimed\): side effects (low|medium|high), performance (low|medium|high), compatibility (low|medium|high)\.(?:\n([\s\S]*))?$/;
+
+/**
+ * The risks the agent claimed when it last asked for review, read from that request's text the
+ * way the server writes it; null when it hasn't asked or the text carries no claims. Claims, not
+ * evidence: review shows them as the agent's word.
+ */
+export function riskClaimsOf(activities: ReadonlyArray<CardActivity>): CardRiskClaims | null {
+  // A loop from the end rather than findLast, which Hermes lacks.
+  for (let index = activities.length - 1; index >= 0; index -= 1) {
+    const activity = activities[index]!;
+    if (activity.reason?.code !== REVIEW_REQUESTED_CODE) continue;
+    const match = RISK_LINE.exec(activity.body);
+    if (match === null) return null;
+    const [, sideEffect, performance, compatibility, notes] = match;
+    return {
+      sideEffect: sideEffect as CardRiskClaims["sideEffect"],
+      performance: performance as CardRiskClaims["performance"],
+      compatibility: compatibility as CardRiskClaims["compatibility"],
+      notes: (notes ?? "").trim(),
+    };
+  }
+  return null;
 }
 
 /**

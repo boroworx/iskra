@@ -171,7 +171,13 @@ function CardSheetBody(props: {
       <SheetHeader>
         <SheetTitle className="pe-8">{card.title}</SheetTitle>
         <p className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
-          <span>{statusLabel(card.status)}</span>
+          <span>
+            {statusLabel(card.status)}
+            {card.status === "landed" &&
+            activities.some((entry) => entry.reason?.code === "mergedOnHost")
+              ? " · merged on the host"
+              : ""}
+          </span>
           {card.ownerSession !== null ? (
             <span>· {CARD_SESSION_LABEL[card.ownerSession.state]}</span>
           ) : null}
@@ -344,7 +350,12 @@ function CardSheetBody(props: {
 
         {card.evidence !== null || card.status === "inReview" || card.status === "landing" ? (
           <Section label="Review">
-            <CardReview card={card} evidence={evidence} environmentId={environmentId} />
+            <CardReview
+              card={card}
+              evidence={evidence}
+              activities={activities}
+              environmentId={environmentId}
+            />
           </Section>
         ) : null}
 

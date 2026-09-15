@@ -1,4 +1,9 @@
-import { filterCardActivities, type CardActivityFilter } from "@iskra/client-runtime/cards";
+import {
+  REASON_LABEL,
+  filterCardActivities,
+  reasonLine,
+  type CardActivityFilter,
+} from "@iskra/client-runtime/cards";
 import type { CardActivity, CardActivityKind, OrchestrationAgentShell } from "@iskra/contracts";
 import { memo, useMemo, useState } from "react";
 
@@ -123,11 +128,17 @@ const ActivityRow = memo(function ActivityRow(props: {
 }) {
   const { activity } = props;
   const undelivered = activity.deliverTo !== null && activity.delivery === "undelivered";
+  const { reason } = activity;
+  // A known code names the entry ("Checks ran", "Moved a branch outside its card"); its text is
+  // repeated below only when the body doesn't already say it.
+  const known = reason !== null && Object.hasOwn(REASON_LABEL, reason.code);
+  const checksOutput =
+    reason?.code === "runChecksResult" || reason?.code === "runChecksRequested";
   return (
     <li className="flex min-w-0 flex-col gap-0.5 py-2">
       <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
         <span className="font-medium text-foreground">{props.authorName}</span>
-        <span>{KIND_LABEL[activity.kind]}</span>
+        <span>{known ? REASON_LABEL[reason.code]!.label : KIND_LABEL[activity.kind]}</span>
         <time dateTime={activity.createdAt} className="ms-auto shrink-0 tabular-nums">
           {timeFormat.format(new Date(activity.createdAt))}
         </time>
@@ -135,7 +146,8 @@ const ActivityRow = memo(function ActivityRow(props: {
       {activity.body.trim().length > 0 ? (
         <p
           className={cn(
-            "whitespace-pre-wrap break-words text-sm",
+            "whitespace-pre-wrap break-words",
+            checksOutput ? "font-mono text-xs" : "text-sm",
             activity.kind === "error" && "text-destructive-foreground",
           )}
         >
@@ -147,8 +159,10 @@ const ActivityRow = memo(function ActivityRow(props: {
           {activity.elicitation.options.map((option) => option.label).join(" · ")}
         </p>
       ) : null}
-      {activity.reason !== null ? (
-        <p className="text-xs text-muted-foreground">Why: {activity.reason.text}</p>
+      {reason !== null && !activity.body.startsWith(reason.text) ? (
+        <p className="text-xs text-muted-foreground">
+          {known ? reason.text : `Why: ${reasonLine(reason)}`}
+        </p>
       ) : null}
       {undelivered ? (
         <p className="text-xs text-destructive-foreground">Not delivered to its agent</p>

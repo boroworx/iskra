@@ -4,6 +4,7 @@ import {
   ciSummary,
   fixRoundsView,
   reviewByCriterion,
+  riskClaimsOf,
   untrustedComments,
   type CriterionState,
   type EvidenceItemView,
@@ -16,6 +17,7 @@ import {
 import type { AtomCommandResult } from "@iskra/client-runtime/state/runtime";
 import {
   MessageId,
+  type AssetResource,
   type CardActivity,
   type CardCheckpointDecision,
   type CardEvidenceItem,
@@ -42,6 +44,7 @@ const NO_ITEMS: ReadonlyArray<CardEvidenceItem> = [];
 const STATE_CLASS: Record<CriterionState, string> = {
   passed: "text-success-foreground",
   failed: "text-destructive-foreground",
+  pending: "text-muted-foreground",
   unavailable: "text-warning-foreground",
   needsYourCheck: "text-warning-foreground",
   noEvidence: "text-muted-foreground",
@@ -58,10 +61,13 @@ export function CardReview(props: {
     readonly evidenceId: string;
     readonly items: ReadonlyArray<CardEvidenceItem>;
   } | null;
+  /** The card's activity, where the agent's review request carries its risk claims. */
+  readonly activities: ReadonlyArray<CardActivity>;
   readonly environmentId: EnvironmentId;
 }) {
   const { card, environmentId } = props;
   const acknowledge = useAtomCommand(cardEnvironment.acknowledgeFlags);
+  const claims = useMemo(() => riskClaimsOf(props.activities), [props.activities]);
   const summary = card.evidence;
   // Items streamed for an older recording than the card's latest would describe the wrong commit.
   const items =
@@ -92,6 +98,20 @@ export function CardReview(props: {
         </span>{" "}
         · {new Date(summary.recordedAt).toLocaleString()}
       </p>
+
+      {claims !== null ? (
+        <div className="flex flex-col gap-0.5 text-xs">
+          <h4 className="font-medium text-muted-foreground">The agent's claims</h4>
+          <p>
+            Side effects {claims.sideEffect} · performance {claims.performance} · compatibility{" "}
+            {claims.compatibility}
+          </p>
+          {claims.notes.length > 0 ? (
+            <p className="whitespace-pre-wrap break-words text-muted-foreground">{claims.notes}</p>
+          ) : null}
+          <p className="text-muted-foreground">Its own assessment when it asked for review, not evidence.</p>
+        </div>
+      ) : null}
 
       {review.criteria.length === 0 ? (
         <p className="text-xs text-muted-foreground">
@@ -214,14 +234,16 @@ const EvidenceRow = memo(function EvidenceRow(props: {
             ? "Timed out"
             : state === "failed"
               ? `Exit ${item.exitCode}`
-              : state === "unavailable"
-                ? "Not captured"
-                : state === "passed"
-                  ? "Passed"
-                  : "Captured"}
+              : state === "pending"
+                ? "Waiting for CI"
+                : state === "unavailable"
+                  ? "Not captured"
+                  : state === "passed"
+                    ? "Passed"
+                    : "Captured"}
         </span>
       </div>
-      {props.view.unavailableText !== null ? (
+      {state === "unavailable" && props.view.unavailableText !== null ? (
         <p className="text-muted-foreground">{props.view.unavailableText}</p>
       ) : null}
       {item.kind === "check" && item.logTail.length > 0 ? (
@@ -233,34 +255,49 @@ const EvidenceRow = memo(function EvidenceRow(props: {
         </details>
       ) : null}
       {props.view.artifact !== null ? (
-        <EvidenceArtifact view={props.view} environmentId={props.environmentId} />
+        <EvidenceFile
+          resource={props.view.artifact}
+          item={item}
+          environmentId={props.environmentId}
+        />
+      ) : null}
+      {props.view.log !== null ? (
+        <EvidenceFile resource={props.view.log} item={item} environmentId={props.environmentId} />
       ) : null}
     </li>
   );
 });
 
-/** A screenshot inline, or a link to the full log or recording, through a signed asset URL. */
-function EvidenceArtifact(props: {
-  readonly view: EvidenceItemView;
+/**
+ * A screenshot inline, or a link to a recording or a check's full log (served as plain text),
+ * through a signed asset URL.
+ */
+function EvidenceFile(props: {
+  readonly resource: AssetResource;
+  readonly item: CardEvidenceItem;
   readonly environmentId: EnvironmentId;
 }) {
-  const url = useAssetUrlState(props.environmentId, props.view.artifact);
+  const url = useAssetUrlState(props.environmentId, props.resource);
   if (url._tag === "Loading") return <span className="text-muted-foreground">Loading…</span>;
   if (url._tag === "Failure") {
     return <span className="text-muted-foreground">The file is no longer available.</span>;
   }
-  return props.view.item.kind === "screenshot" ? (
+  return props.resource._tag !== "card-check-log" && props.item.kind === "screenshot" ? (
     <a href={url.url} target="_blank" rel="noreferrer">
       <img
         src={url.url}
-        alt={props.view.item.name}
+        alt={props.item.name}
         loading="lazy"
         className="max-h-64 w-auto rounded border border-border"
       />
     </a>
   ) : (
     <a href={url.url} target="_blank" rel="noreferrer" className="self-start underline">
-      {props.view.item.kind === "recording" ? "Open the recording" : "Full log"}
+      {props.resource._tag === "card-check-log"
+        ? "Full log"
+        : props.item.kind === "recording"
+          ? "Open the recording"
+          : "Open the file"}
     </a>
   );
 }
@@ -326,10 +363,14 @@ export function CardLandingPanel(props: {
   );
   const roundsOut = rounds.exhausted || card.paused?.reason.code === "fixRoundsExhausted";
   const landing = card.landing;
+  const mergedOnHost =
+    card.status === "landed" &&
+    props.activities.some((activity) => activity.reason?.code === "mergedOnHost");
 
   return (
     <div className="flex flex-col gap-2 text-xs">
       <p>
+        {mergedOnHost ? <span>Merged on the host · </span> : null}
         {landing === null ? (
           <span className="text-muted-foreground">Not linked to a pull request yet.</span>
         ) : landing.mode === "local" ? (
@@ -353,7 +394,9 @@ export function CardLandingPanel(props: {
             ? "No CI results yet."
             : ci.failed.length > 0
               ? `CI failing: ${ci.failed.join(", ")}`
-              : `CI passed (${ci.total})`}
+              : ci.pending.length > 0
+                ? `Waiting for CI: ${ci.pending.join(", ")}. The merge waits for it.`
+                : `CI passed (${ci.total})`}
         </p>
       ) : null}
       <div className="flex flex-wrap items-center gap-2">

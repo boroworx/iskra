@@ -7,6 +7,7 @@ import {
   evidenceArtifactResource,
   fixRoundsView,
   reviewByCriterion,
+  riskClaimsOf,
   untrustedComments,
 } from "./cardReview.ts";
 
@@ -97,8 +98,13 @@ describe("ciSummary and untrustedComments", () => {
         item("typecheck"),
         item("build", { source: "ci" }),
         item("e2e", { source: "ci", exitCode: 1 }),
+        item("lint", {
+          source: "ci",
+          exitCode: null,
+          unavailable: { code: "pendingCi", text: "Waiting for CI on the pull request." },
+        }),
       ]),
-    ).toEqual({ total: 2, failed: ["e2e"] });
+    ).toEqual({ total: 3, failed: ["e2e"], pending: ["lint"] });
 
     const comment = (activityId: string, overrides: Partial<CardActivity>): CardActivity => ({
       activityId,
@@ -130,6 +136,100 @@ describe("ciSummary and untrustedComments", () => {
         comment("person", { author: { kind: "human", id: "human" } }),
       ]).map((activity) => activity.activityId),
     ).toEqual(["untrusted"]);
+  });
+});
+
+describe("pending CI in review", () => {
+  it("reads a CI check with no result as waiting, neither failed nor not captured", () => {
+    const pending = { code: "pendingCi", text: "Waiting for CI on the pull request." };
+    const review = reviewByCriterion({
+      cardId,
+      criteria: [
+        { id: "build", text: "It builds", verification: "automated" },
+        { id: "broken", text: "It still fails", verification: "automated" },
+      ],
+      items: [
+        item("ci-build", { source: "ci", criterionId: "build", exitCode: null, unavailable: pending }),
+        item("ci-e2e", { source: "ci", criterionId: "broken", exitCode: null, unavailable: pending }),
+        item("unit", { criterionId: "broken", exitCode: 1 }),
+        item("ci-lint", { source: "ci", exitCode: null, unavailable: pending }),
+      ],
+    });
+
+    expect(review.criteria.map((entry) => [entry.criterion.id, entry.state])).toEqual([
+      ["build", "pending"],
+      // A failure outweighs a check still waiting.
+      ["broken", "failed"],
+    ]);
+    expect(review.general.map((view) => [view.item.itemId, view.state, view.unavailableText])).toEqual(
+      [["ci-lint", "pending", "Waiting for CI"]],
+    );
+  });
+});
+
+describe("riskClaimsOf", () => {
+  const activity = (activityId: string, body: string, code: string | null): CardActivity => ({
+    activityId,
+    cardId,
+    kind: "message",
+    author: { kind: "agent", id: "builder" },
+    body,
+    runThreadId: null,
+    deliverTo: null,
+    delivery: null,
+    elicitation: null,
+    answers: null,
+    status: null,
+    evidenceId: null,
+    reason: code === null ? null : { code, text: "Asked for review." },
+    createdAt: "2026-01-01T00:00:00.000Z",
+  });
+  const request = (summary: string, line: string) =>
+    `${summary}\n\nRisks (claimed): ${line}`;
+
+  it("reads the claims from the agent's latest review request, as the server writes them", () => {
+    expect(
+      riskClaimsOf([
+        activity(
+          "r1",
+          request("First try.", "side effects high, performance high, compatibility high."),
+          "reviewRequested",
+        ),
+        activity(
+          "r2",
+          request(
+            "Adds the form.",
+            "side effects low, performance medium, compatibility low.\nTouches the cache key.",
+          ),
+          "reviewRequested",
+        ),
+        activity("m1", "Sounds good.", null),
+      ]),
+    ).toEqual({
+      sideEffect: "low",
+      performance: "medium",
+      compatibility: "low",
+      notes: "Touches the cache key.",
+    });
+  });
+
+  it("claims nothing when the latest request has no risk line, or there is no request", () => {
+    expect(
+      riskClaimsOf([
+        activity(
+          "r1",
+          request("Old.", "side effects low, performance low, compatibility low."),
+          "reviewRequested",
+        ),
+        activity("r2", "Done, no risks written.", "reviewRequested"),
+      ]),
+    ).toBeNull();
+    expect(
+      riskClaimsOf([
+        activity("r1", request("Odd.", "side effects huge, performance low, compatibility low."), "reviewRequested"),
+      ]),
+    ).toBeNull();
+    expect(riskClaimsOf([activity("m1", "Risks (claimed): none", null)])).toBeNull();
   });
 });
 
