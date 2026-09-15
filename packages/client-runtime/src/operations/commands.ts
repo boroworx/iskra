@@ -233,6 +233,18 @@ export const setProjectOrchestration = command(
   "setProjectOrchestration",
   "project.orchestration.set",
 );
+/** A person approving a coordinator's latest plan revision; its children are created ready. */
+export const approveCardPlan = command("approveCardPlan", "card.plan.approve");
+/** A person overriding a finished card's outcome, with a note saying why. */
+export const setCardOutcome = command("setCardOutcome", "card.outcome.set");
+/** A person reverting a landed card; the client names the new card that does the revert. */
+export const revertCard = timestampedCommand("revertCard", "card.revert");
+/** A person putting a paused card's worktree back to before an owner turn. */
+export const restoreCardCheckpoint = command("restoreCardCheckpoint", "card.checkpoint.restore");
+/** A person approving, dismissing or removing a lesson an agent proposed about the project. */
+export const approveProjectLesson = command("approveProjectLesson", "project.knowledge.approve");
+export const dismissProjectLesson = command("dismissProjectLesson", "project.knowledge.dismiss");
+export const removeProjectLesson = command("removeProjectLesson", "project.knowledge.remove");
 
 export const updateProject: (input: UpdateProjectInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.updateProject",

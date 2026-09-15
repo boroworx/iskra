@@ -188,6 +188,7 @@ const RUN_DOING: Record<OrchestrationAgentRun["role"], string> = {
   helper: "Helping on",
   critic: "Critiquing",
   verifier: "Verifying",
+  coordinator: "Coordinating",
 };
 
 /**

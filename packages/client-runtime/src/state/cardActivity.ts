@@ -38,6 +38,17 @@ export function applyCardStreamItem(
   switch (item.kind) {
     case "snapshot":
       return { activities: item.activities, evidence: item.evidence, verdict: item.verdict ?? null };
+    // An older page goes before what is held, skipping any activity already held.
+    case "page": {
+      const held = new Set(state.activities.map((activity) => activity.activityId));
+      return {
+        ...state,
+        activities: [
+          ...item.activities.filter((activity) => !held.has(activity.activityId)),
+          ...state.activities,
+        ],
+      };
+    }
     case "activity": {
       const index = state.activities.findIndex(
         (activity) => activity.activityId === item.activity.activityId,

@@ -67,6 +67,7 @@ const ROLE_HEADING: Record<OrchestrationAgentRun["role"], string> = {
   lead: "Leading",
   conversation: "In",
   verifier: "Verifying",
+  coordinator: "Coordinating",
 };
 
 const ROLE_HINT: Record<OrchestrationAgentRun["role"], string> = {
@@ -76,6 +77,7 @@ const ROLE_HINT: Record<OrchestrationAgentRun["role"], string> = {
   lead: "Lead: reads channel messages that mention no one and proposes cards from them.",
   conversation: "Conversation: replies where it was mentioned or messaged, read-only.",
   verifier: "Verifier: checks the card's latest commit against its criteria, read-only.",
+  coordinator: "Coordinator: plans a card's children and follows them, read-only.",
 };
 
 /**
