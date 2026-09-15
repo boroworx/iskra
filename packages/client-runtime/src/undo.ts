@@ -9,9 +9,7 @@ export type UndoableCommand =
       readonly cardId: CardId;
       readonly kind: CardRelationKind;
       readonly otherCardId: CardId;
-    }
-  // A dismissed lesson is gone from the read model; there is nothing to take back.
-  | { readonly type: "project.knowledge.dismiss" };
+    };
 
 /** The command that takes one back. */
 export type UndoCommand =
@@ -47,16 +45,11 @@ export function undoCommandOf(command: UndoableCommand): UndoCommand | null {
         kind: command.kind,
         otherCardId: command.otherCardId,
       };
-    case "project.knowledge.dismiss":
-      return null;
   }
 }
 
 /** What an Undo toast says was done. */
-export const UNDOABLE_LABEL: Record<
-  Exclude<UndoableCommand["type"], "project.knowledge.dismiss">,
-  string
-> = {
+export const UNDOABLE_LABEL: Record<UndoableCommand["type"], string> = {
   "card.pause": "Card paused",
   "card.abandon": "Card abandoned",
   "card.unapprove": "Card sent back to triage",

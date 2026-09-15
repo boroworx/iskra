@@ -16,6 +16,7 @@ import {
   criteriaMarks,
   markOfCriterionState,
   outcomePill,
+  wikiAuthorLabel,
 } from "./cardFace.ts";
 
 const at = "2026-01-01T00:00:00.000Z";
@@ -155,5 +156,23 @@ describe("cardShortId", () => {
     expect(second).toMatch(/^C-[0-9A-F]{4}$/);
     expect(first).not.toBe(second);
     expect(cardShortId("trigger:project-1:nightly:2026-09-14")).toBe(first);
+  });
+});
+
+describe("wikiAuthorLabel", () => {
+  const name = (agentId: string) => (agentId === "agent-1" ? "builder1" : undefined);
+
+  it("names the agent and the card it wrote from, and a person as you", () => {
+    expect(
+      wikiAuthorLabel({ kind: "agent", agentId: "agent-1", cardId: "card-af7f00" }, name),
+    ).toBe("@builder1 on C-AF7F");
+    // A lead writes from a channel, with no card; an archived agent falls back to its id.
+    expect(wikiAuthorLabel({ kind: "agent", agentId: "agent-1", cardId: null }, name)).toBe(
+      "@builder1",
+    );
+    expect(wikiAuthorLabel({ kind: "agent", agentId: "agent-9", cardId: null }, name)).toBe(
+      "@agent-9",
+    );
+    expect(wikiAuthorLabel({ kind: "human", agentId: null, cardId: null }, name)).toBe("you");
   });
 });

@@ -14,17 +14,18 @@ import type { Atom } from "effect/unstable/reactivity";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import {
   answerChannelElicitation,
-  approveProjectLesson,
   archiveChannel,
   createAgent,
   createChannel,
-  dismissProjectLesson,
+  deleteProjectWikiPage,
+  lockProjectWikiPage,
   postAgentDm,
   postChannelMessage,
-  removeProjectLesson,
   sendAgentSessionMessage,
   unarchiveChannel,
+  unlockProjectWikiPage,
   updateChannel,
+  writeProjectWikiPage,
 } from "../operations/commands.ts";
 import { request, subscribe, type EnvironmentRpcInput } from "../rpc/client.ts";
 import {
@@ -245,18 +246,38 @@ export function createChannelEnvironmentAtoms<R, E>(
       execute: (input: EnvironmentRpcInput<typeof ORCHESTRATION_WS_METHODS.removeProjectHoldout>) =>
         request(ORCHESTRATION_WS_METHODS.removeProjectHoldout, input),
     }),
-    /** A person deciding a lesson an agent proposed: only approved lessons reach briefs. */
-    approveLesson: createEnvironmentCommand(runtime, {
-      label: "environment-data:commands:project:approve-lesson",
-      execute: approveProjectLesson,
+    /** A project's wiki: its pages without their text, and its recent changes. */
+    projectWiki: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:projects:wiki",
+      tag: ORCHESTRATION_WS_METHODS.listProjectWiki,
     }),
-    dismissLesson: createEnvironmentCommand(runtime, {
-      label: "environment-data:commands:project:dismiss-lesson",
-      execute: dismissProjectLesson,
+    /** One wiki page with its text and history; `revision` also reads that earlier revision. */
+    projectWikiPage: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:projects:wiki-page",
+      tag: ORCHESTRATION_WS_METHODS.getProjectWikiPage,
     }),
-    removeLesson: createEnvironmentCommand(runtime, {
-      label: "environment-data:commands:project:remove-lesson",
-      execute: removeProjectLesson,
+    /** Reads a page's revision on demand, such as the one a person is about to restore. */
+    getProjectWikiPage: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:project:get-wiki-page",
+      execute: (input: EnvironmentRpcInput<typeof ORCHESTRATION_WS_METHODS.getProjectWikiPage>) =>
+        request(ORCHESTRATION_WS_METHODS.getProjectWikiPage, input),
+    }),
+    /** A person writing a wiki page, restoring a revision, locking a page or deleting it. */
+    writeWikiPage: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:project:write-wiki-page",
+      execute: writeProjectWikiPage,
+    }),
+    lockWikiPage: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:project:lock-wiki-page",
+      execute: lockProjectWikiPage,
+    }),
+    unlockWikiPage: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:project:unlock-wiki-page",
+      execute: unlockProjectWikiPage,
+    }),
+    deleteWikiPage: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:project:delete-wiki-page",
+      execute: deleteProjectWikiPage,
     }),
     importAgentDefinitions: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:agent:import-definitions",

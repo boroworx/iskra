@@ -127,6 +127,20 @@ export function markOfCriterionState(state: CriterionState): CriterionMark {
 }
 
 /**
+ * Who wrote a wiki revision, as the wiki shows it: an agent by name and the card it was on, or the
+ * person who wrote it. An agent whose name is gone shows as its id.
+ */
+export function wikiAuthorLabel(
+  author: { readonly kind: "agent" | "human"; readonly agentId: string | null; readonly cardId: string | null },
+  agentName: (agentId: string) => string | undefined,
+): string {
+  if (author.kind === "human") return "you";
+  const name = author.agentId === null ? null : (agentName(author.agentId) ?? author.agentId);
+  const who = name === null ? "an agent" : `@${name}`;
+  return author.cardId === null ? who : `${who} on ${cardShortId(author.cardId)}`;
+}
+
+/**
  * A card's short caption id, as the board, review and proposals show it: `C-` and the first four
  * letters or digits of its id, after any `card-` prefix. Structured ids (`trigger:<project>:…`)
  * share a prefix, so they get four hex digits of an FNV-1a hash instead.

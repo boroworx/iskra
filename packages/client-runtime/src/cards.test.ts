@@ -908,7 +908,7 @@ describe("needsYouItems on budget", () => {
   });
 });
 
-describe("needsYouItems for plans, lessons, outcomes, reverts and budgets", () => {
+describe("needsYouItems for plans, outcomes, reverts and budgets", () => {
   it("lists each new kind once, with what it decides", () => {
     const project = {
       id: projectId,
@@ -916,26 +916,6 @@ describe("needsYouItems for plans, lessons, outcomes, reverts and budgets", () =
         ...DEFAULT_PROJECT_ORCHESTRATION,
         sideEffectGuard: { acknowledgedAt: at(0), killSwitchEnv: null },
       },
-      knowledge: [
-        {
-          lessonId: "lesson-1",
-          kind: "quirk" as const,
-          text: "Run migrations before tests.",
-          paths: [],
-          state: "proposed" as const,
-          sourceCardId: CardId.make("landed"),
-          createdAt: at(6),
-        },
-        {
-          lessonId: "lesson-2",
-          kind: "quirk" as const,
-          text: "Already approved.",
-          paths: [],
-          state: "approved" as const,
-          sourceCardId: CardId.make("landed"),
-          createdAt: at(6),
-        },
-      ],
     };
     const attention = (
       activityId: string,
@@ -1001,16 +981,13 @@ describe("needsYouItems for plans, lessons, outcomes, reverts and budgets", () =
       now: Date.parse(at(10)),
     });
 
-    expect(items.map((item) => [item.kind, item.cardId, item.activityId ?? item.lessonId])).toEqual(
-      [
-        ["planApproval", "plan", "plan-q"],
-        ["sliceCheckpoint", "slice", null],
-        ["outcomeFlawed", "landed", "flawed-a"],
-        ["revertConflict", "revert", "conflict-a"],
-        ["budgetCap", "capped-1", null],
-        ["lessonProposed", "landed", "lesson-1"],
-      ],
-    );
+    expect(items.map((item) => [item.kind, item.cardId, item.activityId])).toEqual([
+      ["planApproval", "plan", "plan-q"],
+      ["sliceCheckpoint", "slice", null],
+      ["outcomeFlawed", "landed", "flawed-a"],
+      ["revertConflict", "revert", "conflict-a"],
+      ["budgetCap", "capped-1", null],
+    ]);
     expect(needsYouLabel(items[2]!)).toBe("It turned out flawed; add a hidden scenario");
     // A budget wait is a person's, so it isn't listed as waiting on Iskra too.
     expect(

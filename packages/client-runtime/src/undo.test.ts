@@ -25,8 +25,4 @@ describe("undoCommandOf", () => {
       undoCommandOf({ type: "card.relation.add", cardId, kind: "blockedBy", otherCardId }),
     ).toEqual({ type: "card.relation.remove", cardId, kind: "blockedBy", otherCardId });
   });
-
-  it("offers nothing for a dismissed lesson", () => {
-    expect(undoCommandOf({ type: "project.knowledge.dismiss" })).toBeNull();
-  });
 });

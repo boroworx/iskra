@@ -833,7 +833,6 @@ export type NeedsYouKind =
   | "refsChanged"
   | "planApproval"
   | "sliceCheckpoint"
-  | "lessonProposed"
   | "outcomeFlawed"
   | "revertConflict"
   | "budgetCap"
@@ -863,8 +862,6 @@ interface NeedsYouItem {
   readonly code: string | null;
   /** The question or attention item it is answered on; null when it isn't one. */
   readonly activityId: string | null;
-  /** The proposed lesson it decides; null unless it is a lessonProposed item. */
-  readonly lessonId: string | null;
   /** The domains an access request asks for; empty for every other item. */
   readonly domains: ReadonlyArray<string>;
   /** A session waiting on an answer is never snoozed away. */
@@ -893,7 +890,6 @@ export const NEEDS_YOU_LABEL: Record<NeedsYouKind, string> = {
   refsChanged: "Refs changed outside this card; restore or keep them",
   planApproval: "Plan to approve",
   sliceCheckpoint: "A plan slice landed; continue?",
-  lessonProposed: "An agent proposed a lesson about the project",
   outcomeFlawed: "It turned out flawed; add a hidden scenario",
   revertConflict: "Its revert conflicts; assign an agent",
   budgetCap: "A monthly budget holds its work; raise it to continue",
@@ -940,7 +936,7 @@ const ATTENTION_KINDS: Readonly<Record<string, NeedsYouKind>> = {
 const SIDE_EFFECT_GUARD_REASON =
   "Agents don't start work until someone checks this project's scheduled jobs and outbound APIs in project settings.";
 
-type NeedsYouProject = Pick<OrchestrationProjectShell, "id" | "orchestration" | "knowledge">;
+type NeedsYouProject = Pick<OrchestrationProjectShell, "id" | "orchestration">;
 
 /**
  * Everything across projects waiting on a person, longest waiting first. Derived,
@@ -979,7 +975,6 @@ export function needsYouItems(input: {
       reason: null,
       code: null,
       activityId: null,
-      lessonId: null,
       domains: [],
     };
     const open = isOpenStatus(card.status);
@@ -1246,7 +1241,6 @@ export function needsYouItems(input: {
       reason: null,
       code: null,
       activityId: null,
-      lessonId: null,
       domains: [],
     };
     if (session.state === "awaitingInput") {
@@ -1255,27 +1249,6 @@ export function needsYouItems(input: {
       add({ ...base, key: `input:${card.id}`, kind: "awaitingInput", snoozable: false });
     } else if (session.state === "error" || session.state === "stale") {
       add({ ...base, key: `failed:${card.id}`, kind: "sessionFailed", snoozable: true });
-    }
-  }
-  // Lessons are the project's, decided from the card they came from.
-  for (const project of input.projects ?? []) {
-    for (const lesson of project.knowledge ?? []) {
-      const card = lesson.sourceCardId === null ? undefined : cardsById.get(lesson.sourceCardId);
-      if (lesson.state !== "proposed" || card === undefined) continue;
-      add({
-        key: `lesson:${lesson.lessonId}`,
-        kind: "lessonProposed",
-        cardId: card.id,
-        projectId: project.id,
-        title: card.title,
-        since: lesson.createdAt,
-        reason: lesson.text,
-        code: null,
-        activityId: null,
-        lessonId: lesson.lessonId,
-        domains: [],
-        snoozable: false,
-      });
     }
   }
   return (
