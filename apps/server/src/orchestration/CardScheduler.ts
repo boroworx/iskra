@@ -23,6 +23,7 @@ import { forkParked } from "../serverActivation.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { environmentSessionCapOf, planStarts, type PlanStartsInput } from "./cardQueue.ts";
 import { CardWorkspace } from "./CardWorkspace.ts";
+import { errorText } from "./Errors.ts";
 import { HostAdmission } from "./HostAdmission.ts";
 import { runSessionChange } from "./RunReactor.ts";
 import * as OrchestrationEngine from "./Services/OrchestrationEngine.ts";
@@ -165,7 +166,7 @@ const make = Effect.gen(function* () {
           cardId: card.id,
           createdAt: yield* nowIso,
         })
-        .pipe(Effect.catch((error) => failed(card.id, error.message)));
+        .pipe(Effect.catch((error) => failed(card.id, errorText(error))));
     }
   });
 

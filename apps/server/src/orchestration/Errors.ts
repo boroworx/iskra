@@ -41,6 +41,19 @@ export class OrchestrationCommandInvariantError extends Schema.TaggedError<Orche
   }
 }
 
+/**
+ * A failure in the words a person reads on a card: a refusal's own sentence without the command
+ * it refused, any other error's message.
+ */
+const isInvariantError = Schema.is(OrchestrationCommandInvariantError);
+
+export const errorText = (error: unknown): string =>
+  isInvariantError(error)
+    ? error.detail
+    : error instanceof Error
+      ? error.message
+      : String(error);
+
 export class OrchestrationThreadSettleBlockedError extends Schema.TaggedError<OrchestrationThreadSettleBlockedError>()(
   "OrchestrationThreadSettleBlockedError",
   {

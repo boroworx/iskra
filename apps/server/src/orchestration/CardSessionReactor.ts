@@ -48,6 +48,7 @@ import { cardRunStartCommands } from "./cardRunStart.ts";
 import * as CardWorkspace from "./CardWorkspace.ts";
 import { buildCoordinatorBrief } from "./coordinatorBrief.ts";
 import { liveOwnerRun } from "./decider.ts";
+import { errorText } from "./Errors.ts";
 import { runSessionChange } from "./RunReactor.ts";
 import { budgetHold, environmentSpendUsd } from "./watchdogRules.ts";
 import * as OrchestrationEngine from "./Services/OrchestrationEngine.ts";
@@ -316,8 +317,7 @@ const make = Effect.gen(function* () {
     startSessionUnsafe(input).pipe(
       Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause);
-        const error = Cause.squash(cause);
-        const message = error instanceof Error ? error.message : String(error);
+        const message = errorText(Cause.squash(cause));
         return input.role === "owner"
           ? Effect.gen(function* () {
               yield* engine.dispatch({

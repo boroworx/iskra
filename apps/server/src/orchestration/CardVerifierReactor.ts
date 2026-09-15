@@ -27,6 +27,7 @@ import { forkParked } from "../serverActivation.ts";
 import { verificationRequired } from "./cardRules.ts";
 import { cardRunStartCommands, cardRunThreadId } from "./cardRunStart.ts";
 import * as CardWorkspace from "./CardWorkspace.ts";
+import { errorText } from "./Errors.ts";
 import { HostAdmission } from "./HostAdmission.ts";
 import { HoldoutStore, redactHoldouts } from "./HoldoutStore.ts";
 import { runSessionChange } from "./RunReactor.ts";
@@ -339,11 +340,10 @@ const make = Effect.gen(function* () {
           ? Effect.failCause(cause)
           : Effect.gen(function* () {
               yield* release(card.id);
-              const error = Cause.squash(cause);
               yield* raiseError(
                 card.id,
                 key,
-                `The verifier couldn't start: ${error instanceof Error ? error.message : String(error)}`,
+                `The verifier couldn't start: ${errorText(Cause.squash(cause))}`,
               );
             }),
       ),

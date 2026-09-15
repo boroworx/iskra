@@ -30,6 +30,7 @@ import {
 import { forkParked } from "../serverActivation.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { CardWorkspace } from "./CardWorkspace.ts";
+import { errorText } from "./Errors.ts";
 import { HostAdmission, type HostAdmissionSnapshot } from "./HostAdmission.ts";
 import * as OrchestrationEngine from "./Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts";
@@ -83,8 +84,7 @@ export const catchReactorCause =
     effect.pipe(
       Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause as Cause.Cause<never>);
-        const error = Cause.squash(cause);
-        const detail = error instanceof Error ? error.message : String(error);
+        const detail = errorText(Cause.squash(cause));
         const text = `${input.reactor} stopped on this card: ${detail}`.slice(0, 500);
         const { cardId } = input;
         return Effect.logWarning(`${input.reactor} failed`, { cardId, cause: Cause.pretty(cause) }).pipe(
