@@ -1,6 +1,7 @@
 import type {
   AgentId,
   AgentPresence,
+  CardKind,
   ChannelId,
   OrchestrationAgentRun,
   OrchestrationAgentShell,
@@ -125,6 +126,22 @@ export function leadCandidates(
     (agent) =>
       agent.projectId === projectId &&
       (agent.id === currentLeadId || (agent.roles ?? DEFAULT_AGENT_ROLES).includes("lead")),
+  );
+}
+
+/**
+ * The agents a card's owner picker offers: those whose roles include coordinator for a plan card,
+ * or builder otherwise (agents without roles have the defaults), plus the current owner even if it
+ * no longer qualifies, so the picker still shows it.
+ */
+export function ownerCandidates<T extends Pick<OrchestrationAgentShell, "id" | "roles">>(
+  agents: ReadonlyArray<T>,
+  kind: CardKind,
+  currentOwnerId: AgentId | null,
+): ReadonlyArray<T> {
+  const role = kind === "plan" ? "coordinator" : "builder";
+  return agents.filter(
+    (agent) => agent.id === currentOwnerId || (agent.roles ?? DEFAULT_AGENT_ROLES).includes(role),
   );
 }
 

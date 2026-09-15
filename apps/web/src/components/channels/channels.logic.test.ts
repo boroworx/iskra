@@ -29,6 +29,7 @@ import {
   deliveryNotes,
   leadCandidates,
   liveInstances,
+  ownerCandidates,
   dmTargets,
   mentionCandidates,
   mentionQueryAt,
@@ -181,6 +182,32 @@ describe("agentListEntries", () => {
     expect(entries.map((entry) => [entry.name, entry.presence])).toEqual([
       ["backend", "running"],
       ["writer", "blocked"],
+    ]);
+  });
+});
+
+describe("ownerCandidates", () => {
+  const agents = [
+    agent("agent-legacy", "legacy"),
+    agent("agent-lead", "lead", { roles: ["lead"] }),
+    agent("agent-verifier", "verifier-oc", { roles: ["verifier"] }),
+    agent("agent-coordinator", "coordinator", { roles: ["builder", "coordinator"] }),
+  ];
+  const names = (entries: ReadonlyArray<{ readonly name: string }>) =>
+    entries.map((entry) => entry.name);
+
+  it("offers builders for a task, counting agents without roles as having the defaults", () => {
+    expect(names(ownerCandidates(agents, "task", null))).toEqual(["legacy", "coordinator"]);
+  });
+
+  it("offers only coordinators for a plan card", () => {
+    expect(names(ownerCandidates(agents, "plan", null))).toEqual(["coordinator"]);
+  });
+
+  it("keeps the current owner after it stops qualifying", () => {
+    expect(names(ownerCandidates(agents, "plan", AgentId.make("agent-lead")))).toEqual([
+      "lead",
+      "coordinator",
     ]);
   });
 });

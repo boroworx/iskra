@@ -44,6 +44,7 @@ import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { cardSparkState, cardStatusPill, outcomePill } from "@iskra/client-runtime/card-face";
 import { ApproveAndStart } from "../channels/CardProposal";
+import { ownerCandidates } from "../channels/channels.logic";
 import { MigrationPanel } from "./MigrationPanel";
 import { PlanReview } from "./PlanReview";
 import { useUndoToast } from "./useUndoToast";
@@ -619,7 +620,7 @@ function CardSheetBody(props: {
                     </SelectValue>
                   </SelectTrigger>
                   <SelectPopup>
-                    {props.agents.map((agent) => (
+                    {ownerCandidates(props.agents, card.kind, card.delegateAgentId).map((agent) => (
                       <SelectItem key={agent.id} value={agent.id}>
                         @{agent.name}
                       </SelectItem>

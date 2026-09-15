@@ -20,7 +20,7 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
-import { cardProposalStatus, type AgentEntry } from "./channels.logic";
+import { cardProposalStatus, ownerCandidates, type AgentEntry } from "./channels.logic";
 
 const SPEC_PREVIEW_LINES = 4;
 const NO_OWNER = "none";
@@ -28,6 +28,7 @@ const NO_OWNER = "none";
 type ProposalFace = Pick<
   OrchestrationCardShell,
   | "id"
+  | "kind"
   | "projectId"
   | "title"
   | "spec"
@@ -137,7 +138,7 @@ export function CardProposal(props: {
 
 type StartableCard = Pick<
   OrchestrationCardShell,
-  "id" | "title" | "suggestedAgentId" | "acceptance" | "estimate" | "premise"
+  "id" | "kind" | "title" | "suggestedAgentId" | "acceptance" | "estimate" | "premise"
 >;
 
 /**
@@ -172,6 +173,16 @@ function ApproveAndStartDialog(props: {
   const agentShells = useEnvironmentAgents(props.environmentId);
   const suggested = props.agents.find((agent) => agent.id === card.suggestedAgentId)?.id ?? null;
   const [ownerId, setOwnerId] = useState<AgentId | null>(suggested);
+  const owners = useMemo(() => {
+    const allowed = new Set(
+      ownerCandidates(
+        agentShells.filter((agent) => props.agents.some((entry) => entry.id === agent.id)),
+        card.kind,
+        ownerId,
+      ).map((agent) => agent.id),
+    );
+    return props.agents.filter((agent) => allowed.has(agent.id));
+  }, [agentShells, props.agents, card.kind, ownerId]);
   const [criteria, setCriteria] = useState(card.acceptance.criteria);
   const [starting, setStarting] = useState(false);
   const formId = useId();
@@ -248,7 +259,7 @@ function ApproveAndStartDialog(props: {
                   </SelectValue>
                 </SelectTrigger>
                 <SelectPopup>
-                  {props.agents.map((agent) => (
+                  {owners.map((agent) => (
                     <SelectItem key={agent.id} value={agent.id}>
                       @{agent.name}
                     </SelectItem>
