@@ -1,7 +1,11 @@
 import {
   ORCHESTRATION_WS_METHODS,
   type OrchestrationChannelMessage,
+  type OrchestrationChannelRun,
   type OrchestrationChannelStreamItem,
+  type OrchestrationMessage,
+  type OrchestrationThread,
+  type TurnId,
 } from "@iskra/contracts";
 import type * as Crypto from "effect/Crypto";
 import * as Stream from "effect/Stream";
@@ -29,37 +33,109 @@ import {
   createEnvironmentSubscriptionAtomFamily,
 } from "./runtime.ts";
 
+/** What a channel subscription holds: its messages, and the runs seen live in it. */
+export interface ChannelState {
+  readonly messages: ReadonlyArray<OrchestrationChannelMessage>;
+  /** Runs live when the subscription saw them; each run's session says whether it still is. */
+  readonly runs: ReadonlyArray<OrchestrationChannelRun>;
+}
+
+export const EMPTY_CHANNEL_STATE: ChannelState = { messages: [], runs: [] };
+
 /**
- * A channel's messages after one stream item. A snapshot replaces them, so a
- * resubscription starts clean; a message already held is not added twice; a
- * delivery replaces that agent's earlier standing on its message.
+ * A channel's state after one stream item. A snapshot replaces it, so a
+ * resubscription starts clean; a message or run already held is not added
+ * twice; a delivery replaces that agent's earlier standing on its message.
  */
 export function applyChannelStreamItem(
-  messages: ReadonlyArray<OrchestrationChannelMessage>,
+  state: ChannelState,
   item: OrchestrationChannelStreamItem,
-): ReadonlyArray<OrchestrationChannelMessage> {
+): ChannelState {
   switch (item.kind) {
     case "snapshot":
-      return item.messages;
+      return { messages: item.messages, runs: item.runs };
     case "message":
-      return messages.some((message) => message.id === item.message.id)
-        ? messages
-        : [...messages, item.message];
+      return state.messages.some((message) => message.id === item.message.id)
+        ? state
+        : { ...state, messages: [...state.messages, item.message] };
+    case "run":
+      // ponytail: ended runs stay until the next snapshot; prune them if long-open channels collect many.
+      return state.runs.some((run) => run.threadId === item.run.threadId)
+        ? state
+        : { ...state, runs: [...state.runs, item.run] };
     case "delivery":
-      return messages.map((message) =>
-        message.id === item.messageId
-          ? {
-              ...message,
-              deliveries: [
-                ...(message.deliveries ?? []).filter(
-                  (delivery) => delivery.agentId !== item.delivery.agentId,
-                ),
-                item.delivery,
-              ],
-            }
-          : message,
-      );
+      return {
+        ...state,
+        messages: state.messages.map((message) =>
+          message.id === item.messageId
+            ? {
+                ...message,
+                deliveries: [
+                  ...(message.deliveries ?? []).filter(
+                    (delivery) => delivery.agentId !== item.delivery.agentId,
+                  ),
+                  item.delivery,
+                ],
+              }
+            : message,
+        ),
+      };
   }
+}
+
+/** How long a run with no session yet reads as starting, and a finished turn as settling. */
+export const RUN_SETTLE_GRACE_MS = 60_000;
+
+export interface LiveRunPreview {
+  readonly turnId: TurnId | null;
+  /** The newest non-empty thing the run said this turn: the reply the server will post. */
+  readonly message: OrchestrationMessage | null;
+  /** True while it waits on an approval or a person's answer. */
+  readonly waiting: boolean;
+}
+
+/**
+ * What a channel shows for a run until its reply lands, or null. A run shows while its session
+ * starts or runs a turn (or has no session yet, briefly), and while a finished turn's text waits
+ * to be posted. It hides once the channel holds this turn's reply, which then shows instead.
+ */
+export function liveRunPreview(input: {
+  readonly run: OrchestrationChannelRun;
+  readonly thread: Pick<OrchestrationThread, "session" | "latestTurn" | "messages"> | null;
+  readonly awaitingInput: boolean;
+  readonly channelMessages: ReadonlyArray<Pick<OrchestrationChannelMessage, "id">>;
+  readonly now: number;
+}): LiveRunPreview | null {
+  const { run, thread, now } = input;
+  const session = thread?.session ?? null;
+  const turnId = session?.activeTurnId ?? thread?.latestTurn?.turnId ?? null;
+  const replyId = `run-reply:${run.threadId}:${turnId}`;
+  if (turnId !== null && input.channelMessages.some((message) => message.id === replyId)) {
+    return null;
+  }
+  const message =
+    turnId === null
+      ? null
+      : (thread?.messages.findLast(
+          (candidate) =>
+            candidate.role === "assistant" &&
+            candidate.turnId === turnId &&
+            candidate.text.trim().length > 0,
+        ) ?? null);
+  const completedAt = thread?.latestTurn?.completedAt ?? null;
+  const live =
+    session === null
+      ? now - Date.parse(run.startedAt) < RUN_SETTLE_GRACE_MS
+      : session.status === "starting" ||
+        session.status === "running" ||
+        session.activeTurnId !== null ||
+        // Between a turn ending and its reply posting, keep the text in place so it doesn't blink.
+        (session.status !== "stopped" &&
+          session.status !== "error" &&
+          message !== null &&
+          completedAt !== null &&
+          now - Date.parse(completedAt) < RUN_SETTLE_GRACE_MS);
+  return live ? { turnId, message, waiting: input.awaitingInput } : null;
 }
 
 export function createChannelEnvironmentAtoms<R, E>(
@@ -71,7 +147,7 @@ export function createChannelEnvironmentAtoms<R, E>(
       subscribe: (input: EnvironmentRpcInput<typeof ORCHESTRATION_WS_METHODS.subscribeChannel>) =>
         subscribe(ORCHESTRATION_WS_METHODS.subscribeChannel, input).pipe(
           Stream.mapAccum(
-            () => [] as ReadonlyArray<OrchestrationChannelMessage>,
+            (): ChannelState => EMPTY_CHANNEL_STATE,
             (current, item) => {
               const next = applyChannelStreamItem(current, item);
               return [next, [next]] as const;
