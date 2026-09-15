@@ -115,6 +115,34 @@ and objects, `info/exclude` and `gc` are not covered.
 - Snapshots live in memory, so a turn that spans a server restart is not checked, and a restore
   answered just before a restart may not run. The activity keeps the full ids for doing it by hand.
 
+### Preventing ref writes in the sandbox: not applied
+
+Probe (security follow-up): Claude Code 2.1.271, Agent SDK 0.3.260, git 2.55.0, macOS, Haiku, the
+run's sandbox shape plus the rules below, a repository with `main`, `side`, tag `v0` and a linked
+worktree on `iskra/probe` under `~/Library/Caches`. Each command ran as its own Bash call from the
+worktree; refs were read outside the sandbox afterwards. `<c>` is the common dir.
+
+| Rules                                                                                           | Own commit on `iskra/probe`             | `update-ref main`, `branch rogue`, `tag`, `branch -f side`, `branch iskra/other` |
+| ----------------------------------------------------------------------------------------------- | --------------------------------------- | -------------------------------------------------------------------------------- |
+| none                                                                                            | allowed                                 | all allowed                                                                      |
+| `denyWrite` `<c>/refs/heads`, `<c>/refs/tags`, `<c>/packed-refs`; `allowWrite` the branch ref, its `.lock`, its reflog | blocked: `Unable to create '<c>/refs/heads/iskra/probe.lock': Operation not permitted` | all blocked                                    |
+| `denyWrite` `<c>/refs/heads/*`, `<c>/refs/tags/**`, `<c>/packed-refs`, `<c>/packed-refs.lock`   | blocked, same error                     | all blocked                                                                      |
+| `denyWrite` `<c>/refs/heads/main`, `main.lock`, `<c>/packed-refs`, `packed-refs.lock`           | allowed, but prints `error: Unable to create '<c>/packed-refs.lock'` | `main` blocked; the rest allowed                     |
+
+Why it isn't applied:
+
+- `denyWrite` wins over `allowWrite`, so the card's own branch can't be carved out of a denied
+  `refs/heads`. A `*` glob also matched the nested `refs/heads/iskra/probe.lock`.
+- Blocking new branches and tags needs a deny on the `refs/heads` or `refs/tags` directory, which
+  blocks the card's own commits too. Literal denies can only cover refs that already exist when
+  the session starts.
+- Literal denies still need `packed-refs` and its lock denied (an edit there moves a packed ref).
+  With those denied, every normal `git commit` prints an error even though the commit lands, and
+  `pack-refs`/`gc` fail.
+- Linux: bubblewrap can't deny a path that doesn't exist yet (untested here).
+
+The report-only guard stays the only protection.
+
 ## Not verified
 
 - Failure when the sandbox can't start. `failIfUnavailable` is documented to exit at startup; the
