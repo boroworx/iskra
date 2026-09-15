@@ -379,8 +379,8 @@ export const REASON_LABEL: Readonly<Record<string, ReasonLabel>> = {
     hint: "No other provider or model could verify here, so the builder's own model checks it from scratch.",
   },
   verifierFailed: {
-    label: "The verifier found criteria not met",
-    hint: "Its agent got the verifier's notes on the failed criteria and fixes them.",
+    label: "The verifier didn't pass this commit",
+    hint: "Its agent got the notes on any failed criteria and a count of failed hidden scenarios, and fixes them.",
   },
   verifierError: {
     label: "The verifier didn't finish",

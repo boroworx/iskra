@@ -79,7 +79,11 @@ const HOLDOUT_OUTPUT_TAIL = 2_000;
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
-/** What the builder reads when the verifier fails its work: notes and counts, never scenario text. */
+/**
+ * What the builder reads when the verifier fails its work: failed criteria notes and counts, never
+ * scenario text. The verifier's diff concerns stay on the card for people: they are free text
+ * written with the scenarios in view, and redaction can't catch a paraphrase of one.
+ */
 export function verifierFeedback(input: {
   readonly card: Pick<OrchestrationCard, "acceptance">;
   readonly verdict: Pick<CardVerdict, "criteria" | "diffJudge" | "scenarios">;
@@ -109,7 +113,6 @@ export function verifierFeedback(input: {
       )?.text;
       return `- ${criterion.criterionId}${text === undefined ? "" : ` (${text})`}: ${clean(criterion.note)}`;
     }),
-    ...input.verdict.diffJudge.concerns.map((concern) => `- Concern: ${clean(concern)}`),
     ...(hiddenFailed > 0
       ? [
           `- ${plural(hiddenFailed, "hidden scenario", "hidden scenarios")} failed. They stay hidden; fix what the criteria and notes point at.`,

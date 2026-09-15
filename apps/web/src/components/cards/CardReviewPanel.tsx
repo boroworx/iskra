@@ -259,7 +259,7 @@ const VERIFICATION_TITLE: Record<CardVerification["state"], string> = {
   pending: "Waiting for the verifier",
   running: "Verifying…",
   passed: "Verified",
-  failed: "The verifier found criteria not met",
+  failed: "The verifier didn't pass this commit",
   overridden: "Verifier overridden",
 };
 

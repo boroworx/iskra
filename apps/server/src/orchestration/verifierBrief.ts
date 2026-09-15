@@ -109,7 +109,7 @@ export function buildVerifierBrief(input: {
     input.scenarios.length === 0
       ? ""
       : [
-          "Each must hold for the card to pass. Say for each whether it is satisfied.",
+          "Each must hold for the card to pass. Say for each whether it is satisfied. They are hidden from the builder: never mention, quote or paraphrase one in a criterion note, the evidence you cite or a concern, because those reach the builder. A scenario's only answer is its satisfied flag.",
           ...input.scenarios.map((scenario) =>
             reveal
               ? renderScenario(

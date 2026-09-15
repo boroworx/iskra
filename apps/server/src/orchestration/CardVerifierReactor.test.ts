@@ -301,3 +301,25 @@ it.effect(
       }),
     ),
 );
+
+// A real verifier paraphrased a hidden scenario in a diff concern; redaction can't catch that.
+it("keeps the verifier's diff concerns out of the builder's feedback", () => {
+  const { headline, body } = CardVerifierReactor.verifierFeedback({
+    card: {
+      acceptance: { criteria: [{ id: "c1", text: "GET /health answers 200." }] },
+    } as unknown as Pick<OrchestrationCard, "acceptance">,
+    verdict: {
+      criteria: [{ criterionId: "c1", pass: true, evidence: "journey", note: "Answers 200." }],
+      diffJudge: {
+        matchesCriteria: true,
+        concerns: ["The hidden expectation that /health returns JSON conflicts with c1."],
+      },
+      scenarios: [{ scenarioId: "h1", satisfied: false }],
+    } as unknown as Pick<CardVerdict, "criteria" | "diffJudge" | "scenarios">,
+    scenarios: [{ scenarioId: "h1", title: "Health is JSON", body: "", command: "node check.js" }],
+  });
+  expect(headline).toBe("1 hidden scenario failed");
+  expect(body).toContain("1 hidden scenario failed");
+  expect(body).not.toContain("JSON");
+  expect(body).not.toContain("Concern");
+});
