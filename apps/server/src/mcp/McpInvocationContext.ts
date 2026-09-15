@@ -9,10 +9,17 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 
 /**
- * `board` is granted only to a session building a card, `lead` only to a channel lead's run and
- * `verifier` only to a card's verifier session.
+ * `board` is granted only to a session building a card, `lead` only to a channel lead's run,
+ * `verifier` only to a card's verifier session and `coordinator` only to a plan card's coordinator.
  */
-export type McpCapability = "preview" | "device" | "pull-requests" | "board" | "lead" | "verifier";
+export type McpCapability =
+  | "preview"
+  | "device"
+  | "pull-requests"
+  | "board"
+  | "lead"
+  | "verifier"
+  | "coordinator";
 
 export interface McpInvocationScope {
   readonly environmentId: EnvironmentId;

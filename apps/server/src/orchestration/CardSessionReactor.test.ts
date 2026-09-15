@@ -110,7 +110,9 @@ const makeWorld = Effect.fn("makeWorld")(function* (
     title: "Rate limiting",
     spec: "Limit each key to 100 requests a minute.",
     tags: [],
-    criteria: [{ id: "limit", text: "Each key gets 100 requests a minute.", verification: "automated" }],
+    criteria: [
+      { id: "limit", text: "Each key gets 100 requests a minute.", verification: "automated" },
+    ],
     createdAt: now,
   });
   yield* engine.dispatch({
@@ -140,18 +142,23 @@ const makeWorld = Effect.fn("makeWorld")(function* (
   /** A session is recorded before its thread exists; this waits for its first message. */
   const nextSession = Effect.fn("nextSession")(function* () {
     const started = yield* nextEvent("card.session-started");
-    yield* nextEvent("thread.message-sent", (event) => event.payload.threadId === started.payload.threadId);
+    yield* nextEvent(
+      "thread.message-sent",
+      (event) => event.payload.threadId === started.payload.threadId,
+    );
     return started;
   });
 
   const userMessages = (threadId: ThreadId) =>
-    snapshotQuery.getThreadDetailById(threadId, { activityKinds: [] }).pipe(
-      Effect.map((thread) =>
-        Option.isNone(thread)
-          ? []
-          : thread.value.messages.filter((message) => message.role === "user"),
-      ),
-    );
+    snapshotQuery
+      .getThreadDetailById(threadId, { activityKinds: [] })
+      .pipe(
+        Effect.map((thread) =>
+          Option.isNone(thread)
+            ? []
+            : thread.value.messages.filter((message) => message.role === "user"),
+        ),
+      );
 
   const card = snapshotQuery
     .getCommandReadModel()
@@ -182,57 +189,64 @@ const makeWorld = Effect.fn("makeWorld")(function* (
 });
 
 it.layer(layer)("CardSessionReactor", (it) => {
-  it.effect("starts the owner's session in the card worktree from the brief, and hands off on reassignment", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const world = yield* makeWorld("handoff");
-        yield* world.assign("backend");
+  it.effect(
+    "starts the owner's session in the card worktree from the brief, and hands off on reassignment",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const world = yield* makeWorld("handoff");
+          yield* world.assign("backend");
 
-        const first = yield* world.nextSession();
-        yield* world.nextEvent("card.status-changed", (event) => event.payload.to === "inProgress");
-        const card = yield* world.card;
-        expect(first.payload).toMatchObject({
-          agentId: world.agent("backend"),
-          role: "owner",
-          capabilities: ["read", "write"],
-        });
-        expect(card?.worktreePath).not.toBeNull();
-        expect(first.payload.rendered.firstMessage).toContain("Use a token bucket.");
-        // The skip is recorded with who skipped, and every later brief says so.
-        expect(first.payload.rendered.firstMessage).toContain("user: Skipped the plan gate.");
-        expect(first.payload.rendered.firstMessage).toContain("## Changes so far\n\nNo changes yet.");
-        // Exactly what the inspector shows is what the session was sent.
-        expect((yield* world.userMessages(first.payload.threadId)).map((message) => message.text)).toEqual([
-          first.payload.rendered.firstMessage,
-        ]);
-        const thread = yield* world.snapshotQuery.getThreadShellById(first.payload.threadId);
-        expect(Option.getOrThrow(thread).worktreePath).toBe(card?.worktreePath);
+          const first = yield* world.nextSession();
+          yield* world.nextEvent(
+            "card.status-changed",
+            (event) => event.payload.to === "inProgress",
+          );
+          const card = yield* world.card;
+          expect(first.payload).toMatchObject({
+            agentId: world.agent("backend"),
+            role: "owner",
+            capabilities: ["read", "write"],
+          });
+          expect(card?.worktreePath).not.toBeNull();
+          expect(first.payload.rendered.firstMessage).toContain("Use a token bucket.");
+          // The skip is recorded with who skipped, and every later brief says so.
+          expect(first.payload.rendered.firstMessage).toContain("user: Skipped the plan gate.");
+          expect(first.payload.rendered.firstMessage).toContain(
+            "## Changes so far\n\nNo changes yet.",
+          );
+          // Exactly what the inspector shows is what the session was sent.
+          expect(
+            (yield* world.userMessages(first.payload.threadId)).map((message) => message.text),
+          ).toEqual([first.payload.rendered.firstMessage]);
+          const thread = yield* world.snapshotQuery.getThreadShellById(first.payload.threadId);
+          expect(Option.getOrThrow(thread).worktreePath).toBe(card?.worktreePath);
 
-        // The agent edits the card's worktree, then finishes its turn.
-        yield* world.fileSystem.writeFileString(
-          world.path.join(card?.worktreePath ?? "", "README.md"),
-          "hello\nrate limits\n",
-        );
-        yield* world.setSession(first.payload.threadId, "ready", null);
-        // The settled turn measures the card's diff for its face on the board.
-        const measured = yield* world.nextEvent("card.diff-measured");
-        expect(measured.payload.diffStat).toEqual({ files: 1, additions: 1, deletions: 0 });
+          // The agent edits the card's worktree, then finishes its turn.
+          yield* world.fileSystem.writeFileString(
+            world.path.join(card?.worktreePath ?? "", "README.md"),
+            "hello\nrate limits\n",
+          );
+          yield* world.setSession(first.payload.threadId, "ready", null);
+          // The settled turn measures the card's diff for its face on the board.
+          const measured = yield* world.nextEvent("card.diff-measured");
+          expect(measured.payload.diffStat).toEqual({ files: 1, additions: 1, deletions: 0 });
 
-        yield* world.assign("frontend");
-        yield* world.nextEvent(
-          "thread.session-stop-requested",
-          (event) => event.payload.threadId === first.payload.threadId,
-        );
-        yield* world.setSession(first.payload.threadId, "stopped", null);
+          yield* world.assign("frontend");
+          yield* world.nextEvent(
+            "thread.session-stop-requested",
+            (event) => event.payload.threadId === first.payload.threadId,
+          );
+          yield* world.setSession(first.payload.threadId, "stopped", null);
 
-        const second = yield* world.nextSession();
-        expect(second.payload.agentId).toBe(world.agent("frontend"));
-        expect(second.payload.rendered.firstMessage).toContain("+rate limits");
-        expect((yield* world.userMessages(second.payload.threadId)).map((message) => message.text)).toEqual([
-          second.payload.rendered.firstMessage,
-        ]);
-      }),
-    ),
+          const second = yield* world.nextSession();
+          expect(second.payload.agentId).toBe(world.agent("frontend"));
+          expect(second.payload.rendered.firstMessage).toContain("+rate limits");
+          expect(
+            (yield* world.userMessages(second.payload.threadId)).map((message) => message.text),
+          ).toEqual([second.payload.rendered.firstMessage]);
+        }),
+      ),
   );
 
   it.effect("runs a helper read-only and delivers its answer as the owner's next turn", () =>
@@ -311,7 +325,10 @@ it.layer(layer)("CardSessionReactor", (it) => {
           "card.activity-recorded",
           (event) => event.payload.kind === "critique",
         );
-        expect(critique.payload).toMatchObject({ deliverTo: "builder", body: "Test the 101st request." });
+        expect(critique.payload).toMatchObject({
+          deliverTo: "builder",
+          body: "Test the 101st request.",
+        });
         yield* world.nextEvent("card.delivery-updated", (event) => event.payload.status === "sent");
         const ownerMessages = yield* world.userMessages(owner.payload.threadId);
         expect(ownerMessages.map((message) => message.text)).toContainEqual(
@@ -341,7 +358,11 @@ it.layer(layer)("CardSessionReactor", (it) => {
           capabilities: ["read"],
         });
         yield* world.setSession(critic.payload.threadId, "running", "turn-critic");
-        yield* world.answer(critic.payload.threadId, "turn-critic", "Say what happens past the limit.");
+        yield* world.answer(
+          critic.payload.threadId,
+          "turn-critic",
+          "Say what happens past the limit.",
+        );
         yield* world.setSession(critic.payload.threadId, "ready", null);
         const findings = yield* world.nextEvent(
           "card.activity-recorded",
@@ -366,215 +387,227 @@ it.layer(layer)("CardSessionReactor", (it) => {
     ),
   );
 
-  it.effect("starts the owner as soon as a person approves and starts a proposal with a draft spec", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const world = yield* makeWorld("go", "draft");
-        const proposalId = CardId.make("card-go-proposal");
-        yield* world.engine.dispatch({
-          type: "card.create",
-          commandId: CommandId.make("cmd-go-proposal"),
-          cardId: proposalId,
-          projectId: ProjectId.make("project-go"),
-          title: "Landing page",
-          spec: "A landing page for Iskra in apps/web.",
-          tags: [],
-          criteria: [{ id: "page", text: "The page renders.", verification: "automated" }],
-          createdAt: now,
-        });
-        yield* world.engine.dispatch({
-          type: "card.approve",
-          commandId: CommandId.make("cmd-go-start"),
-          cardId: proposalId,
-          delegateAgentId: world.agent("frontend"),
-        });
+  it.effect(
+    "starts the owner as soon as a person approves and starts a proposal with a draft spec",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const world = yield* makeWorld("go", "draft");
+          const proposalId = CardId.make("card-go-proposal");
+          yield* world.engine.dispatch({
+            type: "card.create",
+            commandId: CommandId.make("cmd-go-proposal"),
+            cardId: proposalId,
+            projectId: ProjectId.make("project-go"),
+            title: "Landing page",
+            spec: "A landing page for Iskra in apps/web.",
+            tags: [],
+            criteria: [{ id: "page", text: "The page renders.", verification: "automated" }],
+            createdAt: now,
+          });
+          yield* world.engine.dispatch({
+            type: "card.approve",
+            commandId: CommandId.make("cmd-go-start"),
+            cardId: proposalId,
+            delegateAgentId: world.agent("frontend"),
+          });
 
-        const owner = yield* world.nextSession();
-        expect(owner.payload).toMatchObject({
-          cardId: proposalId,
-          role: "owner",
-          agentId: world.agent("frontend"),
-        });
-        expect(owner.payload.rendered.firstMessage).toContain("user: Approved the spec.");
-        yield* world.nextEvent(
-          "card.status-changed",
-          (event) => event.payload.cardId === proposalId && event.payload.to === "inProgress",
-        );
-      }),
-    ),
+          const owner = yield* world.nextSession();
+          expect(owner.payload).toMatchObject({
+            cardId: proposalId,
+            role: "owner",
+            agentId: world.agent("frontend"),
+          });
+          expect(owner.payload.rendered.firstMessage).toContain("user: Approved the spec.");
+          yield* world.nextEvent(
+            "card.status-changed",
+            (event) => event.payload.cardId === proposalId && event.payload.to === "inProgress",
+          );
+        }),
+      ),
   );
 
-  it.effect("reports a channel's card back to it as it starts, asks, goes to review and is dropped, waking no one", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const world = yield* makeWorld("progress");
-        const channelId = ChannelId.make("channel-progress");
-        const cardId = CardId.make("card-progress-page");
-        yield* world.engine.dispatch({
-          type: "channel.create",
-          commandId: CommandId.make("cmd-progress-channel"),
-          channelId,
-          projectId: ProjectId.make("project-progress"),
-          kind: "channel",
-          name: "api-design",
-          memberAgentIds: [world.agent("frontend"), world.agent("reviewer")],
-          leadAgentId: world.agent("reviewer"),
-          createdAt: now,
-        });
-        yield* world.engine.dispatch({
-          type: "card.create",
-          commandId: CommandId.make("cmd-progress-card"),
-          cardId,
-          projectId: ProjectId.make("project-progress"),
-          channelId,
-          title: "Landing page",
-          spec: "A landing page.",
-          tags: [],
-          criteria: [{ id: "page", text: "The page renders.", verification: "automated" }],
-          createdAt: now,
-        });
-        yield* world.engine.dispatch({
-          type: "card.approve",
-          commandId: CommandId.make("cmd-progress-start"),
-          cardId,
-          delegateAgentId: world.agent("frontend"),
-        });
-        const owner = yield* world.nextSession();
-        yield* world.nextEvent(
-          "channel.message-posted",
-          (event) => event.payload.body === "@frontend started work on Landing page",
-        );
+  it.effect(
+    "reports a channel's card back to it as it starts, asks, goes to review and is dropped, waking no one",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const world = yield* makeWorld("progress");
+          const channelId = ChannelId.make("channel-progress");
+          const cardId = CardId.make("card-progress-page");
+          yield* world.engine.dispatch({
+            type: "channel.create",
+            commandId: CommandId.make("cmd-progress-channel"),
+            channelId,
+            projectId: ProjectId.make("project-progress"),
+            kind: "channel",
+            name: "api-design",
+            memberAgentIds: [world.agent("frontend"), world.agent("reviewer")],
+            leadAgentId: world.agent("reviewer"),
+            createdAt: now,
+          });
+          yield* world.engine.dispatch({
+            type: "card.create",
+            commandId: CommandId.make("cmd-progress-card"),
+            cardId,
+            projectId: ProjectId.make("project-progress"),
+            channelId,
+            title: "Landing page",
+            spec: "A landing page.",
+            tags: [],
+            criteria: [{ id: "page", text: "The page renders.", verification: "automated" }],
+            createdAt: now,
+          });
+          yield* world.engine.dispatch({
+            type: "card.approve",
+            commandId: CommandId.make("cmd-progress-start"),
+            cardId,
+            delegateAgentId: world.agent("frontend"),
+          });
+          const owner = yield* world.nextSession();
+          yield* world.nextEvent(
+            "channel.message-posted",
+            (event) => event.payload.body === "@frontend started work on Landing page",
+          );
 
-        yield* world.engine.dispatch({
-          type: "card.activity.record",
-          commandId: CommandId.make("cmd-progress-ask"),
-          activityId: "ask-owner:progress",
-          cardId,
-          kind: "elicitation",
-          author: { kind: "agent", id: world.agent("frontend") },
-          body: "Which color scheme?",
-          runThreadId: owner.payload.threadId,
-          deliverTo: null,
-          elicitation: null,
-          answers: null,
-          status: null,
-          evidenceId: null,
-          reason: null,
-          createdAt: now,
-        });
-        yield* world.nextEvent(
-          "channel.message-posted",
-          (event) => event.payload.body === "@frontend asks: Which color scheme?",
-        );
+          yield* world.engine.dispatch({
+            type: "card.activity.record",
+            commandId: CommandId.make("cmd-progress-ask"),
+            activityId: "ask-owner:progress",
+            cardId,
+            kind: "elicitation",
+            author: { kind: "agent", id: world.agent("frontend") },
+            body: "Which color scheme?",
+            runThreadId: owner.payload.threadId,
+            deliverTo: null,
+            elicitation: null,
+            answers: null,
+            status: null,
+            evidenceId: null,
+            reason: null,
+            createdAt: now,
+          });
+          yield* world.nextEvent(
+            "channel.message-posted",
+            (event) => event.payload.body === "@frontend asks: Which color scheme?",
+          );
 
-        yield* world.engine.dispatch({
-          type: "card.evidence.record",
-          commandId: CommandId.make("cmd-progress-evidence"),
-          cardId,
-          evidenceId: "evidence-progress",
-          headSha: "abc1234",
-          purpose: "review",
-          items: [
-            {
-              itemId: "check:test",
-              kind: "check",
-              source: "local",
-              name: "test",
-              criterionId: null,
-              exitCode: 0,
-              timedOut: false,
-              durationMs: 1,
-              logTail: "ok",
-              artifactPath: null,
-              unavailable: null,
-            },
-          ],
-          flags: [],
-          risks: null,
-          recordedAt: now,
-        });
-        yield* world.engine.dispatch({
-          type: "card.review.enter",
-          commandId: CommandId.make("cmd-progress-review"),
-          cardId,
-          headSha: "abc1234",
-        });
-        yield* world.engine.dispatch({
-          type: "card.abandon",
-          commandId: CommandId.make("cmd-progress-drop"),
-          cardId,
-        });
-        yield* world.nextEvent(
-          "channel.message-posted",
-          (event) => event.payload.body === "Landing page was dropped",
-        );
-        yield* world.reactor.drain;
+          yield* world.engine.dispatch({
+            type: "card.evidence.record",
+            commandId: CommandId.make("cmd-progress-evidence"),
+            cardId,
+            evidenceId: "evidence-progress",
+            headSha: "abc1234",
+            purpose: "review",
+            items: [
+              {
+                itemId: "check:test",
+                kind: "check",
+                source: "local",
+                name: "test",
+                criterionId: null,
+                exitCode: 0,
+                timedOut: false,
+                durationMs: 1,
+                logTail: "ok",
+                artifactPath: null,
+                unavailable: null,
+              },
+            ],
+            flags: [],
+            risks: null,
+            recordedAt: now,
+          });
+          yield* world.engine.dispatch({
+            type: "card.review.enter",
+            commandId: CommandId.make("cmd-progress-review"),
+            cardId,
+            headSha: "abc1234",
+          });
+          yield* world.engine.dispatch({
+            type: "card.abandon",
+            commandId: CommandId.make("cmd-progress-drop"),
+            cardId,
+          });
+          yield* world.nextEvent(
+            "channel.message-posted",
+            (event) => event.payload.body === "Landing page was dropped",
+          );
+          yield* world.reactor.drain;
 
-        const events = yield* Stream.runCollect(world.engine.readEvents(0));
-        const notes = events.filter((event) => event.type === "channel.message-posted");
-        expect(notes.map((event) => [event.payload.authorKind, event.payload.body])).toEqual([
-          ["system", "@frontend started work on Landing page"],
-          ["system", "@frontend asks: Which color scheme?"],
-          ["system", "Landing page is ready for review"],
-          ["system", "Landing page was dropped"],
-        ]);
-        expect(notes.map((event) => event.payload.messageId)).toEqual([
-          expect.stringMatching(/:card-progress:card-progress-page$/),
-          expect.stringMatching(/:card-question:card-progress-page$/),
-          expect.stringMatching(/:card-progress:card-progress-page$/),
-          expect.stringMatching(/:card-progress:card-progress-page$/),
-        ]);
-        // The notes wake no one, not even the channel's lead.
-        expect(events.some((event) => event.type === "channel.agent-wake-requested")).toBe(false);
-      }),
-    ),
+          const events = yield* Stream.runCollect(world.engine.readEvents(0));
+          const notes = events.filter((event) => event.type === "channel.message-posted");
+          expect(notes.map((event) => [event.payload.authorKind, event.payload.body])).toEqual([
+            ["system", "@frontend started work on Landing page"],
+            ["system", "@frontend asks: Which color scheme?"],
+            ["system", "Landing page is ready for review"],
+            ["system", "Landing page was dropped"],
+          ]);
+          expect(notes.map((event) => event.payload.messageId)).toEqual([
+            expect.stringMatching(/:card-progress:card-progress-page$/),
+            expect.stringMatching(/:card-question:card-progress-page$/),
+            expect.stringMatching(/:card-progress:card-progress-page$/),
+            expect.stringMatching(/:card-progress:card-progress-page$/),
+          ]);
+          // The notes wake no one, not even the channel's lead.
+          expect(events.some((event) => event.type === "channel.agent-wake-requested")).toBe(false);
+        }),
+      ),
   );
 
-  it.effect("holds a card's messages at its budget cap and delivers them once a person raises it", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const world = yield* makeWorld("budget");
-        yield* world.assign("backend");
-        const owner = yield* world.nextSession();
-        yield* world.setSession(owner.payload.threadId, "ready", null);
-        yield* world.engine.dispatch({
-          type: "card.spend.record",
-          commandId: CommandId.make("cmd-budget-spend"),
-          cardId: world.cardId,
-          threadId: owner.payload.threadId,
-          agentId: world.agent("backend"),
-          turnId: TurnId.make("turn-expensive"),
-          costUsd: 10,
-          costSource: "providerReported",
-          recordedAt: now,
-        });
-        yield* world.engine.dispatch({
-          type: "card.message.post",
-          commandId: CommandId.make("cmd-budget-message"),
-          cardId: world.cardId,
-          messageId: MessageId.make("message-budget"),
-          body: "Also handle bursts.",
-          createdAt: now,
-        });
-        yield* world.nextEvent("card.activity-recorded", (event) => event.payload.deliverTo === "builder");
-        yield* world.reactor.drain;
-        // At the cap the owner's next turn is refused, so the message waits.
-        expect(
-          (yield* world.userMessages(owner.payload.threadId)).map((message) => message.text),
-        ).toEqual([owner.payload.rendered.firstMessage]);
+  it.effect(
+    "holds a card's messages at its budget cap and delivers them once a person raises it",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const world = yield* makeWorld("budget");
+          yield* world.assign("backend");
+          const owner = yield* world.nextSession();
+          yield* world.setSession(owner.payload.threadId, "ready", null);
+          yield* world.engine.dispatch({
+            type: "card.spend.record",
+            commandId: CommandId.make("cmd-budget-spend"),
+            cardId: world.cardId,
+            threadId: owner.payload.threadId,
+            agentId: world.agent("backend"),
+            turnId: TurnId.make("turn-expensive"),
+            costUsd: 10,
+            costSource: "providerReported",
+            recordedAt: now,
+          });
+          yield* world.engine.dispatch({
+            type: "card.message.post",
+            commandId: CommandId.make("cmd-budget-message"),
+            cardId: world.cardId,
+            messageId: MessageId.make("message-budget"),
+            body: "Also handle bursts.",
+            createdAt: now,
+          });
+          yield* world.nextEvent(
+            "card.activity-recorded",
+            (event) => event.payload.deliverTo === "builder",
+          );
+          yield* world.reactor.drain;
+          // At the cap the owner's next turn is refused, so the message waits.
+          expect(
+            (yield* world.userMessages(owner.payload.threadId)).map((message) => message.text),
+          ).toEqual([owner.payload.rendered.firstMessage]);
 
-        yield* world.engine.dispatch({
-          type: "card.budget.set",
-          commandId: CommandId.make("cmd-budget-raise"),
-          cardId: world.cardId,
-          capUsd: 20,
-        });
-        yield* world.nextEvent("card.delivery-updated", (event) => event.payload.status === "sent");
-        expect(
-          (yield* world.userMessages(owner.payload.threadId)).map((message) => message.text),
-        ).toContainEqual(expect.stringContaining("Also handle bursts."));
-      }),
-    ),
+          yield* world.engine.dispatch({
+            type: "card.budget.set",
+            commandId: CommandId.make("cmd-budget-raise"),
+            cardId: world.cardId,
+            capUsd: 20,
+          });
+          yield* world.nextEvent(
+            "card.delivery-updated",
+            (event) => event.payload.status === "sent",
+          );
+          expect(
+            (yield* world.userMessages(owner.payload.threadId)).map((message) => message.text),
+          ).toContainEqual(expect.stringContaining("Also handle bursts."));
+        }),
+      ),
   );
 
   it.effect("shows a session lost across a restart as stale", () =>
@@ -584,7 +617,12 @@ it.layer(layer)("CardSessionReactor", (it) => {
         yield* world.assign("backend");
         const owner = yield* world.nextSession();
         yield* world.setSession(owner.payload.threadId, "running", "turn-1");
-        yield* world.setSession(owner.payload.threadId, "error", null, ORPHANED_PROVIDER_SESSION_ERROR);
+        yield* world.setSession(
+          owner.payload.threadId,
+          "error",
+          null,
+          ORPHANED_PROVIDER_SESSION_ERROR,
+        );
 
         const [run] = yield* world.snapshotQuery.listRunsByAgent(world.agent("backend"), 5);
         const thread = Option.getOrThrow(
@@ -599,7 +637,9 @@ it.layer(layer)("CardSessionReactor", (it) => {
           }),
         ).toBe("stale");
         // The board reads the same state from the card's shell.
-        const cardShell = Option.getOrThrow(yield* world.snapshotQuery.getCardShellById(world.cardId));
+        const cardShell = Option.getOrThrow(
+          yield* world.snapshotQuery.getCardShellById(world.cardId),
+        );
         expect(cardShell.ownerSession).toMatchObject({
           threadId: owner.payload.threadId,
           state: "stale",
@@ -612,52 +652,60 @@ it.layer(layer)("CardSessionReactor", (it) => {
     ),
   );
 
-  it.effect("restarts a lost owner from its brief with its unread messages, and pauses the card after four losses in an hour", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const world = yield* makeWorld("restart");
-        yield* world.assign("backend");
-        const first = yield* world.nextSession();
-        yield* world.setSession(first.payload.threadId, "ready", null);
+  it.effect(
+    "restarts a lost owner from its brief with its unread messages, and pauses the card after four losses in an hour",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const world = yield* makeWorld("restart");
+          yield* world.assign("backend");
+          const first = yield* world.nextSession();
+          yield* world.setSession(first.payload.threadId, "ready", null);
 
-        // A message goes in as the idle owner's next turn, which is lost before it runs.
-        yield* world.engine.dispatch({
-          type: "card.message.post",
-          commandId: CommandId.make("cmd-restart-message"),
-          cardId: world.cardId,
-          messageId: MessageId.make("message-restart"),
-          body: "Also handle bursts.",
-          createdAt: now,
-        });
-        yield* world.nextEvent("card.delivery-updated", (event) => event.payload.status === "sent");
-        yield* world.setSession(first.payload.threadId, "error", null, "The provider crashed.");
-        const returned = yield* world.nextEvent("card.delivery-updated");
-        expect(returned.payload).toMatchObject({ status: "pending", messageIds: ["message-restart"] });
+          // A message goes in as the idle owner's next turn, which is lost before it runs.
+          yield* world.engine.dispatch({
+            type: "card.message.post",
+            commandId: CommandId.make("cmd-restart-message"),
+            cardId: world.cardId,
+            messageId: MessageId.make("message-restart"),
+            body: "Also handle bursts.",
+            createdAt: now,
+          });
+          yield* world.nextEvent(
+            "card.delivery-updated",
+            (event) => event.payload.status === "sent",
+          );
+          yield* world.setSession(first.payload.threadId, "error", null, "The provider crashed.");
+          const returned = yield* world.nextEvent("card.delivery-updated");
+          expect(returned.payload).toMatchObject({
+            status: "pending",
+            messageIds: ["message-restart"],
+          });
 
-        // The scheduler restarts the owner, counting the restart, and the message goes in once it settles.
-        const second = yield* world.nextSession();
-        expect(second.payload).toMatchObject({ role: "owner", restarts: 1 });
-        yield* world.setSession(second.payload.threadId, "ready", null);
-        const redelivered = yield* world.nextEvent(
-          "card.delivery-updated",
-          (event) => event.payload.status === "sent",
-        );
-        expect(redelivered.payload.threadId).toBe(second.payload.threadId);
+          // The scheduler restarts the owner, counting the restart, and the message goes in once it settles.
+          const second = yield* world.nextSession();
+          expect(second.payload).toMatchObject({ role: "owner", restarts: 1 });
+          yield* world.setSession(second.payload.threadId, "ready", null);
+          const redelivered = yield* world.nextEvent(
+            "card.delivery-updated",
+            (event) => event.payload.status === "sent",
+          );
+          expect(redelivered.payload.threadId).toBe(second.payload.threadId);
 
-        // Three more losses within the hour: the fourth pauses the card instead of restarting it.
-        yield* world.setSession(second.payload.threadId, "error", null, "The provider crashed.");
-        const third = yield* world.nextSession();
-        expect(third.payload.restarts).toBe(2);
-        yield* world.setSession(third.payload.threadId, "error", null, "The provider crashed.");
-        const fourth = yield* world.nextSession();
-        expect(fourth.payload.restarts).toBe(3);
-        yield* world.setSession(fourth.payload.threadId, "error", null, "The provider crashed.");
-        const paused = yield* world.nextEvent("card.paused");
-        expect(paused.payload).toMatchObject({ by: "system", reason: { code: "sessionFailed" } });
-        yield* world.reactor.drain;
-        expect((yield* world.card)?.paused?.reason.code).toBe("sessionFailed");
-      }),
-    ),
+          // Three more losses within the hour: the fourth pauses the card instead of restarting it.
+          yield* world.setSession(second.payload.threadId, "error", null, "The provider crashed.");
+          const third = yield* world.nextSession();
+          expect(third.payload.restarts).toBe(2);
+          yield* world.setSession(third.payload.threadId, "error", null, "The provider crashed.");
+          const fourth = yield* world.nextSession();
+          expect(fourth.payload.restarts).toBe(3);
+          yield* world.setSession(fourth.payload.threadId, "error", null, "The provider crashed.");
+          const paused = yield* world.nextEvent("card.paused");
+          expect(paused.payload).toMatchObject({ by: "system", reason: { code: "sessionFailed" } });
+          yield* world.reactor.drain;
+          expect((yield* world.card)?.paused?.reason.code).toBe("sessionFailed");
+        }),
+      ),
   );
 
   it.effect("nudges an owner idle on a card in progress with a message for its next turn", () =>
@@ -670,7 +718,9 @@ it.layer(layer)("CardSessionReactor", (it) => {
         yield* world.nextEvent("card.status-changed", (event) => event.payload.to === "inProgress");
         // The owner settled six minutes ago by the test clock, idle on a card in progress. Moving the
         // clock instead would stall the engine's clock-driven work under the frozen test clock.
-        const settledAt = DateTime.formatIso(DateTime.subtract(yield* DateTime.now, { minutes: 6 }));
+        const settledAt = DateTime.formatIso(
+          DateTime.subtract(yield* DateTime.now, { minutes: 6 }),
+        );
         yield* world.engine.dispatch({
           type: "thread.session.set",
           commandId: CommandId.make("cmd-idle-settled"),
@@ -713,5 +763,86 @@ it.layer(layer)("CardSessionReactor", (it) => {
         expect((yield* world.card)?.paused).toBeNull();
       }).pipe(Effect.provide(CardWatchdog.layer)),
     ),
+  );
+  it.effect(
+    "starts a plan card's coordinator read-only outside any worktree, and hands it what is meant for it",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const world = yield* makeWorld("coordinator");
+          const projectId = (yield* world.card)!.projectId;
+          const planId = CardId.make("card-coordinator-plan");
+          yield* world.engine.dispatch({
+            type: "card.create",
+            commandId: CommandId.make("cmd-coordinator-plan"),
+            cardId: planId,
+            projectId,
+            title: "Health and version",
+            spec: "Add /health, then /version.",
+            tags: [],
+            kind: "plan",
+            criteria: [{ id: "c1", text: "Both endpoints answer.", verification: "automated" }],
+            createdAt: now,
+          });
+          // The reviewer can only read, which is all a coordinator does.
+          yield* world.engine.dispatch({
+            type: "card.approve",
+            commandId: CommandId.make("cmd-coordinator-approve"),
+            cardId: planId,
+            delegateAgentId: world.agent("reviewer"),
+          });
+          const started = yield* world.nextSession();
+          expect(started.payload).toMatchObject({
+            cardId: planId,
+            agentId: world.agent("reviewer"),
+            role: "coordinator",
+            capabilities: ["read"],
+          });
+          expect(started.payload.rendered.systemPrompt).toContain("propose_plan");
+          expect(started.payload.rendered.firstMessage).toContain(
+            "## Plan\n\nNo plan proposed yet.",
+          );
+          yield* world.nextEvent(
+            "card.status-changed",
+            (event) => event.payload.cardId === planId && event.payload.to === "inProgress",
+          );
+          const thread = yield* world.snapshotQuery.getThreadShellById(started.payload.threadId);
+          expect(Option.getOrThrow(thread).worktreePath).toBeNull();
+
+          // A digest for the coordinator is its next turn once it is idle.
+          yield* world.setSession(started.payload.threadId, "ready", null);
+          yield* world.engine.dispatch({
+            type: "card.activity.record",
+            commandId: CommandId.make("cmd-coordinator-digest"),
+            activityId: "coordinator-digest",
+            cardId: planId,
+            kind: "message",
+            author: { kind: "system", id: "system" },
+            body: '- health "Health": landed',
+            runThreadId: null,
+            deliverTo: "coordinator",
+            elicitation: null,
+            answers: null,
+            status: null,
+            evidenceId: null,
+            reason: null,
+            createdAt: now,
+          });
+          yield* world.nextEvent(
+            "card.delivery-updated",
+            (event) => event.payload.cardId === planId && event.payload.status === "sent",
+          );
+          expect(
+            (yield* world.userMessages(started.payload.threadId)).map((message) => message.text),
+          ).toContainEqual(
+            expect.stringMatching(/^New message for you:\n.*- health "Health": landed$/s),
+          );
+          yield* world.setSession(started.payload.threadId, "running", "turn-coordinator-2");
+          yield* world.nextEvent(
+            "card.delivery-updated",
+            (event) => event.payload.cardId === planId && event.payload.status === "delivered",
+          );
+        }),
+      ),
   );
 });

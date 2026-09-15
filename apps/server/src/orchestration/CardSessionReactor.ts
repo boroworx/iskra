@@ -4,11 +4,15 @@ import {
   MessageId,
   ThreadId,
   type AgentId,
+  type CardActivity,
   type CardCritiqueFocus,
   type CardId,
   type CardMove,
   type CardSessionRole,
+  type OrchestrationAgent,
+  type OrchestrationCard,
   type OrchestrationEvent,
+  type OrchestrationReadModel,
 } from "@iskra/contracts";
 import { makeDrainableWorker } from "@iskra/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
@@ -31,6 +35,7 @@ import {
   type ProjectionOwnerRun,
 } from "../persistence/Services/ProjectionRunLiveness.ts";
 import { forkParked } from "../serverActivation.ts";
+import { ServerSettingsService } from "../serverSettings.ts";
 import {
   buildCardBrief,
   diffStatOf,
@@ -41,8 +46,10 @@ import {
 import { isFinishedCardStatus } from "./cardRules.ts";
 import { cardRunStartCommands } from "./cardRunStart.ts";
 import * as CardWorkspace from "./CardWorkspace.ts";
+import { buildCoordinatorBrief } from "./coordinatorBrief.ts";
 import { liveOwnerRun } from "./decider.ts";
 import { runSessionChange } from "./RunReactor.ts";
+import { budgetHold, environmentSpendUsd } from "./watchdogRules.ts";
 import * as OrchestrationEngine from "./Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts";
 
@@ -58,6 +65,9 @@ import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts"
  * running turn, and are `delivered` only once that turn runs. A message whose
  * turn never ran is `undelivered`; one still pending when the session ends
  * waits for the card's next owner session (invariant 10).
+ *
+ * A plan card's session is its coordinator: read-only, outside any worktree, briefed on its plan,
+ * and handed what is meant for it (`deliverTo: coordinator`) as its next turn once idle.
  *
  * A card from a channel reports back there: its owner starting, asking something, sending it to
  * review, and its landing or being dropped. The notes wake no one.
@@ -99,6 +109,8 @@ type CardSessionRequest =
   | { readonly kind: "assigned"; readonly cardId: CardId; readonly key: string }
   | { readonly kind: "session"; readonly role: CardSessionRole; readonly event: SessionStartEvent }
   | { readonly kind: "deliver"; readonly cardId: CardId }
+  | { readonly kind: "deliverCoordinator"; readonly cardId: CardId }
+  | { readonly kind: "deliverProject"; readonly projectId: OrchestrationCard["projectId"] }
   | { readonly kind: "finished"; readonly cardId: CardId; readonly key: string }
   | { readonly kind: "settled"; readonly threadId: ThreadId }
   | { readonly kind: "running"; readonly threadId: ThreadId }
@@ -137,6 +149,8 @@ const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  // Optional so the reactor builds without settings; the machine's budget then holds nothing.
+  const settings = yield* Effect.serviceOption(ServerSettingsService);
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
   // ponytail: reads the whole command read model per request, like RunReactor; add
@@ -180,6 +194,39 @@ const make = Effect.gen(function* () {
       });
     });
 
+  const startCoordinator = Effect.fn("CardSessionReactor.startCoordinator")(function* (
+    card: OrchestrationCard,
+    agent: OrchestrationAgent,
+    model: OrchestrationReadModel,
+    key: string,
+  ) {
+    const { baseBranch } = yield* workspace.diff(card.id);
+    const { context, rendered } = buildCoordinatorBrief({
+      agent,
+      card,
+      agents: (model.agents ?? []).filter((candidate) => candidate.projectId === card.projectId),
+      children: (model.cards ?? []).filter(
+        (child) => child.parentCardId === card.id && child.planKey !== null,
+      ),
+      activities: yield* cards.listActivities({ cardId: card.id, limit: 200 }),
+      baseBranch,
+    });
+    for (const command of cardRunStartCommands({
+      key,
+      card,
+      agent,
+      role: "coordinator",
+      modelSelection: agent.modelSelection,
+      capabilities: ["read"],
+      context,
+      rendered,
+      restarts: 0,
+      startedAt: yield* nowIso,
+    })) {
+      yield* engine.dispatch(command);
+    }
+  });
+
   const startSessionUnsafe = Effect.fn("CardSessionReactor.startSession")(function* (input: {
     readonly cardId: CardId;
     readonly agentId: AgentId;
@@ -194,21 +241,32 @@ const make = Effect.gen(function* () {
     if (card === undefined || agent === undefined || project === undefined) {
       return yield* Effect.logWarning("card session reactor could not resolve a session", input);
     }
+    if (input.role === "owner" && card.kind === "plan") {
+      yield* startCoordinator(card, agent, model, input.key);
+      if (card.status === "ready") {
+        yield* engine.dispatch({
+          type: "card.work.start",
+          commandId: CommandId.make(`card-work-start:${input.key}`),
+          cardId: card.id,
+        });
+      }
+      return;
+    }
     // The owner writes in the card's worktree, created now if this is the first session.
     const current =
       input.role === "owner" ? { ...card, ...(yield* workspace.ensure(card.id)) } : card;
     const { baseBranch, diff } = yield* workspace.diff(card.id);
     const restarts =
       input.role === "owner"
-        ? restartsAfter(
-            (yield* liveness.listCardOwnerRuns({ cardId: card.id, since: EPOCH }))[0],
-          )
+        ? restartsAfter((yield* liveness.listCardOwnerRuns({ cardId: card.id, since: EPOCH }))[0])
         : 0;
     // The brief is the card's worklog: its activity, latest evidence and the repository's rules.
     const worklog = yield* loadCardWorklog({
       card: current,
       root: current.worktreePath ?? project.workspaceRoot,
       restarts,
+      project,
+      diff,
     }).pipe(
       Effect.provideService(ProjectionCardRepository, cards),
       Effect.provideService(FileSystem.FileSystem, fileSystem),
@@ -291,9 +349,7 @@ const make = Effect.gen(function* () {
     }
   });
 
-  const deliverToOwner = Effect.fn("CardSessionReactor.deliverToOwner")(function* (
-    cardId: CardId,
-  ) {
+  const deliverToOwner = Effect.fn("CardSessionReactor.deliverToOwner")(function* (cardId: CardId) {
     const owner = liveOwnerRun(yield* readModel(), cardId);
     if (owner === undefined) {
       return;
@@ -308,22 +364,97 @@ const make = Effect.gen(function* () {
     if (open.some((activity) => activity.deliveryThreadId === owner.threadId)) {
       return; // A turn carrying earlier messages is already on its way.
     }
-    const waiting = open.filter((activity) => activity.delivery === "pending");
+    yield* sendTurn(
+      cardId,
+      owner.threadId,
+      open.filter((activity) => activity.delivery === "pending"),
+    );
+  });
+
+  /** A live coordinator run on the card, if it has one. */
+  const liveCoordinatorRun = (model: OrchestrationReadModel, cardId: CardId) =>
+    (model.liveRuns ?? []).find((run) => run.cardId === cardId && run.role === "coordinator");
+
+  const openCoordinatorActivities = (cardId: CardId) =>
+    cards
+      .listActivities({ cardId, limit: 200 })
+      .pipe(
+        Effect.map((activities) =>
+          activities.filter(
+            (activity) =>
+              activity.deliverTo === "coordinator" &&
+              (activity.delivery === "pending" || activity.delivery === "sent"),
+          ),
+        ),
+      );
+
+  const deliverToCoordinator = Effect.fn("CardSessionReactor.deliverToCoordinator")(function* (
+    cardId: CardId,
+  ) {
+    const coordinator = liveCoordinatorRun(yield* readModel(), cardId);
+    if (coordinator === undefined) {
+      return;
+    }
+    const thread = yield* snapshotQuery.getThreadShellById(coordinator.threadId);
+    const session = Option.isSome(thread) ? thread.value.session : null;
+    if (session === null || session.status !== "ready" || session.activeTurnId !== null) {
+      return;
+    }
+    const open = yield* openCoordinatorActivities(cardId);
+    // A card has one coordinator, so anything sent is on its way to this session.
+    if (open.some((activity) => activity.delivery === "sent")) {
+      return;
+    }
+    yield* sendTurn(cardId, coordinator.threadId, open);
+  });
+
+  /** Sends waiting messages as one turn of an idle session and marks them sent. */
+  const sendTurn = Effect.fn("CardSessionReactor.sendTurn")(function* (
+    cardId: CardId,
+    threadId: ThreadId,
+    waiting: ReadonlyArray<Pick<CardActivity, "activityId" | "author" | "body" | "createdAt">>,
+  ) {
     if (waiting.length === 0) {
       return;
     }
     const model = yield* readModel();
+    // Past a monthly budget the messages wait: raising the cap delivers them (see deliverProject).
+    const project = model.projects.find(
+      (candidate) => candidate.id === model.cards?.find((card) => card.id === cardId)?.projectId,
+    );
+    const run = model.liveRuns?.find((candidate) => candidate.threadId === threadId);
+    const now = yield* nowIso;
+    const environmentBudgetUsd = Option.isSome(settings)
+      ? ((yield* settings.value.getSettings.pipe(Effect.orElseSucceed(() => null)))?.cardRuntime
+          .monthlyBudgetUsd ?? null)
+      : null;
+    const held =
+      project === undefined
+        ? null
+        : budgetHold({
+            project,
+            agent: model.agents?.find((agent) => agent.id === run?.agentId) ?? null,
+            environmentBudgetUsd,
+            environmentSpentUsd: environmentSpendUsd(model.projects, now),
+            now,
+          });
+    if (held !== null) {
+      return yield* Effect.logInfo("card messages wait for the monthly budget", {
+        cardId,
+        reason: held.text,
+      });
+    }
     const messageIds = waiting.map((activity) => MessageId.make(activity.activityId));
     // Each attempt gets its own id: a turn refused at the budget cap is tried again after a
     // raise, and the engine never re-decides a rejected command id. Sent messages are skipped,
     // so a repeated attempt cannot deliver twice.
     const attempt = yield* crypto.randomUUIDv4.pipe(Effect.orDie);
-    const key = `${owner.threadId}:${messageIds.join(",")}:${attempt}`;
+    const key = `${threadId}:${messageIds.join(",")}:${attempt}`;
     const createdAt = yield* nowIso;
     yield* engine.dispatch({
       type: "thread.turn.start",
       commandId: CommandId.make(`card-owner-turn:${key}`),
-      threadId: owner.threadId,
+      threadId: threadId,
       message: {
         messageId: MessageId.make(`card-owner-turn:${key}`),
         role: "user",
@@ -340,7 +471,7 @@ const make = Effect.gen(function* () {
       cardId,
       messageIds,
       status: "sent",
-      threadId: owner.threadId,
+      threadId: threadId,
       updatedAt: createdAt,
     });
   });
@@ -349,11 +480,17 @@ const make = Effect.gen(function* () {
     cardId: CardId,
     threadId: ThreadId,
     status: "pending" | "delivered" | "undelivered",
+    to: "builder" | "coordinator" = "builder",
   ) =>
     Effect.gen(function* () {
-      const sent = (yield* cards.listOpenBuilderActivities({ cardId })).filter(
-        (activity) => activity.delivery === "sent" && activity.deliveryThreadId === threadId,
-      );
+      const sent =
+        to === "coordinator"
+          ? (yield* openCoordinatorActivities(cardId)).filter(
+              (activity) => activity.delivery === "sent",
+            )
+          : (yield* cards.listOpenBuilderActivities({ cardId })).filter(
+              (activity) => activity.delivery === "sent" && activity.deliveryThreadId === threadId,
+            );
       if (sent.length === 0) {
         return;
       }
@@ -401,6 +538,10 @@ const make = Effect.gen(function* () {
     if (role === "verifier") {
       return;
     }
+    // A coordinator answers through its tools and stays up for what its plan's children send it.
+    if (role === "coordinator") {
+      return yield* deliverToCoordinator(cardId);
+    }
     const thread = yield* snapshotQuery.getThreadDetailById(threadId, { activityKinds: [] });
     const turnId = Option.isSome(thread) ? thread.value.latestTurn?.turnId : undefined;
     if (Option.isNone(thread) || turnId === undefined) {
@@ -441,8 +582,17 @@ const make = Effect.gen(function* () {
     threadId: ThreadId,
   ) {
     const run = yield* snapshotQuery.getRunByThreadId(threadId);
-    if (Option.isSome(run) && run.value.cardId !== null && run.value.role === "owner") {
-      yield* updateThreadDeliveries(run.value.cardId, threadId, "delivered");
+    if (
+      Option.isSome(run) &&
+      run.value.cardId !== null &&
+      (run.value.role === "owner" || run.value.role === "coordinator")
+    ) {
+      yield* updateThreadDeliveries(
+        run.value.cardId,
+        threadId,
+        "delivered",
+        run.value.role === "owner" ? "builder" : "coordinator",
+      );
     }
   });
 
@@ -457,6 +607,17 @@ const make = Effect.gen(function* () {
     failed: boolean,
   ) {
     const run = yield* snapshotQuery.getRunByThreadId(threadId);
+    if (Option.isSome(run) && run.value.cardId !== null && run.value.role === "coordinator") {
+      // Unread messages wait for the coordinator the scheduler starts next.
+      const planCardId = run.value.cardId;
+      const plan = (yield* readModel()).cards?.find((candidate) => candidate.id === planCardId);
+      return yield* updateThreadDeliveries(
+        planCardId,
+        threadId,
+        plan === undefined || isFinishedCardStatus(plan.status) ? "undelivered" : "pending",
+        "coordinator",
+      );
+    }
     if (Option.isNone(run) || run.value.cardId === null || run.value.role !== "owner") {
       return;
     }
@@ -464,12 +625,7 @@ const make = Effect.gen(function* () {
     const card = (yield* readModel()).cards?.find((candidate) => candidate.id === cardId);
     const lost = failed && card !== undefined && !isFinishedCardStatus(card.status);
     yield* updateThreadDeliveries(cardId, threadId, lost ? "pending" : "undelivered");
-    if (
-      !lost ||
-      card.paused !== null ||
-      card.status === "inReview" ||
-      card.status === "landing"
-    ) {
+    if (!lost || card.paused !== null || card.status === "inReview" || card.status === "landing") {
       return;
     }
     const since = DateTime.formatIso(DateTime.subtract(yield* DateTime.now, { hours: 1 }));
@@ -559,12 +715,39 @@ const make = Effect.gen(function* () {
       }
       case "deliver":
         return deliverToOwner(request.cardId);
+      case "deliverCoordinator":
+        return deliverToCoordinator(request.cardId);
+      case "deliverProject":
+        return readModel().pipe(
+          Effect.flatMap((model) =>
+            Effect.forEach(
+              (model.liveRuns ?? []).flatMap((run) =>
+                run.cardId !== null &&
+                model.cards?.find((card) => card.id === run.cardId)?.projectId === request.projectId
+                  ? [
+                      run.role === "coordinator"
+                        ? deliverToCoordinator(run.cardId)
+                        : run.role === "owner"
+                          ? deliverToOwner(run.cardId)
+                          : Effect.void,
+                    ]
+                  : [],
+              ),
+              (deliver) => deliver,
+              { discard: true },
+            ),
+          ),
+        );
       case "finished":
         return liveCardRuns(request.cardId).pipe(
           Effect.flatMap((runs) =>
-            Effect.forEach(runs, (run) => stopSession(run.threadId, `${request.key}:${run.threadId}`), {
-              discard: true,
-            }),
+            Effect.forEach(
+              runs,
+              (run) => stopSession(run.threadId, `${request.key}:${run.threadId}`),
+              {
+                discard: true,
+              },
+            ),
           ),
         );
       case "settled":
@@ -594,7 +777,11 @@ const make = Effect.gen(function* () {
   const processEvent = (event: OrchestrationEvent) => {
     switch (event.type) {
       case "card.delegate-changed":
-        return worker.enqueue({ kind: "assigned", cardId: event.payload.cardId, key: event.eventId });
+        return worker.enqueue({
+          kind: "assigned",
+          cardId: event.payload.cardId,
+          key: event.eventId,
+        });
       case "card.session-requested":
         return worker.enqueue({ kind: "session", role: "owner", event });
       case "card.helper-requested":
@@ -606,7 +793,9 @@ const make = Effect.gen(function* () {
         const deliver =
           event.payload.deliverTo === "builder"
             ? worker.enqueue({ kind: "deliver", cardId: event.payload.cardId })
-            : Effect.void;
+            : event.payload.deliverTo === "coordinator"
+              ? worker.enqueue({ kind: "deliverCoordinator", cardId: event.payload.cardId })
+              : Effect.void;
         // An agent's question is worth a note in the card's channel.
         return event.payload.kind === "elicitation" && event.payload.author.kind === "agent"
           ? Effect.andThen(deliver, worker.enqueue({ kind: "progress", event }))
@@ -617,12 +806,19 @@ const make = Effect.gen(function* () {
       case "card.budget-set":
       case "card.unpriced-accepted":
         return worker.enqueue({ kind: "deliver", cardId: event.payload.cardId });
+      // A raised monthly budget lets the project's card sessions take their waiting messages.
+      case "project.orchestration-set":
+        return worker.enqueue({ kind: "deliverProject", projectId: event.payload.projectId });
       case "card.status-changed": {
         const progress = worker.enqueue({ kind: "progress", event });
         return isFinishedCardStatus(event.payload.to)
           ? Effect.andThen(
               progress,
-              worker.enqueue({ kind: "finished", cardId: event.payload.cardId, key: event.eventId }),
+              worker.enqueue({
+                kind: "finished",
+                cardId: event.payload.cardId,
+                key: event.eventId,
+              }),
             )
           : progress;
       }
