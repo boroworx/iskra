@@ -94,11 +94,11 @@ const setPolicy = (patch: Partial<ProjectOrchestration> = {}): OrchestrationComm
 
 const criteria = [{ id: "done", text: "It works.", verification: "automated" as const }];
 
-// @frontend only coordinates: it can't build plan children.
+// @frontend only coordinates: it can't build plan children. @backend builds and may coordinate a plan.
 const setup = [
   createProject(),
   setPolicy(),
-  createAgent(backend),
+  createAgent(backend, { roles: ["builder", "lead", "helper", "critic", "coordinator"] }),
   createAgent(frontend, { roles: ["coordinator"] }),
 ];
 
