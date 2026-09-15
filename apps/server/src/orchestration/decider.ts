@@ -114,6 +114,7 @@ import {
   openAssistRunsRefusal,
   channelLeadRoleRefusal,
   roleRefusal,
+  cardOwnerRoleRefusal,
   verdictPassed,
   verdictRefusal,
   verificationRefusal,
@@ -2674,6 +2675,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         if (card.delegateAgentId === agent.id) {
           return yield* refuse(command, `@${agent.name} is already assigned to this card.`);
         }
+        yield* refuseIf(command, cardOwnerRoleRefusal(agent, card.kind));
         delegateAgentId = agent.id;
       } else if (card.delegateAgentId === null) {
         return yield* refuse(command, "No agent is assigned to this card.");

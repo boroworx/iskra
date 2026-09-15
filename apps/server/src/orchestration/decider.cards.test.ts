@@ -187,6 +187,30 @@ it.layer(NodeServices.layer)("decider cards", (it) => {
     }),
   );
 
+  it.effect("assigns a card only to a builder, and a plan card only to a coordinator", () =>
+    Effect.gen(function* () {
+      const checker = AgentId.make("agent-checker");
+      const planner = AgentId.make("agent-planner");
+      const agents = [
+        createAgent(checker, { roles: ["verifier"] }),
+        createAgent(planner, { roles: ["coordinator"] }),
+      ];
+      const notBuilder = yield* Effect.flip(
+        applyCommands([...setup, ...agents, createCard("card"), onCard("card.approve", "card"), assign(checker, "card")]),
+      );
+      expect(notBuilder.message).toContain("@checker can't build cards; choose an agent whose roles include builder.");
+
+      const planCard = { ...createCard("plan"), kind: "plan" } as (typeof setup)[number];
+      const planned = [...setup, ...agents, planCard, onCard("card.approve", "plan")];
+      const notCoordinator = yield* Effect.flip(applyCommands([...planned, assign(backend, "plan")]));
+      expect(notCoordinator.message).toContain(
+        "@backend can't coordinate plans; choose an agent whose roles include coordinator.",
+      );
+      const coordinated = yield* applyCommands([...planned, assign(planner, "plan")]);
+      expect(cardIn(coordinated, "plan")?.delegateAgentId).toBe(planner);
+    }),
+  );
+
   it.effect(
     "keeps relations symmetric, within one project, and leaves overlaps to the server",
     () =>

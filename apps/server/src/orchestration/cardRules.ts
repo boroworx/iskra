@@ -112,6 +112,19 @@ export const roleRefusal = (
     ? null
     : `@${agent.name} can't act as a ${role}; choose an agent whose roles include it.`;
 
+/** Why an agent can't own a card, or null: a plan card needs a coordinator, any other a builder. */
+export const cardOwnerRoleRefusal = (
+  agent: Pick<OrchestrationAgent, "name" | "roles">,
+  kind: OrchestrationCard["kind"],
+): string | null =>
+  kind === "plan"
+    ? agent.roles.includes("coordinator")
+      ? null
+      : `@${agent.name} can't coordinate plans; choose an agent whose roles include coordinator.`
+    : agent.roles.includes("builder")
+      ? null
+      : `@${agent.name} can't build cards; choose an agent whose roles include builder.`;
+
 /** Why an agent can't be made a channel's lead, or null. */
 export const channelLeadRoleRefusal = (
   agent: Pick<OrchestrationAgent, "name" | "roles">,
