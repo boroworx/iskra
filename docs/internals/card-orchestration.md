@@ -189,7 +189,8 @@ A migration lists its items with its enumerate command in a snapshot of its own 
 admission, one item per output line. It samples three, spread across the list, and asks a person to
 tune once they reached review; a redirect note replaces the instructions later children get. The sweep
 starts items while running ones stay under `max(1, sessionCap ?? machine cap)`, in as many batches as
-that takes.
+that takes. Items land into the migration's branch like plan children (`planChild`), with no person's
+approval; only the migration's pull request waits for one.
 
 - A migration is capped at 1000 items: it is one card, its shell carries the item list, and all of it
   lands through one pull request. A longer listing pauses the migration with the refusal.

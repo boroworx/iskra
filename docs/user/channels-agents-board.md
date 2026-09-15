@@ -265,8 +265,10 @@ To make one change across many files, create a card with kind **Migration**, wit
 prints one item per line and the instructions for each item. Iskra runs the command, starts a sample
 of three items as child cards, and then waits: check the sample's cards, change the instructions if
 they need it with **Save instructions**, and choose **Sweep the rest**. Items then start in batches as
-session slots allow. An item that keeps failing is marked blocked and the rest carry on. A migration
-lists at most 1000 items; split a longer one.
+session slots allow. Each item lands into the migration's own branch once its checks pass. An item
+that keeps failing is marked blocked and the rest carry on. When every item has landed or is blocked,
+the migration card goes to review with one pull request, and you approve its merge. A migration lists
+at most 1000 items; split a longer one.
 
 ### Undo, revert, and restore
 

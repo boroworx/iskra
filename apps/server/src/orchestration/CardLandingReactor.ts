@@ -334,7 +334,7 @@ const make = Effect.gen(function* () {
   });
 
   /**
-   * A plan child, or a card in a project with auto-merge on, lands without a person approving its
+   * A plan or migration child, or a card in a project with auto-merge on, lands without a person approving its
    * merge. The decider refuses anything else (see landingBeginRefusal); a refused card simply waits
    * for a person.
    */
@@ -347,7 +347,7 @@ const make = Effect.gen(function* () {
     if (card === undefined || project === undefined || card.status !== "inReview") return;
     const parent = card.parentCardId === null ? undefined : cardIn(model, card.parentCardId);
     const reason =
-      parent?.kind === "plan"
+      parent?.kind === "plan" || parent?.kind === "migration"
         ? ("planChild" as const)
         : projectOrchestrationOf(project).autoMerge.enabled
           ? ("autoMergePolicy" as const)

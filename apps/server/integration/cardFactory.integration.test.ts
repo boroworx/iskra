@@ -1068,11 +1068,11 @@ it.live(
               yield* world.setSession(threadId, "stopped", null);
             }
           });
+        /** Items land into the migration's branch by themselves, like plan children. */
         const landItems = (keys: ReadonlyArray<string>) =>
           Effect.forEach(keys, (key) =>
             Effect.gen(function* () {
               const item = yield* itemCard(key);
-              yield* world.dispatch({ type: "card.merge.approve", cardId: item.id });
               yield* world.until(world.card(item.id), (current) => current.status === "landed");
             }),
           );

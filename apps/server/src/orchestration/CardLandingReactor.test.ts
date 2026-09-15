@@ -260,6 +260,11 @@ const makeWorld = Effect.fn("makeWorld")(function* (
     yield* engine.dispatch({ type: "card.approve", commandId: commandId(), cardId });
     yield* engine.dispatch({ type: "card.spec.skip", commandId: commandId(), cardId });
     yield* engine.dispatch({ type: "card.assign", commandId: commandId(), cardId, agentId });
+    return yield* enterReview(cardId, id);
+  });
+
+  /** An approved, assigned card through review entry with passing evidence, once its landing is linked. */
+  const enterReview = Effect.fn("enterReview")(function* (cardId: CardId, id: string) {
     yield* engine.dispatch({
       type: "card.workspace.set",
       commandId: commandId(),
@@ -331,7 +336,7 @@ const makeWorld = Effect.fn("makeWorld")(function* (
     path: null,
     reviewState: null,
   });
-  return { reactor, cardInReview, cardOf, withReason, approveMerge, comment };
+  return { reactor, cardInReview, enterReview, cardOf, withReason, approveMerge, comment };
 });
 
 it.layer(layer)("CardLandingReactor", (it) => {
@@ -551,6 +556,69 @@ it.layer(layer)("CardLandingReactor", (it) => {
         yield* auto.reactor.drain;
         expect((yield* auto.cardOf(landed.cardId)).status).toBe("landed");
       }),
+  );
+
+  it.effect("lands a migration item into its migration's branch without a person", () =>
+    Effect.gen(function* () {
+      const world = yield* makeWorld("migration-item");
+      const engine = yield* OrchestrationEngineService;
+      const migrationId = CardId.make("card-migration-item-parent");
+      const itemId = CardId.make("card-migration-item-a");
+      let commands = 0;
+      const commandId = () => CommandId.make(`cmd-migration-parent-${(commands += 1)}`);
+      yield* engine.dispatch({
+        type: "card.create",
+        commandId: commandId(),
+        cardId: migrationId,
+        projectId: ProjectId.make("project-migration-item"),
+        title: "Rename the logger",
+        spec: "Rename it.",
+        tags: [],
+        criteria: [{ id: "c1", text: "It works.", verification: "automated" }],
+        kind: "migration",
+        migration: { enumerateCommand: "node list.js", instructions: "Rename it." },
+        createdAt: now,
+      });
+      yield* engine.dispatch({ type: "card.approve", commandId: commandId(), cardId: migrationId });
+      yield* engine.dispatch({ type: "card.spec.skip", commandId: commandId(), cardId: migrationId });
+      yield* engine.dispatch({
+        type: "card.assign",
+        commandId: commandId(),
+        cardId: migrationId,
+        agentId: AgentId.make("agent-migration-item"),
+      });
+      yield* engine.dispatch({
+        type: "card.workspace.set",
+        commandId: commandId(),
+        cardId: migrationId,
+        branch: "iskra/migration",
+        worktreePath: "/tmp/worktrees/migration",
+        portBase: 42000,
+      });
+      yield* engine.dispatch({ type: "card.work.start", commandId: commandId(), cardId: migrationId });
+      yield* engine.dispatch({
+        type: "card.migration.enumerate",
+        commandId: commandId(),
+        cardId: migrationId,
+        items: ["a.ts"],
+      });
+      yield* engine.dispatch({
+        type: "card.migration.phase",
+        commandId: commandId(),
+        cardId: migrationId,
+        phase: "sampling",
+        children: [{ key: "a.ts", cardId: itemId }],
+      });
+
+      yield* world.enterReview(itemId, "a");
+      yield* world.reactor.drain;
+      yield* world.reactor.drain;
+      expect(yield* world.cardOf(itemId)).toMatchObject({
+        status: "landed",
+        baseBranch: "iskra/migration",
+      });
+      expect(host.created).toEqual([]);
+    }),
   );
 
   it.effect(
