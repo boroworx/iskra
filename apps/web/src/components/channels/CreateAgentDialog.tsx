@@ -40,6 +40,7 @@ import {
   orderedCapabilities,
 } from "./AgentSettingsDialog";
 import { toAgentName } from "./channels.logic";
+import { SHEET_INPUT_CLASS, SHEET_TEXTAREA_CLASS, SheetGroup, SheetRow } from "./SheetList";
 
 const NO_PROVIDER_TEXT =
   "No provider that can run agents is on. Turn on Claude or OpenCode in Settings, Providers.";
@@ -176,51 +177,65 @@ export function CreateAgentDialog(props: {
         <DialogPanel>
           <form
             id={formId}
-            className="space-y-4"
+            className="flex flex-col gap-5"
             onSubmit={(event) => {
               event.preventDefault();
               void submit();
             }}
           >
-            <div className="space-y-1.5">
-              <Input
-                aria-label="Agent name"
-                placeholder="backend"
-                autoFocus
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                {agentName.length > 0
+            <SheetGroup
+              footer={
+                agentName.length > 0
                   ? `Mention it as @${agentName}`
-                  : "Lower-case letters, digits and dashes."}
-              </p>
-            </div>
-            <Textarea
-              aria-label="Role"
-              placeholder="What it owns and how it should work, e.g. Owns the server. Answers API questions."
-              rows={3}
-              size="sm"
-              value={role}
-              onChange={(event) => setRole(event.target.value)}
-            />
+                  : "Lower-case letters, digits and dashes."
+              }
+            >
+              <SheetRow as="label" label="Name">
+                <Input
+                  unstyled
+                  aria-label="Agent name"
+                  placeholder="backend"
+                  autoFocus
+                  className={SHEET_INPUT_CLASS}
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                />
+              </SheetRow>
+              {modelSelection === null ? null : (
+                <SheetRow label="Model">
+                  <AgentModelPicker
+                    environmentId={environmentId}
+                    value={modelSelection}
+                    onChange={setChosenModel}
+                  />
+                </SheetRow>
+              )}
+            </SheetGroup>
             {modelSelection === null ? (
-              <p className="text-sm text-destructive-foreground">{NO_PROVIDER_TEXT}</p>
-            ) : (
-              <AgentModelPicker
-                environmentId={environmentId}
-                value={modelSelection}
-                onChange={setChosenModel}
-              />
-            )}
+              <p className="px-3 text-sm text-destructive-foreground">{NO_PROVIDER_TEXT}</p>
+            ) : null}
+            <SheetGroup title="Role">
+              <div className="px-3 py-2 focus-within:bg-accent/40">
+                <Textarea
+                  unstyled
+                  aria-label="Role"
+                  placeholder="What it owns and how it should work, e.g. Owns the server. Answers API questions."
+                  className={SHEET_TEXTAREA_CLASS}
+                  rows={3}
+                  size="sm"
+                  value={role}
+                  onChange={(event) => setRole(event.target.value)}
+                />
+              </div>
+            </SheetGroup>
             <RoleFields value={roles} onChange={setRoles} />
-            <div className="space-y-1.5">
+            <div className="flex flex-col gap-1.5 [&>p]:px-3">
               <CapabilityFields value={capabilities} onChange={setCapabilities} />
               <AgentRunNote driver={run.driver} refusal={run.refusal} />
             </div>
           </form>
         </DialogPanel>
-        <DialogFooter>
+        <DialogFooter variant="bare">
           <Button
             type="button"
             variant="ghost"

@@ -1,3 +1,4 @@
+import type { PillTone } from "@iskra/client-runtime/card-face";
 import { metricsLine, templateMetrics } from "@iskra/client-runtime/metrics";
 import { AgentId, type EnvironmentId, type OrchestrationCardShell } from "@iskra/contracts";
 import { Link } from "@tanstack/react-router";
@@ -20,9 +21,9 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { StatusPill } from "../iskra/StatusPill";
 import { cardProposalStatus, ownerCandidates, type AgentEntry } from "./channels.logic";
 
-const SPEC_PREVIEW_LINES = 4;
 const NO_OWNER = "none";
 
 type ProposalFace = Pick<
@@ -51,11 +52,8 @@ export function CardProposal(props: {
 }) {
   const { card, environmentId } = props;
   const decide = useAtomCommand(cardEnvironment.decide);
-  const [expanded, setExpanded] = useState(false);
   const status = cardProposalStatus(card, props.agents);
-  const spec = card.spec.trim();
-  const specLines = spec.split("\n");
-  const long = specLines.length > SPEC_PREVIEW_LINES;
+  // The spec stays on the card: Edit (or Open card once started) shows it in the card sheet.
   const boardLink = {
     to: "/board/$environmentId/$projectId",
     params: { environmentId, projectId: card.projectId },
@@ -65,34 +63,40 @@ export function CardProposal(props: {
   return (
     <section
       aria-label={`Proposed card: ${card.title}`}
-      className="mt-2 flex min-w-0 max-w-xl flex-col gap-2 rounded-lg border border-border px-3 py-2.5"
+      className="mt-2 flex min-w-0 max-w-[520px] flex-col gap-3.5 rounded-[14px] bg-card p-4 shadow-[0_0_0_0.5px_rgb(0_0_0/8%),0_4px_16px_rgb(0_0_0/8%)] dark:shadow-[0_0_0_0.5px_rgb(255_255_255/7%),0_4px_16px_rgb(0_0_0/24%)]"
     >
-      <div className="flex min-w-0 flex-col">
-        <span className="text-xs text-muted-foreground">
-          Proposed card{card.estimate !== null ? ` · size ${card.estimate.size}` : ""}
-        </span>
-        <span className="truncate text-sm font-medium">{card.title}</span>
+      <div className="flex min-w-0 items-center gap-2">
+        {status === null ? <StatusPill label="Proposed" tone="orange" /> : null}
+        {card.estimate !== null ? (
+          <span
+            role="img"
+            aria-label={`Size ${card.estimate.size}`}
+            className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-secondary px-1.5 text-[11px] font-semibold text-muted-foreground"
+          >
+            {card.estimate.size}
+          </span>
+        ) : null}
       </div>
-      {spec.length > 0 ? (
-        <p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">
-          {expanded || !long ? spec : specLines.slice(0, SPEC_PREVIEW_LINES).join("\n")}
-        </p>
-      ) : null}
-      {long ? (
-        <Button
-          className="-ml-2 self-start"
-          size="sm"
-          variant="ghost-muted"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((current) => !current)}
-        >
-          {expanded ? "Show less" : `Show all ${specLines.length} lines`}
-        </Button>
-      ) : null}
+      <h3 className="-mt-1 text-[17px] font-semibold leading-snug tracking-[-0.01em] break-words">
+        {card.title}
+      </h3>
       {card.acceptance.criteria.length > 0 ? (
-        <ul className="list-inside list-disc text-sm">
+        <ul aria-label="Acceptance criteria" className="flex flex-col gap-2.5">
           {card.acceptance.criteria.map((criterion) => (
-            <li key={criterion.id}>{criterion.text}</li>
+            <li key={criterion.id} className="flex items-start gap-2.5 text-[13px] leading-[18px]">
+              <svg aria-hidden width="18" height="18" viewBox="0 0 24 24" className="shrink-0">
+                <circle
+                  cx="12"
+                  cy="12"
+                  r="9.2"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  className="text-muted-foreground/50"
+                />
+              </svg>
+              <span className="min-w-0 break-words">{criterion.text}</span>
+            </li>
           ))}
         </ul>
       ) : null}
@@ -102,14 +106,11 @@ export function CardProposal(props: {
         </p>
       ) : null}
       {status === null ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <ApproveAndStart card={card} agents={props.agents} environmentId={environmentId} />
-          <Button size="sm" variant="outline" render={<Link {...boardLink} />}>
-            Edit
-          </Button>
+        <div className="flex flex-wrap items-center justify-end gap-2 pt-0.5">
           <Button
             size="sm"
             variant="ghost-muted"
+            className={PROPOSAL_BUTTON}
             onClick={() =>
               void decide({ environmentId, input: { type: "card.abandon", cardId: card.id } }).then(
                 (result) =>
@@ -123,18 +124,47 @@ export function CardProposal(props: {
           >
             Drop
           </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            className={PROPOSAL_BUTTON}
+            render={<Link {...boardLink} />}
+          >
+            Edit
+          </Button>
+          <ApproveAndStart
+            card={card}
+            agents={props.agents}
+            environmentId={environmentId}
+            className={PROPOSAL_BUTTON}
+          />
         </div>
       ) : (
-        <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-          <span>{status}</span>
-          <Link {...boardLink} className="hover:underline">
+        <div className="flex flex-wrap items-center justify-end gap-3 pt-0.5">
+          <StatusPill label={status} tone={PROPOSAL_STATUS_TONE[card.status]} />
+          <Link
+            {...boardLink}
+            className="text-[13px] font-medium text-info-foreground hover:underline"
+          >
             Open card
           </Link>
-        </p>
+        </div>
       )}
     </section>
   );
 }
+
+const PROPOSAL_BUTTON = "h-[30px] rounded-lg px-3.5 text-[13px] font-medium sm:h-[30px]";
+
+const PROPOSAL_STATUS_TONE: Record<ProposalFace["status"], PillTone> = {
+  triage: "orange",
+  ready: "blue",
+  inProgress: "blue",
+  inReview: "orange",
+  landing: "blue",
+  landed: "green",
+  abandoned: "gray",
+};
 
 type StartableCard = Pick<
   OrchestrationCardShell,
@@ -150,14 +180,16 @@ export function ApproveAndStart(props: {
   readonly card: StartableCard;
   readonly agents: ReadonlyArray<AgentEntry>;
   readonly environmentId: EnvironmentId;
+  readonly className?: string;
 }) {
+  const { className, ...dialogProps } = props;
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button size="sm" onClick={() => setOpen(true)}>
-        Approve &amp; start
+      <Button size="sm" className={className} onClick={() => setOpen(true)}>
+        Approve &amp; Start
       </Button>
-      {open ? <ApproveAndStartDialog {...props} onClose={() => setOpen(false)} /> : null}
+      {open ? <ApproveAndStartDialog {...dialogProps} onClose={() => setOpen(false)} /> : null}
     </>
   );
 }
@@ -223,7 +255,7 @@ function ApproveAndStartDialog(props: {
     <Dialog open onOpenChange={(open) => (open ? undefined : props.onClose())}>
       <DialogPopup className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>Approve &amp; start</DialogTitle>
+          <DialogTitle>Approve &amp; Start</DialogTitle>
           <DialogDescription>
             {card.title}. Starting confirms these criteria; checks and review hold the work to them.
           </DialogDescription>

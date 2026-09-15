@@ -10,7 +10,7 @@ import {
   type OrchestrationChannelShell,
 } from "@iskra/contracts";
 import { Link } from "@tanstack/react-router";
-import { HashIcon, SettingsIcon } from "lucide-react";
+import { ChevronRightIcon, ChevronsUpDownIcon, InfoIcon, PlusIcon } from "lucide-react";
 import { memo, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { collapseExpandedComposerCursor, replaceTextRange } from "~/composer-logic";
@@ -25,16 +25,17 @@ import {
 import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
 import ChatMarkdown from "../ChatMarkdown";
-import { ComposerPrimaryActions } from "../chat/ComposerPrimaryActions";
-import { ComposerSurface } from "../chat/ComposerSurface";
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
 import { EMPTY_COMPOSER_CONTEXT_RECORDS } from "../composerContextPresentation";
 import { Button } from "../ui/button";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "../ui/menu";
 import { SidebarInset } from "../ui/sidebar";
+import { Spinner } from "../ui/spinner";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { AgentAvatar } from "../iskra/AgentAvatar";
 import { EventLine } from "../iskra/EventLine";
+import { SparkGlyph } from "../iskra/SparkGlyph";
 import {
   agentListEntries,
   cardNoteOf,
@@ -45,6 +46,7 @@ import {
   mentionQueryAt,
   presenceDotClassName,
   presenceLabel,
+  presenceSpark,
   proposalAnchors,
   type AgentEntry,
   type ChannelMessageRow,
@@ -101,11 +103,13 @@ export function ChannelView(props: {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <WorkspacePageHeader className="border-b border-border">
           {channel === null ? null : (
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <HashIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-              <h1 className="truncate text-sm font-semibold">{title}</h1>
+            <div className="flex min-w-0 flex-1 items-center gap-1.5">
+              <span aria-hidden className="text-[15px] font-semibold text-muted-foreground/75">
+                #
+              </span>
+              <h1 className="truncate text-[15px] font-semibold">{title}</h1>
               {channel.topic.length > 0 ? (
-                <span className="hidden truncate text-sm text-muted-foreground sm:inline">
+                <span className="ml-1.5 hidden truncate text-[13px] text-muted-foreground/55 sm:inline">
                   {channel.topic}
                 </span>
               ) : null}
@@ -127,7 +131,7 @@ export function ChannelView(props: {
                     aria-label="Channel settings"
                     onClick={() => setSettingsOpen(true)}
                   >
-                    <SettingsIcon />
+                    <InfoIcon />
                   </Button>
                 </>
               ) : null}
@@ -177,7 +181,7 @@ export function ChannelView(props: {
               />
               <MessageComposer
                 key={props.channelId}
-                placeholder={`Message #${title} — @mention an agent to wake it`}
+                placeholder={`Message #${title}`}
                 mentionAgents={projectAgents}
                 onSend={async (body) => {
                   const result = await postMessage({
@@ -199,6 +203,7 @@ export function ChannelView(props: {
                 channel={channel}
                 agents={agents}
                 environmentId={props.environmentId}
+                onEditMembers={() => setSettingsOpen(true)}
               />
             ) : null}
           </div>
@@ -271,9 +276,9 @@ export const Timeline = memo(function Timeline(props: TimelineSource) {
   const scrollRef = useStickToNewest(rows.at(-1)?.message.id);
 
   return (
-    <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+    <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 pt-7 pb-4 sm:px-8">
       {props.error !== null ? <p className="text-sm text-destructive">{props.error}</p> : null}
-      <ol className="flex flex-col">
+      <ol className="flex max-w-[716px] flex-col">
         {rows.map((row) => (
           <MessageRow
             key={row.message.id}
@@ -303,13 +308,13 @@ function MessageRow(props: {
   readonly cardById: ReadonlyMap<string, OrchestrationCardShell>;
 }) {
   const { message, authorName, showHeader } = props.row;
-  const notes =
-    message.authorKind === "human" ? deliveryNotes(message, props.agents) : [];
+  const notes = message.authorKind === "human" ? deliveryNotes(message, props.agents) : [];
   // Iskra's own notes, such as a card starting or asking something, read as centered events.
   if (message.authorKind === "system") {
+    const note = cardNoteOf(message);
     return (
-      <li className="mt-3 flex min-w-0 flex-col first:mt-0">
-        <EventLine spark={cardNoteOf(message)?.question === true ? "needsYou" : "idle"}>
+      <li className="mt-4 flex min-w-0 flex-col first:mt-0">
+        <EventLine spark={note === null ? "idle" : note.question ? "needsYou" : "working"}>
           <span className="whitespace-pre-wrap break-words">{message.body}</span>
           <time dateTime={message.createdAt} className="tabular-nums">
             · {messageTimeFormat.format(new Date(message.createdAt))}
@@ -324,58 +329,74 @@ function MessageRow(props: {
     );
   }
   return (
-    <li className={cn("flex min-w-0 flex-col", showHeader ? "mt-4 first:mt-0" : "mt-1")}>
-      {showHeader ? (
-        <div className="flex items-center gap-2">
-          {message.authorKind === "agent" ? <AgentAvatar name={authorName} size="md" /> : null}
-          <span className="text-sm font-semibold">{authorName}</span>
-          <time dateTime={message.createdAt} className="text-xs text-muted-foreground">
-            {messageTimeFormat.format(new Date(message.createdAt))}
-          </time>
-        </div>
-      ) : null}
-      {message.authorKind === "agent" ? (
-        <>
-          <ChatMarkdown text={message.body} cwd={props.cwd} environmentId={props.environmentId} />
-          {message.elicitation !== undefined ? (
-            <ChannelQuestion
-              message={{ ...message, elicitation: message.elicitation }}
-              environmentId={props.environmentId}
-            />
-          ) : null}
-          {message.runThreadId !== undefined ? (
-            <RunWork
-              agentId={AgentId.make(message.authorId)}
-              runThreadId={message.runThreadId}
-              channels={props.channels}
-              cwd={props.cwd}
-              environmentId={props.environmentId}
-            />
-          ) : null}
-        </>
-      ) : (
-        <p className="whitespace-pre-wrap break-words text-sm">{message.body}</p>
+    <li
+      className={cn(
+        "grid min-w-0 grid-cols-[32px_minmax(0,1fr)] gap-x-3 text-[14px] leading-[1.45]",
+        showHeader ? "mt-[22px] first:mt-0" : "mt-1",
       )}
-      {notes.length > 0 ? (
-        <p className="mt-0.5 flex flex-wrap gap-x-3 text-xs">
-          {notes.map((note) => (
-            <span
-              key={note.agentId}
-              className={note.undelivered ? "text-destructive-foreground" : "text-muted-foreground"}
+    >
+      {showHeader ? (
+        <AgentAvatar name={authorName} size="lg" person={message.authorKind !== "agent"} />
+      ) : (
+        <span aria-hidden />
+      )}
+      <div className="flex min-w-0 flex-col">
+        {showHeader ? (
+          <div className="flex items-baseline gap-2">
+            <span className="text-[13px] font-semibold">{authorName}</span>
+            <time
+              dateTime={message.createdAt}
+              className="text-[11px] tabular-nums text-muted-foreground/55"
             >
-              {note.text}
-            </span>
-          ))}
-        </p>
-      ) : null}
-      {props.proposals?.map((card) => (
-        <CardProposal
-          key={card.id}
-          card={card}
-          agents={props.proposalAgents}
-          environmentId={props.environmentId}
-        />
-      ))}
+              {messageTimeFormat.format(new Date(message.createdAt))}
+            </time>
+          </div>
+        ) : null}
+        {message.authorKind === "agent" ? (
+          <>
+            <ChatMarkdown text={message.body} cwd={props.cwd} environmentId={props.environmentId} />
+            {message.elicitation !== undefined ? (
+              <ChannelQuestion
+                message={{ ...message, elicitation: message.elicitation }}
+                environmentId={props.environmentId}
+              />
+            ) : null}
+            {message.runThreadId !== undefined ? (
+              <RunWork
+                agentId={AgentId.make(message.authorId)}
+                runThreadId={message.runThreadId}
+                channels={props.channels}
+                cwd={props.cwd}
+                environmentId={props.environmentId}
+              />
+            ) : null}
+          </>
+        ) : (
+          <p className="whitespace-pre-wrap break-words">{message.body}</p>
+        )}
+        {notes.length > 0 ? (
+          <p className="mt-0.5 flex flex-wrap gap-x-3 text-xs">
+            {notes.map((note) => (
+              <span
+                key={note.agentId}
+                className={
+                  note.undelivered ? "text-destructive-foreground" : "text-muted-foreground/55"
+                }
+              >
+                {note.text}
+              </span>
+            ))}
+          </p>
+        ) : null}
+        {props.proposals?.map((card) => (
+          <CardProposal
+            key={card.id}
+            card={card}
+            agents={props.proposalAgents}
+            environmentId={props.environmentId}
+          />
+        ))}
+      </div>
     </li>
   );
 }
@@ -396,7 +417,7 @@ function CardNoteLink(props: {
       to="/board/$environmentId/$projectId"
       params={{ environmentId: props.environmentId, projectId: card.projectId }}
       search={{ card: card.id }}
-      className="font-medium text-primary hover:underline"
+      className="font-medium text-info-foreground hover:underline"
     >
       {note.question ? "Answer on the card" : "Open card"}
     </Link>
@@ -415,16 +436,19 @@ interface RunWorkProps {
 function RunWork(props: RunWorkProps) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="mt-1 flex min-w-0 flex-col gap-1">
-      <Button
-        className="-ml-2 self-start"
-        size="sm"
-        variant="ghost-muted"
+    <div className="mt-0.5 flex min-w-0 flex-col gap-1">
+      <button
+        type="button"
+        className="-ml-1 inline-flex h-7 items-center gap-1 self-start rounded-md px-1 text-xs font-medium text-muted-foreground/70 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
       >
+        <ChevronRightIcon
+          aria-hidden
+          className={cn("size-3.5 transition-transform duration-150", open && "rotate-90")}
+        />
         {open ? "Hide work" : "Show work"}
-      </Button>
+      </button>
       {open ? <RunWorkDetail {...props} /> : null}
     </div>
   );
@@ -504,6 +528,25 @@ export function MessageComposer(props: {
     window.requestAnimationFrame(() => editorRef.current?.focusAt(nextCursor));
   };
 
+  // The + button starts a mention at the cursor, which opens the agent menu.
+  const startMention = () => {
+    const before = body.slice(0, textCursor);
+    const next = replaceTextRange(
+      body,
+      textCursor,
+      textCursor,
+      before.length === 0 || /\s$/.test(before) ? "@" : " @",
+    );
+    const nextCursor = collapseExpandedComposerCursor(next.text, next.cursor);
+    setBody(next.text);
+    setCursor(nextCursor);
+    setTextCursor(next.cursor);
+    setInMentionChip(false);
+    setDismissedMentionStart(null);
+    setHighlighted(0);
+    window.requestAnimationFrame(() => editorRef.current?.focusAt(nextCursor));
+  };
+
   const send = async () => {
     if (trimmed.length === 0 || sending || disabled) {
       return;
@@ -521,7 +564,7 @@ export function MessageComposer(props: {
 
   return (
     <form
-      className="relative shrink-0 px-5 pb-5"
+      className="relative shrink-0 px-5 pt-4 pb-6 sm:px-8"
       onSubmit={(event) => {
         event.preventDefault();
         void send();
@@ -538,7 +581,7 @@ export function MessageComposer(props: {
           id={listboxId}
           role="listbox"
           aria-label="Mention an agent"
-          className="dropdown-glass absolute bottom-full left-5 z-10 mb-1 flex w-60 flex-col rounded-lg p-1 text-popover-foreground shadow-[0_16px_40px_-18px_rgb(0_0_0/55%)] dark:shadow-[0_18px_44px_-18px_rgb(0_0_0/80%)]"
+          className="dropdown-glass absolute bottom-full left-5 z-10 -mb-2 flex w-60 sm:left-8 flex-col rounded-lg p-1 text-popover-foreground shadow-[0_16px_40px_-18px_rgb(0_0_0/55%)] dark:shadow-[0_18px_44px_-18px_rgb(0_0_0/80%)]"
         >
           {candidates.map((agent, index) => (
             <li
@@ -562,72 +605,94 @@ export function MessageComposer(props: {
           ))}
         </ul>
       ) : null}
-      <ComposerSurface.Shell className="max-w-none">
-        <ComposerSurface.Host>
-          <ComposerSurface.Main>
-            <div className="rounded-[20px]">
-              <div className="px-3 pt-3.5 sm:px-4 sm:pt-4">
-                <ComposerPromptEditor
-                  editorRef={editorRef}
-                  value={body}
-                  cursor={cursor}
-                  contextRecords={EMPTY_COMPOSER_CONTEXT_RECORDS}
-                  skills={EMPTY_SKILLS}
-                  disabled={disabled}
-                  placeholder={props.placeholder}
-                  onChange={(nextValue, nextCursor, expandedCursor, adjacentToMention) => {
-                    setBody(nextValue);
-                    setCursor(nextCursor);
-                    setTextCursor(expandedCursor);
-                    setInMentionChip(adjacentToMention);
-                    setHighlighted(0);
-                  }}
-                  onCommandKeyDown={(key, event) => {
-                    if (menuOpen) {
-                      if (key === "ArrowDown" || key === "ArrowUp") {
-                        const step = key === "ArrowDown" ? 1 : -1;
-                        setHighlighted(
-                          (activeIndex + step + candidates.length) % candidates.length,
-                        );
-                        return true;
-                      }
-                      const picked = candidates[activeIndex];
-                      if (picked !== undefined) {
-                        pickMention(picked);
-                        return true;
-                      }
-                    }
-                    if (key !== "Enter" || event.shiftKey) {
-                      return false;
-                    }
-                    void send();
-                    return true;
-                  }}
-                  onPaste={noop}
-                />
-              </div>
-              <div className="flex items-center justify-end px-3 pb-3 sm:px-4 sm:pb-4">
-                <ComposerPrimaryActions
-                  compact={false}
-                  pendingAction={null}
-                  isRunning={false}
-                  showPlanFollowUpPrompt={false}
-                  promptHasText={trimmed.length > 0 && !disabled}
-                  isSendBusy={sending}
-                  sendDisabledReason={null}
-                  isConnecting={false}
-                  isEnvironmentUnavailable={false}
-                  isPreparingWorktree={false}
-                  hasSendableContent={trimmed.length > 0 && !disabled}
-                  onPreviousPendingQuestion={noop}
-                  onInterrupt={noop}
-                  onImplementPlanInNewThread={noop}
-                />
-              </div>
-            </div>
-          </ComposerSurface.Main>
-        </ComposerSurface.Host>
-      </ComposerSurface.Shell>
+      <div
+        className={cn(
+          "flex max-w-[716px] items-end gap-2.5 rounded-[19px] bg-[rgb(120_120_128/12%)] py-1.5 pr-1.5 pl-2.5 shadow-[inset_0_0_0_0.5px_rgb(0_0_0/8%)] transition-shadow focus-within:shadow-[inset_0_0_0_1px_var(--ring)] dark:bg-[rgb(120_120_128/16%)] dark:shadow-[inset_0_0_0_0.5px_rgb(255_255_255/8%)]",
+          mentionAgents === undefined && "pl-4",
+        )}
+      >
+        {mentionAgents !== undefined ? (
+          <button
+            type="button"
+            aria-label="Mention an agent"
+            disabled={disabled}
+            // Keep the editor's selection: act on mouse down, before it blurs.
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={startMention}
+            className="-ml-1 flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground/75 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+          >
+            <svg aria-hidden width="20" height="20" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.6" />
+              <path
+                d="M12 8v8M8 12h8"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+        ) : null}
+        <ComposerPromptEditor
+          editorRef={editorRef}
+          value={body}
+          cursor={cursor}
+          contextRecords={EMPTY_COMPOSER_CONTEXT_RECORDS}
+          skills={EMPTY_SKILLS}
+          disabled={disabled}
+          placeholder={props.placeholder}
+          containerClassName="min-w-0 flex-1 self-center [font-size:14px]"
+          className="max-h-50 min-h-[26px] py-[3px] leading-5"
+          placeholderClassName="py-[3px] leading-5 text-placeholder/60"
+          onChange={(nextValue, nextCursor, expandedCursor, adjacentToMention) => {
+            setBody(nextValue);
+            setCursor(nextCursor);
+            setTextCursor(expandedCursor);
+            setInMentionChip(adjacentToMention);
+            setHighlighted(0);
+          }}
+          onCommandKeyDown={(key, event) => {
+            if (menuOpen) {
+              if (key === "ArrowDown" || key === "ArrowUp") {
+                const step = key === "ArrowDown" ? 1 : -1;
+                setHighlighted((activeIndex + step + candidates.length) % candidates.length);
+                return true;
+              }
+              const picked = candidates[activeIndex];
+              if (picked !== undefined) {
+                pickMention(picked);
+                return true;
+              }
+            }
+            if (key !== "Enter" || event.shiftKey) {
+              return false;
+            }
+            void send();
+            return true;
+          }}
+          onPaste={noop}
+        />
+        <button
+          type="submit"
+          aria-label={sending ? "Sending" : "Send message"}
+          disabled={sending || disabled || trimmed.length === 0}
+          className="flex size-[26px] shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:bg-[rgb(120_120_128/40%)] disabled:text-background"
+        >
+          {sending ? (
+            <Spinner className="size-3.5" aria-hidden="true" />
+          ) : (
+            <svg aria-hidden width="26" height="26" viewBox="0 0 24 24">
+              <path
+                d="M12 16.5V8m-3.8 3.6L12 7.8l3.8 3.8"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          )}
+        </button>
+      </div>
     </form>
   );
 }
@@ -644,63 +709,119 @@ const ChannelMemberList = memo(function ChannelMemberList(props: {
   readonly channel: OrchestrationChannelShell;
   readonly agents: ReadonlyArray<OrchestrationAgentShell>;
   readonly environmentId: EnvironmentId;
+  /** Opens channel settings, where members are added and removed. */
+  readonly onEditMembers: () => void;
 }) {
   const updateChannel = useAtomCommand(channelEnvironment.update);
-  const leadOptions = props.leadOptions;
-  const leadName = (agentId: string | null) =>
-    agentId === null || agentId === NO_LEAD
-      ? "No lead"
-      : `@${props.agents.find((agent) => agent.id === agentId)?.name ?? agentId}`;
+  const leadId = props.channel.leadAgentId;
+  const leadName =
+    leadId === null ? null : (props.agents.find((agent) => agent.id === leadId)?.name ?? leadId);
   return (
     <aside
       aria-label="Members"
-      className="hidden w-56 shrink-0 flex-col gap-1 overflow-y-auto border-l border-border px-3 py-4 lg:flex"
+      className="hidden w-[260px] shrink-0 flex-col overflow-y-auto bg-sidebar px-3 py-5 shadow-[inset_0.5px_0_var(--border)] lg:flex"
     >
-      <h2 className="px-2 text-xs font-medium text-muted-foreground">Lead</h2>
-      <div className="px-2 pb-3">
-        <Select
-          value={props.channel.leadAgentId ?? NO_LEAD}
-          onValueChange={(value) =>
-            void updateChannel({
-              environmentId: props.environmentId,
-              input: {
-                channelId: props.channel.id,
-                leadAgentId: value === null || value === NO_LEAD ? null : AgentId.make(value),
-              },
-            })
+      <div className="flex items-center gap-1 px-2 pb-1.5">
+        <h2 className={INSPECTOR_HEAD}>Lead</h2>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                aria-label="What the lead does"
+                className="-my-2 inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/55 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            }
+          >
+            <InfoIcon aria-hidden className="size-3.5" />
+          </TooltipTrigger>
+          <TooltipPopup className="max-w-60">
+            The lead reads messages that mention no one, asks what is unclear, and proposes cards
+            you start from the channel.
+          </TooltipPopup>
+        </Tooltip>
+      </div>
+      <Menu>
+        <MenuTrigger
+          render={
+            <button
+              type="button"
+              aria-label={`Channel lead: ${leadName === null ? "No lead" : `@${leadName}`}`}
+              className="group mb-[18px] flex h-9 w-full min-w-0 items-center gap-2.5 rounded-lg px-2 text-left text-[13px] outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring data-popup-open:bg-accent"
+            />
           }
         >
-          <SelectTrigger aria-label="Channel lead">
-            <SelectValue>{leadName}</SelectValue>
-          </SelectTrigger>
-          <SelectPopup>
-            <SelectItem value={NO_LEAD}>No lead</SelectItem>
-            {leadOptions.map((agent) => (
-              <SelectItem key={agent.id} value={agent.id}>
+          {leadName === null ? (
+            <>
+              <span
+                aria-hidden
+                className="size-6 shrink-0 rounded-full border border-dashed border-muted-foreground/40"
+              />
+              <span className="truncate text-muted-foreground">No lead</span>
+            </>
+          ) : (
+            <>
+              <AgentAvatar name={leadName} size="md" />
+              <span className="truncate">{leadName}</span>
+            </>
+          )}
+          <ChevronsUpDownIcon
+            aria-hidden
+            className="ml-auto size-3.5 shrink-0 text-muted-foreground/55 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 group-data-popup-open:opacity-100"
+          />
+        </MenuTrigger>
+        <MenuPopup align="start" className="min-w-52">
+          <MenuRadioGroup
+            value={leadId ?? NO_LEAD}
+            onValueChange={(value: string) =>
+              void updateChannel({
+                environmentId: props.environmentId,
+                input: {
+                  channelId: props.channel.id,
+                  leadAgentId: value === NO_LEAD ? null : AgentId.make(value),
+                },
+              })
+            }
+          >
+            <MenuRadioItem value={NO_LEAD}>No lead</MenuRadioItem>
+            {props.leadOptions.map((agent) => (
+              <MenuRadioItem key={agent.id} value={agent.id}>
                 @{agent.name}
-              </SelectItem>
+              </MenuRadioItem>
             ))}
-          </SelectPopup>
-        </Select>
-        <p className="mt-1.5 text-xs text-muted-foreground">
-          The lead reads messages that mention no one, asks what is unclear, and proposes cards you
-          start from the channel.
-        </p>
+          </MenuRadioGroup>
+        </MenuPopup>
+      </Menu>
+      <div className="flex items-center px-2 pb-1.5">
+        <h2 className={INSPECTOR_HEAD}>Members</h2>
+        <button
+          type="button"
+          aria-label="Add members"
+          onClick={props.onEditMembers}
+          className="-my-2 ml-auto inline-flex size-7 items-center justify-center rounded-md text-primary outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <PlusIcon aria-hidden className="size-4" />
+        </button>
       </div>
-      <h2 className="px-2 text-xs font-medium text-muted-foreground">
-        Members {props.members.length}
-      </h2>
-      <ul role="list" className="flex flex-col gap-px">
+      {props.members.length === 0 ? (
+        <p className="px-2 text-[13px] text-muted-foreground/55">No members yet</p>
+      ) : null}
+      <ul role="list" className="flex flex-col">
         {props.members.map((member) => (
-          <li key={member.id} className="flex h-8 min-w-0 items-center gap-2 px-2 text-sm">
+          <li key={member.id} className="flex h-9 min-w-0 items-center gap-2.5 px-2 text-[13px]">
+            <AgentAvatar name={member.name} size="md" />
             <span className="truncate">{member.name}</span>
-            <PresenceBadge presence={member.presence} className="ml-auto" />
+            {member.presence === "idle" ? null : (
+              <SparkGlyph state={presenceSpark(member.presence)} size={12} className="ml-auto" />
+            )}
           </li>
         ))}
       </ul>
     </aside>
   );
 });
+
+const INSPECTOR_HEAD = "text-[11px] font-semibold text-muted-foreground/55";
 
 /** Static presence dot and label: no continuously repainting animation. */
 export function PresenceBadge(props: {

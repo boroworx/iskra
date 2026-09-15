@@ -1,5 +1,9 @@
+import type { PillTone } from "@iskra/client-runtime/card-face";
 import { scopeThreadRef } from "@iskra/client-runtime/environment";
-import { derivePendingRequests, type PendingUserInput } from "@iskra/client-runtime/pending-requests";
+import {
+  derivePendingRequests,
+  type PendingUserInput,
+} from "@iskra/client-runtime/pending-requests";
 import {
   runSessionState,
   type EnvironmentId,
@@ -15,6 +19,7 @@ import { useThreadDetail } from "~/state/entities";
 import { threadEnvironment } from "~/state/threads";
 import { useAtomCommand } from "~/state/use-atom-command";
 import ChatMarkdown from "../ChatMarkdown";
+import { StatusPill } from "../iskra/StatusPill";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 import { toastCommandFailure } from "../toastCommandFailure";
@@ -52,6 +57,16 @@ const SESSION_STATE_LABEL: Record<RunSessionState, string> = {
   error: "Failed",
   stale: "Lost in a restart",
   ended: "Ended",
+};
+
+const SESSION_STATE_TONE: Record<RunSessionState, PillTone> = {
+  pending: "blue",
+  active: "blue",
+  awaitingInput: "orange",
+  complete: "gray",
+  error: "red",
+  stale: "red",
+  ended: "gray",
 };
 
 const SESSION_STATE_HINT: Partial<Record<RunSessionState, string>> = {
@@ -126,30 +141,30 @@ export const RunBlock = memo(function RunBlock(props: {
   };
 
   return (
-    <section aria-label={heading} className="min-w-0 border-l-2 border-border pl-3">
-      <header className="flex h-7 items-center gap-2 text-xs text-muted-foreground">
+    <section
+      aria-label={heading}
+      className="min-w-0 rounded-xl bg-card px-3.5 py-2.5 shadow-[0_0_0_0.5px_rgb(0_0_0/8%)] dark:shadow-[0_0_0_0.5px_rgb(255_255_255/7%)]"
+    >
+      <header className="flex min-h-7 items-center gap-2 text-xs">
         <Hint text={ROLE_HINT[props.run.role]}>
-          <span className="truncate">{heading}</span>
+          <span className="truncate font-semibold">{heading}</span>
         </Hint>
-        <time dateTime={props.run.startedAt} className="shrink-0">
+        <time
+          dateTime={props.run.startedAt}
+          className="shrink-0 text-[11px] tabular-nums text-muted-foreground/55"
+        >
           {runTimeFormat.format(new Date(props.run.startedAt))}
         </time>
         <Hint text={SESSION_STATE_HINT[state]}>
-          <span
-            className={cn(
-              "shrink-0",
-              (state === "awaitingInput" || state === "error") && "text-destructive-foreground",
-            )}
-          >
-            {SESSION_STATE_LABEL[state]}
-          </span>
+          <StatusPill label={SESSION_STATE_LABEL[state]} tone={SESSION_STATE_TONE[state]} />
         </Hint>
-        <span className="ml-auto flex shrink-0 items-center">
+        <span className="-mr-1.5 ml-auto flex shrink-0 items-center">
           {stoppable ? (
             <Hint text="End this session. A new message or assignment starts a fresh one.">
               <Button
-                size="sm"
+                size="xs"
                 variant="ghost-muted"
+                className="h-7 sm:h-7"
                 disabled={stopping}
                 onClick={() => void stop()}
               >
@@ -164,19 +179,24 @@ export const RunBlock = memo(function RunBlock(props: {
                 : "What this session was told when it started."
             }
           >
-            <Button size="sm" variant="ghost-muted" onClick={() => setInspecting(true)}>
+            <Button
+              size="xs"
+              variant="ghost-muted"
+              className="h-7 sm:h-7"
+              onClick={() => setInspecting(true)}
+            >
               {isCardSession ? "Handoff brief" : "Context"}
             </Button>
           </Hint>
         </span>
       </header>
-      <ol className="flex flex-col gap-1">
+      <ol className="mt-1 flex flex-col gap-1">
         {items.map((item) => (
           <li key={item.id} className="min-w-0">
             {item.addressedToUser ? (
               <ChatMarkdown text={item.text} cwd={props.cwd} environmentId={props.environmentId} />
             ) : (
-              <p className="truncate text-xs text-muted-foreground">{item.text}</p>
+              <p className="truncate text-xs text-muted-foreground/70">{item.text}</p>
             )}
           </li>
         ))}
@@ -226,7 +246,7 @@ function RunQuestion(props: {
 
   return (
     <form
-      className="mt-2 flex flex-col gap-2 rounded-md border border-border p-3"
+      className="mt-2 flex flex-col gap-2 rounded-lg bg-secondary/50 p-3"
       onSubmit={(event) => {
         event.preventDefault();
         void send();
@@ -236,17 +256,24 @@ function RunQuestion(props: {
         <label key={question.id} className="flex flex-col gap-1.5 text-sm">
           <span>{question.question}</span>
           {question.options.length > 0 && (
-            <span className="flex flex-wrap gap-1.5">
+            <span className="flex flex-wrap gap-2">
               {question.options.map((option) => (
-                <Button
+                <button
                   key={option.label}
                   type="button"
-                  size="compact"
-                  variant={answers[question.id] === option.label ? "secondary" : "outline"}
-                  onClick={() => setAnswers((current) => ({ ...current, [question.id]: option.label }))}
+                  aria-pressed={answers[question.id] === option.label}
+                  className={cn(
+                    "inline-flex h-[30px] items-center rounded-lg px-3 text-[13px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    answers[question.id] === option.label
+                      ? "bg-primary/18 text-info-foreground"
+                      : "bg-secondary hover:bg-secondary/80",
+                  )}
+                  onClick={() =>
+                    setAnswers((current) => ({ ...current, [question.id]: option.label }))
+                  }
                 >
                   {option.label}
-                </Button>
+                </button>
               ))}
             </span>
           )}
@@ -284,7 +311,10 @@ function RunContextDialog(props: {
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-4">
-          <ContextText title="Instructions (system prompt)" text={props.run.rendered.systemPrompt} />
+          <ContextText
+            title="Instructions (system prompt)"
+            text={props.run.rendered.systemPrompt}
+          />
           <ContextText title="First message" text={props.run.rendered.firstMessage} />
           <details className="group">
             <summary className="cursor-pointer text-xs font-medium text-muted-foreground">

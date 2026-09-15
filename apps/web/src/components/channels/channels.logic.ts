@@ -108,7 +108,10 @@ export function mentionCandidates<T extends { readonly name: string }>(
 }
 
 /** A project's agents by name. */
-export function agentListEntries(agents: ReadonlyArray<OrchestrationAgentShell>, projectId: ProjectId) {
+export function agentListEntries(
+  agents: ReadonlyArray<OrchestrationAgentShell>,
+  projectId: ProjectId,
+) {
   return agentEntries(agents, (agent) => agent.projectId === projectId);
 }
 
@@ -362,6 +365,11 @@ export function presenceDotClassName(presence: AgentPresence): string {
   }
 }
 
+/** The spark an agent shows for its presence: working blue, waiting orange, idle outline. */
+export function presenceSpark(presence: AgentPresence): "working" | "needsYou" | "idle" {
+  return presence === "running" ? "working" : presence === "blocked" ? "needsYou" : "idle";
+}
+
 export function presenceLabel(presence: AgentPresence): string {
   switch (presence) {
     case "running":
@@ -452,5 +460,7 @@ export function cardNoteOf(
   const match =
     message.authorKind === "system" ? /:card-(progress|question):([^:]+)$/.exec(message.id) : null;
   const cardId = match?.[2];
-  return match === null || cardId === undefined ? null : { cardId, question: match[1] === "question" };
+  return match === null || cardId === undefined
+    ? null
+    : { cardId, question: match[1] === "question" };
 }

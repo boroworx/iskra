@@ -17,6 +17,7 @@ import {
 } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { toChannelName } from "./channels.logic";
+import { SHEET_INPUT_CLASS, SheetGroup, SheetRow } from "./SheetList";
 
 /** Creates a channel every agent of the project joins, then opens it. */
 export function CreateChannelDialog(props: {
@@ -78,16 +79,28 @@ export function CreateChannelDialog(props: {
               void submit();
             }}
           >
-            <Input
-              aria-label="Channel name"
-              placeholder="general"
-              autoFocus
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-            />
+            <SheetGroup
+              footer={
+                channelName.length > 0
+                  ? `Shows as #${channelName}`
+                  : "Lower case, words joined by dashes."
+              }
+            >
+              <SheetRow as="label" label="Name">
+                <Input
+                  unstyled
+                  aria-label="Channel name"
+                  placeholder="general"
+                  autoFocus
+                  className={SHEET_INPUT_CLASS}
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                />
+              </SheetRow>
+            </SheetGroup>
           </form>
         </DialogPanel>
-        <DialogFooter>
+        <DialogFooter variant="bare">
           <Button type="button" variant="outline" onClick={() => props.onOpenChange(false)}>
             Cancel
           </Button>

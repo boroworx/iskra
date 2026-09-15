@@ -1,8 +1,4 @@
-import {
-  AgentId,
-  type EnvironmentId,
-  type OrchestrationChannelShell,
-} from "@iskra/contracts";
+import { AgentId, type EnvironmentId, type OrchestrationChannelShell } from "@iskra/contracts";
 import { useId, useMemo, useState } from "react";
 
 import { requestConfirmDialog } from "~/confirmDialog";
@@ -24,7 +20,9 @@ import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
 import { agentListEntries, leadCandidates, toChannelName } from "./channels.logic";
+import { AgentAvatar } from "../iskra/AgentAvatar";
 import { PresenceBadge } from "./ChannelView";
+import { SHEET_INPUT_CLASS, SheetGroup, SheetRow } from "./SheetList";
 
 const NO_LEAD = "none";
 
@@ -140,78 +138,91 @@ function ChannelSettingsForm(props: {
       <DialogPanel>
         <form
           id={formId}
-          className="space-y-4"
+          className="flex flex-col gap-5"
           onSubmit={(event) => {
             event.preventDefault();
             void save();
           }}
         >
-          <label className="block space-y-1.5 text-sm">
-            <span className="text-xs font-medium text-muted-foreground">Name</span>
-            <Input value={name} onChange={(event) => setName(event.target.value)} />
-          </label>
-          <label className="block space-y-1.5 text-sm">
-            <span className="text-xs font-medium text-muted-foreground">Topic</span>
-            <Input
-              placeholder="What this channel is for"
-              value={topic}
-              onChange={(event) => setTopic(event.target.value)}
-            />
-          </label>
-          <div className="space-y-1.5">
-            <span className="block text-xs font-medium text-muted-foreground">Lead</span>
-            <Select
-              value={leadId ?? NO_LEAD}
-              onValueChange={(value) =>
-                setLeadId(value === null || value === NO_LEAD ? null : AgentId.make(value))
-              }
-            >
-              <SelectTrigger aria-label="Channel lead">
-                <SelectValue>{leadName}</SelectValue>
-              </SelectTrigger>
-              <SelectPopup>
-                <SelectItem value={NO_LEAD}>No lead</SelectItem>
-                {leadAgents.map((agent) => (
-                  <SelectItem key={agent.id} value={agent.id}>
-                    @{agent.name}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              The lead reads unaddressed messages and turns them into cards.
-            </p>
-          </div>
-          <fieldset className="space-y-1.5">
-            <legend className="text-xs font-medium text-muted-foreground">Members</legend>
-            {projectAgents.length === 0 ? (
-              <p className="text-sm text-muted-foreground">This project has no agents yet.</p>
-            ) : (
-              <ul role="list" className="flex flex-col gap-1">
-                {projectAgents.map((agent) => (
-                  <li key={agent.id}>
-                    <label className="flex h-7 items-center gap-2 text-sm">
-                      <Checkbox
-                        checked={memberIds.includes(agent.id)}
-                        onCheckedChange={(checked) =>
-                          setMemberIds((current) =>
-                            checked
-                              ? [...current, agent.id]
-                              : current.filter((id) => id !== agent.id),
-                          )
-                        }
-                      />
-                      <span className="truncate">@{agent.name}</span>
-                      <PresenceBadge presence={agent.presence} className="ml-auto" />
-                    </label>
-                  </li>
-                ))}
-              </ul>
-            )}
+          <SheetGroup>
+            <SheetRow as="label" label="Name">
+              <Input
+                unstyled
+                className={SHEET_INPUT_CLASS}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+              />
+            </SheetRow>
+            <SheetRow as="label" label="Topic">
+              <Input
+                unstyled
+                className={SHEET_INPUT_CLASS}
+                placeholder="What this channel is for"
+                value={topic}
+                onChange={(event) => setTopic(event.target.value)}
+              />
+            </SheetRow>
+          </SheetGroup>
+          <SheetGroup footer="The lead reads unaddressed messages and turns them into cards.">
+            <SheetRow label="Lead">
+              <Select
+                value={leadId ?? NO_LEAD}
+                onValueChange={(value) =>
+                  setLeadId(value === null || value === NO_LEAD ? null : AgentId.make(value))
+                }
+              >
+                <SelectTrigger aria-label="Channel lead" className="w-auto min-w-40">
+                  <SelectValue>{leadName}</SelectValue>
+                </SelectTrigger>
+                <SelectPopup>
+                  <SelectItem value={NO_LEAD}>No lead</SelectItem>
+                  {leadAgents.map((agent) => (
+                    <SelectItem key={agent.id} value={agent.id}>
+                      @{agent.name}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            </SheetRow>
+          </SheetGroup>
+          <fieldset>
+            <legend className="sr-only">Members</legend>
+            <SheetGroup title="Members">
+              {projectAgents.length === 0 ? (
+                <p className="flex min-h-11 items-center px-3 text-[13px] text-muted-foreground">
+                  This project has no agents yet.
+                </p>
+              ) : (
+                projectAgents.map((agent) => (
+                  <SheetRow
+                    key={agent.id}
+                    as="label"
+                    label={
+                      <span className="flex min-w-0 items-center gap-2.5">
+                        <AgentAvatar name={agent.name} size="md" />
+                        <span className="truncate">@{agent.name}</span>
+                      </span>
+                    }
+                  >
+                    <PresenceBadge presence={agent.presence} />
+                    <Checkbox
+                      checked={memberIds.includes(agent.id)}
+                      onCheckedChange={(checked) =>
+                        setMemberIds((current) =>
+                          checked
+                            ? [...current, agent.id]
+                            : current.filter((id) => id !== agent.id),
+                        )
+                      }
+                    />
+                  </SheetRow>
+                ))
+              )}
+            </SheetGroup>
           </fieldset>
         </form>
       </DialogPanel>
-      <DialogFooter>
+      <DialogFooter variant="bare">
         <Button
           type="button"
           variant="destructive-outline"

@@ -10,10 +10,10 @@ import {
   type OrchestrationChannelMessage,
   type ThreadId,
 } from "@iskra/contracts";
-import { AtSignIcon, SettingsIcon } from "lucide-react";
+import { InfoIcon, SettingsIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { randomUUID } from "~/lib/utils";
+import { cn, randomUUID } from "~/lib/utils";
 import { channelEnvironment } from "~/state/channels";
 import {
   useEnvironmentAgents,
@@ -23,16 +23,19 @@ import {
 } from "~/state/entities";
 import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { AgentAvatar } from "../iskra/AgentAvatar";
+import { SparkGlyph } from "../iskra/SparkGlyph";
 import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import {
   AgentSettingsDialog,
   useAgentDefinitions,
   useSaveAgentDefinition,
 } from "./AgentSettingsDialog";
-import { MessageComposer, PresenceBadge, Timeline, useStickToNewest } from "./ChannelView";
-import { agentDmChannel, dmTargets, liveInstances } from "./channels.logic";
+import { MessageComposer, Timeline, useStickToNewest } from "./ChannelView";
+import { agentDmChannel, dmTargets, liveInstances, presenceSpark } from "./channels.logic";
 import { RunBlock } from "./RunBlock";
 
 const EMPTY_MESSAGES: ReadonlyArray<OrchestrationChannelMessage> = [];
@@ -110,9 +113,12 @@ export function AgentView(props: {
         <WorkspacePageHeader className="border-b border-border">
           {agent === null ? null : (
             <div className="flex min-w-0 flex-1 items-center gap-2">
-              <AtSignIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-              <h1 className="truncate text-sm font-semibold">{agent.name}</h1>
-              <PresenceBadge presence={agent.presence} />
+              <AgentAvatar
+                name={agent.name}
+                size="md"
+                spark={agent.presence === "idle" ? undefined : presenceSpark(agent.presence)}
+              />
+              <h1 className="truncate text-[15px] font-semibold">{agent.name}</h1>
               <AgentStats
                 agent={agent}
                 cards={cards}
@@ -120,23 +126,29 @@ export function AgentView(props: {
                   (project) => project.environmentId === props.environmentId,
                 )}
               />
-              <div className="ml-auto flex shrink-0 items-center gap-1">
-                <Button
-                  size="sm"
-                  variant={view === "messages" ? "secondary" : "ghost-muted"}
-                  aria-pressed={view === "messages"}
-                  onClick={() => setView("messages")}
+              <div className="ml-auto flex shrink-0 items-center gap-2">
+                <div
+                  role="group"
+                  aria-label="View"
+                  className="flex items-center rounded-lg bg-secondary p-0.5"
                 >
-                  Messages
-                </Button>
-                <Button
-                  size="sm"
-                  variant={view === "sessions" ? "secondary" : "ghost-muted"}
-                  aria-pressed={view === "sessions"}
-                  onClick={() => setView("sessions")}
-                >
-                  Sessions
-                </Button>
+                  {(["messages", "sessions"] as const).map((entry) => (
+                    <button
+                      key={entry}
+                      type="button"
+                      aria-pressed={view === entry}
+                      onClick={() => setView(entry)}
+                      className={cn(
+                        "h-7 rounded-md px-3 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        view === entry
+                          ? "bg-card text-foreground shadow-[0_0_0_0.5px_rgb(0_0_0/6%),0_1px_2px_rgb(0_0_0/12%)] dark:bg-[rgb(120_120_128/36%)]"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {entry === "messages" ? "Messages" : "Sessions"}
+                    </button>
+                  ))}
+                </div>
                 <Button
                   size="icon-sm"
                   variant="ghost-muted"
@@ -172,24 +184,25 @@ export function AgentView(props: {
             {live.length > 0 ? (
               <section
                 aria-label="Live now"
-                className="flex max-h-32 shrink-0 flex-col gap-0.5 overflow-y-auto border-b border-border px-5 py-2"
+                className="flex max-h-32 shrink-0 flex-col overflow-y-auto border-b border-border px-5 py-2.5 sm:px-8"
               >
-                <h2 className="text-xs font-medium text-muted-foreground">
+                <h2 className="pb-1 text-[11px] font-semibold text-muted-foreground/55">
                   Live now <span className="tabular-nums">{live.length}</span>
                 </h2>
-                <ul className="flex flex-col">
+                <ul className="flex max-w-[716px] flex-col">
                   {live.map((instance) => (
                     <li
                       key={instance.threadId}
-                      className="flex min-w-0 items-baseline gap-2 text-sm"
+                      className="flex h-7 min-w-0 items-center gap-2 text-[13px]"
                     >
+                      <SparkGlyph state="working" size={12} />
                       <span className="min-w-0 truncate">
                         {instance.doing}{" "}
                         <span className="text-muted-foreground">{instance.where}</span>
                       </span>
                       <time
                         dateTime={instance.since}
-                        className="ms-auto shrink-0 text-xs tabular-nums text-muted-foreground"
+                        className="ms-auto shrink-0 text-[11px] tabular-nums text-muted-foreground/55"
                       >
                         since {sinceFormat.format(new Date(instance.since))}
                       </time>
@@ -209,25 +222,29 @@ export function AgentView(props: {
                   environmentId={props.environmentId}
                 />
               ) : (
-                <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-                  <p className="text-sm text-muted-foreground">
-                    Message @{agent.name}. It can read the project but not change it; changes need a
-                    card.
+                <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 overflow-y-auto px-5 py-4 text-center">
+                  <AgentAvatar name={agent.name} size="xl" />
+                  <p className="mt-1 text-[15px] font-semibold">Message @{agent.name}</p>
+                  <p className="max-w-80 text-[13px] text-muted-foreground">
+                    It can read the project but not change it; changes need a card.
                   </p>
                 </div>
               )
             ) : (
-              <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+              <div
+                ref={scrollRef}
+                className="min-h-0 flex-1 overflow-y-auto px-5 pt-7 pb-4 sm:px-8"
+              >
                 {runs.error !== null ? (
                   <p className="text-sm text-destructive">{runs.error}</p>
                 ) : null}
                 {runs.data !== null && sessions.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-[13px] text-muted-foreground">
                     @{agent.name} has no sessions yet. Message it, mention it in a channel or assign
                     it a card.
                   </p>
                 ) : null}
-                <ol className="flex flex-col gap-5">
+                <ol className="flex max-w-[716px] flex-col gap-4">
                   {sessions.map((run) => (
                     <li key={run.threadId} className="min-w-0">
                       <RunBlock
@@ -242,10 +259,10 @@ export function AgentView(props: {
               </div>
             )}
             {targets.length > 1 ? (
-              <label className="flex shrink-0 items-center gap-2 px-5 pb-2 text-xs text-muted-foreground">
+              <label className="-mb-2 flex shrink-0 items-center gap-2 px-5 pt-2 text-xs text-muted-foreground sm:px-8">
                 Write to
                 <select
-                  className="min-w-0 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+                  className="h-7 min-w-0 rounded-lg border-0 bg-secondary px-2 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   value={target?.threadId ?? ""}
                   onChange={(event) =>
                     setChosenThreadId(
@@ -344,12 +361,25 @@ function AgentStats(props: {
   // The same record the pre-start preview shows as a routing hint, over the last 30 days.
   const recent = templateMetrics(own, now).get(props.agent.id);
   return (
-    <span className="hidden truncate text-xs tabular-nums text-muted-foreground sm:inline">
-      ${(props.agent.spentUsd ?? 0).toFixed(2)} spent · {landed} landed · {returns} sent back ·{" "}
-      {waiting} waiting on you
-      {recent === undefined
-        ? ""
-        : ` · last 30 days: ${metricsLine(props.agent.name, recent).replace(`@${props.agent.name}: `, "")}`}
-    </span>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            aria-label={`@${props.agent.name} record`}
+            className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        }
+      >
+        <InfoIcon aria-hidden className="size-4" />
+      </TooltipTrigger>
+      <TooltipPopup className="max-w-72 tabular-nums">
+        ${(props.agent.spentUsd ?? 0).toFixed(2)} spent · {landed} landed · {returns} sent back ·{" "}
+        {waiting} waiting on you
+        {recent === undefined
+          ? ""
+          : ` · last 30 days: ${metricsLine(props.agent.name, recent).replace(`@${props.agent.name}: `, "")}`}
+      </TooltipPopup>
+    </Tooltip>
   );
 }

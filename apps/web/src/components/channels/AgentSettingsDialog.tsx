@@ -35,6 +35,7 @@ import { toastManager } from "../ui/toast";
 import { DisabledReason } from "../cards/DisabledReason";
 import { AgentModelPicker, AgentRunNote, useAgentRunRefusal } from "./AgentModelPicker";
 import { toAgentName } from "./channels.logic";
+import { SHEET_INPUT_CLASS, SHEET_TEXTAREA_CLASS, SheetGroup, SheetRow } from "./SheetList";
 
 type SavedAgentDefinition = AgentDefinitionInput & { readonly id: AgentId };
 
@@ -62,11 +63,14 @@ export function CapabilityFields(props: {
     props.onChange(next.includes("write") ? next : next.filter((entry) => entry !== "shell"));
   };
   return (
-    <div className="space-y-1.5">
-      <span className="block text-xs font-medium text-muted-foreground">Capabilities</span>
-      <div className="flex flex-wrap gap-x-4 gap-y-2">
+    <fieldset>
+      <legend className="sr-only">Capabilities</legend>
+      <SheetGroup
+        title="Capabilities"
+        footer="Card sessions only; conversations and DMs are always read-only. Shell needs write."
+      >
         {CAPABILITIES.map((entry) => (
-          <label key={entry.value} className="flex items-center gap-2 text-sm">
+          <SheetRow key={entry.value} as="label" label={entry.label}>
             <Checkbox
               checked={props.value.includes(entry.value)}
               disabled={
@@ -75,14 +79,10 @@ export function CapabilityFields(props: {
               }
               onCheckedChange={(checked) => toggle(entry.value, checked)}
             />
-            {entry.label}
-          </label>
+          </SheetRow>
         ))}
-      </div>
-      <p className="text-xs text-muted-foreground">
-        Card sessions only; conversations and DMs are always read-only. Shell needs write.
-      </p>
-    </div>
+      </SheetGroup>
+    </fieldset>
   );
 }
 
@@ -116,13 +116,12 @@ export function RoleFields(props: {
   readonly disabled?: boolean;
 }) {
   return (
-    <fieldset className="space-y-1.5">
-      <legend className="block text-xs font-medium text-muted-foreground">Roles</legend>
-      <div className="grid gap-1.5 sm:grid-cols-2">
+    <fieldset>
+      <legend className="sr-only">Roles</legend>
+      <SheetGroup title="Roles">
         {ROLES.map((entry) => (
-          <label key={entry.value} className="flex items-start gap-2 text-sm">
+          <SheetRow key={entry.value} as="label" label={entry.label} hint={entry.hint}>
             <Checkbox
-              className="mt-0.5"
               checked={props.value.includes(entry.value)}
               disabled={props.disabled === true}
               onCheckedChange={(checked) =>
@@ -135,13 +134,9 @@ export function RoleFields(props: {
                 )
               }
             />
-            <span className="flex flex-col">
-              {entry.label}
-              <span className="text-xs text-muted-foreground">{entry.hint}</span>
-            </span>
-          </label>
+          </SheetRow>
         ))}
-      </div>
+      </SheetGroup>
     </fieldset>
   );
 }
@@ -169,8 +164,7 @@ function ChoiceField<K extends string>(props: {
 }) {
   const keys = Object.keys(props.labels) as K[];
   return (
-    <label className="flex items-center justify-between gap-3 text-sm">
-      <span className="text-xs font-medium text-muted-foreground">{props.label}</span>
+    <SheetRow as="label" label={props.label}>
       <Select
         value={props.value}
         disabled={props.disabled === true}
@@ -190,7 +184,7 @@ function ChoiceField<K extends string>(props: {
           ))}
         </SelectPopup>
       </Select>
-    </label>
+    </SheetRow>
   );
 }
 
@@ -204,53 +198,55 @@ function BlueprintFields(props: {
     props.onChange({ ...props.value, [key]: value });
   const disabled = props.disabled === true;
   return (
-    <fieldset className="space-y-2">
-      <legend className="block text-xs font-medium text-muted-foreground">Blueprint</legend>
-      <ChoiceField
-        label="Preflight"
-        value={props.value.preflight}
-        labels={PREFLIGHT_LABEL}
-        onChange={(value) => set("preflight", value)}
-        disabled={disabled}
-      />
-      <ChoiceField
-        label="Screenshots"
-        value={props.value.uiCapture}
-        labels={UI_CAPTURE_LABEL}
-        onChange={(value) => set("uiCapture", value)}
-        disabled={disabled}
-      />
-      <label className="block space-y-1 text-sm">
-        <span className="text-xs font-medium text-muted-foreground">
-          UI paths to screenshot, one per line
-        </span>
-        <Textarea
-          rows={2}
-          size="sm"
+    <fieldset>
+      <legend className="sr-only">Blueprint</legend>
+      <SheetGroup
+        title="Blueprint"
+        footer="These only add steps: checks, journeys and the scope judge always run."
+      >
+        <ChoiceField
+          label="Preflight"
+          value={props.value.preflight}
+          labels={PREFLIGHT_LABEL}
+          onChange={(value) => set("preflight", value)}
           disabled={disabled}
-          placeholder="/settings"
-          value={props.value.uiPaths.join("\n")}
-          onChange={(event) =>
-            set(
-              "uiPaths",
-              event.target.value
-                .split("\n")
-                .map((line) => line.trim())
-                .filter((line) => line.length > 0),
-            )
-          }
         />
-      </label>
-      <ChoiceField
-        label="Verify its cards"
-        value={props.value.verify}
-        labels={VERIFY_LABEL}
-        onChange={(value) => set("verify", value)}
-        disabled={disabled}
-      />
-      <p className="text-xs text-muted-foreground">
-        These only add steps: checks, journeys and the scope judge always run.
-      </p>
+        <ChoiceField
+          label="Screenshots"
+          value={props.value.uiCapture}
+          labels={UI_CAPTURE_LABEL}
+          onChange={(value) => set("uiCapture", value)}
+          disabled={disabled}
+        />
+        <label className="flex flex-col gap-1 px-3 py-2 text-[13px] focus-within:bg-accent/40">
+          <span>UI paths to screenshot, one per line</span>
+          <Textarea
+            unstyled
+            className={SHEET_TEXTAREA_CLASS}
+            rows={2}
+            size="sm"
+            disabled={disabled}
+            placeholder="/settings"
+            value={props.value.uiPaths.join("\n")}
+            onChange={(event) =>
+              set(
+                "uiPaths",
+                event.target.value
+                  .split("\n")
+                  .map((line) => line.trim())
+                  .filter((line) => line.length > 0),
+              )
+            }
+          />
+        </label>
+        <ChoiceField
+          label="Verify its cards"
+          value={props.value.verify}
+          labels={VERIFY_LABEL}
+          onChange={(value) => set("verify", value)}
+          disabled={disabled}
+        />
+      </SheetGroup>
     </fieldset>
   );
 }
@@ -270,33 +266,37 @@ function VerifyWithField(props: {
       ? [...props.verifiers, props.value]
       : props.verifiers;
   return (
-    <label className="flex items-center justify-between gap-3 text-sm">
-      <span className="flex flex-col">
-        <span className="text-xs font-medium text-muted-foreground">Verified by</span>
-        <span className="text-xs text-muted-foreground">
-          Automatic prefers another provider, then another model.
-        </span>
-      </span>
-      <Select
-        value={props.value ?? AUTOMATIC}
-        disabled={props.disabled === true}
-        onValueChange={(value) => props.onChange(value === null || value === AUTOMATIC ? null : value)}
+    <SheetGroup>
+      <SheetRow
+        as="label"
+        label="Verified by"
+        hint="Automatic prefers another provider, then another model."
       >
-        <SelectTrigger aria-label="Verified by" className="w-auto min-w-44">
-          <SelectValue>
-            {(value: string | null) => (value === null || value === AUTOMATIC ? "Automatic" : `@${value}`)}
-          </SelectValue>
-        </SelectTrigger>
-        <SelectPopup>
-          <SelectItem value={AUTOMATIC}>Automatic</SelectItem>
-          {names.map((name) => (
-            <SelectItem key={name} value={name}>
-              @{name}
-            </SelectItem>
-          ))}
-        </SelectPopup>
-      </Select>
-    </label>
+        <Select
+          value={props.value ?? AUTOMATIC}
+          disabled={props.disabled === true}
+          onValueChange={(value) =>
+            props.onChange(value === null || value === AUTOMATIC ? null : value)
+          }
+        >
+          <SelectTrigger aria-label="Verified by" className="w-auto min-w-44">
+            <SelectValue>
+              {(value: string | null) =>
+                value === null || value === AUTOMATIC ? "Automatic" : `@${value}`
+              }
+            </SelectValue>
+          </SelectTrigger>
+          <SelectPopup>
+            <SelectItem value={AUTOMATIC}>Automatic</SelectItem>
+            {names.map((name) => (
+              <SelectItem key={name} value={name}>
+                @{name}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      </SheetRow>
+    </SheetGroup>
   );
 }
 
@@ -490,45 +490,54 @@ function AgentSettingsForm(props: {
       <DialogPanel>
         <form
           id={formId}
-          className="space-y-4"
           onSubmit={(event) => {
             event.preventDefault();
             void save();
           }}
         >
-          <fieldset disabled={props.archived} className="space-y-4">
-            <label className="block space-y-1.5 text-sm">
-              <span className="text-xs font-medium text-muted-foreground">Name</span>
-              <Input value={name} onChange={(event) => setName(event.target.value)} />
-            </label>
-            <div className="space-y-1.5">
-              <span className="block text-xs font-medium text-muted-foreground">Model</span>
-              <AgentModelPicker
-                environmentId={props.environmentId}
-                value={model}
-                onChange={setModel}
-                disabled={props.archived}
-              />
-            </div>
-            <label className="block space-y-1.5 text-sm">
-              <span className="text-xs font-medium text-muted-foreground">Role</span>
-              <Textarea
-                rows={4}
-                size="sm"
-                value={rolePrompt}
-                onChange={(event) => setRolePrompt(event.target.value)}
-              />
-            </label>
-            <label className="block space-y-1.5 text-sm">
-              <span className="text-xs font-medium text-muted-foreground">Tags</span>
-              <Input
-                placeholder="backend, api"
-                value={tags}
-                onChange={(event) => setTags(event.target.value)}
-              />
-            </label>
+          <fieldset disabled={props.archived} className="flex flex-col gap-5">
+            <SheetGroup>
+              <SheetRow as="label" label="Name">
+                <Input
+                  unstyled
+                  className={SHEET_INPUT_CLASS}
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                />
+              </SheetRow>
+              <SheetRow label="Model">
+                <AgentModelPicker
+                  environmentId={props.environmentId}
+                  value={model}
+                  onChange={setModel}
+                  disabled={props.archived}
+                />
+              </SheetRow>
+              <SheetRow as="label" label="Tags">
+                <Input
+                  unstyled
+                  className={SHEET_INPUT_CLASS}
+                  placeholder="backend, api"
+                  value={tags}
+                  onChange={(event) => setTags(event.target.value)}
+                />
+              </SheetRow>
+            </SheetGroup>
+            <SheetGroup title="Role">
+              <label className="block px-3 py-2 focus-within:bg-accent/40">
+                <span className="sr-only">Role</span>
+                <Textarea
+                  unstyled
+                  className={SHEET_TEXTAREA_CLASS}
+                  rows={4}
+                  size="sm"
+                  value={rolePrompt}
+                  onChange={(event) => setRolePrompt(event.target.value)}
+                />
+              </label>
+            </SheetGroup>
             <RoleFields value={roles} onChange={setRoles} disabled={props.archived} />
-            <div className="space-y-1.5">
+            <div className="flex flex-col gap-1.5 [&>p]:px-3">
               <CapabilityFields
                 value={capabilities}
                 onChange={setCapabilities}
@@ -554,7 +563,7 @@ function AgentSettingsForm(props: {
           </fieldset>
         </form>
       </DialogPanel>
-      <DialogFooter>
+      <DialogFooter variant="bare">
         {props.archived ? (
           <Button type="button" disabled={busy} onClick={() => void unarchive()}>
             Unarchive
