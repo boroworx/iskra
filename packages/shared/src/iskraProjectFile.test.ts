@@ -46,9 +46,11 @@ describe("buildIskraProjectFileJsonSchema", () => {
     expect(Object.keys(script?.properties ?? {}).sort()).toEqual([
       "autoOpenPreview",
       "command",
+      "exclusive",
       "icon",
       "name",
       "previewUrl",
+      "role",
       "runOnWorktreeCreate",
     ]);
   });
