@@ -43,6 +43,7 @@ const facts = (overrides: Partial<OwnerRunFacts> = {}): OwnerRunFacts => ({
   toolRunningSince: null,
   tools: [],
   workStartedAt: now - 60 * MINUTE,
+  heavyJobPending: false,
   strikes: new Map(),
   ...overrides,
 });
@@ -120,6 +121,11 @@ describe("watchOwnerRun", () => {
       "idle in progress for 5 minutes",
       facts({ turnActive: false, sessionSince: now - 5 * MINUTE }),
       ["nudge", "idleInProgress", "idleInProgress", null],
+    ],
+    [
+      "idle for 5 minutes while its checks wait for the machine",
+      facts({ turnActive: false, sessionSince: now - 5 * MINUTE, heavyJobPending: true }),
+      null,
     ],
     [
       "idle again after the nudge",

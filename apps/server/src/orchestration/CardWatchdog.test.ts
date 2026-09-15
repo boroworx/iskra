@@ -19,7 +19,7 @@ import { TestClock } from "effect/testing";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import * as CardWatchdog from "./CardWatchdog.ts";
 import { CardWorkspace } from "./CardWorkspace.ts";
-import { HostAdmission } from "./HostAdmission.ts";
+import { HostAdmission, type HostAdmissionSnapshot } from "./HostAdmission.ts";
 import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
 
@@ -59,6 +59,7 @@ const makeWatchdog = (
   model: OrchestrationReadModel = readModel,
   workspace = Layer.mock(CardWorkspace)({ serviceHealth: () => Effect.succeed([]) }),
   events: Stream.Stream<OrchestrationEvent> = Stream.never,
+  heavyJobs: HostAdmissionSnapshot = { running: [], waiting: [], memoryPressureSince: null },
 ) =>
   CardWatchdog.layer.pipe(
     Layer.provide(workspace),
@@ -84,7 +85,7 @@ const makeWatchdog = (
     ),
     Layer.provide(
       Layer.mock(HostAdmission)({
-        snapshot: Effect.succeed({ running: [], waiting: [], memoryPressureSince: null }),
+        snapshot: Effect.succeed(heavyJobs),
         cancelLowestPriority: Effect.succeed(null),
       }),
     ),
@@ -122,6 +123,34 @@ it.effect("checks live owners on its minute tick and nudges one left idle for fi
         ["message", null, "builder"],
       ]);
     }).pipe(Effect.provide(makeWatchdog(dispatched)), Effect.scoped);
+  }),
+);
+
+it.effect("leaves an idle owner alone while its card's run_checks waits for the machine", () =>
+  Effect.gen(function* () {
+    const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationCommand>>([]);
+    const queued: HostAdmissionSnapshot = {
+      running: [],
+      waiting: [
+        {
+          id: 1,
+          job: { cardId, projectId: ProjectId.make("project-watchdog"), priority: 0, label: "run_checks", kind: "runChecks" },
+          enqueuedAt: 0,
+          startedAt: null,
+        },
+      ],
+      memoryPressureSince: null,
+    };
+    yield* Effect.gen(function* () {
+      const watchdog = yield* CardWatchdog.CardWatchdog;
+      yield* watchdog.start();
+      yield* TestClock.adjust("10 minutes");
+      yield* watchdog.drain;
+      expect(yield* Ref.get(dispatched)).toEqual([]);
+    }).pipe(
+      Effect.provide(makeWatchdog(dispatched, readModel, undefined, Stream.never, queued)),
+      Effect.scoped,
+    );
   }),
 );
 

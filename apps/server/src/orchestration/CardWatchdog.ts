@@ -30,7 +30,7 @@ import {
 import { forkParked } from "../serverActivation.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { CardWorkspace } from "./CardWorkspace.ts";
-import { HostAdmission } from "./HostAdmission.ts";
+import { HostAdmission, type HostAdmissionSnapshot } from "./HostAdmission.ts";
 import * as OrchestrationEngine from "./Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts";
 import {
@@ -350,6 +350,7 @@ const make = Effect.gen(function* () {
   const ownerFacts = Effect.fn("CardWatchdog.ownerFacts")(function* (
     run: OrchestrationLiveRun & { readonly cardId: CardId },
     card: OrchestrationCard,
+    heavyJobs: HostAdmissionSnapshot,
   ) {
     const shell = yield* snapshotQuery.getThreadShellById(run.threadId);
     if (Option.isNone(shell) || shell.value.session === null) {
@@ -373,6 +374,7 @@ const make = Effect.gen(function* () {
       toolRunningSince: tool.toolRunningSince,
       tools: tool.tools,
       workStartedAt: toMillis(owners.at(-1)?.startedAt ?? run.startedAt),
+      heavyJobPending: [...heavyJobs.running, ...heavyJobs.waiting].some((entry) => entry.job.cardId === card.id),
       strikes: strikes.get(run.threadId) ?? new Map(),
     } satisfies OwnerRunFacts;
   });
@@ -393,11 +395,12 @@ const make = Effect.gen(function* () {
       if (!liveThreads.has(threadId)) strikes.delete(threadId);
     }
 
+    const snapshot = yield* admission.snapshot;
     const activeOwners: Array<{ threadId: ThreadId; priority: OrchestrationCard["priority"]; startedAt: string }> = [];
     for (const run of owners) {
       const card = cards.get(run.cardId);
       if (card === undefined || card.paused !== null) continue;
-      const facts = yield* ownerFacts(run, card);
+      const facts = yield* ownerFacts(run, card, snapshot);
       if (facts === undefined) continue;
       if (facts.turnActive) {
         activeOwners.push({ threadId: run.threadId, priority: card.priority, startedAt: run.startedAt });
@@ -423,8 +426,6 @@ const make = Effect.gen(function* () {
         forBuilder: false,
       });
     }
-
-    const snapshot = yield* admission.snapshot;
 
     // Heavy jobs past their limit: started over once, then stopped.
     const liveJobIds = new Set([...snapshot.running, ...snapshot.waiting].map((entry) => entry.id));

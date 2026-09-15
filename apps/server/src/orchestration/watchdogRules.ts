@@ -77,6 +77,8 @@ export interface OwnerRunFacts {
   }>;
   // When the card's first owner session started.
   readonly workStartedAt: number;
+  // A heavy job for the card (its checks, a run_checks) is queued or running: the agent is waiting on it.
+  readonly heavyJobPending: boolean;
   // Nudges already given this session, and when the latest was.
   readonly strikes: ReadonlyMap<WatchdogRule, { readonly count: number; readonly at: number }>;
 }
@@ -215,7 +217,12 @@ export function watchOwnerRun(facts: OwnerRunFacts, now: number): WatchdogAction
       : { kind: "pause", rule, session: "stop", reason: { code: "stuck", text: `${text} It kept going after a nudge.` } };
   }
 
-  if (!facts.turnActive && facts.cardStatus === "inProgress" && now - facts.sessionSince >= L.idleInProgressMs) {
+  if (
+    !facts.turnActive &&
+    !facts.heavyJobPending &&
+    facts.cardStatus === "inProgress" &&
+    now - facts.sessionSince >= L.idleInProgressMs
+  ) {
     const previous = strike("idleInProgress");
     if (previous === undefined) {
       return {
