@@ -39,6 +39,7 @@ vi.mock("../chat/ProviderModelPicker", () => ({ ProviderModelPicker: () => null 
 vi.mock("./settingsSearch", () => ({ searchableSetting: (id: string) => ({ id, title: id }) }));
 vi.mock("./settingsLayout", () => ({
   SETTINGS_PICKER_TRIGGER_CLASSNAME: "",
+  SETTINGS_SELECT_WIDTH_CLASSNAME: "",
   SettingResetButton: ({ label, onClick }: { label: string; onClick: () => void }) => (
     <button onClick={onClick}>{`Reset ${label}`}</button>
   ),

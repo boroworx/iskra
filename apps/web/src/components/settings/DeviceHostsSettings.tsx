@@ -8,9 +8,9 @@ import { useDeviceState } from "../../state/device";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
-import { MoreVertical, PlusIcon } from "lucide-react";
+import { MoreVertical } from "lucide-react";
 import { Menu, MenuTrigger, MenuPopup, MenuItem } from "../ui/menu";
-import { SettingsRow } from "./settingsLayout";
+import { SettingsAddButton, SettingsRow } from "./settingsLayout";
 
 import { useSettingsScope } from "./SettingsScopeContext";
 import { toastManager } from "../ui/toast";
@@ -79,24 +79,22 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
       title="Device hosts"
       serverScoped
       settingKeys={["deviceHosts"]}
-      description="Add remote machines with simulator or emulator runtimes installed, and the selected environments will connect over SSH and set up device tools automatically."
+      description="Remote machines with simulators or emulators, reached over SSH. The selected environments connect and set up device tools automatically."
       control={
-        <Button
-          size="sm"
-          variant="outline"
+        <SettingsAddButton
           disabled={projectScope || busy || !props.environmentId || editing !== null}
           onClick={() => {
             setOriginalHost(null);
             setEditing({ id: randomUUID(), label: "", target: "" });
           }}
         >
-          <PlusIcon className="size-3.5" /> Add host
-        </Button>
+          Add host
+        </SettingsAddButton>
       }
     >
-      <div className="pt-3 pb-2">
+      <div className="pt-1 pb-2">
         {!props.environmentId ? (
-          <p className="text-sm text-muted-foreground">
+          <p className="py-2 text-[13px] text-muted-foreground">
             Connect a selected environment to manage device hosts.
           </p>
         ) : (
@@ -177,7 +175,7 @@ function DeviceHostList({
   return (
     <>
       {hosts.length === 0 ? (
-        <p className="py-2 text-sm text-muted-foreground">No device hosts.</p>
+        <p className="py-2 text-[13px] text-muted-foreground">No device hosts.</p>
       ) : null}
       {hosts.map((host) => {
         const status = state.hostStatuses[host.id];

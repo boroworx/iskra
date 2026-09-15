@@ -37,7 +37,7 @@ import {
   type PreviewViewportSetting,
 } from "@iskra/contracts";
 import { PREVIEW_VIEWPORT_PRESETS } from "@iskra/shared/previewViewport";
-import { MoreVertical, Plus as PlusIcon } from "lucide-react";
+import { MoreVertical } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 
 import { ScreenRotationIcon } from "~/browser/ScreenRotationIcon";
@@ -58,7 +58,7 @@ import {
 } from "~/components/device/DeviceSetup";
 import { isElectron } from "../../env";
 
-import { Badge } from "../ui/badge";
+import { StatusPill } from "../iskra/StatusPill";
 import {
   Menu,
   MenuGroup,
@@ -103,12 +103,16 @@ import {
 } from "~/hooks/useSettings";
 
 import {
+  SETTINGS_GROUP_ROWS_CLASSNAME,
+  SETTINGS_SELECT_WIDTH_CLASSNAME,
+  SettingsAddButton,
   SettingsUnavailableGroup,
   SettingResetButton,
   SettingsPageContainer,
   SettingsRow,
   SettingsSection,
 } from "./settingsLayout";
+import { SnapShotSettings } from "./SnapShotSettings";
 import { searchableSetting } from "./settingsSearch";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
@@ -297,7 +301,7 @@ function BrowserViewportSetting({ disabled }: { readonly disabled: boolean }) {
           >
             <SelectTrigger
               size="sm"
-              className="w-full min-w-0 sm:w-44"
+              className={SETTINGS_SELECT_WIDTH_CLASSNAME}
               aria-label="Default browser viewport"
             >
               <SelectValue>{viewportSelectLabel(viewport)}</SelectValue>
@@ -408,7 +412,11 @@ function BrowserZoomSetting({ disabled }: { readonly disabled: boolean }) {
             if (next !== undefined) updateSettings({ browserDefaultZoomFactor: next });
           }}
         >
-          <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Default browser zoom">
+          <SelectTrigger
+            size="sm"
+            className={SETTINGS_SELECT_WIDTH_CLASSNAME}
+            aria-label="Default browser zoom"
+          >
             <SelectValue>{zoomLabel(zoomFactor)}</SelectValue>
           </SelectTrigger>
           <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -452,7 +460,7 @@ function BrowserAppearanceSetting({ disabled }: { readonly disabled: boolean }) 
         >
           <SelectTrigger
             size="sm"
-            className="w-full sm:w-40"
+            className={SETTINGS_SELECT_WIDTH_CLASSNAME}
             aria-label="Default browser appearance"
           >
             <SelectValue>{APPEARANCE_LABELS[appearance]}</SelectValue>
@@ -501,7 +509,7 @@ function BrowserRecordingFrameRateSetting({ disabled }: { readonly disabled: boo
         >
           <SelectTrigger
             size="sm"
-            className="w-full sm:w-40"
+            className={SETTINGS_SELECT_WIDTH_CLASSNAME}
             aria-label="Browser recording frame rate"
           >
             <SelectValue>{frameRate} fps</SelectValue>
@@ -531,7 +539,7 @@ function BrowserLinkTargetSetting({ disabled }: { readonly disabled: boolean }) 
   return (
     <SettingsRow
       {...searchableSetting("browser-link-target")}
-      description="Where links in the chat and terminal open. Hold ⌘ or Ctrl while clicking a link to open it in your default browser either way."
+      description="Where links in agent messages and the terminal open. Hold ⌘ or Ctrl while clicking to use your default browser either way."
       resetAction={
         !disabled && linkTarget !== DEFAULT_BROWSER_LINK_TARGET ? (
           <SettingResetButton
@@ -550,7 +558,11 @@ function BrowserLinkTargetSetting({ disabled }: { readonly disabled: boolean }) 
             }
           }}
         >
-          <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Open links in">
+          <SelectTrigger
+            size="sm"
+            className={SETTINGS_SELECT_WIDTH_CLASSNAME}
+            aria-label="Open links in"
+          >
             <SelectValue>{LINK_TARGET_LABELS[linkTarget]}</SelectValue>
           </SelectTrigger>
           <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -651,7 +663,7 @@ function DeviceIntegrationControls({
         {...searchableSetting("device-hub")}
         serverScoped
         settingKeys={["enableDeviceSupport"]}
-        description={deviceHubDescription}
+        description={`Open simulators and emulators here or on a device host. ${deviceHubDescription}`}
         control={
           <>
             {pending === "hub" ? <DeviceHubSetupStatus state={state} pending compact /> : null}
@@ -710,7 +722,7 @@ function DeviceIntegrationControls({
         {...searchableSetting("agent-device-access")}
         serverScoped
         settingKeys={["enableAgentDeviceAccess"]}
-        description={agentDeviceDescription}
+        description={`Let new agent sessions control local and remote devices. ${agentDeviceDescription}`}
         control={
           <>
             {pending === "agent" ? <AgentDeviceSetupStatus state={state} pending compact /> : null}
@@ -749,7 +761,7 @@ function BrowserAutoShowFloatingPreviewSetting({ disabled }: { readonly disabled
   return (
     <SettingsRow
       {...searchableSetting("browser-auto-show-floating-preview")}
-      description="Show the floating preview when an agent opens a browser or device unless the agent says otherwise."
+      description="Show the floating preview when an agent opens a browser or device. An agent can still ask to keep it hidden."
       resetAction={
         !disabled && autoShow !== DEFAULT_BROWSER_AUTO_SHOW_FLOATING_PREVIEW ? (
           <SettingResetButton
@@ -1056,19 +1068,12 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   return (
     <SettingsRow
       {...searchableSetting("browser-profiles")}
-      description="Profiles separate cookies and logins. Incognito data is cleared when the app closes."
+      description="Profiles keep cookies and logins apart. Incognito data is cleared when the app closes."
       control={
         <Menu onOpenChange={(open) => open && loadSources()}>
           <MenuTrigger
-            render={
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={profileWritesDisabled || importInFlight}
-              />
-            }
+            render={<SettingsAddButton disabled={profileWritesDisabled || importInFlight} />}
           >
-            <PlusIcon />
             Add profile
           </MenuTrigger>
           <MenuPopup align="end" className="min-w-56">
@@ -1123,23 +1128,13 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
         </Menu>
       }
     >
-      {/*
-        The bordered container groups rows unambiguously at any width, and
-        carries the bottom spacing `SettingsRow` leaves to its children
-        (`pt-3 pb-1`).
-      */}
-      <div className="mt-2 mb-2 overflow-hidden rounded-lg border border-border/60">
-        {listedProfiles.map((profile, index) => {
+      {/* Profiles are plain rows of the group, split by the same inset hairlines. */}
+      <div className={cn("-mx-4 mt-1", SETTINGS_GROUP_ROWS_CLASSNAME)}>
+        {listedProfiles.map((profile) => {
           const builtIn = isBuiltInBrowserProfileId(profile.id);
           const isDefault = profile.id === resolvedDefaultId;
           return (
-            <div
-              key={profile.id}
-              className={cn(
-                "flex items-center gap-3 px-3 py-2",
-                index > 0 && "border-t border-border/60",
-              )}
-            >
+            <div key={profile.id} className="flex min-h-11 items-center gap-3 px-4 py-1.5">
               <span className="flex min-w-0 flex-1 items-center gap-2">
                 {builtIn ? (
                   // Dimmed here rather than on the table: a wrapper-level dim
@@ -1148,7 +1143,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                   // control in the block sits at 0.64.
                   <span
                     className={cn(
-                      "truncate text-sm text-foreground",
+                      "truncate text-[13px] text-foreground",
                       profileWritesDisabled && "opacity-64",
                     )}
                   >
@@ -1166,21 +1161,16 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                     onCommit={(next) => renameProfile(profile.id, next)}
                   />
                 )}
-                {/*
-                  Dimmed with the rest of the row: a `Badge` has no disabled
-                  treatment of its own, so a solid `bg-primary` pill would
-                  otherwise sit at full strength beside a name, rename field
-                  and menu button that are all at 0.64.
-                */}
-                {isDefault ? (
-                  <Badge className={cn(profileWritesDisabled && "opacity-64")}>Default</Badge>
+                {/* A profile already named "Default" needs no pill saying so. */}
+                {isDefault && profile.name !== "Default" ? (
+                  <StatusPill label="Default" tone="gray" />
                 ) : null}
               </span>
               <Menu>
                 <MenuTrigger
                   render={
                     <Button
-                      size="icon-xs"
+                      size="icon-sm"
                       variant="ghost-muted"
                       disabled={profileWritesDisabled || importInFlight}
                       aria-label={`${profile.name} options`}
@@ -1346,6 +1336,7 @@ export function IntegrationsSettingsPanel() {
         )}
       </SettingsSection>
       <DeviceIntegrationSettings />
+      <SnapShotSettings embedded />
     </SettingsPageContainer>
   );
 }

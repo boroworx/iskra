@@ -359,7 +359,7 @@ export function SnapShotSetupDialog({
                 ) : null}
                 {helperBackend && helper?.status === "error" ? (
                   <Button
-                    size="xs"
+                    size="sm"
                     variant="outline"
                     disabled={busy}
                     onClick={() => void onAction(installHelper)}
@@ -424,7 +424,7 @@ export function SnapShotSetupDialog({
                   ) : null}
                   {step === "access" && backend === "gnome" && extension?.status === "enabled" ? (
                     <Button
-                      size="xs"
+                      size="sm"
                       variant="ghost"
                       disabled={busy}
                       onClick={() => void onAction("disable-extension")}
@@ -434,7 +434,7 @@ export function SnapShotSetupDialog({
                   ) : null}
                   {step === "access" && helperBackend && helper?.status !== "not-installed" ? (
                     <Button
-                      size="xs"
+                      size="sm"
                       variant="ghost"
                       disabled={busy}
                       onClick={() => void onAction(removeHelper)}

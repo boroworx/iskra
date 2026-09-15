@@ -48,6 +48,8 @@ vi.mock("./settingsLayout", async (importOriginal) => ({
 // The scoped agent-access rows need the settings layout's scope provider;
 // this test covers the device-local browser sections only.
 vi.mock("./ProjectDefaultsSettings", () => ({ ProjectDefaultsSettings: () => null }));
+// SnapShots talk to the desktop bridge and keybindings atom; SnapShotSettings.test covers them.
+vi.mock("./SnapShotSettings", () => ({ SnapShotSettings: () => null }));
 vi.mock("./SettingsScopeContext", () => ({
   useSettingsScope: () => ({
     scope: { kind: "all", environmentIds: [] },
