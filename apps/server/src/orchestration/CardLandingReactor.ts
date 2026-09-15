@@ -298,10 +298,14 @@ const make = Effect.gen(function* () {
           ? ("autoMergePolicy" as const)
           : null;
     if (reason === null) return;
+    // A verdict or an override is a new attempt: a refusal before it keeps its own receipt.
+    const verification = card.verification.verdictId ?? card.verification.state;
     yield* engine
       .dispatch({
         type: "card.landing.begin",
-        commandId: CommandId.make(`card-landing-begin:${cardId}:${reason}:${card.evidence?.evidenceId ?? "none"}`),
+        commandId: CommandId.make(
+          `card-landing-begin:${cardId}:${reason}:${card.evidence?.evidenceId ?? "none"}:${verification}`,
+        ),
         cardId,
         reason,
       })

@@ -201,6 +201,8 @@ const makeWorld = Effect.fn("makeWorld")(function* (
       ...DEFAULT_PROJECT_ORCHESTRATION,
       landing: options.landing ?? "pullRequest",
       autoMerge: { enabled: options.autoMerge ?? false, minSatisfaction: 0.9 },
+      // Auto-merge merges only verified work, so it needs the verifier on.
+      verifier: { mode: options.autoMerge === true ? "on" : "off" },
       ciFixRounds: options.ciFixRounds ?? 2,
       exclusivePaths: options.exclusivePaths ?? [],
       sideEffectGuard: { acknowledgedAt: now, killSwitchEnv: null },
@@ -286,7 +288,7 @@ const makeWorld = Effect.fn("makeWorld")(function* (
       .getCommandReadModel()
       .pipe(Effect.map((model) => (model.cards ?? []).find((card) => card.id === cardId)!));
   const activitiesOf = (cardId: CardId) =>
-    snapshotQuery.getCardActivity(cardId, 200).pipe(Effect.map((stream) => stream.activities));
+    snapshotQuery.getCardActivity(cardId, { limit: 200 }).pipe(Effect.map((stream) => stream.activities));
   const withReason = (cardId: CardId, code: string) =>
     activitiesOf(cardId).pipe(
       Effect.map((activities) => activities.filter((activity) => activity.reason?.code === code)),
@@ -483,6 +485,33 @@ it.layer(layer)("CardLandingReactor", (it) => {
 
       const auto = yield* makeWorld("auto-merge", { landing: "local", autoMerge: true });
       const landed = yield* auto.cardInReview("lands");
+      yield* auto.reactor.drain;
+      // It lands once a verifier passed its commit with a hidden scenario satisfied.
+      const engine = yield* OrchestrationEngineService;
+      yield* engine.dispatch({
+        type: "card.verifier.select",
+        commandId: CommandId.make("cmd-auto-merge-verifier"),
+        cardId: landed.cardId,
+        headSha: "abc1234",
+        verifier: {
+          agentId: AgentId.make("agent-auto-merge"),
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          model: "claude-haiku-4-5",
+          reason: { code: "sameModelVerifier", text: "Only the builder's model can check it." },
+        },
+      });
+      yield* engine.dispatch({
+        type: "card.verdict.record",
+        commandId: CommandId.make("cmd-auto-merge-verdict"),
+        verdictId: "verdict-auto-merge",
+        cardId: landed.cardId,
+        headSha: "abc1234",
+        criteria: [{ criterionId: "c1", pass: true, evidence: "test", note: "" }],
+        diffJudge: { matchesCriteria: true, concerns: [] },
+        scenarios: [{ scenarioId: "holdout-1", satisfied: true }],
+        recordedAt: now,
+      });
+      // The verdict queues the landing check, which enters landing and queues the local land.
       yield* auto.reactor.drain;
       // Entering landing queues the local land as its own job.
       yield* auto.reactor.drain;
