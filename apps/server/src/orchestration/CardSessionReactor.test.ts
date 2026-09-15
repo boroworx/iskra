@@ -3,6 +3,7 @@ import {
   CardId,
   ChannelId,
   CommandId,
+  DEFAULT_AGENT_ROLES,
   DEFAULT_PROJECT_ORCHESTRATION,
   MessageId,
   ORPHANED_PROVIDER_SESSION_ERROR,
@@ -10,6 +11,7 @@ import {
   ProviderInstanceId,
   TurnId,
   runSessionState,
+  type AgentRole,
   type RunCapability,
   type ThreadId,
 } from "@iskra/contracts";
@@ -83,7 +85,11 @@ const makeWorld = Effect.fn("makeWorld")(function* (
       sideEffectGuard: { acknowledgedAt: now, killSwitchEnv: null },
     },
   });
-  const createAgent = (id: string, capabilities: ReadonlyArray<RunCapability>) =>
+  const createAgent = (
+    id: string,
+    capabilities: ReadonlyArray<RunCapability>,
+    roles?: ReadonlyArray<AgentRole>,
+  ) =>
     engine.dispatch({
       type: "agent.create",
       commandId: CommandId.make(`cmd-agent-${name}-${id}`),
@@ -97,11 +103,13 @@ const makeWorld = Effect.fn("makeWorld")(function* (
         model: "claude-haiku-4-5",
       },
       capabilities,
+      ...(roles === undefined ? {} : { roles }),
       createdAt: now,
     });
   yield* createAgent("backend", ["read", "write"]);
   yield* createAgent("frontend", ["read", "write"]);
-  yield* createAgent("reviewer", ["read"]);
+  // The reviewer also coordinates the plan card below; coordinator is never a default role.
+  yield* createAgent("reviewer", ["read"], [...DEFAULT_AGENT_ROLES, "coordinator"]);
   yield* engine.dispatch({
     type: "card.create",
     commandId: CommandId.make(`cmd-card-${name}`),
