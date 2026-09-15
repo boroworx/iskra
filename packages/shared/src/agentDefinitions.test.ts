@@ -110,6 +110,25 @@ describe("agent templates", () => {
     expect(definition(parseAgentFile(serializeAgentFile(base), "reviewer.md"))).toEqual(base);
   });
 
+  it("leaves default roles, blueprint and no verifier out of the file", () => {
+    const defaults: AgentDefinition = {
+      ...base,
+      roles: ["critic", "helper", "lead", "builder"],
+      verifyWith: null,
+      blueprint: { preflight: "none", uiCapture: "auto", uiPaths: [], verify: "project" },
+    };
+
+    expect(serializeAgentFile(defaults)).not.toMatch(/roles|verifyWith|blueprint/);
+    expect(definition(parseAgentFile(serializeAgentFile(defaults), "reviewer.md"))).toEqual(base);
+    // One field off its default keeps the whole field.
+    const oneOff: AgentDefinition = {
+      ...base,
+      roles: ["builder", "lead", "helper"],
+      blueprint: { preflight: "none", uiCapture: "auto", uiPaths: ["/limits"], verify: "project" },
+    };
+    expect(definition(parseAgentFile(serializeAgentFile(oneOff), "reviewer.md"))).toEqual(oneOff);
+  });
+
   it("fills a partial blueprint with its defaults and rejects an unknown role", () => {
     const parsed = definition(parseAgentFile("---\nblueprint:\n  verify: always\n---\n", "api.md"));
 

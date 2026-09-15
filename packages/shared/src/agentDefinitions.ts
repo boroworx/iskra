@@ -3,6 +3,8 @@ import {
   AgentId,
   AgentName,
   AgentRoles,
+  DEFAULT_AGENT_BLUEPRINT,
+  DEFAULT_AGENT_ROLES,
   DEFAULT_MODEL,
   DEFAULT_MODEL_BY_PROVIDER,
   ModelSelection,
@@ -51,6 +53,7 @@ const AgentFileFrontmatter = Schema.Struct({
 const decodeFrontmatter = Schema.decodeUnknownSync(AgentFileFrontmatter);
 const decodeModelSelection = Schema.decodeUnknownSync(ModelSelection);
 const decodeAgentName = Schema.decodeUnknownSync(AgentName);
+const blueprintEquals = Schema.toEquivalence(AgentBlueprint);
 
 const errorMessage = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
@@ -111,7 +114,10 @@ export function parseAgentFile(contents: string, fileName: string): AgentFileRes
   }
 }
 
-/** Writes an agent's file. `parseAgentFile` reads it back unchanged. */
+/**
+ * Writes an agent's file. `parseAgentFile` reads it back unchanged, except that default roles and
+ * blueprint are left out and read back as absent, which means the defaults.
+ */
 export function serializeAgentFile(definition: AgentDefinition): string {
   const frontmatter = {
     ...(definition.id !== null ? { id: definition.id } : {}),
@@ -124,9 +130,18 @@ export function serializeAgentFile(definition: AgentDefinition): string {
       ? { options: definition.modelSelection.options }
       : {}),
     capabilities: definition.capabilities,
-    ...(definition.roles !== undefined ? { roles: definition.roles } : {}),
+    ...(definition.roles !== undefined &&
+    !(
+      definition.roles.length === DEFAULT_AGENT_ROLES.length &&
+      DEFAULT_AGENT_ROLES.every((role) => definition.roles?.includes(role))
+    )
+      ? { roles: definition.roles }
+      : {}),
     ...(definition.verifyWith != null ? { verifyWith: definition.verifyWith } : {}),
-    ...(definition.blueprint !== undefined ? { blueprint: definition.blueprint } : {}),
+    ...(definition.blueprint !== undefined &&
+    !blueprintEquals(definition.blueprint, DEFAULT_AGENT_BLUEPRINT)
+      ? { blueprint: definition.blueprint }
+      : {}),
   };
   const body = definition.rolePrompt.trim();
   return `---\n${stringifyYaml(frontmatter).trimEnd()}\n---\n${body.length > 0 ? `\n${body}\n` : ""}`;
