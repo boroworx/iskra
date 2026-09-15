@@ -12,6 +12,7 @@ import {
   type ProjectLesson,
 } from "@iskra/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { it as effectIt } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";
@@ -387,22 +388,21 @@ describe("card worklog", () => {
     );
   });
 
-  it("points at nested AGENTS.md and CLAUDE.md above the card's areas, nearest first, not the root's", async () => {
-    const found = await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const fileSystem = yield* FileSystem.FileSystem;
-          const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "iskra-folder-rules-" });
-          for (const file of ["AGENTS.md", "src/api/AGENTS.md", "src/CLAUDE.md", "docs/AGENTS.md"]) {
-            yield* fileSystem.makeDirectory(`${root}/${file}`.replace(/\/[^/]+$/, ""), { recursive: true });
-            yield* fileSystem.writeFileString(`${root}/${file}`, "rules");
-          }
-          return yield* folderRulesUnder(root, cardAreas(card, "diff --git a/src/api/users.ts b/src/api/users.ts\n"));
-        }),
-      ).pipe(Effect.provide(NodeServices.layer)),
-    );
-    expect(found).toEqual(["src/api/AGENTS.md", "src/CLAUDE.md"]);
-  });
+  effectIt.effect("points at nested AGENTS.md and CLAUDE.md above the card's areas, nearest first, not the root's", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "iskra-folder-rules-" });
+      for (const file of ["AGENTS.md", "src/api/AGENTS.md", "src/CLAUDE.md", "docs/AGENTS.md"]) {
+        yield* fileSystem.makeDirectory(`${root}/${file}`.replace(/\/[^/]+$/, ""), { recursive: true });
+        yield* fileSystem.writeFileString(`${root}/${file}`, "rules");
+      }
+      const found = yield* folderRulesUnder(
+        root,
+        cardAreas(card, "diff --git a/src/api/users.ts b/src/api/users.ts\n"),
+      );
+      expect(found).toEqual(["src/api/AGENTS.md", "src/CLAUDE.md"]);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
 
   it("digests older messages and drops the digest first when the worklog runs over", () => {
     const messages = Array.from({ length: 14 }, (_, index) =>
