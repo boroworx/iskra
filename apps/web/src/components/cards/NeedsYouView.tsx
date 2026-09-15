@@ -25,6 +25,7 @@ import { AttentionActions, RefsChangedControls } from "./CardAttention";
 import { CardQuestion } from "./CardContract";
 import { CheckpointControls } from "./CardReviewPanel";
 import { agentListEntries, type AgentEntry } from "../channels/channels.logic";
+import { SparkGlyph } from "../iskra/SparkGlyph";
 import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
 import { toastCommandFailure } from "../toastCommandFailure";
@@ -123,13 +124,18 @@ export function NeedsYouView() {
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <WorkspacePageHeader className="border-b border-border">
-          <h1 className="truncate text-sm font-semibold">Needs you</h1>
+          <h1 className="truncate text-[15px] font-semibold">Needs you</h1>
+          {items.length > 0 ? (
+            <span className="inline-flex h-5 items-center rounded-full bg-warning px-2 text-xs font-bold tabular-nums text-black/85">
+              {items.length}
+            </span>
+          ) : null}
         </WorkspacePageHeader>
         <main className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {items.length === 0 ? (
             <p className="text-sm text-muted-foreground">Nothing is waiting on you.</p>
           ) : (
-            <ol className="flex flex-col divide-y divide-border">
+            <ol className="flex flex-col gap-2.5">
               {items.map((item) => {
                 const itemCard = cardById.get(item.cardId);
                 // The question or attention item this answers, from the card shell.
@@ -142,8 +148,11 @@ export function NeedsYouView() {
                 return (
                   <li
                     key={item.key}
-                    className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 py-2.5"
+                    className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-card px-4 py-3 shadow-[0_0_0_0.5px_var(--border)]"
                   >
+                    <span className="flex size-8 shrink-0 items-center justify-center self-start rounded-full bg-warning/16">
+                      <SparkGlyph state="needsYou" />
+                    </span>
                     <div className="flex min-w-0 flex-1 flex-col">
                       <CardLink
                         environmentId={environmentId}
@@ -338,11 +347,11 @@ export function NeedsYouView() {
               <h2 className="text-xs font-medium text-muted-foreground">
                 Waiting on Iskra {waits.length}
               </h2>
-              <ul className="mt-1 flex flex-col divide-y divide-border">
+              <ul className="mt-2 flex flex-col divide-y divide-border overflow-hidden rounded-xl bg-card shadow-[0_0_0_0.5px_var(--border)]">
                 {waits.map((wait) => (
                   <li
                     key={wait.cardId}
-                    className="flex min-w-0 flex-wrap items-center gap-x-3 py-2"
+                    className="flex min-w-0 flex-wrap items-center gap-x-3 px-4 py-2.5"
                   >
                     <div className="flex min-w-0 flex-1 flex-col">
                       <CardLink
@@ -369,9 +378,9 @@ export function NeedsYouView() {
               <h2 className="text-xs font-medium text-muted-foreground">
                 Snoozed {snoozed.length}
               </h2>
-              <ul className="mt-1 flex flex-col divide-y divide-border">
+              <ul className="mt-2 flex flex-col divide-y divide-border overflow-hidden rounded-xl bg-card shadow-[0_0_0_0.5px_var(--border)]">
                 {snoozed.map((card) => (
-                  <li key={card.id} className="flex min-w-0 items-center gap-3 py-2">
+                  <li key={card.id} className="flex min-w-0 items-center gap-3 px-4 py-2">
                     <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
                       {card.title}
                       {card.snoozedUntil === null

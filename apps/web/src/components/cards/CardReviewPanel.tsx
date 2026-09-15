@@ -5,9 +5,13 @@ import {
   fixRoundsView,
   reviewByCriterion,
   riskClaimsOf,
-  type CriterionState,
   type EvidenceItemView,
 } from "@iskra/client-runtime/card-review";
+import {
+  markOfCriterionState,
+  type CriterionMark,
+  type PillTone,
+} from "@iskra/client-runtime/card-face";
 import {
   OVERRIDE_REASON_REQUIRED_TEXT,
   hasUnacknowledgedHardFlags,
@@ -41,6 +45,7 @@ import { useEnvironmentProviders } from "../channels/AgentModelPicker";
 import { toastCommandFailure } from "../toastCommandFailure";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
+import { StatusPill } from "../iskra/StatusPill";
 import { DisabledReason } from "./DisabledReason";
 
 const refused = (title: string) => (result: AtomCommandResult<unknown, unknown>) =>
@@ -49,15 +54,16 @@ const refused = (title: string) => (result: AtomCommandResult<unknown, unknown>)
 const NO_ITEMS: ReadonlyArray<CardEvidenceItem> = [];
 const CHECKS_ANCHOR = "card-review-checks";
 
-const STATE_CLASS: Record<CriterionState, string> = {
-  passed: "text-success-foreground",
-  failed: "text-destructive-foreground",
-  pending: "text-muted-foreground",
-  unavailable: "text-warning-foreground",
-  needsYourCheck: "text-warning-foreground",
-  coveredByChecks: "text-success-foreground",
-  noEvidence: "text-muted-foreground",
+const MARK_TONE: Record<CriterionMark, PillTone> = {
+  passed: "green",
+  failed: "red",
+  needsYou: "orange",
+  pending: "gray",
 };
+
+// A grouped inset list, as macOS settings group rows on one rounded surface.
+const GROUP_CLASS =
+  "flex flex-col overflow-hidden rounded-xl bg-card shadow-[0_0_0_0.5px_var(--border)]";
 
 /**
  * A card's review, organized by its acceptance criteria: the evidence captured for each, what
@@ -98,6 +104,16 @@ export function CardReview(props: {
       reviewByCriterion({ cardId: card.id, criteria: card.acceptance.criteria, items, verdict }),
     [card.id, card.acceptance.criteria, items, verdict],
   );
+  // Screenshots numbered in reading order, so a note can point at "Exhibit 2".
+  const exhibits = useMemo(
+    () =>
+      new Map(
+        [...review.criteria.flatMap((entry) => entry.items), ...review.general]
+          .filter((view) => view.item.kind === "screenshot" && view.artifact !== null)
+          .map((view, index) => [view.item.itemId, index + 1] as const),
+      ),
+    [review],
+  );
 
   if (summary === null) {
     return (
@@ -110,7 +126,7 @@ export function CardReview(props: {
     <div className="flex flex-col gap-3">
       <p className="text-xs text-muted-foreground">
         {summary.purpose === "checkpoint" ? "Checkpoint evidence" : "Evidence"} for{" "}
-        <span className="font-mono">{summary.headSha.slice(0, 7)}</span> ·{" "}
+        <span className="tabular-nums">{summary.headSha.slice(0, 7)}</span> ·{" "}
         <span
           className={summary.passed ? "text-success-foreground" : "text-destructive-foreground"}
         >
@@ -147,14 +163,18 @@ export function CardReview(props: {
           This card has no acceptance criteria, so only its checks speak for it.
         </p>
       ) : (
-        <ol className="flex flex-col gap-2.5">
+        <ol aria-label="Criteria" className={GROUP_CLASS}>
           {review.criteria.map((entry) => (
-            <li key={entry.criterion.id} className="flex flex-col gap-1">
-              <div className="flex items-baseline gap-2">
+            <li
+              key={entry.criterion.id}
+              className="flex flex-col gap-1 border-t border-border px-3.5 py-2.5 first:border-t-0"
+            >
+              <div className="flex items-center gap-3">
                 <span className="min-w-0 flex-1 text-sm">{entry.criterion.text}</span>
-                <span className={cn("shrink-0 text-xs", STATE_CLASS[entry.state])}>
-                  {CRITERION_STATE_LABEL[entry.state]}
-                </span>
+                <StatusPill
+                  label={CRITERION_STATE_LABEL[entry.state]}
+                  tone={MARK_TONE[markOfCriterionState(entry.state)]}
+                />
               </div>
               {entry.verdict !== null &&
               (entry.verdict.note.length > 0 || entry.verdict.evidence.length > 0) ? (
@@ -177,7 +197,7 @@ export function CardReview(props: {
                 </p>
               ) : null}
               {entry.items.length > 0 ? (
-                <EvidenceList items={entry.items} environmentId={environmentId} />
+                <EvidenceList items={entry.items} exhibits={exhibits} environmentId={environmentId} />
               ) : null}
             </li>
           ))}
@@ -187,7 +207,7 @@ export function CardReview(props: {
       {review.general.length > 0 ? (
         <div id={CHECKS_ANCHOR} className="flex flex-col gap-1">
           <h4 className="text-xs font-medium text-muted-foreground">Checks</h4>
-          <EvidenceList items={review.general} environmentId={environmentId} />
+          <EvidenceList items={review.general} exhibits={exhibits} environmentId={environmentId} />
         </div>
       ) : null}
 
@@ -392,12 +412,19 @@ function VerifierPanel(props: {
 
 function EvidenceList(props: {
   readonly items: ReadonlyArray<EvidenceItemView>;
+  /** Each screenshot's exhibit number. */
+  readonly exhibits: ReadonlyMap<string, number>;
   readonly environmentId: EnvironmentId;
 }) {
   return (
     <ul className="flex flex-col gap-1">
       {props.items.map((view) => (
-        <EvidenceRow key={view.item.itemId} view={view} environmentId={props.environmentId} />
+        <EvidenceRow
+          key={view.item.itemId}
+          view={view}
+          exhibit={props.exhibits.get(view.item.itemId)}
+          environmentId={props.environmentId}
+        />
       ))}
     </ul>
   );
@@ -405,11 +432,12 @@ function EvidenceList(props: {
 
 const EvidenceRow = memo(function EvidenceRow(props: {
   readonly view: EvidenceItemView;
+  readonly exhibit: number | undefined;
   readonly environmentId: EnvironmentId;
 }) {
   const { item, state } = props.view;
   return (
-    <li className="flex min-w-0 flex-col gap-1 rounded-md border border-border px-2 py-1.5 text-xs">
+    <li className="flex min-w-0 flex-col gap-1 rounded-lg bg-muted px-2.5 py-2 text-xs">
       <div className="flex min-w-0 items-baseline gap-2">
         <span className="min-w-0 flex-1 truncate">
           {item.name}
@@ -458,6 +486,7 @@ const EvidenceRow = memo(function EvidenceRow(props: {
         <EvidenceFile
           resource={props.view.artifact}
           item={item}
+          exhibit={props.exhibit}
           environmentId={props.environmentId}
         />
       ) : null}
@@ -475,6 +504,7 @@ const EvidenceRow = memo(function EvidenceRow(props: {
 function EvidenceFile(props: {
   readonly resource: AssetResource;
   readonly item: CardEvidenceItem;
+  readonly exhibit?: number | undefined;
   readonly environmentId: EnvironmentId;
 }) {
   const url = useAssetUrlState(props.environmentId, props.resource);
@@ -483,14 +513,19 @@ function EvidenceFile(props: {
     return <span className="text-muted-foreground">The file is no longer available.</span>;
   }
   return props.resource._tag !== "card-check-log" && props.item.kind === "screenshot" ? (
-    <a href={url.url} target="_blank" rel="noreferrer">
-      <img
-        src={url.url}
-        alt={props.item.name}
-        loading="lazy"
-        className="max-h-64 w-auto rounded border border-border"
-      />
-    </a>
+    <figure className="flex flex-col gap-1.5">
+      <a href={url.url} target="_blank" rel="noreferrer">
+        <img
+          src={url.url}
+          alt={props.item.name}
+          loading="lazy"
+          className="max-h-64 w-auto rounded-lg shadow-[0_0_0_0.5px_var(--border)]"
+        />
+      </a>
+      {props.exhibit !== undefined ? (
+        <figcaption className="text-muted-foreground">Exhibit {props.exhibit}</figcaption>
+      ) : null}
+    </figure>
   ) : (
     <a href={url.url} target="_blank" rel="noreferrer" className="self-start underline">
       {props.resource._tag === "card-check-log"

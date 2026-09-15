@@ -138,10 +138,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(iskra-mo
    the variables and Settings -> Appearance can override them at runtime. The
    default stacks are mirrored in `appearanceFonts.ts`. */
 @theme {
+  /* The system font: SF Pro on Apple platforms, Inter where installed, then the platform's UI font. */
   --font-sans:
-    "IBM Plex Sans Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  /* Michroma ships a single weight; use it for display headings only. */
-  --font-display: Michroma, "IBM Plex Sans Variable", system-ui, sans-serif;
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, "Segoe UI", system-ui, sans-serif;
+  --font-display:
+    -apple-system, BlinkMacSystemFont, "SF Pro Display", Inter, "Segoe UI", system-ui, sans-serif;
   --font-mono:
     ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
 }
@@ -166,6 +167,19 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(iskra-mo
      compositor updates discrete frames instead of every vsync. */
   --animate-status-pulse: status-pulse 2s infinite;
   --animate-status-ping: status-ping 2s infinite;
+  /* Played once when a card lands in view; nothing else on the board moves on its own. */
+  --animate-spark-land: spark-land 640ms cubic-bezier(0.16, 1, 0.3, 1) 1;
+  @keyframes spark-land {
+    0% {
+      transform: scale(1);
+    }
+    45% {
+      transform: scale(1.4);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
   --color-warning-foreground: var(--warning-foreground);
   --color-warning: var(--warning);
   --color-warning-surface: var(--warning-surface);
@@ -983,10 +997,13 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(iskra-mo
   animation-duration: 0s !important;
 }
 
+/* macOS neutrals: #f5f5f7 canvas and white surfaces in light, #1c1c1e and #2c2c2e in dark. Blue is
+   the one accent; orange means a person is needed, green verified, red failed. Controls round to
+   8px (--radius) and cards to 12px (rounded-xl). */
 :root {
   color-scheme: light;
-  --radius: 0.625rem;
-  --background: var(--color-steel-25);
+  --radius: 0.5rem;
+  --background: #f5f5f7;
   --app-chrome-background: var(--background);
   --toolbar-background: var(--app-chrome-background);
   --toolbar-foreground: var(--foreground);
@@ -995,17 +1012,17 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(iskra-mo
   --toolbar-control-foreground: var(--foreground);
   --toolbar-control-hover: var(--accent);
   --surface-raised: color-mix(in srgb, var(--card) 20%, transparent);
-  --foreground: var(--color-steel-800);
-  --card: var(--color-white);
-  --card-foreground: var(--color-steel-800);
-  --popover: var(--color-white);
-  --popover-foreground: var(--color-steel-800);
-  --primary: oklch(0.52 0.07 250);
-  --primary-foreground: var(--color-white);
-  --secondary: var(--color-steel-50);
-  --secondary-foreground: var(--color-steel-800);
-  --muted: var(--color-steel-50);
-  --muted-foreground: var(--color-steel-500);
+  --foreground: #1d1d1f;
+  --card: #ffffff;
+  --card-foreground: #1d1d1f;
+  --popover: #ffffff;
+  --popover-foreground: #1d1d1f;
+  --primary: #007aff;
+  --primary-foreground: #ffffff;
+  --secondary: rgb(120 120 128 / 12%);
+  --secondary-foreground: #1d1d1f;
+  --muted: rgb(120 120 128 / 8%);
+  --muted-foreground: #6e6e73;
   --placeholder: var(--muted-foreground);
   --secondary-label: var(--muted-foreground);
   --icon-muted: var(--muted-foreground);
@@ -1014,36 +1031,36 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(iskra-mo
   --message-action: var(--primary);
   --message-action-foreground: var(--primary-foreground);
   --message-action-hover: color-mix(in srgb, var(--primary) 90%, var(--background));
-  --accent: var(--color-steel-100);
-  --accent-foreground: var(--color-steel-900);
-  --error: var(--color-red-500);
-  --error-foreground: var(--color-red-700);
+  --accent: rgb(120 120 128 / 12%);
+  --accent-foreground: #1d1d1f;
+  --error: #ff3b30;
+  --error-foreground: #d70015;
   --tool-error-icon: var(--error);
   --error-surface: color-mix(in srgb, var(--error) 8%, transparent);
   --destructive: var(--error);
-  --border: var(--color-steel-200);
-  --input: var(--color-steel-300);
+  --border: rgb(0 0 0 / 10%);
+  --input: rgb(0 0 0 / 14%);
   --ring: var(--primary);
   --destructive-foreground: var(--error-foreground);
-  --info: var(--color-blue-500);
-  --info-foreground: var(--color-blue-700);
-  --success: var(--color-emerald-500);
-  --success-foreground: var(--color-emerald-700);
-  --warning: var(--color-amber-500);
-  --warning-foreground: var(--color-amber-700);
+  --info: #007aff;
+  --info-foreground: #0066cc;
+  --success: #34c759;
+  --success-foreground: #1f7a36;
+  --warning: #ff9500;
+  --warning-foreground: #b54b00;
   --warning-surface: color-mix(in srgb, var(--warning) 8%, transparent);
   --update: var(--primary);
   --update-foreground: var(--primary);
   --update-surface: color-mix(in srgb, var(--update) 12%, transparent);
   /* Keep every sidebar primitive on the same light surface hierarchy, including
      portaled mobile sheets and settings navigation outside the app sidebar. */
-  --sidebar: var(--color-steel-50);
+  --sidebar: #ececf0;
   --sidebar-foreground: var(--foreground);
   --sidebar-muted-foreground: var(--muted-foreground);
-  --sidebar-control-surface: var(--color-steel-100);
-  --sidebar-row-hover: var(--color-steel-25);
-  --sidebar-row-active: var(--color-white);
-  --sidebar-row-selected: var(--color-white);
+  --sidebar-control-surface: rgb(120 120 128 / 12%);
+  --sidebar-row-hover: rgb(0 0 0 / 4%);
+  --sidebar-row-active: #ffffff;
+  --sidebar-row-selected: #ffffff;
   --sidebar-border: var(--border);
   --sidebar-stage-fade: var(--sidebar);
   --code-background: color-mix(in srgb, var(--card) 90%, var(--background));
@@ -1055,35 +1072,37 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(iskra-mo
 
   @variant dark {
     color-scheme: dark;
-    /* Keep controls and floating surfaces close to the steel canvas.
-       Borders and hover states provide separation without milky gray fills. */
-    --background: var(--color-steel-950);
-    --surface-raised: color-mix(in srgb, var(--background) 97%, var(--color-white));
-    --foreground: var(--color-steel-100);
-    --card: color-mix(in srgb, var(--background) 97%, var(--color-white));
-    --card-foreground: var(--color-steel-100);
-    --popover: color-mix(in srgb, var(--background) 97%, var(--color-white));
-    --popover-foreground: var(--color-steel-100);
-    --primary: oklch(0.56 0.075 250);
-    --secondary: --alpha(var(--color-white) / 3%);
-    --secondary-foreground: var(--color-steel-100);
-    --muted: --alpha(var(--color-white) / 3%);
-    --muted-foreground: color-mix(in srgb, var(--color-steel-500) 90%, var(--color-white));
-    --accent: --alpha(var(--color-white) / 4%);
-    --accent-foreground: var(--color-steel-100);
-    --error: color-mix(in srgb, var(--color-red-500) 90%, var(--color-white));
-    --error-foreground: var(--color-red-400);
-    --tool-error-icon: #fca5a5;
+    /* #1c1c1e canvas with #2c2c2e surfaces; hairline borders separate without gray fills. */
+    --background: #1c1c1e;
+    --surface-raised: #2c2c2e;
+    --foreground: #f5f5f7;
+    --card: #2c2c2e;
+    --card-foreground: #f5f5f7;
+    --popover: #2c2c2e;
+    --popover-foreground: #f5f5f7;
+    --primary: #0a84ff;
+    --secondary: rgb(120 120 128 / 24%);
+    --secondary-foreground: #f5f5f7;
+    --muted: rgb(120 120 128 / 16%);
+    --muted-foreground: rgb(235 235 245 / 60%);
+    --accent: rgb(120 120 128 / 24%);
+    --accent-foreground: #f5f5f7;
+    --error: #ff453a;
+    --error-foreground: #ff6961;
+    --tool-error-icon: #ff6961;
     --error-surface: color-mix(in srgb, var(--error) 16%, transparent);
-    --border: --alpha(var(--color-white) / 6%);
-    --input: --alpha(var(--color-white) / 8%);
-    --info-foreground: var(--color-blue-400);
-    --success-foreground: var(--color-emerald-400);
-    --warning-foreground: var(--color-amber-400);
+    --border: rgb(255 255 255 / 10%);
+    --input: rgb(255 255 255 / 14%);
+    --info: #0a84ff;
+    --info-foreground: #409cff;
+    --success: #30d158;
+    --success-foreground: #30d158;
+    --warning: #ff9f0a;
+    --warning-foreground: #ffb340;
     --warning-surface: color-mix(in srgb, var(--warning) 16%, transparent);
-    --update-foreground: var(--color-blue-400);
+    --update-foreground: #409cff;
     --update-surface: color-mix(in srgb, var(--update) 18%, transparent);
-    --sidebar: var(--card);
+    --sidebar: #232325;
     --sidebar-control-surface: var(--muted);
     --sidebar-row-hover: var(--accent);
     --sidebar-row-active: var(--accent);
@@ -1098,37 +1117,37 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(iskra-mo
    steel hierarchy: steel-50 navigation, steel-25 hover, and white selected/raised
    surfaces. */
 [data-app-sidebar] {
-  --background: var(--color-steel-25);
-  --foreground: var(--color-steel-800);
-  --card: var(--color-white);
-  --card-foreground: var(--color-steel-800);
-  --accent: var(--color-steel-100);
-  --accent-foreground: var(--color-steel-900);
-  --muted: var(--color-steel-50);
-  --muted-foreground: var(--color-steel-500);
-  --border: var(--color-steel-200);
-  --input: var(--color-steel-300);
-  --sidebar: var(--color-steel-50);
-  --sidebar-foreground: var(--color-steel-800);
-  --sidebar-muted-foreground: var(--color-steel-500);
-  --sidebar-control-surface: var(--color-steel-100);
-  --sidebar-row-hover: var(--color-steel-25);
-  --sidebar-row-active: var(--color-white);
-  --sidebar-row-selected: var(--color-white);
-  --sidebar-border: var(--color-steel-200);
+  --background: #f5f5f7;
+  --foreground: #1d1d1f;
+  --card: #ffffff;
+  --card-foreground: #1d1d1f;
+  --accent: rgb(120 120 128 / 12%);
+  --accent-foreground: #1d1d1f;
+  --muted: rgb(120 120 128 / 8%);
+  --muted-foreground: #6e6e73;
+  --border: rgb(0 0 0 / 10%);
+  --input: rgb(0 0 0 / 14%);
+  --sidebar: #ececf0;
+  --sidebar-foreground: #1d1d1f;
+  --sidebar-muted-foreground: #6e6e73;
+  --sidebar-control-surface: rgb(120 120 128 / 12%);
+  --sidebar-row-hover: rgb(0 0 0 / 4%);
+  --sidebar-row-active: #ffffff;
+  --sidebar-row-selected: #ffffff;
+  --sidebar-border: rgb(0 0 0 / 10%);
   --sidebar-stage-fade: var(--sidebar);
 
   @variant dark {
-    --background: var(--color-steel-975);
-    --foreground: var(--color-steel-50);
-    --card: var(--color-steel-975);
+    --background: #1c1c1e;
+    --foreground: #f5f5f7;
+    --card: #232325;
     --card-foreground: var(--foreground);
-    --accent: var(--color-steel-900);
-    --accent-foreground: var(--color-steel-25);
-    --muted: var(--color-steel-950);
-    --muted-foreground: var(--color-steel-400);
+    --accent: rgb(120 120 128 / 24%);
+    --accent-foreground: #f5f5f7;
+    --muted: rgb(120 120 128 / 16%);
+    --muted-foreground: rgb(235 235 245 / 60%);
     --border: rgb(255 255 255 / 8%);
-    --input: rgb(255 255 255 / 18%);
+    --input: rgb(255 255 255 / 14%);
     --sidebar: var(--card);
     --sidebar-foreground: var(--foreground);
     --sidebar-muted-foreground: var(--muted-foreground);

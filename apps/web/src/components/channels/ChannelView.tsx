@@ -33,6 +33,8 @@ import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { SidebarInset } from "../ui/sidebar";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
+import { AgentAvatar } from "../iskra/AgentAvatar";
+import { EventLine } from "../iskra/EventLine";
 import {
   agentListEntries,
   cardNoteOf,
@@ -303,18 +305,30 @@ function MessageRow(props: {
   const { message, authorName, showHeader } = props.row;
   const notes =
     message.authorKind === "human" ? deliveryNotes(message, props.agents) : [];
+  // Iskra's own notes, such as a card starting or asking something, read as centered events.
+  if (message.authorKind === "system") {
+    return (
+      <li className="mt-3 flex min-w-0 flex-col first:mt-0">
+        <EventLine spark={cardNoteOf(message)?.question === true ? "needsYou" : "idle"}>
+          <span className="whitespace-pre-wrap break-words">{message.body}</span>
+          <time dateTime={message.createdAt} className="tabular-nums">
+            · {messageTimeFormat.format(new Date(message.createdAt))}
+          </time>
+          <CardNoteLink
+            message={message}
+            cardById={props.cardById}
+            environmentId={props.environmentId}
+          />
+        </EventLine>
+      </li>
+    );
+  }
   return (
     <li className={cn("flex min-w-0 flex-col", showHeader ? "mt-4 first:mt-0" : "mt-1")}>
       {showHeader ? (
-        <div className="flex items-baseline gap-2">
-          <span
-            className={cn(
-              "text-sm font-semibold",
-              message.authorKind === "system" && "text-muted-foreground",
-            )}
-          >
-            {authorName}
-          </span>
+        <div className="flex items-center gap-2">
+          {message.authorKind === "agent" ? <AgentAvatar name={authorName} size="md" /> : null}
+          <span className="text-sm font-semibold">{authorName}</span>
           <time dateTime={message.createdAt} className="text-xs text-muted-foreground">
             {messageTimeFormat.format(new Date(message.createdAt))}
           </time>
@@ -340,14 +354,7 @@ function MessageRow(props: {
           ) : null}
         </>
       ) : (
-        <p
-          className={cn(
-            "whitespace-pre-wrap break-words text-sm",
-            message.authorKind === "system" && "text-muted-foreground",
-          )}
-        >
-          {message.body}
-        </p>
+        <p className="whitespace-pre-wrap break-words text-sm">{message.body}</p>
       )}
       {notes.length > 0 ? (
         <p className="mt-0.5 flex flex-wrap gap-x-3 text-xs">
@@ -361,11 +368,6 @@ function MessageRow(props: {
           ))}
         </p>
       ) : null}
-      <CardNoteLink
-        message={message}
-        cardById={props.cardById}
-        environmentId={props.environmentId}
-      />
       {props.proposals?.map((card) => (
         <CardProposal
           key={card.id}
@@ -394,7 +396,7 @@ function CardNoteLink(props: {
       to="/board/$environmentId/$projectId"
       params={{ environmentId: props.environmentId, projectId: card.projectId }}
       search={{ card: card.id }}
-      className="self-start text-xs text-muted-foreground hover:underline"
+      className="font-medium text-primary hover:underline"
     >
       {note.question ? "Answer on the card" : "Open card"}
     </Link>

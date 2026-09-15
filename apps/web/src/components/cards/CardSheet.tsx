@@ -37,7 +37,11 @@ import { cardEnvironment } from "~/state/cards";
 import { useProjects } from "~/state/entities";
 import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { cardSparkState, cardStatusPill } from "@iskra/client-runtime/card-face";
 import { ApproveAndStart } from "../channels/CardProposal";
+import { AgentAvatar } from "../iskra/AgentAvatar";
+import { RoundDots, SpendBar } from "../iskra/Marks";
+import { StatusPill } from "../iskra/StatusPill";
 import { CardActivityTimeline } from "./CardActivityTimeline";
 import { AttentionActions, RefsChangedControls } from "./CardAttention";
 import { CardCriteria, CardPreviewPanel, CardQuestions, cardQuestionsOf } from "./CardContract";
@@ -211,7 +215,32 @@ function CardSheetBody(props: {
   return (
     <>
       <SheetHeader>
-        <SheetTitle className="pe-8">{card.title}</SheetTitle>
+        <div className="flex items-center pe-8">
+          <StatusPill {...cardStatusPill(card)} />
+        </div>
+        <SheetTitle className="pe-8 text-[22px] font-bold leading-tight tracking-[-0.015em]">
+          {card.title}
+        </SheetTitle>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-[13px] text-muted-foreground">
+          {sessionAgent !== undefined ? (
+            <span className="inline-flex items-center gap-2">
+              <AgentAvatar name={sessionAgent.name} spark={cardSparkState(card)} />
+              {sessionAgent.name}
+            </span>
+          ) : null}
+          <span className="inline-flex items-center gap-2">
+            <SpendBar spentUsd={card.spentUsd} capUsd={card.budgetCapUsd} className="w-22" />
+            <span className="tabular-nums">${card.spentUsd.toFixed(2)}</span>
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <RoundDots
+              used={card.fixRounds.review}
+              cap={policy.reviewFixRounds}
+              label="Review fix rounds"
+            />
+            Fix rounds
+          </span>
+        </div>
         <p className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
           <span>
             {statusLabel(card.status)}

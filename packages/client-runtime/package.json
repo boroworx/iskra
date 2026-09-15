@@ -27,6 +27,10 @@
       "types": "./src/cardPreview.ts",
       "default": "./src/cardPreview.ts"
     },
+    "./card-face": {
+      "types": "./src/cardFace.ts",
+      "default": "./src/cardFace.ts"
+    },
     "./run-enforcement": {
       "types": "./src/runEnforcementView.ts",
       "default": "./src/runEnforcementView.ts"

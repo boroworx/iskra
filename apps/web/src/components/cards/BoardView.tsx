@@ -9,6 +9,7 @@ import {
   isCardSnoozed,
   type BoardColumn,
 } from "@iskra/client-runtime/cards";
+import { cardSparkState, cardStatusPill, criteriaMarks } from "@iskra/client-runtime/card-face";
 import type {
   CardId,
   CardPriority,
@@ -39,6 +40,9 @@ import {
 import { cardEnvironment } from "~/state/cards";
 import { useEnvironmentAgents, useEnvironmentCards, useProjects } from "~/state/entities";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { AgentAvatar } from "../iskra/AgentAvatar";
+import { CriteriaMarks, SpendBar } from "../iskra/Marks";
+import { StatusPill } from "../iskra/StatusPill";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { searchableSetting } from "../settings/settingsSearch";
@@ -268,15 +272,15 @@ function BoardColumnView(props: {
       ref={setNodeRef}
       aria-label={BOARD_COLUMN_LABEL[props.column]}
       className={cn(
-        "flex w-72 shrink-0 flex-col gap-2 rounded-lg bg-muted/30 p-2",
-        isOver && "bg-muted/60",
+        "flex w-72 shrink-0 flex-col gap-2.5 rounded-xl p-1",
+        isOver && "bg-muted",
       )}
     >
-      <h2 className="flex h-6 items-center gap-2 px-1 text-xs font-medium text-muted-foreground">
+      <h2 className="flex h-7 items-baseline gap-1.5 px-1 text-[13px] font-semibold">
         {BOARD_COLUMN_LABEL[props.column]}
-        <span className="tabular-nums">{props.cards.length}</span>
+        <span className="font-normal tabular-nums text-muted-foreground">{props.cards.length}</span>
       </h2>
-      <ol className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
+      <ol className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto">
         {props.cards.map((card) => (
           <li key={card.id}>
             <CardFace
@@ -328,12 +332,15 @@ const CardFace = memo(function CardFace(props: {
           : { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
       }
       className={cn(
-        "flex cursor-grab touch-none flex-col gap-1.5 rounded-md border border-border bg-background p-2.5 text-sm shadow-xs",
-        isDragging && "z-10 cursor-grabbing shadow-md",
+        "flex cursor-grab touch-none flex-col gap-2.5 rounded-xl bg-card p-3 text-sm shadow-[0_0_0_0.5px_var(--border),0_1px_2px_rgb(0_0_0/8%)]",
+        isDragging && "z-10 cursor-grabbing shadow-lg",
         card.status === "abandoned" && "opacity-60",
       )}
     >
-      <h3 className="line-clamp-2 font-medium">
+      <div className="flex items-center justify-end gap-2">
+        <StatusPill {...cardStatusPill(card)} />
+      </div>
+      <h3 className="line-clamp-2 font-medium leading-snug tracking-[-0.005em]">
         {/* dnd-kit swallows the click that ends a drag, so this opens the sheet only on a click. */}
         <button
           type="button"
@@ -386,6 +393,17 @@ const CardFace = memo(function CardFace(props: {
           Resume
         </Button>
       ) : null}
+      <div className="flex items-center gap-2">
+        <CriteriaMarks marks={criteriaMarks(card)} />
+        <span className="ms-auto flex items-center gap-2.5">
+          {card.spentUsd > 0 ? (
+            <SpendBar spentUsd={card.spentUsd} capUsd={card.budgetCapUsd} />
+          ) : null}
+          {props.delegateName !== undefined ? (
+            <AgentAvatar name={props.delegateName} spark={cardSparkState(card)} />
+          ) : null}
+        </span>
+      </div>
       <dl className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
         <dd>
           <Select
@@ -419,10 +437,7 @@ const CardFace = memo(function CardFace(props: {
             </SelectPopup>
           </Select>
         </dd>
-        {props.delegateName !== undefined ? <dd>@{props.delegateName}</dd> : null}
-        {card.branch !== null ? (
-          <dd className="max-w-full truncate font-mono">{card.branch}</dd>
-        ) : null}
+        {card.branch !== null ? <dd className="max-w-full truncate">{card.branch}</dd> : null}
         {card.diffStat !== null && card.diffStat.files > 0 ? (
           <dd className="tabular-nums">
             +{card.diffStat.additions} −{card.diffStat.deletions}
@@ -442,11 +457,6 @@ const CardFace = memo(function CardFace(props: {
             >
               Attempts
             </Link>
-          </dd>
-        ) : null}
-        {card.spentUsd > 0 ? (
-          <dd className="tabular-nums">
-            ${card.spentUsd.toFixed(2)} of ${card.budgetCapUsd.toFixed(0)}
           </dd>
         ) : null}
         {children.length > 0 ? (
