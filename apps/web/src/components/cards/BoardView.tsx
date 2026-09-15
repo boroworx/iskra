@@ -9,7 +9,12 @@ import {
   isCardSnoozed,
   type BoardColumn,
 } from "@iskra/client-runtime/cards";
-import { cardSparkState, cardStatusPill, criteriaMarks } from "@iskra/client-runtime/card-face";
+import {
+  cardShortId,
+  cardSparkState,
+  cardStatusPill,
+  criteriaMarks,
+} from "@iskra/client-runtime/card-face";
 import type {
   CardId,
   CardPriority,
@@ -41,7 +46,6 @@ import { cardEnvironment } from "~/state/cards";
 import { useEnvironmentAgents, useEnvironmentCards, useProjects } from "~/state/entities";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { AgentAvatar } from "../iskra/AgentAvatar";
-import { cardShortId } from "../iskra/cardLabel";
 import { CriteriaMarks, SpendBar } from "../iskra/Marks";
 import { SparkGlyph } from "../iskra/SparkGlyph";
 import { StatusPill } from "../iskra/StatusPill";
@@ -411,7 +415,7 @@ const CardFace = memo(function CardFace(props: {
             className="-mx-1 h-5 min-h-0 w-auto min-w-0 gap-1 rounded-[5px] border-0 bg-transparent px-1 text-[11px] font-medium tabular-nums text-tertiary-label shadow-none hover:bg-[rgb(120_120_128/12%)] sm:min-h-0 sm:text-[11px] dark:bg-transparent dark:hover:bg-[rgb(120_120_128/20%)] [&_[data-slot=select-icon]]:hidden"
           >
             <PriorityFlag priority={card.priority} />
-            <SelectValue>{() => cardShortId(card)}</SelectValue>
+            <SelectValue>{() => cardShortId(card.id)}</SelectValue>
           </SelectTrigger>
           <SelectPopup>
             {CARD_PRIORITIES.map((priority) => (

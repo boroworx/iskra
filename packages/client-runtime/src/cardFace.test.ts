@@ -10,6 +10,7 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  cardShortId,
   cardSparkState,
   cardStatusPill,
   criteriaMarks,
@@ -137,5 +138,13 @@ describe("outcomePill", () => {
     expect(
       outcomePill({ state: "flawed", decidedAt: "2026-09-15T00:00:00.000Z", signals: [] }),
     ).toEqual({ label: "Flawed", tone: "red" });
+  });
+});
+
+describe("cardShortId", () => {
+  it("takes the first four letters or digits after any card- prefix, uppercased", () => {
+    expect(cardShortId("7d20b1c4-0000-4000-8000-000000000000")).toBe("C-7D20");
+    expect(cardShortId("card-5af2e9")).toBe("C-5AF2");
+    expect(cardShortId("a-b-c-d-e")).toBe("C-ABCD");
   });
 });

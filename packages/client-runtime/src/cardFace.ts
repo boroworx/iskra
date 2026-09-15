@@ -125,3 +125,15 @@ export function markOfCriterionState(state: CriterionState): CriterionMark {
       return "pending";
   }
 }
+
+/**
+ * A card's short caption id, as the board, review and proposals show it: `C-` and the first four
+ * letters or digits of its id, after any `card-` prefix.
+ */
+export function cardShortId(cardId: string): string {
+  return `C-${cardId
+    .replace(/^card-/, "")
+    .replace(/[^a-z0-9]/gi, "")
+    .slice(0, 4)
+    .toUpperCase()}`;
+}
