@@ -175,6 +175,9 @@ function CardScreenBody(props: {
       <View className="gap-2 px-1">
         <View className="flex-row flex-wrap items-center gap-2">
           <StatusPill {...cardStatusPill(card)} />
+          {card.kind !== "task" ? (
+            <StatusPill label={card.kind === "plan" ? "Plan" : "Migration"} tone="gray" />
+          ) : null}
           {outcome !== null ? <StatusPill {...outcome} /> : null}
           {card.unattended ? <StatusPill label="Draft PR" tone="gray" /> : null}
         </View>

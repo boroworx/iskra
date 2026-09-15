@@ -34,7 +34,9 @@ A message that mentions nobody goes to the lead. If the request is too vague, th
 question, usually with two or three answers and one it recommends. Pick one, or answer in your own
 words without mentioning anyone. Once the request is clear, the lead proposes a card with acceptance
 criteria, an estimate, and a suggested owner. The proposal appears under its reply with **Approve &
-Start**, **Edit**, and **Drop**.
+Start**, **Edit**, and **Drop**. When you ask it to plan or break down remaining work, the lead
+proposes one [plan card](#plan-cards) instead; **Approve & Start** then needs an agent with the
+coordinator role, and offers **Create a coordinator agent** when the project has none.
 
 **Approve & Start** first shows what you are starting: the criteria to confirm or edit, and the
 lead's estimate of size, likely areas, and risks. If the lead thinks the work should be several
@@ -261,7 +263,8 @@ project's cards can't enter review.
 
 ### Plan cards
 
-For work too big for one card, create a card with kind **Plan** and give it acceptance criteria.
+For work too big for one card, create a card with kind **Plan** and give it acceptance criteria, or
+ask for a plan in Requests and the lead proposes one.
 Assign it an agent with the coordinator role and approve it. The coordinator reads the project and
 proposes child cards, grouped into slices, with what each depends on. It can't change anything or
 approve its own plan.

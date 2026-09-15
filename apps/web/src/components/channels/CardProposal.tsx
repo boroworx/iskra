@@ -1,11 +1,16 @@
 import type { PillTone } from "@iskra/client-runtime/card-face";
 import { metricsLine, templateMetrics } from "@iskra/client-runtime/metrics";
-import { AgentId, type EnvironmentId, type OrchestrationCardShell } from "@iskra/contracts";
+import {
+  AgentId,
+  type AgentRole,
+  type EnvironmentId,
+  type OrchestrationCardShell,
+} from "@iskra/contracts";
 import { Link } from "@tanstack/react-router";
 import { useId, useMemo, useState } from "react";
 
 import { cardEnvironment } from "~/state/cards";
-import { useEnvironmentAgents, useEnvironmentCards } from "~/state/entities";
+import { useEnvironmentAgents, useEnvironmentCards, useProjects } from "~/state/entities";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { CardPreviewPanel, CriteriaEditor, savedCriteria } from "../cards/CardContract";
 import { DisabledReason } from "../cards/DisabledReason";
@@ -24,6 +29,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { cardShortId } from "@iskra/client-runtime/card-face";
 import { StatusPill } from "../iskra/StatusPill";
 import { cardProposalStatus, ownerCandidates, type AgentEntry } from "./channels.logic";
+import { CreateAgentDialog } from "./CreateAgentDialog";
 
 const NO_OWNER = "none";
 
@@ -72,6 +78,7 @@ export function CardProposal(props: {
         ) : (
           <StatusPill label={status} tone={PROPOSAL_STATUS_TONE[card.status]} />
         )}
+        {card.kind === "plan" ? <StatusPill label="Plan" tone="gray" /> : null}
         <span className="text-[11px] font-medium tabular-nums text-tertiary-label">
           {cardShortId(card.id)}
         </span>
@@ -176,8 +183,10 @@ const PROPOSAL_STATUS_TONE: Record<ProposalFace["status"], PillTone> = {
 
 type StartableCard = Pick<
   OrchestrationCardShell,
-  "id" | "kind" | "title" | "suggestedAgentId" | "acceptance" | "estimate" | "premise"
+  "id" | "kind" | "projectId" | "title" | "suggestedAgentId" | "acceptance" | "estimate" | "premise"
 >;
+
+const COORDINATOR_ROLES: ReadonlyArray<AgentRole> = ["coordinator"];
 
 /**
  * Approve & start: opens a confirmation of who owns the card, the acceptance criteria it is held
@@ -225,6 +234,12 @@ function ApproveAndStartDialog(props: {
   }, [agentShells, props.agents, card.kind, ownerId]);
   const [criteria, setCriteria] = useState(card.acceptance.criteria);
   const [starting, setStarting] = useState(false);
+  const [creatingCoordinator, setCreatingCoordinator] = useState(false);
+  const project = useProjects().find(
+    (entry) => entry.environmentId === props.environmentId && entry.id === card.projectId,
+  );
+  // Only a coordinator owns a plan; with none in the project, the way out is to create one.
+  const needsCoordinator = card.kind === "plan" && owners.length === 0;
   const formId = useId();
   const confirmed = savedCriteria(criteria);
   const owner = agentShells.find((agent) => agent.id === ownerId) ?? null;
@@ -284,6 +299,24 @@ function ApproveAndStartDialog(props: {
             ) : null}
             <section className="flex flex-col gap-1.5" aria-label="Owner">
               <h3 className="text-[13px] font-semibold text-muted-foreground">Owner</h3>
+              {needsCoordinator ? (
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-[13px] text-muted-foreground">
+                    A plan is owned by an agent with the coordinator role, and this project has
+                    none.
+                  </p>
+                  {project === undefined ? null : (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => setCreatingCoordinator(true)}
+                    >
+                      Create a coordinator agent
+                    </Button>
+                  )}
+                </div>
+              ) : (
               <Select
                 value={ownerId ?? NO_OWNER}
                 onValueChange={(value) =>
@@ -306,6 +339,7 @@ function ApproveAndStartDialog(props: {
                   ))}
                 </SelectPopup>
               </Select>
+              )}
             </section>
             <section className="flex flex-col gap-1.5" aria-label="Acceptance criteria">
               <h3 className="text-[13px] font-semibold text-muted-foreground">
@@ -334,6 +368,16 @@ function ApproveAndStartDialog(props: {
           </DisabledReason>
         </DialogFooter>
       </DialogPopup>
+      {project === undefined ? null : (
+        <CreateAgentDialog
+          open={creatingCoordinator}
+          onOpenChange={setCreatingCoordinator}
+          project={project}
+          initialName="coordinator"
+          initialRoles={COORDINATOR_ROLES}
+          onCreated={(agentId) => setOwnerId(agentId)}
+        />
+      )}
     </Dialog>
   );
 }
