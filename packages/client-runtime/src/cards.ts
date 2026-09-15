@@ -1192,11 +1192,24 @@ export function needsYouItems(input: {
         }
       }
     }
-    // Invariant 13: a card that may not spend waits on a person.
+    // Invariant 13: a card that may not spend waits on a person. Never snoozed away: a plan's or
+    // migration's children spend from it, so this item is their only way to start again.
     if (card.spentUsd >= card.budgetCapUsd) {
-      add({ ...base, key: `budget:${card.id}`, kind: "budgetReached", since: card.activityAt });
+      add({
+        ...base,
+        key: `budget:${card.id}`,
+        kind: "budgetReached",
+        since: card.activityAt,
+        snoozable: false,
+      });
     } else if (card.unpricedTurns > 0 && !card.acceptsUnpriced) {
-      add({ ...base, key: `unpriced:${card.id}`, kind: "unpricedModel", since: card.activityAt });
+      add({
+        ...base,
+        key: `unpriced:${card.id}`,
+        kind: "unpricedModel",
+        since: card.activityAt,
+        snoozable: false,
+      });
     }
   }
   for (const session of input.sessions) {

@@ -883,6 +883,28 @@ describe("needsYouItems on budget", () => {
       ["unpricedModel", "unpriced"],
     ]);
   });
+
+  it("shows a plan's unpriced model beside its open question, even when the plan is snoozed", () => {
+    // Its children spend from the plan, so this item is the only way their sessions start again.
+    const plan = card("plan", {
+      kind: "plan",
+      status: "inProgress",
+      specState: "approved",
+      unpricedTurns: 1,
+      activityAt: at(1),
+      openElicitations: [
+        openQuestion("ask-1", "question", at(2), { question: "Which slice first?" }),
+      ],
+    });
+    const kinds = (cards: ReadonlyArray<OrchestrationCard>) =>
+      needsYouItems({ cards, sessions: [], now: Date.parse(at(10)) }).map((item) => item.kind);
+
+    expect(kinds([plan])).toEqual(["unpricedModel", "awaitingInput"]);
+    expect(kinds([{ ...plan, snoozedAt: at(3), snoozedUntil: null }])).toEqual([
+      "unpricedModel",
+      "awaitingInput",
+    ]);
+  });
 });
 
 describe("needsYouItems for plans, lessons, outcomes, reverts and budgets", () => {
