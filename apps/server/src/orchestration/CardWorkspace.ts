@@ -186,9 +186,9 @@ export class CardWorkspace extends Context.Service<
       headSha: string,
     ) => Effect.Effect<CardSnapshot, CardWorkspaceError>;
     /**
-     * Starts each of the card's services that isn't answering its ready probe and waits until all
-     * are ready. Idempotent: services already up are left alone, and services a server restart
-     * lost come back.
+     * Starts each of the card's services that isn't answering its ready probe, or was started on an
+     * older commit than the worktree's HEAD, and waits until all are ready. Idempotent: services up
+     * at the current HEAD are left alone, and services a server restart lost come back.
      */
     readonly ensureServices: (cardId: CardId) => Effect.Effect<void, CardWorkspaceError>;
     /** The card's changes against its base, untracked files included; empty before it has a worktree. */
@@ -242,6 +242,8 @@ const CARD_PORT_BLOCK_LIMIT = 500;
 const SCRIPT_TIMEOUT = "10 minutes";
 const SCRIPT_OUTPUT_TAIL = 2_000;
 const CHECK_LOG_MAX_BYTES = 1_048_576;
+/** How long a restarted service's old process gets to free its port before the new one starts. */
+const SERVICE_STOP_WAIT_MS = 10_000;
 
 /** A card's script terminals live under this terminal thread id. */
 export const cardTerminalThreadId = (cardId: CardId): string => `card:${cardId}`;
@@ -415,6 +417,10 @@ const make = Effect.gen(function* () {
   const reservedPortBases = new Set<number>();
   // Cards whose run script (the preview) this process started, by that script's id.
   const previewStarted = new Map<CardId, string>();
+  // The worktree HEAD each service was started on, by `${terminal thread}|${service}`, so a service
+  // still answering from an older commit is restarted.
+  // ponytail: process-local, so after a server restart each running service restarts once; persist it if that hurts.
+  const serviceHeads = new Map<string, string>();
 
   const toError = (cardId: string, message: string) => (cause: unknown) =>
     new CardWorkspaceError({ cardId, message, cause });
@@ -746,9 +752,10 @@ const make = Effect.gen(function* () {
         );
 
   /**
-   * Brings the project's services up in order under a terminal thread: a service already answering
-   * its ready probe is left alone, any other is (re)started and waited on. One caller per thread at
-   * a time, so a second caller finds them ready instead of restarting them.
+   * Brings the project's services up in order under a terminal thread: a service this process
+   * started at the worktree's current HEAD and still answering its ready probe is left alone, any
+   * other is (re)started and waited on. One caller per thread at a time, so a second caller finds
+   * them ready instead of restarting them.
    */
   const ensureServicesAt = (input: {
     readonly cardId: CardId;
@@ -759,38 +766,57 @@ const make = Effect.gen(function* () {
     readonly portBase: number;
   }) =>
     withLock(`services:${input.threadId}`)(
-      Effect.forEach(
-        input.file.services,
-        (service) =>
-          Effect.gen(function* () {
-            const port = input.portBase + (input.file.ports[service.port] ?? 0);
-            if (yield* serviceReady(service, port)) return;
-            const terminalId = `service-${service.name}`;
-            yield* terminals
-              .close({ threadId: input.threadId, terminalId })
-              .pipe(Effect.orElseSucceed(() => undefined));
-            yield* openCardTerminal({
-              cardId: input.cardId,
-              threadId: input.threadId,
-              terminalId,
-              worktreePath: input.worktreePath,
-              env: input.env,
-              command: service.start,
-              label: service.name,
-            });
-            const deadline = (yield* Clock.currentTimeMillis) + service.ready.timeoutSeconds * 1_000;
-            while (!(yield* serviceReady(service, port))) {
-              if ((yield* Clock.currentTimeMillis) > deadline) {
-                return yield* new CardWorkspaceError({
-                  cardId: input.cardId,
-                  message: `Service ${service.name} wasn't ready on port ${port} within ${service.ready.timeoutSeconds}s.`,
-                });
+      Effect.gen(function* () {
+        const head = yield* git(input.cardId, input.worktreePath, ["rev-parse", "HEAD"]);
+        yield* Effect.forEach(
+          input.file.services,
+          (service) =>
+            Effect.gen(function* () {
+              const port = input.portBase + (input.file.ports[service.port] ?? 0);
+              const startedKey = `${input.threadId}|${service.name}`;
+              const ready = yield* serviceReady(service, port);
+              if (ready && serviceHeads.get(startedKey) === head) return;
+              const terminalId = `service-${service.name}`;
+              serviceHeads.delete(startedKey);
+              yield* terminals
+                .close({ threadId: input.threadId, terminalId })
+                .pipe(Effect.orElseSucceed(() => undefined));
+              if (ready) {
+                // The old process frees its port after it exits; until then the probe would hear it.
+                // One this process didn't start may never stop, and the new start then can't bind.
+                const stopDeadline = (yield* Clock.currentTimeMillis) + SERVICE_STOP_WAIT_MS;
+                while (
+                  (yield* serviceReady(service, port)) &&
+                  (yield* Clock.currentTimeMillis) < stopDeadline
+                ) {
+                  yield* Effect.sleep("100 millis");
+                }
               }
-              yield* Effect.sleep("500 millis");
-            }
-          }),
-        { discard: true },
-      ),
+              yield* openCardTerminal({
+                cardId: input.cardId,
+                threadId: input.threadId,
+                terminalId,
+                worktreePath: input.worktreePath,
+                env: input.env,
+                command: service.start,
+                label: service.name,
+              });
+              const deadline =
+                (yield* Clock.currentTimeMillis) + service.ready.timeoutSeconds * 1_000;
+              while (!(yield* serviceReady(service, port))) {
+                if ((yield* Clock.currentTimeMillis) > deadline) {
+                  return yield* new CardWorkspaceError({
+                    cardId: input.cardId,
+                    message: `Service ${service.name} wasn't ready on port ${port} within ${service.ready.timeoutSeconds}s.`,
+                  });
+                }
+                yield* Effect.sleep("500 millis");
+              }
+              serviceHeads.set(startedKey, head);
+            }),
+          { discard: true },
+        );
+      }),
     );
 
   /** Writes each env file from its template; targets must be gitignored so landing can't commit them. */

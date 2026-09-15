@@ -777,6 +777,43 @@ it.live("restarts services a restart lost and leaves running ones alone", () => 
   ).pipe(Effect.provide(cardWorkspaceTestLayer("iskra-card-services-", terminals.layer)));
 });
 
+it.live("restarts a service started on an older commit, and not one at the worktree's HEAD", () => {
+  const terminals = makeSpawningTerminals();
+  // Serves body.txt as it was when the service started.
+  const bodyService = {
+    ...httpService,
+    start: `node -e "const fs=require('fs');const b=fs.existsSync('body.txt')?fs.readFileSync('body.txt','utf8'):'v0';require('http').createServer((q,s)=>s.end(b)).listen(+process.env.ISKRA_PORT_WEB,'127.0.0.1')"`,
+  };
+  const body = (port: number) =>
+    Effect.promise(() =>
+      // @effect-diagnostics-next-line globalFetchInEffect:off - a loopback probe in a test.
+      fetch(`http://127.0.0.1:${port}/`).then((response) => response.text()),
+    );
+  return Effect.scoped(
+    Effect.gen(function* () {
+      yield* Effect.addFinalizer(() => terminals.killAll);
+      const workspace = yield* CardWorkspace.CardWorkspace;
+      const world = yield* makeProject("service-head", []);
+      yield* world.commitProjectFile({ ports: { web: 0 }, services: [bodyService] });
+      const cardId = CardId.make("card-service-head");
+      yield* world.createCard(cardId, "Service head");
+      const info = yield* workspace.ensure(cardId);
+      expect(yield* body(info.portBase)).toBe("v0");
+
+      yield* world.fileSystem.writeFileString(world.path.join(info.worktreePath, "body.txt"), "v1");
+      yield* world.gitIn(info.worktreePath, "add", ".");
+      yield* world.gitIn(info.worktreePath, "commit", "-m", "v1");
+      yield* workspace.ensureServices(cardId);
+      expect(yield* body(info.portBase)).toBe("v1");
+      expect(terminals.opens).toHaveLength(2);
+
+      // At the same HEAD the running service is kept.
+      yield* workspace.ensureServices(cardId);
+      expect(terminals.opens).toHaveLength(2);
+    }),
+  ).pipe(Effect.provide(cardWorkspaceTestLayer("iskra-card-service-head-", terminals.layer)));
+});
+
 const journeyHitsWeb = `node -e "require('http').get('http://127.0.0.1:'+process.env.ISKRA_PORT_WEB+'/',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(2))"`;
 
 it.live("runs journeys in order against running services, stopping at the first failure or timeout", () => {
