@@ -437,6 +437,15 @@ export const budgetCardOf = (readModel: OrchestrationReadModel, card: Orchestrat
     : card;
 };
 
+/** Why the card's turns can't start on the budget it spends from, naming its plan or migration when it's theirs. */
+export const budgetRefusalOf = (readModel: OrchestrationReadModel, card: OrchestrationCard) => {
+  const holder = budgetCardOf(readModel, card);
+  return cardBudgetRefusal(
+    holder,
+    holder.id === card.id ? null : holder.kind === "task" ? "parent card" : holder.kind,
+  );
+};
+
 /** The card's live owner session, if it has one. */
 export const liveOwnerRun = (readModel: OrchestrationReadModel, cardId: CardId) =>
   (readModel.liveRuns ?? []).find((run) => run.cardId === cardId && run.role === "owner");
@@ -1599,7 +1608,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ? undefined
           : readModel.cards?.find((candidate) => candidate.id === budgetRun.cardId);
       const budgetRefusal =
-        budgetCard === undefined ? null : cardBudgetRefusal(budgetCardOf(readModel, budgetCard));
+        budgetCard === undefined ? null : budgetRefusalOf(readModel, budgetCard);
       if (budgetRefusal !== null) {
         return yield* refuse(command, budgetRefusal);
       }
@@ -3464,7 +3473,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         return yield* refuse(command, guardRefusal);
       }
       // A plan or migration child spends from its parent, so the parent's cap holds it back too.
-      yield* refuseIf(command, cardBudgetRefusal(budgetCardOf(readModel, card)));
+      yield* refuseIf(command, budgetRefusalOf(readModel, card));
       yield* refuseAtSessionCap(readModel, command, card.projectId);
       return yield* planned(command, "card", command.cardId, command.createdAt, {
         type: "card.session-requested",
@@ -3785,7 +3794,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         return yield* refuse(command, `A ${command.role} session is read-only.`);
       }
       yield* refuseAtSessionCap(readModel, command, card.projectId);
-      const overBudget = cardBudgetRefusal(budgetCardOf(readModel, card));
+      const overBudget = budgetRefusalOf(readModel, card);
       if (overBudget !== null) {
         return yield* refuse(command, overBudget);
       }

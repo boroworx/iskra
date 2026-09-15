@@ -668,15 +668,22 @@ export function withoutRelation(
 /**
  * Why a card's turns cannot start (invariant 13): its spend reached the cap, or
  * its model has no known price and no person accepted running it uncapped.
+ * `holder` names the card whose budget it is ("plan") when that isn't the card itself.
  */
 export function cardBudgetRefusal(
   card: Pick<OrchestrationCard, "spentUsd" | "budgetCapUsd" | "unpricedTurns" | "acceptsUnpriced">,
+  holder: string | null = null,
 ): string | null {
+  const spent = `$${card.spentUsd.toFixed(2)} of its $${card.budgetCapUsd.toFixed(2)} budget`;
   if (card.spentUsd >= card.budgetCapUsd) {
-    return `The card has spent $${card.spentUsd.toFixed(2)} of its $${card.budgetCapUsd.toFixed(2)} budget; raise the cap to continue.`;
+    return holder === null
+      ? `The card has spent ${spent}; raise the cap to continue.`
+      : `Its ${holder} has spent ${spent}; raise the ${holder}'s cap to continue.`;
   }
   if (card.unpricedTurns > 0 && !card.acceptsUnpriced) {
-    return "The card's model has no known price; accept running it uncapped to continue.";
+    return holder === null
+      ? "The card's model has no known price; accept running it uncapped to continue."
+      : `Its ${holder}'s model has no known price; accept running the ${holder} uncapped to continue.`;
   }
   return null;
 }

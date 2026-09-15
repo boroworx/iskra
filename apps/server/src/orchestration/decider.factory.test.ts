@@ -36,7 +36,7 @@ import {
   triggerReadyReason,
   untrustedAuthorReason,
 } from "./cardRules.ts";
-import { budgetCardOf } from "./decider.ts";
+import { budgetCardOf, budgetRefusalOf } from "./decider.ts";
 import {
   COORDINATOR_OWN_CHILDREN_REASON,
   MIGRATION_ENUMERATE_COMMAND_REASON,
@@ -72,6 +72,7 @@ import {
   now,
   onCard,
   projectId,
+  recordSession,
 } from "./decider.testkit.ts";
 
 const isClientCommand = Schema.is(ClientOrchestrationCommand);
@@ -245,8 +246,36 @@ it.layer(NodeServices.layer)("decider card factory", (it) => {
           recordedAt: now,
         },
       ]);
+      // The refusal names the plan, whose cap is the one to raise.
       expect(yield* refusal(planAtCap, startC1)).toBe(
-        cardBudgetRefusal(cardIn(planAtCap, planCardId)!),
+        cardBudgetRefusal(cardIn(planAtCap, planCardId)!, "plan"),
+      );
+      expect(yield* refusal(planAtCap, startC1)).toMatch(
+        /^Its plan has spent \$\d+\.\d\d of its \$\d+\.\d\d budget; raise the plan's cap to continue\.$/,
+      );
+      // An unpriced turn on the plan holds back every child session, a verifier's included.
+      const planUnpriced = yield* applyTo(approved, [
+        {
+          type: "card.spend.record",
+          commandId: nextCommandId(),
+          cardId: planCardId,
+          threadId: ThreadId.make("thread-coordinator"),
+          agentId: frontend,
+          turnId: TurnId.make("turn-unpriced"),
+          costUsd: 0,
+          costSource: "unpriced",
+          recordedAt: now,
+        },
+      ]);
+      const unpricedReason =
+        "Its plan's model has no known price; accept running the plan uncapped to continue.";
+      expect(yield* refusal(planUnpriced, startC1)).toBe(unpricedReason);
+      expect(
+        yield* refusal(planUnpriced, recordSession("thread-verifier", backend, "verifier", ["read"], c1.id)),
+      ).toBe(unpricedReason);
+      // The plan's own session keeps the card's wording.
+      expect(budgetRefusalOf(planUnpriced, cardIn(planUnpriced, planCardId)!)).toBe(
+        "The card's model has no known price; accept running it uncapped to continue.",
       );
       expect(yield* refusal(approved, approvePlan(2))).toBe(PLAN_NOT_PROPOSED_REASON);
 
