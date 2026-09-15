@@ -94,6 +94,7 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { BOARD_CLAUDE_TOOL_NAMES, LEAD_CLAUDE_TOOL_NAMES } from "../../mcp/toolkits/board/tools.ts";
 import { VERIFIER_CLAUDE_TOOL_NAMES } from "../../mcp/toolkits/verifier/tools.ts";
+import { COORDINATOR_CLAUDE_TOOL_NAMES } from "../../mcp/toolkits/coordinator/tools.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
 import { claudeSignedOutMessage, makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import { planClaudeSkillDispatch } from "../Drivers/ClaudeSkillDispatch.ts";
@@ -4879,7 +4880,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           ? LEAD_CLAUDE_TOOL_NAMES
           : threadMcpSession?.capabilities.has("verifier")
             ? VERIFIER_CLAUDE_TOOL_NAMES
-            : null;
+            : threadMcpSession?.capabilities.has("coordinator")
+              ? COORDINATOR_CLAUDE_TOOL_NAMES
+              : null;
       const mcpSession = input.run && runToolNames === null ? undefined : threadMcpSession;
       const runAllowedTools =
         input.run && runToolNames !== null ? [...allowedTools, ...runToolNames] : allowedTools;

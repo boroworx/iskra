@@ -966,7 +966,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
             ? ["lead"]
             : run.value.role === "verifier" && run.value.cardId !== null
               ? ["verifier"]
-              : [],
+              : run.value.role === "coordinator" && run.value.cardId !== null
+                ? ["coordinator"]
+                : [],
       );
     }
     const capabilities = new Set<McpInvocationContext.McpCapability>(["pull-requests"]);

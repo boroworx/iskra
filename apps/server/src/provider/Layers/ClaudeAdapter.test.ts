@@ -6870,6 +6870,7 @@ describe("ClaudeAdapterLive", () => {
         "mcp__iskra__propose_criteria_change",
         "mcp__iskra__request_help",
         "mcp__iskra__request_critique",
+        "mcp__iskra__propose_lesson",
       ]);
       assert.deepEqual(Object.keys(options?.mcpServers ?? {}), ["iskra"]);
     }).pipe(
@@ -6943,6 +6944,46 @@ describe("ClaudeAdapterLive", () => {
         "mcp__iskra__record_verdict",
         "mcp__iskra__view_evidence",
         "mcp__iskra__view_screenshot",
+      ]);
+      assert.deepEqual(Object.keys(options?.mcpServers ?? {}), ["iskra"]);
+    }).pipe(
+      Effect.scoped,
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("connects a plan coordinator's run to its plan tools", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      McpProviderSession.setMcpProviderSession({
+        environmentId: EnvironmentId.make("environment-coordinator"),
+        threadId: THREAD_ID,
+        providerSessionId: "provider-session-coordinator",
+        providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+        endpoint: "http://127.0.0.1:1/mcp",
+        authorizationHeader: "Bearer coordinator-token",
+        capabilities: new Set(["coordinator"]),
+      });
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => McpProviderSession.clearMcpProviderSession(THREAD_ID)),
+      );
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+        run: { systemPrompt: "", capabilities: ["read"] },
+      });
+
+      const options = harness.getLastCreateQueryInput()?.options;
+      assert.deepEqual(options?.allowedTools, [
+        "mcp__iskra__propose_plan",
+        "mcp__iskra__read_child_worklog",
+        "mcp__iskra__message_child",
+        "mcp__iskra__pause_child",
+        "mcp__iskra__ask_plan_owner",
+        "mcp__iskra__propose_plan_lesson",
       ]);
       assert.deepEqual(Object.keys(options?.mcpServers ?? {}), ["iskra"]);
     }).pipe(
