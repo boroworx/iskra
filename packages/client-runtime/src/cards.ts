@@ -34,7 +34,7 @@ export type BoardColumn = (typeof BOARD_COLUMNS)[number];
 export const BOARD_COLUMN_LABEL: Record<BoardColumn, string> = {
   triage: "Triage",
   ready: "Ready",
-  inProgress: "In progress",
+  inProgress: "In Progress",
   inReview: "Review",
   landing: "Landing",
   done: "Done",

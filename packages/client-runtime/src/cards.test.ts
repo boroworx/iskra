@@ -150,7 +150,7 @@ describe("cardMoveActions", () => {
 
     expect(actions("triage")).toEqual([
       ["Approve", true],
-      ["Move to In progress", false],
+      ["Move to In Progress", false],
       ["Move to Review", false],
       ["Move to Landing", false],
       ["Abandon", true],
@@ -158,7 +158,7 @@ describe("cardMoveActions", () => {
     expect(actions("abandoned")).toEqual([
       ["Reopen", true],
       ["Move to Ready", false],
-      ["Move to In progress", false],
+      ["Move to In Progress", false],
       ["Move to Review", false],
       ["Move to Landing", false],
     ]);
