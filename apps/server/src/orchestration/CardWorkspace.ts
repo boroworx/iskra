@@ -122,6 +122,21 @@ export interface CardWorkspaceInfo {
   readonly portBase: number;
 }
 
+/**
+ * A detached checkout of one commit of a card, with its own port block and services, for work
+ * that must not touch the builder's worktree (the verifier). Setup and services run without
+ * secrets. `ensureServices` restarts any service that stopped answering; `release` runs archive,
+ * stops the services and removes the checkout, and is safe to call twice.
+ */
+export interface CardSnapshot {
+  readonly path: string;
+  readonly portBase: number;
+  // Each project file port by name, inside this snapshot's block.
+  readonly ports: Readonly<Record<string, number>>;
+  readonly ensureServices: Effect.Effect<void, CardWorkspaceError>;
+  readonly release: Effect.Effect<void>;
+}
+
 /** The card's base, the ref it resolves to on this machine, and the project file read there. */
 export interface CardProjectFile {
   readonly baseBranch: string;
@@ -144,6 +159,17 @@ export class CardWorkspace extends Context.Service<
   {
     readonly start: () => Effect.Effect<void, never, Scope.Scope>;
     readonly ensure: (cardId: CardId) => Effect.Effect<CardWorkspaceInfo, CardWorkspaceError>;
+    /** A detached checkout of `headSha` on its own ports with services up; see CardSnapshot. */
+    readonly snapshot: (
+      cardId: CardId,
+      headSha: string,
+    ) => Effect.Effect<CardSnapshot, CardWorkspaceError>;
+    /**
+     * Starts each of the card's services that isn't answering its ready probe and waits until all
+     * are ready. Idempotent: services already up are left alone, and services a server restart
+     * lost come back.
+     */
+    readonly ensureServices: (cardId: CardId) => Effect.Effect<void, CardWorkspaceError>;
     /** The card's changes against its base, untracked files included; empty before it has a worktree. */
     readonly diff: (
       cardId: CardId,
@@ -631,6 +657,8 @@ const make = Effect.gen(function* () {
 
   const openCardTerminal = (input: {
     readonly cardId: CardId;
+    // Defaults to the card's own terminal thread.
+    readonly threadId?: string;
     readonly terminalId: string;
     readonly worktreePath: string;
     readonly env: Record<string, string>;
@@ -638,7 +666,7 @@ const make = Effect.gen(function* () {
     readonly label: string;
   }) =>
     Effect.gen(function* () {
-      const threadId = cardTerminalThreadId(input.cardId);
+      const threadId = input.threadId ?? cardTerminalThreadId(input.cardId);
       yield* terminals
         .open({
           threadId,
@@ -669,39 +697,52 @@ const make = Effect.gen(function* () {
           Effect.orElseSucceed(() => false),
         );
 
-  /** Starts the project's services in order in the card's terminals, each waiting until ready. */
-  const startServices = (input: {
+  /**
+   * Brings the project's services up in order under a terminal thread: a service already answering
+   * its ready probe is left alone, any other is (re)started and waited on. One caller per thread at
+   * a time, so a second caller finds them ready instead of restarting them.
+   */
+  const ensureServicesAt = (input: {
     readonly cardId: CardId;
+    readonly threadId: string;
     readonly worktreePath: string;
     readonly env: Record<string, string>;
     readonly file: ProjectFileConfig;
     readonly portBase: number;
   }) =>
-    Effect.forEach(
-      input.file.services,
-      (service) =>
-        Effect.gen(function* () {
-          yield* openCardTerminal({
-            cardId: input.cardId,
-            terminalId: `service-${service.name}`,
-            worktreePath: input.worktreePath,
-            env: input.env,
-            command: service.start,
-            label: service.name,
-          });
-          const port = input.portBase + (input.file.ports[service.port] ?? 0);
-          const deadline = (yield* Clock.currentTimeMillis) + service.ready.timeoutSeconds * 1_000;
-          while (!(yield* serviceReady(service, port))) {
-            if ((yield* Clock.currentTimeMillis) > deadline) {
-              return yield* new CardWorkspaceError({
-                cardId: input.cardId,
-                message: `Service ${service.name} wasn't ready on port ${port} within ${service.ready.timeoutSeconds}s.`,
-              });
+    withLock(`services:${input.threadId}`)(
+      Effect.forEach(
+        input.file.services,
+        (service) =>
+          Effect.gen(function* () {
+            const port = input.portBase + (input.file.ports[service.port] ?? 0);
+            if (yield* serviceReady(service, port)) return;
+            const terminalId = `service-${service.name}`;
+            yield* terminals
+              .close({ threadId: input.threadId, terminalId })
+              .pipe(Effect.orElseSucceed(() => undefined));
+            yield* openCardTerminal({
+              cardId: input.cardId,
+              threadId: input.threadId,
+              terminalId,
+              worktreePath: input.worktreePath,
+              env: input.env,
+              command: service.start,
+              label: service.name,
+            });
+            const deadline = (yield* Clock.currentTimeMillis) + service.ready.timeoutSeconds * 1_000;
+            while (!(yield* serviceReady(service, port))) {
+              if ((yield* Clock.currentTimeMillis) > deadline) {
+                return yield* new CardWorkspaceError({
+                  cardId: input.cardId,
+                  message: `Service ${service.name} wasn't ready on port ${port} within ${service.ready.timeoutSeconds}s.`,
+                });
+              }
+              yield* Effect.sleep("500 millis");
             }
-            yield* Effect.sleep("500 millis");
-          }
-        }),
-      { discard: true },
+          }),
+        { discard: true },
+      ),
     );
 
   /** Writes each env file from its template; targets must be gitignored so landing can't commit them. */
@@ -1181,8 +1222,14 @@ const make = Effect.gen(function* () {
           );
         }
         if (file !== null) {
-          // ponytail: services start once per workspace; after a server restart they stay down until the card is set up again.
-          yield* startServices({ cardId, worktreePath, env, file, portBase });
+          yield* ensureServicesAt({
+            cardId,
+            threadId: cardTerminalThreadId(cardId),
+            worktreePath,
+            env,
+            file,
+            portBase,
+          });
         }
         yield* engine
           .dispatch({
@@ -1198,6 +1245,122 @@ const make = Effect.gen(function* () {
       // A worktree whose preparation failed is not a workspace; remove it so the next try starts clean.
       yield* prepare.pipe(Effect.tapError(() => rollback));
       return { branch, worktreePath, portBase };
+    });
+
+  const ensureServices: CardWorkspace["Service"]["ensureServices"] = (cardId) =>
+    Effect.gen(function* () {
+      const { model, card, project } = yield* readCard(cardId);
+      if (card.worktreePath === null || card.portBase === null) {
+        return yield* new CardWorkspaceError({
+          cardId,
+          message: "The card has no worktree to run services in.",
+        });
+      }
+      const { file } = yield* loadProjectFile(cardId, model, card, project);
+      if (file === null || file.services.length === 0) return;
+      yield* ensureServicesAt({
+        cardId,
+        threadId: cardTerminalThreadId(cardId),
+        worktreePath: card.worktreePath,
+        env: scriptEnv({
+          cardId,
+          project,
+          worktreePath: card.worktreePath,
+          portBase: card.portBase,
+          file,
+          settings: yield* readSettings(cardId),
+        }),
+        file,
+        portBase: card.portBase,
+      });
+    });
+
+  const snapshot: CardWorkspace["Service"]["snapshot"] = (cardId, headSha) =>
+    Effect.gen(function* () {
+      if (!/^[0-9a-f]{7,64}$/i.test(headSha)) {
+        return yield* new CardWorkspaceError({ cardId, message: `'${headSha}' isn't a commit sha.` });
+      }
+      const { model, card, project } = yield* readCard(cardId);
+      const root = project.workspaceRoot;
+      const { file } = yield* loadProjectFile(cardId, model, card, project);
+      const settings = yield* readSettings(cardId);
+      const scripts = yield* projectScripts(cardId, project);
+      const suffix = (yield* crypto.randomUUIDv4.pipe(Effect.orDie)).replaceAll("-", "").slice(-8);
+      const worktreePath = path.join(
+        serverConfig.worktreesDir,
+        path.basename(root),
+        `snapshot-${cardSlug(cardId)}-${headSha.slice(0, 7)}-${suffix}`,
+      );
+      const threadId = `card-snapshot:${cardId}:${suffix}`;
+
+      const portBase = yield* withLock(`project:${project.id}`)(
+        Effect.gen(function* () {
+          const { model: current } = yield* readCard(cardId);
+          const base = yield* allocatePortBase(cardId, current);
+          // Detached: no branch is made, so nothing done in the snapshot can move a card's ref.
+          yield* git(cardId, root, ["worktree", "add", "--detach", worktreePath, headSha]).pipe(
+            Effect.tapError(() => Effect.sync(() => reservedPortBases.delete(base))),
+          );
+          return base;
+        }),
+      );
+      // No secrets anywhere in a snapshot: env files and scripts get ports and paths only.
+      const env = scriptEnv({ cardId, project, worktreePath, portBase, file, settings });
+
+      let released = false;
+      const release = Effect.suspend(() => {
+        if (released) return Effect.void;
+        released = true;
+        return Effect.gen(function* () {
+          const archive = archiveProjectScript(scripts);
+          if (archive !== null) {
+            yield* runAwaitedScript(cardId, archive, worktreePath, env).pipe(
+              Effect.catch((error) => Effect.logWarning(error.message)),
+            );
+          }
+          yield* terminals
+            .close({ threadId, deleteHistory: true })
+            .pipe(Effect.orElseSucceed(() => undefined));
+          yield* optionalGit(cardId, root, ["worktree", "remove", "--force", worktreePath]);
+          yield* optionalGit(cardId, root, ["worktree", "prune"]);
+          reservedPortBases.delete(portBase);
+        });
+      });
+
+      const ensureSnapshotServices =
+        file === null
+          ? Effect.void
+          : ensureServicesAt({ cardId, threadId, worktreePath, env, file, portBase });
+
+      yield* Effect.gen(function* () {
+        if (file !== null) {
+          yield* renderEnvFiles({ cardId, worktreePath, file, portBase, secrets: [] });
+        }
+        const setup = setupProjectScript(scripts);
+        if (setup !== null) {
+          yield* admission.run(
+            {
+              cardId,
+              projectId: project.id,
+              priority: card.priority,
+              label: `Setting up a snapshot of ${card.title}`,
+              kind: "setup",
+            },
+            runAwaitedScript(cardId, setup, worktreePath, env),
+          );
+        }
+        yield* ensureSnapshotServices;
+      }).pipe(Effect.tapError(() => release));
+
+      return {
+        path: worktreePath,
+        portBase,
+        ports: Object.fromEntries(
+          Object.entries(file?.ports ?? {}).map(([name, offset]) => [name, portBase + offset]),
+        ),
+        ensureServices: ensureSnapshotServices,
+        release,
+      } satisfies CardSnapshot;
     });
 
   const teardownUnlocked = (cardId: CardId) =>
@@ -1320,6 +1483,8 @@ const make = Effect.gen(function* () {
   return {
     start,
     ensure: (cardId) => withLock(`card:${cardId}`)(ensureUnlocked(cardId)),
+    snapshot,
+    ensureServices,
     diff,
     runChecks,
     changedFiles,

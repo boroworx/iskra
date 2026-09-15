@@ -1,4 +1,5 @@
-// @effect-diagnostics nodeBuiltinImport:off - holds a real port to prove every port is probed.
+// @effect-diagnostics nodeBuiltinImport:off - holds real ports and runs real service processes.
+import * as NodeChildProcess from "node:child_process";
 import * as NodeNet from "node:net";
 
 import {
@@ -14,6 +15,7 @@ import {
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
 
 import { ServerSecretStore } from "../auth/ServerSecretStore.ts";
@@ -63,7 +65,7 @@ const makeProject = Effect.fn("makeProject")(function* (
 ) {
   const engine = yield* OrchestrationEngineService;
   const snapshotQuery = yield* ProjectionSnapshotQuery;
-  const { fileSystem, path, root, git } = yield* makeGitRepo(`iskra-card-repo-${name}-`);
+  const { fileSystem, path, root, git, gitIn } = yield* makeGitRepo(`iskra-card-repo-${name}-`);
 
   const projectId = ProjectId.make(`project-${name}`);
   yield* engine.dispatch({
@@ -100,6 +102,7 @@ const makeProject = Effect.fn("makeProject")(function* (
     path,
     root,
     git,
+    gitIn,
     createCard: (id: string, title: string) =>
       engine.dispatch({
         type: "card.create",
@@ -615,3 +618,158 @@ it.live("kills a check at its timeout and keeps the output it wrote", () =>
     }),
   ).pipe(Effect.provide(cardWorkspaceTestLayer("iskra-card-slow-check-", fakeTerminals))),
 );
+
+/**
+ * Terminals that really run what is written to them, so services listen: each written command is
+ * spawned in its own process group, and closing a terminal (or the test's scope) kills that group.
+ */
+const makeSpawningTerminals = () => {
+  const opened = new Map<string, { readonly cwd: string; readonly env: Record<string, string> }>();
+  const running = new Map<string, NodeChildProcess.ChildProcess>();
+  const opens: Array<string> = [];
+  const key = (threadId: string, terminalId: string) => `${threadId}|${terminalId}`;
+  const killWhere = (matches: (entry: string) => boolean) => {
+    for (const [entry, child] of running) {
+      if (!matches(entry)) continue;
+      try {
+        if (child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
+      } catch {
+        // Already gone.
+      }
+      running.delete(entry);
+    }
+  };
+  const layer = Layer.mock(TerminalManager.TerminalManager)({
+    open: (input) =>
+      Effect.sync(() => {
+        opens.push(key(input.threadId, input.terminalId));
+        opened.set(key(input.threadId, input.terminalId), { cwd: input.cwd, env: { ...input.env } });
+        return {} as never;
+      }),
+    write: (input) =>
+      Effect.sync(() => {
+        const entry = key(input.threadId, input.terminalId);
+        const terminal = opened.get(entry)!;
+        running.set(
+          entry,
+          NodeChildProcess.spawn("sh", ["-c", input.data.replace(/\r$/, "")], {
+            cwd: terminal.cwd,
+            env: { ...process.env, ...terminal.env },
+            detached: true,
+            stdio: "ignore",
+          }),
+        );
+      }),
+    close: (input) =>
+      Effect.sync(() =>
+        killWhere((entry) =>
+          input.terminalId === undefined
+            ? entry.startsWith(`${input.threadId}|`)
+            : entry === key(input.threadId, input.terminalId),
+        ),
+      ),
+  });
+  return {
+    layer,
+    opens,
+    /** Kills every process a terminal thread runs, as a server restart would. */
+    killThread: (threadId: string) => killWhere((entry) => entry.startsWith(`${threadId}|`)),
+    killAll: Effect.sync(() => killWhere(() => true)),
+  };
+};
+
+const listening = (port: number) =>
+  Effect.callback<boolean>((resume) => {
+    const socket = NodeNet.createConnection({ host: "127.0.0.1", port });
+    socket.once("connect", () => {
+      socket.destroy();
+      resume(Effect.succeed(true));
+    });
+    socket.once("error", () => resume(Effect.succeed(false)));
+  });
+
+const httpService = {
+  name: "api",
+  kind: "fake",
+  port: "web",
+  start: `node -e "require('http').createServer((q,s)=>s.end('ok')).listen(+process.env.ISKRA_PORT_WEB,'127.0.0.1')"`,
+  ready: { kind: "http", path: "/", timeoutSeconds: 20 },
+};
+
+// Live clock: services really start and their ready probes really wait.
+it.live("snapshots a commit detached on its own ports with services up, and removes it on release", () => {
+  const terminals = makeSpawningTerminals();
+  return Effect.scoped(
+    Effect.gen(function* () {
+      yield* Effect.addFinalizer(() => terminals.killAll);
+      const workspace = yield* CardWorkspace.CardWorkspace;
+      const world = yield* makeProject("snapshot", []);
+      yield* world.commitProjectFile({ ports: { web: 0 }, services: [httpService] });
+      const cardId = CardId.make("card-snapshot");
+      yield* world.createCard(cardId, "Snapshot");
+      const info = yield* workspace.ensure(cardId);
+      expect(yield* listening(info.portBase)).toBe(true);
+
+      yield* world.fileSystem.writeFileString(world.path.join(info.worktreePath, "done.txt"), "v1\n");
+      yield* world.gitIn(info.worktreePath, "add", ".");
+      yield* world.gitIn(info.worktreePath, "commit", "-m", "v1");
+      const headSha = yield* world.gitIn(info.worktreePath, "rev-parse", "HEAD");
+      // Work after the commit stays out of the snapshot.
+      yield* world.fileSystem.writeFileString(world.path.join(info.worktreePath, "done.txt"), "v2\n");
+
+      const snapshot = yield* workspace.snapshot(cardId, headSha);
+      expect(snapshot.portBase).not.toBe(info.portBase);
+      expect(snapshot.ports).toEqual({ web: snapshot.portBase });
+      expect(yield* world.gitIn(snapshot.path, "rev-parse", "HEAD")).toBe(headSha);
+      expect(yield* world.gitIn(snapshot.path, "status", "--porcelain", "--branch")).toBe(
+        "## HEAD (no branch)",
+      );
+      expect(yield* world.fileSystem.readFileString(world.path.join(snapshot.path, "done.txt"))).toBe(
+        "v1\n",
+      );
+      expect(yield* listening(snapshot.portBase)).toBe(true);
+      expect(yield* world.cardBranches).toEqual([info.branch]);
+
+      yield* snapshot.release;
+      yield* snapshot.release;
+      expect(yield* world.fileSystem.exists(snapshot.path)).toBe(false);
+      expect(yield* world.git("worktree", "list", "--porcelain")).not.toContain(snapshot.path);
+      expect(yield* listening(snapshot.portBase)).toBe(false);
+      // The card's own services and worktree are untouched.
+      expect(yield* listening(info.portBase)).toBe(true);
+      expect(yield* world.fileSystem.exists(info.worktreePath)).toBe(true);
+    }),
+  ).pipe(Effect.provide(cardWorkspaceTestLayer("iskra-card-snapshot-", terminals.layer)));
+});
+
+it.live("restarts services a restart lost and leaves running ones alone", () => {
+  const terminals = makeSpawningTerminals();
+  return Effect.scoped(
+    Effect.gen(function* () {
+      yield* Effect.addFinalizer(() => terminals.killAll);
+      const workspace = yield* CardWorkspace.CardWorkspace;
+      const world = yield* makeProject("services", []);
+      yield* world.commitProjectFile({ ports: { web: 0 }, services: [httpService] });
+      const cardId = CardId.make("card-services");
+      yield* world.createCard(cardId, "Services");
+      const info = yield* workspace.ensure(cardId);
+      expect(terminals.opens).toHaveLength(1);
+
+      // Already up: nothing starts again.
+      yield* workspace.ensureServices(cardId);
+      expect(terminals.opens).toHaveLength(1);
+
+      terminals.killThread(CardWorkspace.cardTerminalThreadId(cardId));
+      // The killed service frees its port once the kernel reaps it.
+      yield* listening(info.portBase).pipe(
+        Effect.repeat({ until: (up) => !up, schedule: Schedule.spaced("20 millis") }),
+      );
+      // Two callers at once start it once.
+      yield* Effect.all([workspace.ensureServices(cardId), workspace.ensureServices(cardId)], {
+        concurrency: 2,
+      });
+      expect(terminals.opens).toHaveLength(2);
+      expect(yield* listening(info.portBase)).toBe(true);
+    }),
+  ).pipe(Effect.provide(cardWorkspaceTestLayer("iskra-card-services-", terminals.layer)));
+});
