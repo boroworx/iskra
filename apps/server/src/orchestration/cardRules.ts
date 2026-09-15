@@ -4,7 +4,6 @@ import {
   CHANNEL_HUMAN_AUTHOR_ID,
   CHANNEL_SYSTEM_AUTHOR_ID,
   DEFAULT_CARD_BUDGET_USD,
-  LESSON_TEXT_MAX_CHARS,
   cardOriginOf,
   type ProjectSpend,
   type ProjectTrigger,
@@ -227,9 +226,6 @@ export const environmentBudgetReason = (capUsd: number) =>
 /** The wait codes of a monthly budget holding new work; the scheduler clears them once there is room. */
 export const BUDGET_WAIT_CODES = ["budgetCap", "agentBudgetCap", "environmentBudgetCap"] as const;
 
-export const LESSON_TOO_LONG_REASON = `Keep a lesson under ${LESSON_TEXT_MAX_CHARS} characters.`;
-export const LESSON_NOT_PROPOSED_REASON = "Only a proposed lesson can be approved or dismissed.";
-export const NO_LESSON_REASON = "This project has no lesson with that id.";
 export const OUTCOME_UNFINISHED_REASON = "Only a finished card has an outcome.";
 export const REVERT_NOT_LANDED_REASON = "Only a landed card can be reverted.";
 export const REVERT_IN_PROGRESS_REASON = "This card already has a revert in progress.";

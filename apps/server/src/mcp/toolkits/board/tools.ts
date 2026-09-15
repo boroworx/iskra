@@ -4,7 +4,6 @@ import {
   CardEstimate,
   CardPremise,
   CardRiskClaims,
-  LESSON_TEXT_MAX_CHARS,
   McpCapabilityUnavailableError,
   TrimmedNonEmptyString,
 } from "@iskra/contracts";
@@ -17,6 +16,7 @@ import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as OrchestrationEngine from "../../../orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ThreadPlanProgressService } from "../../../orchestration/ThreadPlanProgress.ts";
+import { WIKI_CLAUDE_TOOL_NAMES } from "../wiki/tools.ts";
 
 const dependencies = [
   McpInvocationContext.McpInvocationContext,
@@ -257,30 +257,6 @@ const ProposeCriteriaChangeTool = Tool.make("propose_criteria_change", {
   .annotate(Tool.Title, "Propose a criteria change")
   .annotateMerge(boardToolAnnotations);
 
-const ProposeLessonTool = Tool.make("propose_lesson", {
-  description:
-    "Propose a lesson about this project that later cards should know, such as a quirk you tripped over or a playbook that worked. A person approves or dismisses it; approved lessons reach the briefs of cards touching its paths.",
-  parameters: Schema.Struct({
-    kind: Schema.Literals(["quirk", "playbook"]).annotate({
-      description: "quirk for a surprise in the code or tooling; playbook for steps that work.",
-    }),
-    text: TrimmedNonEmptyString.annotate({
-      description: `The lesson in plain language, under ${LESSON_TEXT_MAX_CHARS} characters.`,
-    }),
-    paths: Schema.optional(
-      Schema.Array(TrimmedNonEmptyString).annotate({
-        description:
-          "Repository paths or globs the lesson is about, such as src/api/**. Leave it out for a lesson every card should read.",
-      }),
-    ),
-  }),
-  success: Schema.Struct({ lessonId: Schema.String }),
-  failure: BoardToolError,
-  dependencies,
-})
-  .annotate(Tool.Title, "Propose a lesson")
-  .annotateMerge(boardToolAnnotations);
-
 const AssistantName = TrimmedNonEmptyString.annotate({
   description: "The agent to ask, by name without the @. Defaults to your own agent template.",
 });
@@ -391,7 +367,6 @@ export const BoardToolkit = Toolkit.make(
   ProposeCriteriaChangeTool,
   RequestHelpTool,
   RequestCritiqueTool,
-  ProposeLessonTool,
   ProposeTriageCardTool,
   AskClarificationTool,
 );
@@ -400,20 +375,25 @@ const claudeToolNames = (names: ReadonlyArray<keyof typeof BoardToolkit.tools>) 
   names.map((name) => `mcp__iskra__${name}`);
 
 /** The tools a card's owner session is allowed, as Claude names them from the `iskra` MCP server. */
-export const BOARD_CLAUDE_TOOL_NAMES = claudeToolNames([
-  "propose_card",
-  "record_decision",
-  "update_plan",
-  "run_checks",
-  "request_review",
-  "request_checkpoint",
-  "ask_owner",
-  "request_access",
-  "propose_criteria_change",
-  "request_help",
-  "request_critique",
-  "propose_lesson",
-]);
+export const BOARD_CLAUDE_TOOL_NAMES = [
+  ...claudeToolNames([
+    "propose_card",
+    "record_decision",
+    "update_plan",
+    "run_checks",
+    "request_review",
+    "request_checkpoint",
+    "ask_owner",
+    "request_access",
+    "propose_criteria_change",
+    "request_help",
+    "request_critique",
+  ]),
+  ...WIKI_CLAUDE_TOOL_NAMES,
+];
 
-/** A channel lead proposes cards and asks clarifying questions, nothing else. */
-export const LEAD_CLAUDE_TOOL_NAMES = claudeToolNames(["propose_triage_card", "ask_clarification"]);
+/** A channel lead proposes cards, asks clarifying questions and keeps the wiki, nothing else. */
+export const LEAD_CLAUDE_TOOL_NAMES = [
+  ...claudeToolNames(["propose_triage_card", "ask_clarification"]),
+  ...WIKI_CLAUDE_TOOL_NAMES,
+];

@@ -33,6 +33,8 @@ import { BoardToolkitHandlersLive } from "./toolkits/board/handlers.ts";
 import { BoardToolkit } from "./toolkits/board/tools.ts";
 import { CoordinatorToolkitHandlersLive } from "./toolkits/coordinator/handlers.ts";
 import { CoordinatorToolkit } from "./toolkits/coordinator/tools.ts";
+import { WikiToolkitHandlersLive } from "./toolkits/wiki/handlers.ts";
+import { WikiToolkit } from "./toolkits/wiki/tools.ts";
 import {
   VerifierScreenshotToolkitHandlersLive,
   VerifierToolkitHandlersLive,
@@ -631,6 +633,10 @@ export const CoordinatorToolkitRegistrationLive = McpServer.toolkit(CoordinatorT
   Layer.provide(CoordinatorToolkitHandlersLive),
 );
 
+export const WikiToolkitRegistrationLive = McpServer.toolkit(WikiToolkit).pipe(
+  Layer.provide(WikiToolkitHandlersLive),
+);
+
 const registerVerifierScreenshot = Effect.fn("McpHttpServer.registerVerifierScreenshot")(
   function* () {
     const engine = yield* OrchestrationEngine.OrchestrationEngineService;
@@ -685,6 +691,7 @@ export const layer = Layer.mergeAll(
   PullRequestsToolkitRegistrationLive,
   BoardToolkitRegistrationLive,
   CoordinatorToolkitRegistrationLive,
+  WikiToolkitRegistrationLive,
   VerifierToolkitRegistrationLive,
   DeviceToolkitRegistrationLive,
 ).pipe(Layer.provideMerge(McpTransportLive));

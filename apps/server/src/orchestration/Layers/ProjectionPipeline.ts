@@ -647,23 +647,23 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        // Lessons came before the wiki; migration 084 made pages of the approved ones.
         case "project.knowledge-proposed":
-          yield* projectionProjectRepository.upsertLesson(event.payload);
-          return;
-
         case "project.knowledge-added":
         case "project.knowledge-dismissed":
         case "project.knowledge-removed":
-          yield* projectionProjectRepository.decideLesson({
-            lessonId: event.payload.lessonId,
-            state:
-              event.type === "project.knowledge-added"
-                ? "approved"
-                : event.type === "project.knowledge-dismissed"
-                  ? "dismissed"
-                  : "removed",
-            decidedAt: event.payload.decidedAt,
-          });
+          return;
+
+        case "project.wiki-page-written":
+          yield* projectionProjectRepository.writeWikiPage(event.payload);
+          return;
+
+        case "project.wiki-page-locked":
+          yield* projectionProjectRepository.setWikiPageLocked(event.payload);
+          return;
+
+        case "project.wiki-page-deleted":
+          yield* projectionProjectRepository.deleteWikiPage(event.payload);
           return;
 
         case "project.trigger-fired": {

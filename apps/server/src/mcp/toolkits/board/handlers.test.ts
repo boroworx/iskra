@@ -212,7 +212,6 @@ describe("board toolkit handlers", () => {
       "propose_criteria_change",
       "request_help",
       "request_critique",
-      "propose_lesson",
       "propose_triage_card",
       "ask_clarification",
     ]);
@@ -292,35 +291,6 @@ describe("board toolkit handlers", () => {
           tags: [],
         },
       ]);
-    }),
-  );
-
-  it.effect("proposes a lesson for a person to approve, in its card's project, only as the builder", () =>
-    Effect.gen(function* () {
-      const harness = yield* makeHarness();
-      const { lessonId } = yield* harness.call("propose_lesson", {
-        kind: "quirk",
-        text: "The API tests need the fake clock.",
-        paths: ["src/api/**"],
-      });
-      yield* harness.call("propose_lesson", { kind: "playbook", text: "Run db:generate after a migration." });
-      expect(yield* Ref.get(harness.commands)).toMatchObject([
-        {
-          type: "card.lesson.propose",
-          projectId: PROJECT_ID,
-          cardId: CARD_ID,
-          lessonId,
-          kind: "quirk",
-          text: "The API tests need the fake clock.",
-          paths: ["src/api/**"],
-        },
-        { type: "card.lesson.propose", kind: "playbook", paths: [] },
-      ]);
-
-      const helper = yield* makeHarness({ run: ownerRun("helper") });
-      expect(
-        yield* helper.call("propose_lesson", { kind: "quirk", text: "Nope." }).pipe(Effect.flip),
-      ).toMatchObject({ _tag: "BoardSessionRequiredError" });
     }),
   );
 

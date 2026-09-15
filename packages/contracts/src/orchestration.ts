@@ -60,6 +60,8 @@ export const ORCHESTRATION_WS_METHODS = {
   getProjectHoldout: "project.holdouts.get",
   setProjectHoldout: "project.holdouts.set",
   removeProjectHoldout: "project.holdouts.remove",
+  listProjectWiki: "project.wiki.list",
+  getProjectWikiPage: "project.wiki.get",
   createSampleProject: "project.sample.create",
 } as const;
 
@@ -598,10 +600,10 @@ export const ProjectSpend = Schema.Struct({
 });
 export type ProjectSpend = typeof ProjectSpend.Type;
 
-/** The longest lesson a project keeps; briefs carry lessons as context. */
-export const LESSON_TEXT_MAX_CHARS = 800;
-
-/** A lesson an agent proposed about the project; only an approved one reaches briefs. */
+/**
+ * A lesson an agent proposed about the project, from before the project wiki. Only old events carry
+ * one: migration 084 made wiki pages of the approved ones, and nothing writes lessons anymore.
+ */
 export const ProjectLesson = Schema.Struct({
   lessonId: TrimmedNonEmptyString,
   kind: Schema.Literals(["quirk", "playbook"]),
@@ -613,6 +615,44 @@ export const ProjectLesson = Schema.Struct({
   createdAt: IsoDateTime,
 });
 export type ProjectLesson = typeof ProjectLesson.Type;
+
+/** The longest wiki page a project keeps; briefs carry pages as context. */
+export const WIKI_PAGE_BODY_MAX_CHARS = 20_000;
+
+/** A wiki page's name, as tools and links use it: lowercase words joined by dashes. */
+export const WikiSlug = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(80),
+  Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+);
+
+/** Who wrote a wiki revision: a person, or an agent and the card it was on (none for a lead). */
+export const WikiAuthor = Schema.Struct({
+  kind: Schema.Literals(["agent", "human"]),
+  agentId: Schema.NullOr(AgentId),
+  cardId: Schema.NullOr(CardId),
+});
+export type WikiAuthor = typeof WikiAuthor.Type;
+
+/**
+ * A page of a project's wiki at its latest revision. Agents write it as they work and people watch:
+ * every revision says who wrote it, a person can restore an earlier one, lock the page against
+ * agents, or delete it. A deleted page keeps its revision number and loses its text, so writing or
+ * restoring it later continues its history.
+ */
+export const ProjectWikiPage = Schema.Struct({
+  slug: WikiSlug,
+  title: TrimmedNonEmptyString,
+  body: Schema.String,
+  // Repository globs the page is about: a card touching one gets the page in its brief, and `**`
+  // reaches every card.
+  paths: Schema.Array(TrimmedNonEmptyString),
+  locked: Schema.Boolean,
+  revision: PositiveInt,
+  updatedAt: IsoDateTime,
+  updatedBy: WikiAuthor,
+  deletedAt: Schema.NullOr(IsoDateTime),
+});
+export type ProjectWikiPage = typeof ProjectWikiPage.Type;
 
 /**
  * A project's orchestration policy: everything the decider enforces or that widens what agents
@@ -717,8 +757,9 @@ export const OrchestrationProject = Schema.Struct({
   orchestration: Schema.optional(ProjectOrchestration),
   // Absent until something was spent; read it through `projectSpendOf` so a past month reads as zero.
   spend: Schema.optional(ProjectSpend),
-  // Proposed and approved lessons; dismissed and removed ones are left out.
-  knowledge: Schema.optional(Schema.Array(ProjectLesson)),
+  // Every wiki page at its latest revision, deleted ones without their text. The server's read
+  // model only: clients read pages over the project.wiki RPCs.
+  wiki: Schema.optional(Schema.Array(ProjectWikiPage)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -1740,6 +1781,10 @@ export const RunContextPayload = Schema.Struct({
       openCards: Schema.Array(
         Schema.Struct({ id: CardId, title: TrimmedNonEmptyString, status: CardStatus }),
       ),
+      // The project wiki's pages by name. Optional so runs from before the wiki still decode.
+      wikiPages: Schema.optional(
+        Schema.Array(Schema.Struct({ slug: Schema.String, title: Schema.String })),
+      ),
     }),
   ),
 });
@@ -2232,7 +2277,8 @@ export const OrchestrationProjectShell = Schema.Struct({
   scripts: Schema.Array(ProjectScript),
   orchestration: Schema.optional(ProjectOrchestration),
   spend: Schema.optional(ProjectSpend),
-  knowledge: Schema.optional(Schema.Array(ProjectLesson)),
+  // When a wiki page last changed, so a client knows to read the wiki again.
+  wikiUpdatedAt: Schema.optional(IsoDateTime),
   // The newest trigger fires, newest first.
   recentTriggerFires: Schema.optional(Schema.Array(ProjectTriggerFire)),
   createdAt: IsoDateTime,
@@ -2991,11 +3037,35 @@ export const ProjectKnowledgeProposedPayload = Schema.Struct({
   lesson: ProjectLesson,
 });
 
-/** A person approving, dismissing or removing a lesson. */
+/** A person approving, dismissing or removing a lesson, before the wiki replaced lessons. */
 export const ProjectKnowledgeDecidedPayload = Schema.Struct({
   projectId: ProjectId,
   lessonId: TrimmedNonEmptyString,
   decidedAt: IsoDateTime,
+});
+
+/** A person or an agent writing a wiki page's next revision; a person's restore is a write too. */
+export const ProjectWikiPageWrittenPayload = Schema.Struct({
+  projectId: ProjectId,
+  page: ProjectWikiPage,
+  summary: Schema.String,
+  // The revision a person restored the page to; null for an ordinary write.
+  restoredFrom: Schema.NullOr(PositiveInt),
+});
+
+/** A person locking a wiki page against agents' writes, or unlocking it. */
+export const ProjectWikiPageLockedPayload = Schema.Struct({
+  projectId: ProjectId,
+  slug: WikiSlug,
+  locked: Schema.Boolean,
+  updatedAt: IsoDateTime,
+});
+
+/** A person deleting a wiki page; its revisions stay, so a person can bring it back. */
+export const ProjectWikiPageDeletedPayload = Schema.Struct({
+  projectId: ProjectId,
+  slug: WikiSlug,
+  deletedAt: IsoDateTime,
 });
 
 export const ChannelCreatedPayload = Schema.Struct({
@@ -3675,16 +3745,37 @@ const CardCheckpointRestoreCommand = Schema.Struct({
   turnCount: NonNegativeInt,
 });
 
-const projectLessonCommand = <const Type extends string>(type: Type) =>
+/** What writing a wiki page names; `expectedRevision` is the revision the writer read, 0 to create it. */
+const wikiWriteFields = {
+  commandId: CommandId,
+  projectId: ProjectId,
+  slug: WikiSlug,
+  title: TrimmedNonEmptyString,
+  body: Schema.String,
+  paths: Schema.Array(TrimmedNonEmptyString),
+  summary: Schema.String,
+  expectedRevision: NonNegativeInt,
+};
+
+/** A person creating, editing or restoring a wiki page. */
+const ProjectWikiWriteCommand = Schema.Struct({
+  type: Schema.Literal("project.wiki.write"),
+  ...wikiWriteFields,
+  // The page's earlier revision this write puts back; null for an ordinary edit.
+  restoredFrom: Schema.NullOr(PositiveInt),
+});
+
+const projectWikiPageCommand = <const Type extends string>(type: Type) =>
   Schema.Struct({
     type: Schema.Literal(type),
     commandId: CommandId,
     projectId: ProjectId,
-    lessonId: TrimmedNonEmptyString,
+    slug: WikiSlug,
   });
-const ProjectKnowledgeApproveCommand = projectLessonCommand("project.knowledge.approve");
-const ProjectKnowledgeDismissCommand = projectLessonCommand("project.knowledge.dismiss");
-const ProjectKnowledgeRemoveCommand = projectLessonCommand("project.knowledge.remove");
+// Only a person locks, unlocks or deletes a page; a locked page takes no agent's write.
+const ProjectWikiLockCommand = projectWikiPageCommand("project.wiki.lock");
+const ProjectWikiUnlockCommand = projectWikiPageCommand("project.wiki.unlock");
+const ProjectWikiDeleteCommand = projectWikiPageCommand("project.wiki.delete");
 
 // Server-only: the coordinator's tools and the plan and migration reactors. A coordinator never
 // approves its own plan: approval is a client command only.
@@ -3771,17 +3862,12 @@ const ProjectSpendRecordCommand = Schema.Struct({
   ...ProjectSpendRecordedPayload.fields,
 });
 
-// Server-only: an owner's or coordinator's propose_lesson tool. Decided on the project.
-const CardLessonProposeCommand = Schema.Struct({
-  type: Schema.Literal("card.lesson.propose"),
-  commandId: CommandId,
-  projectId: ProjectId,
-  cardId: CardId,
-  lessonId: TrimmedNonEmptyString,
-  kind: ProjectLesson.fields.kind,
-  text: Schema.String,
-  paths: Schema.Array(TrimmedNonEmptyString),
-  createdAt: IsoDateTime,
+// Server-only: an agent's wiki_write tool, as the agent and card behind its session (a lead has none).
+const ProjectWikiAgentWriteCommand = Schema.Struct({
+  type: Schema.Literal("project.wiki.agent.write"),
+  ...wikiWriteFields,
+  agentId: AgentId,
+  cardId: Schema.NullOr(CardId),
 });
 
 // Server-only: the outcome reactor.
@@ -4294,9 +4380,10 @@ const IskraClientCommands = [
   CardOutcomeSetCommand,
   CardRevertCommand,
   CardCheckpointRestoreCommand,
-  ProjectKnowledgeApproveCommand,
-  ProjectKnowledgeDismissCommand,
-  ProjectKnowledgeRemoveCommand,
+  ProjectWikiWriteCommand,
+  ProjectWikiLockCommand,
+  ProjectWikiUnlockCommand,
+  ProjectWikiDeleteCommand,
   ChannelCreateCommand,
   ChannelUpdateCommand,
   ChannelArchiveCommand,
@@ -4496,7 +4583,7 @@ const InternalOrchestrationCommand = Schema.Union([
   CardMigrationItemsUpdateCommand,
   CardTriggerIntakeCommand,
   ProjectSpendRecordCommand,
-  CardLessonProposeCommand,
+  ProjectWikiAgentWriteCommand,
   CardOutcomeRecordCommand,
   CardActivityRecordCommand,
   CardAccessRequestCommand,
@@ -4619,6 +4706,9 @@ export const OrchestrationEventType = Schema.Literals([
   "project.knowledge-added",
   "project.knowledge-dismissed",
   "project.knowledge-removed",
+  "project.wiki-page-written",
+  "project.wiki-page-locked",
+  "project.wiki-page-deleted",
   "channel.created",
   "channel.updated",
   "channel.archived",
@@ -5302,6 +5392,21 @@ export const OrchestrationEvent = Schema.Union([
   }),
   Schema.Struct({
     ...EventBaseFields,
+    type: Schema.Literal("project.wiki-page-written"),
+    payload: ProjectWikiPageWrittenPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("project.wiki-page-locked"),
+    payload: ProjectWikiPageLockedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("project.wiki-page-deleted"),
+    payload: ProjectWikiPageDeletedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
     type: Schema.Literal("channel.created"),
     payload: ChannelCreatedPayload,
   }),
@@ -5748,6 +5853,73 @@ export type OrchestrationRemoveProjectSecretInput =
   typeof OrchestrationRemoveProjectSecretInput.Type;
 
 /** A project's hidden scenarios as listed: never their bodies or commands. */
+/** How many recent changes a project's wiki listing carries. */
+export const PROJECT_WIKI_CHANGES_LIMIT = 50;
+
+export const ProjectWikiListInput = Schema.Struct({
+  projectId: ProjectId,
+  // Words every listed page holds; absent lists every page.
+  query: Schema.optional(Schema.String),
+});
+
+/** A page in the wiki's list: everything but its text, with where a search matched it. */
+export const ProjectWikiPageSummary = Schema.Struct({
+  ...Struct.omit(ProjectWikiPage.fields, ["body", "deletedAt"]),
+  snippet: Schema.NullOr(Schema.String),
+});
+export type ProjectWikiPageSummary = typeof ProjectWikiPageSummary.Type;
+
+/** One entry of a wiki's recent changes: a revision someone wrote, or a page a person deleted. */
+export const ProjectWikiChange = Schema.Struct({
+  kind: Schema.Literals(["write", "delete"]),
+  slug: WikiSlug,
+  title: TrimmedNonEmptyString,
+  // The revision written, or the last one a deleted page had.
+  revision: PositiveInt,
+  summary: Schema.String,
+  author: WikiAuthor,
+  restoredFrom: Schema.NullOr(PositiveInt),
+  at: IsoDateTime,
+});
+export type ProjectWikiChange = typeof ProjectWikiChange.Type;
+
+export const ProjectWikiListResult = Schema.Struct({
+  pages: Schema.Array(ProjectWikiPageSummary),
+  changes: Schema.Array(ProjectWikiChange),
+});
+
+/** One revision of a page, as it was written. */
+export const ProjectWikiRevision = Schema.Struct({
+  revision: PositiveInt,
+  title: TrimmedNonEmptyString,
+  body: Schema.String,
+  paths: Schema.Array(TrimmedNonEmptyString),
+  summary: Schema.String,
+  author: WikiAuthor,
+  restoredFrom: Schema.NullOr(PositiveInt),
+  writtenAt: IsoDateTime,
+});
+export type ProjectWikiRevision = typeof ProjectWikiRevision.Type;
+
+export const ProjectWikiRevisionSummary = Schema.Struct(
+  Struct.omit(ProjectWikiRevision.fields, ["body"]),
+);
+export type ProjectWikiRevisionSummary = typeof ProjectWikiRevisionSummary.Type;
+
+export const ProjectWikiGetInput = Schema.Struct({
+  projectId: ProjectId,
+  slug: WikiSlug,
+  // One earlier revision to read in full, such as the one a person is about to restore.
+  revision: Schema.optional(PositiveInt),
+});
+
+export const ProjectWikiGetResult = Schema.Struct({
+  page: ProjectWikiPage,
+  // The page's revisions, newest first, without their text.
+  history: Schema.Array(ProjectWikiRevisionSummary),
+  revision: Schema.NullOr(ProjectWikiRevision),
+});
+
 export const ProjectHoldoutsListInput = Schema.Struct({ projectId: ProjectId });
 export const ProjectHoldoutsListResult = Schema.Struct({
   scenarios: Schema.Array(
@@ -6031,6 +6203,8 @@ export const OrchestrationRpcSchemas = {
   getProjectHoldout: { input: ProjectHoldoutGetInput, output: ProjectHoldoutGetResult },
   setProjectHoldout: { input: ProjectHoldoutSetInput, output: Schema.Struct({}) },
   removeProjectHoldout: { input: ProjectHoldoutRemoveInput, output: Schema.Struct({}) },
+  listProjectWiki: { input: ProjectWikiListInput, output: ProjectWikiListResult },
+  getProjectWikiPage: { input: ProjectWikiGetInput, output: ProjectWikiGetResult },
   createSampleProject: { input: ProjectSampleCreateInput, output: ProjectSampleCreateResult },
 } as const;
 

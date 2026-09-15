@@ -161,13 +161,14 @@ function commandToAggregateRef(command: OrchestrationCommand): {
         aggregateKind: "card",
         aggregateId: command.cardId,
       };
-    // Decided on the project: the fire and the lesson are recorded there, as the receipt's last event.
+    // Decided on the project: the fire and wiki pages are recorded there, as the receipt's last event.
     case "card.trigger.intake":
-    case "card.lesson.propose":
     case "project.spend.record":
-    case "project.knowledge.approve":
-    case "project.knowledge.dismiss":
-    case "project.knowledge.remove":
+    case "project.wiki.write":
+    case "project.wiki.agent.write":
+    case "project.wiki.lock":
+    case "project.wiki.unlock":
+    case "project.wiki.delete":
       return {
         aggregateKind: "project",
         aggregateId: command.projectId,

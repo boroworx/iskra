@@ -5099,6 +5099,11 @@ describe("agent browser access", () => {
         Layer.provide(runtimeRepositoryLayer),
       );
       const projectionLayer = Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+        listWikiPages: () => Effect.die("unused"),
+        getWikiPage: () => Effect.die("unused"),
+        listWikiRevisions: () => Effect.die("unused"),
+        getWikiRevision: () => Effect.die("unused"),
+        listWikiChanges: () => Effect.die("unused"),
         getTurnStartMessage: () => Effect.die("unused"),
         getCardActivity: () => Effect.die("unused"),
         getImportedAgentSessionSources: () => Effect.die("unused"),

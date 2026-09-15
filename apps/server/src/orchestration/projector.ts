@@ -1433,34 +1433,43 @@ export function projectEvent(
     case "project.spend-recorded":
       return Effect.succeed(withProjectSpend(nextBase, event.payload.projectId, event.payload));
 
-    case "project.knowledge-proposed": {
-      const { projectId, lesson } = event.payload;
+    // Lessons came before the wiki; migration 084 made pages of the approved ones, so these are inert.
+    case "project.knowledge-proposed":
+    case "project.knowledge-added":
+    case "project.knowledge-dismissed":
+    case "project.knowledge-removed":
+      return Effect.succeed(nextBase);
+
+    case "project.wiki-page-written": {
+      const { projectId, page } = event.payload;
       return Effect.succeed(
         withProject(nextBase, projectId, (project) => ({
           ...project,
-          knowledge: [
-            ...(project.knowledge ?? []).filter((entry) => entry.lessonId !== lesson.lessonId),
-            lesson,
-          ],
+          wiki: [...(project.wiki ?? []).filter((entry) => entry.slug !== page.slug), page],
         })),
       );
     }
 
-    // Only proposed and approved lessons stay in the read model.
-    case "project.knowledge-added":
-    case "project.knowledge-dismissed":
-    case "project.knowledge-removed": {
-      const { projectId, lessonId } = event.payload;
-      const approved = event.type === "project.knowledge-added";
+    case "project.wiki-page-locked": {
+      const { projectId, slug, locked, updatedAt } = event.payload;
       return Effect.succeed(
         withProject(nextBase, projectId, (project) => ({
           ...project,
-          knowledge: (project.knowledge ?? []).flatMap((lesson) =>
-            lesson.lessonId !== lessonId
-              ? [lesson]
-              : approved
-                ? [{ ...lesson, state: "approved" as const }]
-                : [],
+          wiki: (project.wiki ?? []).map((page) =>
+            page.slug === slug ? { ...page, locked, updatedAt } : page,
+          ),
+        })),
+      );
+    }
+
+    // A deleted page keeps its revision and loses its text, so a restore continues its history.
+    case "project.wiki-page-deleted": {
+      const { projectId, slug, deletedAt } = event.payload;
+      return Effect.succeed(
+        withProject(nextBase, projectId, (project) => ({
+          ...project,
+          wiki: (project.wiki ?? []).map((page) =>
+            page.slug === slug ? { ...page, body: "", deletedAt, updatedAt: deletedAt } : page,
           ),
         })),
       );

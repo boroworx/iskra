@@ -246,7 +246,15 @@ const make = Effect.gen(function* () {
       agents: projectAgents,
       messages: history.map(toOrchestrationChannelMessage),
       trigger: toOrchestrationChannelMessage(trigger.value),
-      ...(lead ? { lead: { cards: readModel.cards ?? [] } } : {}),
+      ...(lead
+        ? {
+            lead: {
+              cards: readModel.cards ?? [],
+              wiki:
+                readModel.projects.find((project) => project.id === channel.projectId)?.wiki ?? [],
+            },
+          }
+        : {}),
     });
     const rendered = renderRunContext(context);
     // Ids derive from the wake event, so a retried wake cannot start a second run.

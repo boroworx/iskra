@@ -43,6 +43,8 @@ export const RPC_REQUIRED_SCOPES = {
   [ORCHESTRATION_WS_METHODS.removeProjectSecret]: AuthOrchestrationOperateScope,
   // Hidden scenarios are withheld from agents; even listing them takes the write scope.
   [ORCHESTRATION_WS_METHODS.listProjectHoldouts]: AuthOrchestrationOperateScope,
+  [ORCHESTRATION_WS_METHODS.listProjectWiki]: AuthOrchestrationReadScope,
+  [ORCHESTRATION_WS_METHODS.getProjectWikiPage]: AuthOrchestrationReadScope,
   [ORCHESTRATION_WS_METHODS.getProjectHoldout]: AuthOrchestrationOperateScope,
   [ORCHESTRATION_WS_METHODS.setProjectHoldout]: AuthOrchestrationOperateScope,
   [ORCHESTRATION_WS_METHODS.removeProjectHoldout]: AuthOrchestrationOperateScope,

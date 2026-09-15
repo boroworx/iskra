@@ -37,6 +37,10 @@ import type {
   OrchestrationThreadDetailWindow,
   OrchestrationThreadShell,
   ProjectId,
+  ProjectWikiChange,
+  ProjectWikiPage,
+  ProjectWikiRevision,
+  ProjectWikiRevisionSummary,
   ThreadId,
   CardActivity,
   CardVerdict,
@@ -345,6 +349,35 @@ export interface ProjectionSnapshotQueryShape {
     threadId: ThreadId,
     window?: OrchestrationThreadDetailWindow,
   ) => Effect.Effect<Option.Option<OrchestrationThreadDetailSnapshot>, ProjectionRepositoryError>;
+
+  /** A project's wiki pages, newest change first; deleted pages are included, without their text. */
+  readonly listWikiPages: (
+    projectId: ProjectId,
+  ) => Effect.Effect<ReadonlyArray<ProjectWikiPage>, ProjectionRepositoryError>;
+
+  /** One wiki page, deleted or not. */
+  readonly getWikiPage: (
+    projectId: ProjectId,
+    slug: string,
+  ) => Effect.Effect<Option.Option<ProjectWikiPage>, ProjectionRepositoryError>;
+
+  /** A page's revisions, newest first, without their text. */
+  readonly listWikiRevisions: (
+    projectId: ProjectId,
+    slug: string,
+  ) => Effect.Effect<ReadonlyArray<ProjectWikiRevisionSummary>, ProjectionRepositoryError>;
+
+  /** One revision of a page, with the text it had. */
+  readonly getWikiRevision: (
+    projectId: ProjectId,
+    slug: string,
+    revision: number,
+  ) => Effect.Effect<Option.Option<ProjectWikiRevision>, ProjectionRepositoryError>;
+
+  /** A project's newest wiki changes, newest first: revisions written and pages deleted. */
+  readonly listWikiChanges: (
+    projectId: ProjectId,
+  ) => Effect.Effect<ReadonlyArray<ProjectWikiChange>, ProjectionRepositoryError>;
 }
 
 /**

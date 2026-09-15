@@ -8,7 +8,7 @@
  */
 import {
   type AgentId,
-  type ProjectLesson,
+  type ProjectWikiPage,
   type ProjectTriggerFire,
   type RunRole,
   IsoDateTime,
@@ -98,17 +98,27 @@ export interface ProjectionProjectRepositoryShape {
     readonly costUsd: number;
   }) => Effect.Effect<void, ProjectionRepositoryError>;
 
-  /** Insert or replace a proposed lesson. */
-  readonly upsertLesson: (input: {
+  /** Write a wiki page's new revision: the page as it now is, and the revision in its history. */
+  readonly writeWikiPage: (input: {
     readonly projectId: ProjectId;
-    readonly lesson: ProjectLesson;
+    readonly page: ProjectWikiPage;
+    readonly summary: string;
+    readonly restoredFrom: number | null;
   }) => Effect.Effect<void, ProjectionRepositoryError>;
 
-  /** Record a person's decision on a lesson; a removed one stays in the table, out of every read. */
-  readonly decideLesson: (input: {
-    readonly lessonId: string;
-    readonly state: "approved" | "dismissed" | "removed";
-    readonly decidedAt: string;
+  /** Lock a wiki page against agents' writes, or unlock it. */
+  readonly setWikiPageLocked: (input: {
+    readonly projectId: ProjectId;
+    readonly slug: string;
+    readonly locked: boolean;
+    readonly updatedAt: string;
+  }) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /** Delete a wiki page: its text goes, its revisions stay, so a person can bring it back. */
+  readonly deleteWikiPage: (input: {
+    readonly projectId: ProjectId;
+    readonly slug: string;
+    readonly deletedAt: string;
   }) => Effect.Effect<void, ProjectionRepositoryError>;
 
   /** Record a trigger's fire; the same trigger and source again is a no-op. */

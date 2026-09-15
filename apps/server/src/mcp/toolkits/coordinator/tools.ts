@@ -1,7 +1,6 @@
 import {
   McpCapabilityUnavailableError,
   PositiveInt,
-  ProjectLesson,
   TrimmedNonEmptyString,
 } from "@iskra/contracts";
 import * as Context from "effect/Context";
@@ -13,6 +12,7 @@ import * as OrchestrationEngine from "../../../orchestration/Services/Orchestrat
 import * as ProjectionSnapshotQuery from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import { CriterionInput } from "../board/tools.ts";
+import { WIKI_CLAUDE_TOOL_NAMES } from "../wiki/tools.ts";
 
 const dependencies = [
   McpInvocationContext.McpInvocationContext,
@@ -164,23 +164,6 @@ const AskPlanOwnerTool = Tool.make("ask_plan_owner", {
   .annotate(Tool.Title, "Ask the plan's owner")
   .annotateMerge(writing);
 
-const ProposePlanLessonTool = Tool.make("propose_plan_lesson", {
-  description:
-    "Suggest a lesson later work in this project should know: a quirk of the repository or a playbook that worked. A person approves it before any agent sees it.",
-  parameters: Schema.Struct({
-    kind: ProjectLesson.fields.kind,
-    text: TrimmedNonEmptyString,
-    paths: Schema.Array(TrimmedNonEmptyString).annotate({
-      description: "Repository globs the lesson is about; empty for the whole project.",
-    }),
-  }),
-  success: Schema.Struct({ lessonId: Schema.String }),
-  failure: CoordinatorToolError,
-  dependencies,
-})
-  .annotate(Tool.Title, "Propose a lesson")
-  .annotateMerge(writing);
-
 /** A plan card's coordinator: it plans and steers its own plan's children, and reads, nothing else. */
 export const CoordinatorToolkit = Toolkit.make(
   ProposePlanTool,
@@ -188,10 +171,10 @@ export const CoordinatorToolkit = Toolkit.make(
   MessageChildTool,
   PauseChildTool,
   AskPlanOwnerTool,
-  ProposePlanLessonTool,
 );
 
 /** The tools a coordinator session is allowed, as Claude names them from the `iskra` MCP server. */
-export const COORDINATOR_CLAUDE_TOOL_NAMES = Object.keys(CoordinatorToolkit.tools).map(
-  (name) => `mcp__iskra__${name}`,
-);
+export const COORDINATOR_CLAUDE_TOOL_NAMES = [
+  ...Object.keys(CoordinatorToolkit.tools).map((name) => `mcp__iskra__${name}`),
+  ...WIKI_CLAUDE_TOOL_NAMES,
+];

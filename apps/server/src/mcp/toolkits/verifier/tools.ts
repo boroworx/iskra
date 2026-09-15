@@ -14,6 +14,7 @@ import { VERIFIER_SESSION_ONLY_REASON } from "../../../orchestration/cardRules.t
 import * as OrchestrationEngine from "../../../orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
+import { WIKI_READ_CLAUDE_TOOL_NAMES } from "../wiki/tools.ts";
 
 const dependencies = [
   McpInvocationContext.McpInvocationContext,
@@ -135,6 +136,8 @@ export const VerifierToolkit = Toolkit.make(RecordVerdictTool, ViewEvidenceTool)
 export const VerifierScreenshotToolkit = Toolkit.make(ViewScreenshotTool);
 
 /** The tools a card's verifier session is allowed, as Claude names them from the `iskra` MCP server. */
-export const VERIFIER_CLAUDE_TOOL_NAMES = ["record_verdict", "view_evidence", "view_screenshot"].map(
-  (name) => `mcp__iskra__${name}`,
-);
+export const VERIFIER_CLAUDE_TOOL_NAMES = [
+  ...["record_verdict", "view_evidence", "view_screenshot"].map((name) => `mcp__iskra__${name}`),
+  // A verifier reads the wiki and never writes it, so hidden scenarios can't reach a shared page.
+  ...WIKI_READ_CLAUDE_TOOL_NAMES,
+];

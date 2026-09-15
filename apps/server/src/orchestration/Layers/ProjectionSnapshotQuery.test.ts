@@ -82,7 +82,7 @@ it.effect("reads project shells without loading threads or resolving excluded pr
     const counter = makeSqlStatementCounter();
     const projects = yield* query.getProjectShells().pipe(Effect.withTracer(counter.tracer));
     assert.deepStrictEqual(projects, expected);
-    // The project rows, then their spend, lessons and recent trigger fires; never the threads.
+    // The project rows, then their spend, wiki change times and recent trigger fires; never the threads.
     assert.strictEqual(counter.count(), 4);
     assert.deepStrictEqual(resolved.toSorted(), ["/first", "/second"]);
     resolved.length = 0;

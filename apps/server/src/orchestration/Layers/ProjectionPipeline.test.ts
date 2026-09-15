@@ -5560,7 +5560,7 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
         ],
         // M3: a coordinator's plan is proposed and approved with one child and its next slice
         // released; a migration lists and samples its items; a trigger fires; a lead's spend, a
-        // lesson, an outcome, a revert and a restore are recorded.
+        // wiki page, an outcome, a revert and a restore are recorded.
         [
           "card.created",
           planCard,
@@ -5699,25 +5699,24 @@ cardAgentChannelLayer("card, agent and channel projection", (it) => {
           },
         ],
         [
-          "project.knowledge-proposed",
+          "project.wiki-page-written",
           projectId,
           {
             projectId,
-            lesson: {
-              lessonId: "lesson-1",
-              kind: "quirk",
-              text: "Run the migrations before the tests.",
+            page: {
+              slug: "api-limits",
+              title: "API limits",
+              body: "Run the migrations before the tests.",
               paths: ["src/api/**"],
-              state: "proposed",
-              sourceCardId: card1,
-              createdAt: at(66),
+              locked: false,
+              revision: 1,
+              updatedAt: at(66),
+              updatedBy: { kind: "human", agentId: null, cardId: null },
+              deletedAt: null,
             },
+            summary: "First page",
+            restoredFrom: null,
           },
-        ],
-        [
-          "project.knowledge-added",
-          projectId,
-          { projectId, lessonId: "lesson-1", decidedAt: at(66) },
         ],
         [
           "card.outcome-recorded",

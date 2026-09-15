@@ -15,7 +15,6 @@ import {
   projectOrchestrationOf,
   AgentId,
   CardId,
-  LESSON_TEXT_MAX_CHARS,
   MIGRATION_ITEMS_MAX,
   MIGRATION_SAMPLE_SIZE,
   cardOriginOf,
@@ -132,9 +131,6 @@ import {
   COORDINATOR_PAUSED_CODE,
   DUPLICATE_TRIGGER_REASON,
   HELD_BY_CHECKPOINT_WAIT,
-  LESSON_NOT_PROPOSED_REASON,
-  LESSON_TOO_LONG_REASON,
-  NO_LESSON_REASON,
   OUTCOME_SET_BY_PERSON_CODE,
   OUTCOME_UNFINISHED_REASON,
   RESTORE_NEEDS_STOPPED_REASON,
@@ -144,6 +140,13 @@ import {
   triggerConfigRefusal,
   triggerFireRefusal,
 } from "./cardRules.ts";
+import {
+  WIKI_ALREADY_LOCKED_REASON,
+  WIKI_NOT_LOCKED_REASON,
+  liveWikiPage,
+  noWikiPageReason,
+  wikiWriteRefusal,
+} from "./wikiRules.ts";
 import {
   COORDINATOR_OWN_CHILDREN_REASON,
   MIGRATION_ENUMERATE_COMMAND_REASON,
@@ -5377,59 +5380,83 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       });
     }
 
-    // Agents only propose lessons; a person approves, dismisses or removes them.
-    case "card.lesson.propose": {
+    // People and agents write the project's wiki as they work; a locked page takes no agent's write.
+    case "project.wiki.write":
+    case "project.wiki.agent.write": {
       const project = yield* requireProject({ readModel, command, projectId: command.projectId });
-      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
-      if (card.projectId !== project.id) {
-        return yield* refuse(command, `Card '${card.id}' is not in project '${project.id}'.`);
+      if (command.type === "project.wiki.agent.write" && command.cardId !== null) {
+        const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+        if (card.projectId !== project.id) {
+          return yield* refuse(command, `Card '${card.id}' is not in project '${project.id}'.`);
+        }
       }
-      const text = command.text.trim();
-      if (text.length === 0) {
-        return yield* refuse(command, "A lesson needs some text.");
-      }
-      if (text.length > LESSON_TEXT_MAX_CHARS) {
-        return yield* refuse(command, LESSON_TOO_LONG_REASON);
-      }
-      if ((project.knowledge ?? []).some((lesson) => lesson.lessonId === command.lessonId)) {
-        return yield* refuse(command, "This lesson was already proposed.");
-      }
-      return yield* planned(command, "project", project.id, command.createdAt, {
-        type: "project.knowledge-proposed",
+      const restoredFrom = command.type === "project.wiki.write" ? command.restoredFrom : null;
+      const current = (project.wiki ?? []).find((page) => page.slug === command.slug);
+      yield* refuseIf(
+        command,
+        wikiWriteRefusal({
+          page: current,
+          slug: command.slug,
+          body: command.body,
+          expectedRevision: command.expectedRevision,
+          restoredFrom,
+          byAgent: command.type === "project.wiki.agent.write",
+        }),
+      );
+      const occurredAt = yield* nowIso;
+      return yield* planned(command, "project", project.id, occurredAt, {
+        type: "project.wiki-page-written",
         payload: {
           projectId: project.id,
-          lesson: {
-            lessonId: command.lessonId,
-            kind: command.kind,
-            text,
+          page: {
+            slug: command.slug,
+            title: command.title,
+            body: command.body,
             paths: command.paths,
-            state: "proposed",
-            sourceCardId: card.id,
-            createdAt: command.createdAt,
+            // A write keeps the page's lock; one written back after a delete starts unlocked.
+            locked: current !== undefined && current.deletedAt === null ? current.locked : false,
+            revision: (current?.revision ?? 0) + 1,
+            updatedAt: occurredAt,
+            updatedBy:
+              command.type === "project.wiki.agent.write"
+                ? { kind: "agent" as const, agentId: command.agentId, cardId: command.cardId }
+                : { kind: "human" as const, agentId: null, cardId: null },
+            deletedAt: null,
           },
+          summary: command.summary,
+          restoredFrom,
         },
       });
     }
 
-    case "project.knowledge.approve":
-    case "project.knowledge.dismiss":
-    case "project.knowledge.remove": {
+    // Locking, unlocking and deleting a page are a person's; no tool sends them.
+    case "project.wiki.lock":
+    case "project.wiki.unlock": {
       const project = yield* requireProject({ readModel, command, projectId: command.projectId });
-      const lesson = (project.knowledge ?? []).find((entry) => entry.lessonId === command.lessonId);
-      if (command.type === "project.knowledge.remove") {
-        yield* refuseIf(command, lesson === undefined ? NO_LESSON_REASON : null);
-      } else if (lesson?.state !== "proposed") {
-        return yield* refuse(command, LESSON_NOT_PROPOSED_REASON);
+      const page = liveWikiPage(project.wiki, command.slug);
+      if (page === undefined) {
+        return yield* refuse(command, noWikiPageReason(command.slug));
+      }
+      const locked = command.type === "project.wiki.lock";
+      if (page.locked === locked) {
+        return yield* refuse(command, locked ? WIKI_ALREADY_LOCKED_REASON : WIKI_NOT_LOCKED_REASON);
       }
       const occurredAt = yield* nowIso;
       return yield* planned(command, "project", project.id, occurredAt, {
-        type:
-          command.type === "project.knowledge.approve"
-            ? "project.knowledge-added"
-            : command.type === "project.knowledge.dismiss"
-              ? "project.knowledge-dismissed"
-              : "project.knowledge-removed",
-        payload: { projectId: project.id, lessonId: command.lessonId, decidedAt: occurredAt },
+        type: "project.wiki-page-locked",
+        payload: { projectId: project.id, slug: command.slug, locked, updatedAt: occurredAt },
+      });
+    }
+
+    case "project.wiki.delete": {
+      const project = yield* requireProject({ readModel, command, projectId: command.projectId });
+      if (liveWikiPage(project.wiki, command.slug) === undefined) {
+        return yield* refuse(command, noWikiPageReason(command.slug));
+      }
+      const occurredAt = yield* nowIso;
+      return yield* planned(command, "project", project.id, occurredAt, {
+        type: "project.wiki-page-deleted",
+        payload: { projectId: project.id, slug: command.slug, deletedAt: occurredAt },
       });
     }
 

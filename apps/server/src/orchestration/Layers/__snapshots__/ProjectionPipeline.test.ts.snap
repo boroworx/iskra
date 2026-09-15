@@ -576,7 +576,7 @@ exports[`card, agent and channel projection > projects every card, agent and cha
       "status": null,
     },
     {
-      "activityId": "restore:evt-cards-92",
+      "activityId": "restore:evt-cards-91",
       "answers": null,
       "author": {
         "id": "human",
@@ -714,7 +714,7 @@ exports[`card, agent and channel projection > projects every card, agent and cha
         "status": null,
       },
       {
-        "activityId": "restore:evt-cards-92",
+        "activityId": "restore:evt-cards-91",
         "answers": null,
         "author": {
           "id": "human",
@@ -1468,19 +1468,6 @@ exports[`card, agent and channel projection > projects every card, agent and cha
       "defaultThreadEnvMode": null,
       "faviconPath": null,
       "id": "project-cards",
-      "knowledge": [
-        {
-          "createdAt": "2026-03-01T01:06:00.000Z",
-          "kind": "quirk",
-          "lessonId": "lesson-1",
-          "paths": [
-            "src/api/**",
-          ],
-          "sourceCardId": "card-1",
-          "state": "approved",
-          "text": "Run the migrations before the tests.",
-        },
-      ],
       "orchestration": {
         "autoMerge": {
           "enabled": false,
@@ -1543,6 +1530,7 @@ exports[`card, agent and channel projection > projects every card, agent and cha
       },
       "title": "Cards",
       "updatedAt": "2026-03-01T00:51:00.000Z",
+      "wikiUpdatedAt": "2026-03-01T01:06:00.000Z",
       "workspaceRoot": "/tmp/project-cards",
     },
   },
@@ -3167,7 +3155,7 @@ exports[`card, agent and channel projection > projects every card, agent and cha
       "elicitation": null,
       "messageId": "message-answer",
       "runThreadId": null,
-      "sequence": 95,
+      "sequence": 94,
     },
     {
       "answeredAt": null,
@@ -3195,7 +3183,7 @@ exports[`card, agent and channel projection > projects every card, agent and cha
       },
       "messageId": "message-open-question",
       "runThreadId": null,
-      "sequence": 96,
+      "sequence": 95,
     },
   ],
 }

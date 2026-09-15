@@ -3,6 +3,7 @@ import type {
   OrchestrationCard,
   OrchestrationChannel,
   OrchestrationChannelMessage,
+  ProjectWikiPage,
   RenderedRunContext,
   RunContextMessage,
   RunContextPayload,
@@ -19,9 +20,15 @@ export interface RunContextInput {
   readonly messages: ReadonlyArray<OrchestrationChannelMessage>;
   /** The message that woke the agent. */
   readonly trigger: OrchestrationChannelMessage;
-  /** Set when the agent is woken as the channel's lead: the project's cards. */
-  readonly lead?: { readonly cards: ReadonlyArray<OrchestrationCard> };
+  /** Set when the agent is woken as the channel's lead: the project's cards and wiki. */
+  readonly lead?: {
+    readonly cards: ReadonlyArray<OrchestrationCard>;
+    readonly wiki?: ReadonlyArray<ProjectWikiPage>;
+  };
 }
+
+/** How many wiki pages a lead's context names before it stops; it searches for the rest. */
+const LEAD_WIKI_PAGES = 40;
 
 function authorName(
   message: OrchestrationChannelMessage,
@@ -105,6 +112,10 @@ export function buildRunContext(input: RunContextInput): RunContextPayload {
                   card.projectId === channel.projectId && !isFinishedCardStatus(card.status),
               )
               .map((card) => ({ id: card.id, title: card.title, status: card.status })),
+            wikiPages: (input.lead.wiki ?? [])
+              .filter((page) => page.deletedAt === null)
+              .slice(0, LEAD_WIKI_PAGES)
+              .map((page) => ({ slug: page.slug, title: page.title })),
           },
         }),
   };
@@ -151,6 +162,7 @@ export function renderRunContext(payload: RunContextPayload): RenderedRunContext
           'Otherwise, for each distinct piece of work it asks for, call propose_triage_card once with a short title, a plain-language spec, your reasoning, two to five acceptance criteria a person can observe (mark ones only a person can check, such as mobile behavior, manual), an estimate with a split when it is too big for one card, the premise, the ids of open cards it likely duplicates, and as suggestedAgent the channel member best suited to own it. Then reply with one short line, such as "Proposed a card below."',
           "If the request asks to plan, break down or map out remaining work as cards, call propose_triage_card once with kind plan, criteria that describe the plan's outcome, and as suggestedAgent a coordinator agent if the project has one, instead of task cards that write documents.",
           "Never write a spec that depends on a later step no one is assigned to, such as the lead turning a document into cards.",
+          "Check the project wiki with wiki_search when a request touches something agents may already know about this project, and write down with wiki_write what you learn about it.",
           "If the message asks for no work, answer it in a sentence or two.",
           "Never ask the user to run commands, fetch data or do the work for you; propose a card for work instead.",
         ]),
@@ -178,6 +190,11 @@ export function renderRunContext(payload: RunContextPayload): RenderedRunContext
             ? "No open cards."
             : lead.openCards.map((card) => `- ${card.id} [${card.status}] ${card.title}`).join("\n")
         }`,
+    lead === undefined || (lead.wikiPages ?? []).length === 0
+      ? ""
+      : `## Project wiki\n\n${(lead.wikiPages ?? [])
+          .map((page) => `- ${page.slug}: ${page.title}`)
+          .join("\n")}\n\nRead one in full with wiki_read.`,
     renderNewMessage(payload.trigger),
   ];
   return {

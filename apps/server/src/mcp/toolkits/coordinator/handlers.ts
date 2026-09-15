@@ -166,32 +166,6 @@ const make = Effect.gen(function* () {
         });
         return {};
       }),
-    propose_plan_lesson: (input) =>
-      Effect.gen(function* () {
-        const session = yield* requireCoordinatorSession;
-        const plan = yield* snapshots.getCardShellById(session.planCardId).pipe(
-          Effect.mapError(failed),
-          Effect.flatMap(
-            Option.match({
-              onNone: () => new CoordinatorSessionRequiredError({}),
-              onSome: Effect.succeed,
-            }),
-          ),
-        );
-        const lessonId = `lesson-${yield* uuid}`;
-        yield* dispatch({
-          type: "card.lesson.propose",
-          commandId: yield* commandId("propose-lesson", session.threadId),
-          projectId: plan.projectId,
-          cardId: session.planCardId,
-          lessonId,
-          kind: input.kind,
-          text: input.text,
-          paths: input.paths,
-          createdAt: yield* nowIso,
-        });
-        return { lessonId };
-      }),
   });
 });
 

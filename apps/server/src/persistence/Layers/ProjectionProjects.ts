@@ -11,6 +11,7 @@ import {
   ProjectIconOverride,
   ProjectOrchestration,
   ProjectScript,
+  WikiAuthor,
 } from "@iskra/contracts";
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
@@ -31,6 +32,9 @@ const ProjectionProjectDbRow = ProjectionProject.mapFields(
   }),
 );
 type ProjectionProjectDbRow = typeof ProjectionProjectDbRow.Type;
+
+const encodeWikiPaths = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Schema.String)));
+const encodeWikiAuthor = Schema.encodeSync(Schema.fromJsonString(WikiAuthor));
 
 const PROJECTION_PROJECT_COLUMNS = `
   project_id AS "projectId",
@@ -171,38 +175,67 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
       Effect.mapError(toPersistenceSqlError("ProjectionProjectRepository.addMonthlySpend:query")),
     );
 
-  const upsertLesson: ProjectionProjectRepositoryShape["upsertLesson"] = ({ projectId, lesson }) =>
-    sql`
-      INSERT INTO projection_project_knowledge (
-        lesson_id, project_id, kind, text, paths_json, state, source_card_id, created_at, decided_at
-      )
-      VALUES (
-        ${lesson.lessonId}, ${projectId}, ${lesson.kind}, ${lesson.text}, ${JSON.stringify(lesson.paths)},
-        ${lesson.state}, ${lesson.sourceCardId}, ${lesson.createdAt}, NULL
-      )
-      ON CONFLICT (lesson_id)
-      DO UPDATE SET
-        project_id = excluded.project_id,
-        kind = excluded.kind,
-        text = excluded.text,
-        paths_json = excluded.paths_json,
-        state = excluded.state,
-        source_card_id = excluded.source_card_id,
-        created_at = excluded.created_at,
-        decided_at = NULL
-    `.pipe(
+  const writeWikiPage: ProjectionProjectRepositoryShape["writeWikiPage"] = ({
+    projectId,
+    page,
+    summary,
+    restoredFrom,
+  }) =>
+    Effect.gen(function* () {
+      const paths = encodeWikiPaths(page.paths);
+      const author = encodeWikiAuthor(page.updatedBy);
+      yield* sql`
+        INSERT INTO projection_project_wiki_pages (
+          project_id, slug, title, body, paths_json, locked, revision, updated_at, updated_by_json, deleted_at
+        )
+        VALUES (
+          ${projectId}, ${page.slug}, ${page.title}, ${page.body}, ${paths}, ${page.locked ? 1 : 0},
+          ${page.revision}, ${page.updatedAt}, ${author}, NULL
+        )
+        ON CONFLICT (project_id, slug)
+        DO UPDATE SET
+          title = excluded.title,
+          body = excluded.body,
+          paths_json = excluded.paths_json,
+          locked = excluded.locked,
+          revision = excluded.revision,
+          updated_at = excluded.updated_at,
+          updated_by_json = excluded.updated_by_json,
+          deleted_at = NULL
+      `;
+      yield* sql`
+        INSERT INTO projection_project_wiki_revisions (
+          project_id, slug, revision, title, body, paths_json, summary, author_json, restored_from, written_at
+        )
+        VALUES (
+          ${projectId}, ${page.slug}, ${page.revision}, ${page.title}, ${page.body}, ${paths},
+          ${summary}, ${author}, ${restoredFrom}, ${page.updatedAt}
+        )
+        ON CONFLICT (project_id, slug, revision) DO NOTHING
+      `;
+    }).pipe(
       Effect.asVoid,
-      Effect.mapError(toPersistenceSqlError("ProjectionProjectRepository.upsertLesson:query")),
+      Effect.mapError(toPersistenceSqlError("ProjectionProjectRepository.writeWikiPage:query")),
     );
 
-  const decideLesson: ProjectionProjectRepositoryShape["decideLesson"] = (input) =>
+  const setWikiPageLocked: ProjectionProjectRepositoryShape["setWikiPageLocked"] = (input) =>
     sql`
-      UPDATE projection_project_knowledge
-      SET state = ${input.state}, decided_at = ${input.decidedAt}
-      WHERE lesson_id = ${input.lessonId}
+      UPDATE projection_project_wiki_pages
+      SET locked = ${input.locked ? 1 : 0}, updated_at = ${input.updatedAt}
+      WHERE project_id = ${input.projectId} AND slug = ${input.slug}
     `.pipe(
       Effect.asVoid,
-      Effect.mapError(toPersistenceSqlError("ProjectionProjectRepository.decideLesson:query")),
+      Effect.mapError(toPersistenceSqlError("ProjectionProjectRepository.setWikiPageLocked:query")),
+    );
+
+  const deleteWikiPage: ProjectionProjectRepositoryShape["deleteWikiPage"] = (input) =>
+    sql`
+      UPDATE projection_project_wiki_pages
+      SET body = '', deleted_at = ${input.deletedAt}, updated_at = ${input.deletedAt}
+      WHERE project_id = ${input.projectId} AND slug = ${input.slug}
+    `.pipe(
+      Effect.asVoid,
+      Effect.mapError(toPersistenceSqlError("ProjectionProjectRepository.deleteWikiPage:query")),
     );
 
   const recordTriggerFire: ProjectionProjectRepositoryShape["recordTriggerFire"] = ({
@@ -229,8 +262,9 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
     listAll,
     deleteById,
     addMonthlySpend,
-    upsertLesson,
-    decideLesson,
+    writeWikiPage,
+    setWikiPageLocked,
+    deleteWikiPage,
     recordTriggerFire,
   } satisfies ProjectionProjectRepositoryShape;
 });

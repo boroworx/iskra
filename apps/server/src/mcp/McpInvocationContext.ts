@@ -11,6 +11,8 @@ import * as Effect from "effect/Effect";
 /**
  * `board` is granted only to a session building a card, `lead` only to a channel lead's run,
  * `verifier` only to a card's verifier session and `coordinator` only to a plan card's coordinator.
+ * Every card and lead run reads the project wiki: `wiki` also writes it, `wiki-read` (verifiers and
+ * critics) only reads.
  */
 export type McpCapability =
   | "preview"
@@ -19,7 +21,9 @@ export type McpCapability =
   | "board"
   | "lead"
   | "verifier"
-  | "coordinator";
+  | "coordinator"
+  | "wiki"
+  | "wiki-read";
 
 export interface McpInvocationScope {
   readonly environmentId: EnvironmentId;

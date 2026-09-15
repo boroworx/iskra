@@ -75,6 +75,11 @@ describe("CheckpointDiffQuery.layer", () => {
         Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
         Layer.provideMerge(
           Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+            listWikiPages: () => Effect.die("unused"),
+            getWikiPage: () => Effect.die("unused"),
+            listWikiRevisions: () => Effect.die("unused"),
+            getWikiRevision: () => Effect.die("unused"),
+            listWikiChanges: () => Effect.die("unused"),
             getUserInputActivity: () => Effect.die("unused"),
             getCardActivity: () => Effect.die("unused"),
             getRunByThreadId: () => Effect.die("unused"),
@@ -200,6 +205,11 @@ describe("CheckpointDiffQuery.layer", () => {
         Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
         Layer.provideMerge(
           Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+            listWikiPages: () => Effect.die("unused"),
+            getWikiPage: () => Effect.die("unused"),
+            listWikiRevisions: () => Effect.die("unused"),
+            getWikiRevision: () => Effect.die("unused"),
+            listWikiChanges: () => Effect.die("unused"),
             getUserInputActivity: () => Effect.die("unused"),
             getCardActivity: () => Effect.die("unused"),
             getRunByThreadId: () => Effect.die("unused"),
@@ -300,6 +310,11 @@ describe("CheckpointDiffQuery.layer", () => {
         Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
         Layer.provideMerge(
           Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+            listWikiPages: () => Effect.die("unused"),
+            getWikiPage: () => Effect.die("unused"),
+            listWikiRevisions: () => Effect.die("unused"),
+            getWikiRevision: () => Effect.die("unused"),
+            listWikiChanges: () => Effect.die("unused"),
             getUserInputActivity: () => Effect.die("unused"),
             getCardActivity: () => Effect.die("unused"),
             getRunByThreadId: () => Effect.die("unused"),
@@ -385,6 +400,11 @@ describe("CheckpointDiffQuery.layer", () => {
         Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
         Layer.provideMerge(
           Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+            listWikiPages: () => Effect.die("unused"),
+            getWikiPage: () => Effect.die("unused"),
+            listWikiRevisions: () => Effect.die("unused"),
+            getWikiRevision: () => Effect.die("unused"),
+            listWikiChanges: () => Effect.die("unused"),
             getUserInputActivity: () => Effect.die("unused"),
             getCardActivity: () => Effect.die("unused"),
             getRunByThreadId: () => Effect.die("unused"),
@@ -455,6 +475,11 @@ describe("CheckpointDiffQuery.layer", () => {
         Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
         Layer.provideMerge(
           Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+            listWikiPages: () => Effect.die("unused"),
+            getWikiPage: () => Effect.die("unused"),
+            listWikiRevisions: () => Effect.die("unused"),
+            getWikiRevision: () => Effect.die("unused"),
+            listWikiChanges: () => Effect.die("unused"),
             getUserInputActivity: () => Effect.die("unused"),
             getCardActivity: () => Effect.die("unused"),
             getRunByThreadId: () => Effect.die("unused"),

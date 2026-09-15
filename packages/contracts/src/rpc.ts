@@ -1332,6 +1332,18 @@ const WsProjectRemoveHoldoutRpc = Rpc.make(ORCHESTRATION_WS_METHODS.removeProjec
   error: ProjectHoldoutErrors,
 });
 
+const WsProjectListWikiRpc = Rpc.make(ORCHESTRATION_WS_METHODS.listProjectWiki, {
+  payload: OrchestrationRpcSchemas.listProjectWiki.input,
+  success: OrchestrationRpcSchemas.listProjectWiki.output,
+  error: Schema.Union([OrchestrationGetSnapshotError, EnvironmentAuthorizationError]),
+});
+
+const WsProjectGetWikiPageRpc = Rpc.make(ORCHESTRATION_WS_METHODS.getProjectWikiPage, {
+  payload: OrchestrationRpcSchemas.getProjectWikiPage.input,
+  success: OrchestrationRpcSchemas.getProjectWikiPage.output,
+  error: Schema.Union([OrchestrationGetSnapshotError, EnvironmentAuthorizationError]),
+});
+
 /** The first-run sample project couldn't be written, committed or registered. */
 export class ProjectSampleError extends Schema.TaggedError<ProjectSampleError>()(
   "ProjectSampleError",
@@ -1601,5 +1613,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectGetHoldoutRpc,
   WsProjectSetHoldoutRpc,
   WsProjectRemoveHoldoutRpc,
+  WsProjectListWikiRpc,
+  WsProjectGetWikiPageRpc,
   WsProjectCreateSampleRpc,
 );

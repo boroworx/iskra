@@ -53,6 +53,8 @@ import { CoordinatorToolkitHandlersLive } from "../src/mcp/toolkits/coordinator/
 import { CoordinatorToolkit } from "../src/mcp/toolkits/coordinator/tools.ts";
 import { VerifierToolkitHandlersLive } from "../src/mcp/toolkits/verifier/handlers.ts";
 import { VerifierToolkit } from "../src/mcp/toolkits/verifier/tools.ts";
+import { WikiToolkitHandlersLive } from "../src/mcp/toolkits/wiki/handlers.ts";
+import { WikiToolkit } from "../src/mcp/toolkits/wiki/tools.ts";
 import * as AgentDefinitionSync from "../src/orchestration/AgentDefinitionSync.ts";
 import * as CardLandingReactor from "../src/orchestration/CardLandingReactor.ts";
 import * as CardMigrationReactor from "../src/orchestration/CardMigrationReactor.ts";
@@ -378,6 +380,7 @@ const makeWorld = Effect.fn("makeWorld")(function* (
   yield* (yield* CardReversibilityReactor.CardReversibilityReactor).start();
   const board = yield* BoardToolkit.pipe(Effect.provide(BoardToolkitHandlersLive));
   const verifierTools = yield* VerifierToolkit.pipe(Effect.provide(VerifierToolkitHandlersLive));
+  const wikiTools = yield* WikiToolkit.pipe(Effect.provide(WikiToolkitHandlersLive));
   const coordinatorTools = yield* CoordinatorToolkit.pipe(
     Effect.provide(CoordinatorToolkitHandlersLive),
   );
@@ -626,6 +629,22 @@ const makeWorld = Effect.fn("makeWorld")(function* (
         mcpScope(threadId, "claudeAgent", "board"),
       ),
     );
+  const callWiki = <Name extends keyof typeof WikiToolkit.tools>(
+    threadId: ThreadId,
+    tool: Name,
+    params: Parameters<typeof wikiTools.handle<Name>>[1],
+  ) =>
+    wikiTools.handle(tool, params).pipe(
+      Stream.unwrap,
+      Stream.runCollect,
+      Effect.map(
+        (chunk) => chunk.at(-1)!.result as Tool.Success<(typeof WikiToolkit.tools)[Name]>,
+      ),
+      Effect.provideService(
+        McpInvocationContext.McpInvocationContext,
+        mcpScope(threadId, "claudeAgent", "wiki"),
+      ),
+    );
   const callCoordinator = <Name extends keyof typeof CoordinatorToolkit.tools>(
     threadId: ThreadId,
     tool: Name,
@@ -740,6 +759,7 @@ const makeWorld = Effect.fn("makeWorld")(function* (
     startedCard,
     commit,
     callBoard,
+    callWiki,
     callCoordinator,
     reviewAndRelease,
     work,
@@ -1406,30 +1426,27 @@ it.live(
 );
 
 it.live(
-  "E1: an approved lesson reaches only briefs for its paths, a revert of a landed card lands with no agent and makes it flawed, and a paused card restores its checkpoint",
+  "E1: a wiki page reaches only briefs for its paths, a revert of a landed card lands with no agent and makes it flawed, and a paused card restores its checkpoint",
   () =>
     scenario(() =>
       Effect.gen(function* () {
         const world = yield* makeWorld("knowledge", { landing: "local", verifier: "off" });
-        const lesson = "The API rate limiter reads its limits from src/api/limits.ts at boot only.";
+        const page = "The API rate limiter reads its limits from src/api/limits.ts at boot only.";
 
-        // An owner proposes a lesson about the API folder; a person approves it.
+        // An owner writes a wiki page about the API folder; no one has to approve it.
         const limits = yield* world.startedCard("limits", "Rate limits");
         const owner = yield* world.sessionOf(limits, "owner");
         yield* world.setSession(owner.threadId, "running", "turn-0");
-        const { lessonId } = yield* world.callBoard(owner.threadId, "propose_lesson", {
-          kind: "quirk",
-          text: lesson,
+        yield* world.callWiki(owner.threadId, "wiki_write", {
+          slug: "api-limits",
+          title: "API limits",
+          body: page,
           paths: ["src/api/**"],
+          summary: "What the limiter reads at boot",
         });
-        expect((yield* world.project).knowledge).toContainEqual(
-          expect.objectContaining({ lessonId, state: "proposed" }),
+        expect((yield* world.project).wiki).toContainEqual(
+          expect.objectContaining({ slug: "api-limits", revision: 1, locked: false }),
         );
-        yield* world.dispatch({
-          type: "project.knowledge.approve",
-          projectId: world.projectId,
-          lessonId,
-        });
         const { head } = yield* world.work(limits, {
           "src/api/limits.ts": "export const LIMIT = 100;\n",
         });
@@ -1456,8 +1473,8 @@ it.live(
             });
             return (yield* world.sessionOf(cardId, "owner")).rendered.firstMessage;
           });
-        expect(yield* briefFor("api", ["src/api"])).toContain(lesson);
-        expect(yield* briefFor("docs", ["docs"])).not.toContain(lesson);
+        expect(yield* briefFor("api", ["src/api"])).toContain(page);
+        expect(yield* briefFor("docs", ["docs"])).not.toContain(page);
 
         // The card lands; a person's revert goes to review with evidence and no agent, then lands.
         yield* world.dispatch({ type: "card.merge.approve", cardId: limits });

@@ -36,6 +36,11 @@ const makeProjectShell = (workspaceRoot: string): OrchestrationProjectShell => (
 /** Only `getShellSnapshot` is exercised; the rest must not be called. */
 const makeProjectionSnapshotQueryLayer = (importedWorkspaceRoots: ReadonlyArray<string>) =>
   Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+    listWikiPages: () => Effect.die("unused"),
+    getWikiPage: () => Effect.die("unused"),
+    listWikiRevisions: () => Effect.die("unused"),
+    getWikiRevision: () => Effect.die("unused"),
+    listWikiChanges: () => Effect.die("unused"),
     getCommandReadModel: () => Effect.die("unused"),
     getUserInputActivity: () => Effect.die("unused"),
     getCardActivity: () => Effect.die("unused"),

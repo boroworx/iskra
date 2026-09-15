@@ -4,6 +4,7 @@ import {
   ClientOrchestrationCommand,
   DEFAULT_PROJECT_ORCHESTRATION,
   MessageId,
+  WIKI_PAGE_BODY_MAX_CHARS,
   ThreadId,
   TurnId,
   type CardPlanChild,
@@ -20,9 +21,6 @@ import * as Schema from "effect/Schema";
 import {
   AUTO_MERGE_NEEDS_VERIFIER_REASON,
   DUPLICATE_TRIGGER_REASON,
-  LESSON_NOT_PROPOSED_REASON,
-  LESSON_TOO_LONG_REASON,
-  NO_LESSON_REASON,
   OUTCOME_UNFINISHED_REASON,
   RESTORE_NEEDS_STOPPED_REASON,
   REVERT_IN_PROGRESS_REASON,
@@ -36,6 +34,17 @@ import {
   triggerReadyReason,
   untrustedAuthorReason,
 } from "./cardRules.ts";
+import {
+  WIKI_ALREADY_LOCKED_REASON,
+  WIKI_BODY_EMPTY_REASON,
+  WIKI_BODY_TOO_LONG_REASON,
+  WIKI_RESTORE_EARLIER_REASON,
+  noWikiPageReason,
+  wikiGoneReason,
+  wikiLockedReason,
+  wikiPageExistsReason,
+  wikiStaleReason,
+} from "./wikiRules.ts";
 import { budgetCardOf, budgetRefusalOf } from "./decider.ts";
 import {
   COORDINATOR_OWN_CHILDREN_REASON,
@@ -693,54 +702,117 @@ it.layer(NodeServices.layer)("decider card factory", (it) => {
     }),
   );
 
-  it.effect("agents only propose lessons; a person approves, dismisses or removes them", () =>
+  it.effect("agents and people write the wiki; only a person locks, restores or deletes a page", () =>
     Effect.gen(function* () {
-      const proposeLesson = (lessonId: string, text = "Run the migrations before the tests."): OrchestrationCommand => ({
-        type: "card.lesson.propose",
+      const write = (
+        patch: Partial<Extract<OrchestrationCommand, { type: "project.wiki.write" }>> = {},
+      ): OrchestrationCommand => ({
+        type: "project.wiki.write",
         commandId: nextCommandId(),
         projectId,
-        cardId,
-        lessonId,
-        kind: "quirk",
-        text,
+        slug: "api-limits",
+        title: "API limits",
+        body: "Limits load at boot.",
         paths: ["src/api/**"],
-        createdAt: now,
+        summary: "First page",
+        expectedRevision: 0,
+        restoredFrom: null,
+        ...patch,
       });
-      const onLesson = (
-        type: "project.knowledge.approve" | "project.knowledge.dismiss" | "project.knowledge.remove",
-        lessonId: string,
-      ): OrchestrationCommand => ({ type, commandId: nextCommandId(), projectId, lessonId });
-      const lessons = (readModel: OrchestrationReadModel) =>
-        readModel.projects[0]?.knowledge?.map((lesson) => [lesson.lessonId, lesson.state]);
+      const agentWrite = (
+        patch: Partial<Extract<OrchestrationCommand, { type: "project.wiki.agent.write" }>> = {},
+      ): OrchestrationCommand => ({
+        type: "project.wiki.agent.write",
+        commandId: nextCommandId(),
+        projectId,
+        slug: "api-limits",
+        title: "API limits",
+        body: "Limits load at boot; restart after editing them.",
+        paths: ["src/api/**"],
+        summary: "Say to restart",
+        expectedRevision: 1,
+        agentId: backend,
+        cardId,
+        ...patch,
+      });
+      const onPage = (
+        type: "project.wiki.lock" | "project.wiki.unlock" | "project.wiki.delete",
+      ): OrchestrationCommand => ({
+        type,
+        commandId: nextCommandId(),
+        projectId,
+        slug: "api-limits",
+      });
+      const pages = (readModel: OrchestrationReadModel) =>
+        readModel.projects[0]?.wiki?.map((page) => [
+          page.slug,
+          page.revision,
+          page.locked,
+          page.deletedAt !== null,
+        ]);
 
       const base = yield* applyCommands([...setup, createCard()]);
-      expect(yield* refusal(base, proposeLesson("lesson-long", "x".repeat(801)))).toBe(
-        LESSON_TOO_LONG_REASON,
-      );
-      expect(isClientCommand(proposeLesson("lesson-1"))).toBe(false);
-      expect(isClientCommand(onLesson("project.knowledge.approve", "lesson-1"))).toBe(true);
+      expect(isClientCommand(write())).toBe(true);
+      expect(isClientCommand(agentWrite())).toBe(false);
+      expect(yield* refusal(base, write({ body: "   " }))).toBe(WIKI_BODY_EMPTY_REASON);
+      expect(
+        yield* refusal(base, write({ body: "x".repeat(WIKI_PAGE_BODY_MAX_CHARS + 1) })),
+      ).toBe(WIKI_BODY_TOO_LONG_REASON);
+      expect(yield* refusal(base, onPage("project.wiki.lock"))).toBe(noWikiPageReason("api-limits"));
 
-      const proposed = yield* applyTo(base, [proposeLesson("lesson-1"), proposeLesson("lesson-2")]);
-      expect(proposed.projects[0]?.knowledge?.[0]).toMatchObject({
-        state: "proposed",
-        sourceCardId: cardId,
-        paths: ["src/api/**"],
+      // An agent updates the revision it read; a blind or stale write is refused with what to do.
+      const created = yield* applyTo(base, [write()]);
+      expect(created.projects[0]?.wiki?.[0]).toMatchObject({
+        slug: "api-limits",
+        revision: 1,
+        locked: false,
+        updatedBy: { kind: "human", agentId: null, cardId: null },
       });
-      const decided = yield* applyTo(proposed, [
-        onLesson("project.knowledge.approve", "lesson-1"),
-        onLesson("project.knowledge.dismiss", "lesson-2"),
+      expect(yield* refusal(created, write())).toBe(wikiPageExistsReason("api-limits", 1));
+      expect(yield* refusal(created, agentWrite({ expectedRevision: 5 }))).toBe(
+        wikiStaleReason("api-limits", 5, 1),
+      );
+      const updated = yield* applyTo(created, [agentWrite()]);
+      expect(updated.projects[0]?.wiki?.[0]).toMatchObject({
+        revision: 2,
+        updatedBy: { kind: "agent", agentId: backend, cardId },
+      });
+
+      // A locked page takes a person's write, never an agent's.
+      const locked = yield* applyTo(updated, [onPage("project.wiki.lock")]);
+      expect(yield* refusal(locked, onPage("project.wiki.lock"))).toBe(WIKI_ALREADY_LOCKED_REASON);
+      expect(yield* refusal(locked, agentWrite({ expectedRevision: 2 }))).toBe(
+        wikiLockedReason("api-limits"),
+      );
+      const restored = yield* applyTo(locked, [
+        write({
+          expectedRevision: 2,
+          body: "Limits load at boot.",
+          restoredFrom: 1,
+          summary: "Restore revision 1",
+        }),
       ]);
-      expect(lessons(decided)).toEqual([["lesson-1", "approved"]]);
-      expect(yield* refusal(decided, onLesson("project.knowledge.approve", "lesson-1"))).toBe(
-        LESSON_NOT_PROPOSED_REASON,
+      expect(pages(restored)).toEqual([["api-limits", 3, true, false]]);
+      expect(yield* refusal(restored, write({ expectedRevision: 3, restoredFrom: 9 }))).toBe(
+        WIKI_RESTORE_EARLIER_REASON,
       );
-      expect(yield* refusal(decided, onLesson("project.knowledge.dismiss", "lesson-2"))).toBe(
-        LESSON_NOT_PROPOSED_REASON,
+
+      // A deleted page is gone for agents; a person's write brings it back where its history left off.
+      const deleted = yield* applyTo(restored, [
+        onPage("project.wiki.unlock"),
+        onPage("project.wiki.delete"),
+      ]);
+      expect(pages(deleted)).toEqual([["api-limits", 3, false, true]]);
+      expect(yield* refusal(deleted, onPage("project.wiki.delete"))).toBe(
+        noWikiPageReason("api-limits"),
       );
-      expect(yield* refusal(decided, onLesson("project.knowledge.remove", "lesson-2"))).toBe(
-        NO_LESSON_REASON,
+      expect(yield* refusal(deleted, agentWrite({ expectedRevision: 3 }))).toBe(
+        wikiGoneReason("api-limits"),
       );
-      expect(lessons(yield* applyTo(decided, [onLesson("project.knowledge.remove", "lesson-1")]))).toEqual([]);
+      const again = yield* applyTo(deleted, [
+        write({ expectedRevision: 0, restoredFrom: 3, summary: "Bring it back" }),
+      ]);
+      expect(pages(again)).toEqual([["api-limits", 4, false, false]]);
     }),
   );
 

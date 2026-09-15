@@ -96,6 +96,10 @@ import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { BOARD_CLAUDE_TOOL_NAMES, LEAD_CLAUDE_TOOL_NAMES } from "../../mcp/toolkits/board/tools.ts";
 import { VERIFIER_CLAUDE_TOOL_NAMES } from "../../mcp/toolkits/verifier/tools.ts";
 import { COORDINATOR_CLAUDE_TOOL_NAMES } from "../../mcp/toolkits/coordinator/tools.ts";
+import {
+  WIKI_CLAUDE_TOOL_NAMES,
+  WIKI_READ_CLAUDE_TOOL_NAMES,
+} from "../../mcp/toolkits/wiki/tools.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
 import { claudeSignedOutMessage, makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import { planClaudeSkillDispatch } from "../Drivers/ClaudeSkillDispatch.ts";
@@ -4891,7 +4895,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             ? VERIFIER_CLAUDE_TOOL_NAMES
             : threadMcpSession?.capabilities.has("coordinator")
               ? COORDINATOR_CLAUDE_TOOL_NAMES
-              : null;
+              : // A helper writes the wiki; a critic only reads it.
+                threadMcpSession?.capabilities.has("wiki")
+                ? WIKI_CLAUDE_TOOL_NAMES
+                : threadMcpSession?.capabilities.has("wiki-read")
+                  ? WIKI_READ_CLAUDE_TOOL_NAMES
+                  : null;
       const mcpSession = input.run && runToolNames === null ? undefined : threadMcpSession;
       const runAllowedTools =
         input.run && runToolNames !== null ? [...allowedTools, ...runToolNames] : allowedTools;

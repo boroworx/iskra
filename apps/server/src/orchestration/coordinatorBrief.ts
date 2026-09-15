@@ -3,10 +3,11 @@ import type {
   CardBriefPayload,
   OrchestrationAgent,
   OrchestrationCard,
+  ProjectWikiPage,
   RenderedRunContext,
 } from "@iskra/contracts";
 
-import { renderCardActivities } from "./cardBrief.ts";
+import { projectWikiBody, renderCardActivities } from "./cardBrief.ts";
 
 /** The most of a coordinator's recent messages its brief carries, newest kept. */
 export const COORDINATOR_MESSAGES_LIMIT = 20_000;
@@ -30,6 +31,8 @@ export interface CoordinatorBriefInput {
     Pick<CardActivity, "activityId" | "kind" | "author" | "body" | "createdAt">
   >;
   readonly baseBranch: string;
+  /** The project's wiki, which the coordinator reads by name and can write. */
+  readonly wiki?: ReadonlyArray<ProjectWikiPage>;
 }
 
 const list = (lines: ReadonlyArray<string>, empty: string) =>
@@ -82,6 +85,7 @@ export function buildCoordinatorBrief(input: CoordinatorBriefInput): {
       ),
     },
     { title: "Plan", body: planBody },
+    { title: "Project wiki", body: projectWikiBody(input.wiki ?? [], []) },
     {
       title: "Children",
       body: list(
@@ -101,7 +105,7 @@ export function buildCoordinatorBrief(input: CoordinatorBriefInput): {
     },
   ].filter((section) => section.body.trim().length > 0);
 
-  const intro = `You are @${agent.name}, coordinating the plan card "${card.title}". You can read the repository but never change it. Break the goal into child cards with propose_plan: give each child a short key, a title, a spec, acceptance criteria a person can observe, the builder that should build it, the keys it depends on, and a slice. Slice 1 runs first; a person checks in before each later slice starts. A person approves your plan; you can never approve it yourself. Once it is approved you get updates as children move: message_child steers a child's builder, pause_child stops a child going wrong, read_child_worklog shows what a child did, ask_plan_owner asks a person to decide something, and propose_plan_lesson suggests something later work in this project should know. When a person redirects the plan, propose a revised one. Never ask a person to run commands, fetch data or do the work for you.`;
+  const intro = `You are @${agent.name}, coordinating the plan card "${card.title}". You can read the repository but never change it. Break the goal into child cards with propose_plan: give each child a short key, a title, a spec, acceptance criteria a person can observe, the builder that should build it, the keys it depends on, and a slice. Slice 1 runs first; a person checks in before each later slice starts. A person approves your plan; you can never approve it yourself. Once it is approved you get updates as children move: message_child steers a child's builder, pause_child stops a child going wrong, read_child_worklog shows what a child did, ask_plan_owner asks a person to decide something, and wiki_search, wiki_read and wiki_write keep the project's wiki: read what agents already learned, and write down what later work should know. When a person redirects the plan, propose a revised one. Never ask a person to run commands, fetch data or do the work for you.`;
   const context: CardBriefPayload = {
     agent: { id: agent.id, name: agent.name, rolePrompt: agent.rolePrompt },
     role: "coordinator",

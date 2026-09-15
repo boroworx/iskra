@@ -6871,7 +6871,9 @@ describe("ClaudeAdapterLive", () => {
         "mcp__iskra__propose_criteria_change",
         "mcp__iskra__request_help",
         "mcp__iskra__request_critique",
-        "mcp__iskra__propose_lesson",
+        "mcp__iskra__wiki_search",
+        "mcp__iskra__wiki_read",
+        "mcp__iskra__wiki_write",
       ]);
       assert.deepEqual(Object.keys(options?.mcpServers ?? {}), ["iskra"]);
     }).pipe(
@@ -6908,6 +6910,9 @@ describe("ClaudeAdapterLive", () => {
       assert.deepEqual(options?.allowedTools, [
         "mcp__iskra__propose_triage_card",
         "mcp__iskra__ask_clarification",
+        "mcp__iskra__wiki_search",
+        "mcp__iskra__wiki_read",
+        "mcp__iskra__wiki_write",
       ]);
       assert.deepEqual(Object.keys(options?.mcpServers ?? {}), ["iskra"]);
     }).pipe(
@@ -6945,6 +6950,8 @@ describe("ClaudeAdapterLive", () => {
         "mcp__iskra__record_verdict",
         "mcp__iskra__view_evidence",
         "mcp__iskra__view_screenshot",
+        "mcp__iskra__wiki_search",
+        "mcp__iskra__wiki_read",
       ]);
       assert.deepEqual(Object.keys(options?.mcpServers ?? {}), ["iskra"]);
     }).pipe(
@@ -6984,7 +6991,9 @@ describe("ClaudeAdapterLive", () => {
         "mcp__iskra__message_child",
         "mcp__iskra__pause_child",
         "mcp__iskra__ask_plan_owner",
-        "mcp__iskra__propose_plan_lesson",
+        "mcp__iskra__wiki_search",
+        "mcp__iskra__wiki_read",
+        "mcp__iskra__wiki_write",
       ]);
       assert.deepEqual(Object.keys(options?.mcpServers ?? {}), ["iskra"]);
     }).pipe(

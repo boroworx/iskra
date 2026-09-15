@@ -42,8 +42,12 @@ import {
   OrchestrationChannelRun,
   OrchestrationLiveRun,
   PROJECT_SHELL_TRIGGER_FIRES_LIMIT,
-  ProjectLesson,
+  PROJECT_WIKI_CHANGES_LIMIT,
   ProjectTriggerFire,
+  ProjectWikiChange,
+  ProjectWikiPage,
+  ProjectWikiRevision,
+  WikiAuthor,
   Reason,
   type ProjectSpend,
   type OrchestrationCardShell,
@@ -438,15 +442,16 @@ function mapSessionRow(
   };
 }
 
-/** A project's spend this month, its lessons and its newest trigger fires, each absent when it has none. */
-type ProjectExtras = Pick<OrchestrationProjectShell, "spend" | "knowledge" | "recentTriggerFires">;
+/** A project's spend this month, when its wiki last changed and its newest fires, absent when it has none. */
+type ProjectExtras = Pick<OrchestrationProjectShell, "spend" | "wikiUpdatedAt" | "recentTriggerFires">;
 
-/** The read model carries a project's spend and lessons; recent fires are only for clients. */
+/** The read model carries a project's spend and its wiki pages; the rest is only for clients. */
 const projectReadExtras = (
   extras: ProjectExtras | undefined,
-): Pick<OrchestrationProject, "spend" | "knowledge"> => ({
+  wiki: ReadonlyArray<ProjectWikiPage> | undefined,
+): Pick<OrchestrationProject, "spend" | "wiki"> => ({
   ...(extras?.spend === undefined ? {} : { spend: extras.spend }),
-  ...(extras?.knowledge === undefined ? {} : { knowledge: extras.knowledge }),
+  ...(wiki === undefined ? {} : { wiki }),
 });
 
 function mapProjectShellRow(
@@ -2568,6 +2573,7 @@ pending_approval_requests AS (
               );
 
               const projectExtras = yield* loadProjectExtras();
+              const projectWikis = yield* loadProjectWikis();
               const projects: ReadonlyArray<OrchestrationProject> = projectRows.map((row) => ({
                 id: row.projectId,
                 title: row.title,
@@ -2580,7 +2586,7 @@ pending_approval_requests AS (
                 projectIcon: row.projectIcon ?? null,
                 scripts: row.scripts,
                 ...(row.orchestration === null ? {} : { orchestration: row.orchestration }),
-                ...projectReadExtras(projectExtras.get(row.projectId)),
+                ...projectReadExtras(projectExtras.get(row.projectId), projectWikis.get(row.projectId)),
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
                 deletedAt: row.deletedAt,
@@ -2745,6 +2751,7 @@ pending_approval_requests AS (
               );
               let updatedAt: string | null = null;
               const projectExtras = yield* loadProjectExtras();
+              const projectWikis = yield* loadProjectWikis();
               const projects: OrchestrationProject[] = [];
               const threads: OrchestrationThread[] = [];
 
@@ -2766,7 +2773,7 @@ pending_approval_requests AS (
                   projectIcon: row.projectIcon ?? null,
                   scripts: row.scripts,
                   ...(row.orchestration === null ? {} : { orchestration: row.orchestration }),
-                  ...projectReadExtras(projectExtras.get(row.projectId)),
+                  ...projectReadExtras(projectExtras.get(row.projectId), projectWikis.get(row.projectId)),
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
                   deletedAt: row.deletedAt,
@@ -4280,28 +4287,124 @@ pending_approval_requests AS (
       `,
   });
 
-  const listProjectLessonRows = SqlSchema.findAll({
+  const listProjectWikiUpdatedRows = SqlSchema.findAll({
     Request: Schema.Struct({ projectId: Schema.UndefinedOr(Schema.String) }),
+    Result: Schema.Struct({ projectId: ProjectId, wikiUpdatedAt: Schema.NullOr(IsoDateTime) }),
+    execute: ({ projectId }) =>
+      sql`
+        SELECT project_id AS "projectId", MAX(updated_at) AS "wikiUpdatedAt"
+        FROM projection_project_wiki_pages
+        WHERE ${projectId === undefined ? sql`1 = 1` : sql`project_id = ${projectId}`}
+        GROUP BY project_id
+      `,
+  });
+
+  const WikiPageRow = Schema.Struct({
+    ...ProjectWikiPage.fields,
+    projectId: ProjectId,
+    paths: Schema.fromJsonString(ProjectWikiPage.fields.paths),
+    locked: Schema.Number,
+    updatedBy: Schema.fromJsonString(WikiAuthor),
+  });
+
+  const toWikiPage = ({
+    projectId: _projectId,
+    locked,
+    ...row
+  }: typeof WikiPageRow.Type): ProjectWikiPage => ({ ...row, locked: locked === 1 });
+
+  const listWikiPageRows = SqlSchema.findAll({
+    Request: Schema.Struct({
+      projectId: Schema.UndefinedOr(Schema.String),
+      slug: Schema.UndefinedOr(Schema.String),
+    }),
+    Result: WikiPageRow,
+    execute: ({ projectId, slug }) =>
+      sql`
+        SELECT
+          project_id AS "projectId",
+          slug,
+          title,
+          body,
+          paths_json AS "paths",
+          locked,
+          revision,
+          updated_at AS "updatedAt",
+          updated_by_json AS "updatedBy",
+          deleted_at AS "deletedAt"
+        FROM projection_project_wiki_pages
+        WHERE ${projectId === undefined ? sql`1 = 1` : sql`project_id = ${projectId}`}
+          AND ${slug === undefined ? sql`1 = 1` : sql`slug = ${slug}`}
+        ORDER BY updated_at DESC, slug ASC
+      `,
+  });
+
+  const listWikiRevisionRows = SqlSchema.findAll({
+    Request: Schema.Struct({
+      projectId: Schema.String,
+      slug: Schema.String,
+      revision: Schema.UndefinedOr(Schema.Number),
+    }),
     Result: Schema.Struct({
-      ...ProjectLesson.fields,
-      projectId: ProjectId,
-      paths: Schema.fromJsonString(ProjectLesson.fields.paths),
+      ...ProjectWikiRevision.fields,
+      paths: Schema.fromJsonString(ProjectWikiRevision.fields.paths),
+      author: Schema.fromJsonString(WikiAuthor),
+    }),
+    execute: ({ projectId, slug, revision }) =>
+      sql`
+        SELECT
+          revision,
+          title,
+          body,
+          paths_json AS "paths",
+          summary,
+          author_json AS "author",
+          restored_from AS "restoredFrom",
+          written_at AS "writtenAt"
+        FROM projection_project_wiki_revisions
+        WHERE project_id = ${projectId}
+          AND slug = ${slug}
+          AND ${revision === undefined ? sql`1 = 1` : sql`revision = ${revision}`}
+        ORDER BY revision DESC
+      `,
+  });
+
+  // A person's deletion is their own act, so the feed names a person, not the page's last writer.
+  const listWikiChangeRows = SqlSchema.findAll({
+    Request: Schema.Struct({ projectId: Schema.String }),
+    Result: Schema.Struct({
+      ...ProjectWikiChange.fields,
+      author: Schema.fromJsonString(WikiAuthor),
     }),
     execute: ({ projectId }) =>
       sql`
-        SELECT
-          lesson_id AS "lessonId",
-          project_id AS "projectId",
-          kind,
-          text,
-          paths_json AS "paths",
-          state,
-          source_card_id AS "sourceCardId",
-          created_at AS "createdAt"
-        FROM projection_project_knowledge
-        WHERE state IN ('proposed', 'approved')
-          AND ${projectId === undefined ? sql`1 = 1` : sql`project_id = ${projectId}`}
-        ORDER BY created_at ASC, rowid ASC
+        SELECT kind, slug, title, revision, summary, author, "restoredFrom", at FROM (
+          SELECT
+            'write' AS kind,
+            revisions.slug AS slug,
+            revisions.title AS title,
+            revisions.revision AS revision,
+            revisions.summary AS summary,
+            revisions.author_json AS author,
+            revisions.restored_from AS "restoredFrom",
+            revisions.written_at AS at
+          FROM projection_project_wiki_revisions AS revisions
+          WHERE revisions.project_id = ${projectId}
+          UNION ALL
+          SELECT
+            'delete' AS kind,
+            pages.slug AS slug,
+            pages.title AS title,
+            pages.revision AS revision,
+            '' AS summary,
+            '{"kind":"human","agentId":null,"cardId":null}' AS author,
+            NULL AS "restoredFrom",
+            pages.deleted_at AS at
+          FROM projection_project_wiki_pages AS pages
+          WHERE pages.project_id = ${projectId} AND pages.deleted_at IS NOT NULL
+        )
+        ORDER BY at DESC, revision DESC
+        LIMIT ${PROJECT_WIKI_CHANGES_LIMIT}
       `,
   });
 
@@ -4334,20 +4437,20 @@ pending_approval_requests AS (
       `,
   });
 
-  /** Each project's spend, lessons and recent fires, by project id; one project's when given. */
+  /** Each project's spend, wiki change time and recent fires, by project id; one project's when given. */
   const loadProjectExtras = (projectId?: ProjectId) =>
     Effect.all([
       listProjectSpendRows({ projectId }),
-      listProjectLessonRows({ projectId }),
+      listProjectWikiUpdatedRows({ projectId }),
       listRecentTriggerFireRows({ projectId }),
     ]).pipe(
       Effect.mapError(queryError("loadProjectExtras")),
-      Effect.map(([spendRows, lessonRows, fireRows]): ReadonlyMap<string, ProjectExtras> => {
+      Effect.map(([spendRows, wikiRows, fireRows]): ReadonlyMap<string, ProjectExtras> => {
         const extras = new Map<
           string,
           {
             spend?: ProjectSpend;
-            knowledge?: ReadonlyArray<ProjectLesson>;
+            wikiUpdatedAt?: string;
             recentTriggerFires?: ReadonlyArray<ProjectTriggerFire>;
           }
         >();
@@ -4365,9 +4468,8 @@ pending_approval_requests AS (
             byAgent: [...spend.byAgent, { agentId, usd: costUsd }],
           };
         }
-        for (const { projectId: id, ...lesson } of lessonRows) {
-          const entry = entryOf(id);
-          entry.knowledge = [...(entry.knowledge ?? []), lesson];
+        for (const { projectId: id, wikiUpdatedAt } of wikiRows) {
+          if (wikiUpdatedAt !== null) entryOf(id).wikiUpdatedAt = wikiUpdatedAt;
         }
         for (const { projectId: id, ...fire } of fireRows) {
           const entry = entryOf(id);
@@ -4376,6 +4478,55 @@ pending_approval_requests AS (
         return extras;
       }),
     );
+
+  /** Every project's wiki pages, by project id, for the read model the decider and briefs read. */
+  const loadProjectWikis = () =>
+    listWikiPageRows({ projectId: undefined, slug: undefined }).pipe(
+      Effect.mapError(queryError("loadProjectWikis")),
+      Effect.map((rows): ReadonlyMap<string, ReadonlyArray<ProjectWikiPage>> => {
+        const wikis = new Map<string, Array<ProjectWikiPage>>();
+        for (const row of rows) {
+          const pages = wikis.get(row.projectId) ?? [];
+          pages.push(toWikiPage(row));
+          wikis.set(row.projectId, pages);
+        }
+        return wikis;
+      }),
+    );
+
+  const listWikiPages: ProjectionSnapshotQueryShape["listWikiPages"] = (projectId) =>
+    listWikiPageRows({ projectId, slug: undefined }).pipe(
+      Effect.mapError(queryError("listWikiPages")),
+      Effect.map((rows) => rows.map(toWikiPage)),
+    );
+
+  const getWikiPage: ProjectionSnapshotQueryShape["getWikiPage"] = (projectId, slug) =>
+    listWikiPageRows({ projectId, slug }).pipe(
+      Effect.mapError(queryError("getWikiPage")),
+      Effect.map((rows) => {
+        const row = rows[0];
+        return row === undefined ? Option.none() : Option.some(toWikiPage(row));
+      }),
+    );
+
+  const listWikiRevisions: ProjectionSnapshotQueryShape["listWikiRevisions"] = (projectId, slug) =>
+    listWikiRevisionRows({ projectId, slug, revision: undefined }).pipe(
+      Effect.mapError(queryError("listWikiRevisions")),
+      Effect.map((rows) => rows.map(({ body: _body, ...summary }) => summary)),
+    );
+
+  const getWikiRevision: ProjectionSnapshotQueryShape["getWikiRevision"] = (
+    projectId,
+    slug,
+    revision,
+  ) =>
+    listWikiRevisionRows({ projectId, slug, revision }).pipe(
+      Effect.mapError(queryError("getWikiRevision")),
+      Effect.map((rows) => Option.fromNullishOr(rows[0])),
+    );
+
+  const listWikiChanges: ProjectionSnapshotQueryShape["listWikiChanges"] = (projectId) =>
+    listWikiChangeRows({ projectId }).pipe(Effect.mapError(queryError("listWikiChanges")));
 
   const getCardActivity: ProjectionSnapshotQueryShape["getCardActivity"] = (
     cardId,
@@ -4501,6 +4652,11 @@ pending_approval_requests AS (
     listLiveChannelRuns,
     listRunsByAgent,
     getAgentById,
+    listWikiPages,
+    getWikiPage,
+    listWikiRevisions,
+    getWikiRevision,
+    listWikiChanges,
     getThreadRuntimeContext,
     getTurnStartMessage,
     getThreadDetailById,

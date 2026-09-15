@@ -948,7 +948,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const agentAccessCapabilities = Effect.fn("ProviderService.agentAccessCapabilities")(function* (
     threadId: ThreadId,
   ) {
-    // A card owner sees only the board while it owns the card; a verifier only its verdict tools.
+    // A card owner sees only the board while it owns the card, and a verifier only its verdict
+    // tools; every card and lead run also reads the project wiki, and the roles that do work write it.
     const run = Option.isSome(projectionQuery)
       ? yield* projectionQuery.value.getRunByThreadId(threadId).pipe(
           Effect.catch((cause) =>
@@ -961,14 +962,18 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     if (Option.isSome(run)) {
       return new Set<McpInvocationContext.McpCapability>(
         run.value.role === "owner" && run.value.cardId !== null
-          ? ["board"]
+          ? ["board", "wiki"]
           : run.value.role === "lead"
-            ? ["lead"]
+            ? ["lead", "wiki"]
             : run.value.role === "verifier" && run.value.cardId !== null
-              ? ["verifier"]
+              ? ["verifier", "wiki-read"]
               : run.value.role === "coordinator" && run.value.cardId !== null
-                ? ["coordinator"]
-                : [],
+                ? ["coordinator", "wiki"]
+                : run.value.role === "helper" && run.value.cardId !== null
+                  ? ["wiki"]
+                  : run.value.role === "critic" && run.value.cardId !== null
+                    ? ["wiki-read"]
+                    : [],
       );
     }
     const capabilities = new Set<McpInvocationContext.McpCapability>(["pull-requests"]);

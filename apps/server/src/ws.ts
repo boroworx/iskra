@@ -42,6 +42,7 @@ import {
   ProjectSecretError,
   ProjectHoldoutError,
   ProjectSampleError,
+  type ProjectWikiRevision,
   OrchestrationSearchThreadsError,
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
@@ -109,6 +110,7 @@ import * as AgentDefinitionSync from "./orchestration/AgentDefinitionSync.ts";
 import * as CardWorkspace from "./orchestration/CardWorkspace.ts";
 import { cardActivitiesOf } from "./orchestration/cardRules.ts";
 import * as HoldoutStore from "./orchestration/HoldoutStore.ts";
+import { searchWikiPages } from "./orchestration/wikiRules.ts";
 import { createSampleProject } from "./orchestration/SampleProject.ts";
 import * as ProcessRunner from "./processRunner.ts";
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor.ts";
@@ -869,10 +871,9 @@ const makeWsRpcLayer = (
           case "project.orchestration-set":
           case "project.trigger-fired":
           case "project.spend-recorded":
-          case "project.knowledge-proposed":
-          case "project.knowledge-added":
-          case "project.knowledge-dismissed":
-          case "project.knowledge-removed":
+          case "project.wiki-page-written":
+          case "project.wiki-page-locked":
+          case "project.wiki-page-deleted":
             return projectUpsertOrRemove(ProjectId.make(event.aggregateId), event.sequence);
           case "project.deleted":
             return Effect.succeed(
@@ -2633,6 +2634,65 @@ const makeWsRpcLayer = (
             withHoldouts(input.projectId, (store) =>
               store.remove(input.projectId, input.scenarioId),
             ).pipe(Effect.as({})),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.listProjectWiki]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.listProjectWiki,
+            Effect.all([
+              projectionSnapshotQuery.listWikiPages(input.projectId),
+              projectionSnapshotQuery.listWikiChanges(input.projectId),
+            ]).pipe(
+              Effect.map(([pages, changes]) => ({
+                pages: searchWikiPages(pages, input.query ?? "", null),
+                changes,
+              })),
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationGetSnapshotError({
+                    message: `Failed to load the wiki of project ${input.projectId}`,
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        // A page with its history; `revision` also reads one earlier revision, such as one to restore.
+        [ORCHESTRATION_WS_METHODS.getProjectWikiPage]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.getProjectWikiPage,
+            Effect.all([
+              projectionSnapshotQuery.getWikiPage(input.projectId, input.slug),
+              projectionSnapshotQuery.listWikiRevisions(input.projectId, input.slug),
+              input.revision === undefined
+                ? Effect.succeed(Option.none<ProjectWikiRevision>())
+                : projectionSnapshotQuery.getWikiRevision(
+                    input.projectId,
+                    input.slug,
+                    input.revision,
+                  ),
+            ]).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationGetSnapshotError({
+                    message: `Failed to load the wiki page ${input.slug}`,
+                    cause,
+                  }),
+              ),
+              Effect.flatMap(([page, history, revision]) =>
+                Option.isNone(page)
+                  ? Effect.fail(
+                      new OrchestrationGetSnapshotError({
+                        message: `No wiki page ${input.slug} in this project.`,
+                      }),
+                    )
+                  : Effect.succeed({
+                      page: page.value,
+                      history,
+                      revision: Option.getOrNull(revision),
+                    }),
+              ),
+            ),
             { "rpc.aggregate": "orchestration" },
           ),
         [ORCHESTRATION_WS_METHODS.createSampleProject]: (input) =>

@@ -95,6 +95,7 @@ import Migration0080 from "./Migrations/080_ProjectionTriggerFires.ts";
 import Migration0081 from "./Migrations/081_ProjectionSpendMonthly.ts";
 import Migration0082 from "./Migrations/082_ProjectionProjectKnowledge.ts";
 import Migration0083 from "./Migrations/083_ProjectionCardOutcomes.ts";
+import Migration0084 from "./Migrations/084_ProjectionProjectWiki.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -190,6 +191,7 @@ const migrationEntries = [
   [81, "ProjectionSpendMonthly", Migration0081],
   [82, "ProjectionProjectKnowledge", Migration0082],
   [83, "ProjectionCardOutcomes", Migration0083],
+  [84, "ProjectionProjectWiki", Migration0084],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
