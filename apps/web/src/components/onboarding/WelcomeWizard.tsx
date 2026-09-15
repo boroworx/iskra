@@ -63,7 +63,6 @@ import { getDriverOption } from "../settings/providerDriverMeta";
 import { TerminalViewport } from "../ThreadTerminalDrawer";
 import { CloudEnvironmentConnectRows } from "../cloud/CloudEnvironmentConnectList";
 import { ClaudeAI, OpenAI } from "../Icons";
-import { IskraWordmark } from "../IskraWordmark";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
@@ -190,7 +189,20 @@ export function WelcomeWizard({
       >
         <WizardHeader
           title="Set up Iskra"
-          identity={<IskraWordmark className="h-4 w-auto shrink-0" role="img" aria-label="Iskra" />}
+          identity={
+            <div className="flex flex-col items-center gap-3 pb-1">
+              <img
+                src="/apple-touch-icon.png"
+                alt=""
+                width={48}
+                height={48}
+                className="size-12 rounded-[11px] shadow-[0_1px_2px_rgb(0_0_0/32%)]"
+              />
+              <p aria-hidden className="text-[22px] leading-tight font-bold tracking-[-0.015em]">
+                Set up Iskra
+              </p>
+            </div>
+          }
         >
           <WizardSteps
             steps={ONBOARDING_STAGES}

@@ -52,11 +52,8 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { SidebarInset } from "../ui/sidebar";
 import { Skeleton } from "../ui/skeleton";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
-import {
-  WorkspaceBreadcrumb,
-  WorkspaceBreadcrumbItem,
-  WorkspaceBreadcrumbSeparator,
-} from "../WorkspaceBreadcrumb";
+import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../WorkspaceBreadcrumb";
+import { SETTINGS_SECTION_HEAD_CLASSNAME, SettingsLargeTitle } from "../settings/settingsLayout";
 import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { UsageLimitsSection } from "./UsageLimits";
@@ -207,11 +204,10 @@ export function UsagePage() {
       : `${formatDayShort(window.sinceDay)} to ${formatDayShort(window.untilDay)}`;
   const topbarContent = (
     <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 py-2 xl:flex">
-      <WorkspaceBreadcrumb ariaLabel="Usage breadcrumb" className="col-span-2 min-w-0">
-        <WorkspaceBreadcrumbItem>
-          <h1>Usage</h1>
-        </WorkspaceBreadcrumbItem>
-        <WorkspaceBreadcrumbSeparator />
+      <WorkspaceBreadcrumb
+        ariaLabel="Usage scope"
+        className="col-span-2 min-w-0 [&_li]:font-normal [&_ol]:text-[13px]"
+      >
         <WorkspaceBreadcrumbItem current className="min-w-10">
           <UsageEnvironmentFilter
             environments={environments}
@@ -345,7 +341,8 @@ export function UsagePage() {
         </WorkspacePageHeader>
 
         <ScrollArea className="min-h-0 flex-1">
-          <WorkspacePageContainer width="wide">
+          <WorkspacePageContainer width="wide" className="gap-7 pt-2">
+            <SettingsLargeTitle>Usage</SettingsLargeTitle>
             {selectedEnvironments.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 {environments.length === 0
@@ -423,7 +420,7 @@ export function UsagePage() {
                   </div>
 
                   <div className="flex min-w-0 flex-col gap-3">
-                    <h2 className="text-sm font-medium text-foreground">
+                    <h2 className={SETTINGS_SECTION_HEAD_CLASSNAME}>
                       {isPast24Hours ? "Hourly" : "Daily"}{" "}
                       {metric === "tokens" ? "processed tokens" : "cost"}
                     </h2>
@@ -442,7 +439,7 @@ export function UsagePage() {
                 </section>
 
                 <section className="flex flex-col gap-2">
-                  <h2 className="text-sm font-medium text-foreground">Totals</h2>
+                  <h2 className={SETTINGS_SECTION_HEAD_CLASSNAME}>Totals</h2>
                   <div className="grid grid-cols-2 gap-x-6 gap-y-4 py-1 md:grid-cols-5">
                     <Metric label="Processed tokens" value={formatTokens(merged.totalTokens)} />
                     <Metric label="Cached input" value={formatTokens(merged.cachedInputTokens)} />
@@ -460,7 +457,7 @@ export function UsagePage() {
 
                 <section className="flex flex-col gap-3">
                   <div className="flex items-center justify-between gap-3">
-                    <h2 className="text-sm font-medium text-foreground">Breakdown</h2>
+                    <h2 className={SETTINGS_SECTION_HEAD_CLASSNAME}>Breakdown</h2>
                     <ToggleGroup
                       aria-label="Usage breakdown"
                       variant="segmented"
@@ -862,7 +859,7 @@ function UsageSkeleton() {
       </section>
 
       <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-medium text-foreground">Totals</h2>
+        <h2 className={SETTINGS_SECTION_HEAD_CLASSNAME}>Totals</h2>
         <div className="grid grid-cols-2 gap-x-6 gap-y-4 py-1 md:grid-cols-5">
           {["Processed tokens", "Cached input", "Uncached input", "Output", "Cache savings"].map(
             (label) => (
@@ -877,7 +874,7 @@ function UsageSkeleton() {
 
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-sm font-medium text-foreground">Breakdown</h2>
+          <h2 className={SETTINGS_SECTION_HEAD_CLASSNAME}>Breakdown</h2>
           <Skeleton className="h-7 w-28 rounded-lg" />
         </div>
         <Skeleton className="h-44 bg-muted-foreground/10" />

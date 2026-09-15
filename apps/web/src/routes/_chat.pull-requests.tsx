@@ -148,6 +148,11 @@ import {
 } from "../state/pullRequests";
 import { useAtomCommand } from "../state/use-atom-command";
 import { cn } from "~/lib/utils";
+import {
+  SETTINGS_GROUP_CLASSNAME,
+  SETTINGS_SECTION_HEAD_CLASSNAME,
+  SettingsLargeTitle,
+} from "~/components/settings/settingsLayout";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { getSourceControlPresentationForKind } from "~/sourceControlPresentation";
 
@@ -1643,44 +1648,44 @@ function PullRequestsRouteView() {
           onLoadMore={loadMore}
         />
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-6">
           {displayGroups.map((group) => (
-            <div key={group.key} className="space-y-0.5">
+            <div key={group.key} className="space-y-2">
               {group.label ? (
-                <h2 className="px-3 pb-0.5 text-xs font-medium text-muted-foreground/70">
-                  {group.label}
-                </h2>
+                <h2 className={cn("px-4", SETTINGS_SECTION_HEAD_CLASSNAME)}>{group.label}</h2>
               ) : null}
-              {group.entries.map((entry) => {
-                const entryKey = pullRequestEntryKey(entry);
-                return (
-                  <PullRequestRow
-                    key={entryKey}
-                    statsKey={entryKey}
-                    statsRef={registerStatsRow}
-                    entry={entry}
-                    showProjectTitle
-                    showProvider={showProvider}
-                    {...(capableEnvironments.length > 1 &&
-                    environmentLabels.get(entry.environmentId) !== undefined
-                      ? { environmentLabel: environmentLabels.get(entry.environmentId)! }
-                      : {})}
-                    // Ten is the floor the ranking gives a row whose own fields say nothing
-                    // about the search: the host matched something this row cannot show.
-                    matchedElsewhere={
-                      typedParsed.text.length > 0 &&
-                      scorePullRequestMatch(entry, typedParsed.text) <= MATCHED_ELSEWHERE_SCORE
-                    }
-                    selected={
-                      selected?.environmentId === entry.environmentId &&
-                      selected.repository === entry.repository &&
-                      selected.host?.toLowerCase() === entry.host.toLowerCase() &&
-                      selected.number === entry.number
-                    }
-                    onSelect={selectEntry}
-                  />
-                );
-              })}
+              <div className={cn("overflow-hidden", SETTINGS_GROUP_CLASSNAME)}>
+                {group.entries.map((entry) => {
+                  const entryKey = pullRequestEntryKey(entry);
+                  return (
+                    <PullRequestRow
+                      key={entryKey}
+                      statsKey={entryKey}
+                      statsRef={registerStatsRow}
+                      entry={entry}
+                      showProjectTitle
+                      showProvider={showProvider}
+                      {...(capableEnvironments.length > 1 &&
+                      environmentLabels.get(entry.environmentId) !== undefined
+                        ? { environmentLabel: environmentLabels.get(entry.environmentId)! }
+                        : {})}
+                      // Ten is the floor the ranking gives a row whose own fields say nothing
+                      // about the search: the host matched something this row cannot show.
+                      matchedElsewhere={
+                        typedParsed.text.length > 0 &&
+                        scorePullRequestMatch(entry, typedParsed.text) <= MATCHED_ELSEWHERE_SCORE
+                      }
+                      selected={
+                        selected?.environmentId === entry.environmentId &&
+                        selected.repository === entry.repository &&
+                        selected.host?.toLowerCase() === entry.host.toLowerCase() &&
+                        selected.number === entry.number
+                      }
+                      onSelect={selectEntry}
+                    />
+                  );
+                })}
+              </div>
             </div>
           ))}
         </div>
@@ -2317,7 +2322,7 @@ function PullRequestsColumn({
             {/* An expanded search owns the scarce horizontal space. The page title stays
                 available to readers while the live filters remain available in both states. */}
             <WorkspaceBreadcrumbItem current className={cn(searchExpanded && "sr-only")}>
-              <h1 className="truncate">Pull Requests</h1>
+              <span className="truncate font-semibold">Pull Requests</span>
             </WorkspaceBreadcrumbItem>
             {searchExpanded ? null : <WorkspaceBreadcrumbSeparator />}
             <WorkspaceBreadcrumbItem className="shrink gap-1.5">
@@ -2344,13 +2349,7 @@ function PullRequestsColumn({
               ) : null}
             </WorkspaceBreadcrumbItem>
           </WorkspaceBreadcrumb>
-        ) : (
-          <WorkspaceBreadcrumb ariaLabel="Pull requests breadcrumb">
-            <WorkspaceBreadcrumbItem current>
-              <h1 className="truncate">Pull Requests</h1>
-            </WorkspaceBreadcrumbItem>
-          </WorkspaceBreadcrumb>
-        )}
+        ) : null}
         <div className="min-w-0 flex-1" />
         {condensed ? (
           <div className="flex shrink items-center gap-1.5">
@@ -2377,7 +2376,8 @@ function PullRequestsColumn({
         {/* The top padding is the shared fade band's height, the same pairing the
             settings page makes: at rest the controls sit fully below the mask, and only
             content actually passing under the chrome fades. */}
-        <WorkspacePageContainer width="expanded" className="min-h-full gap-4">
+        <WorkspacePageContainer width="expanded" className="min-h-full gap-4 pt-2">
+          <SettingsLargeTitle>Pull Requests</SettingsLargeTitle>
           <div className="flex flex-col gap-3">
             <div ref={inFlowSearchRef} className="flex flex-wrap items-center gap-2">
               <div className="min-w-0 basis-full @lg/pr-list:basis-0 @lg/pr-list:flex-1">

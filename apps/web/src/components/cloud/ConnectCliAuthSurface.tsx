@@ -26,13 +26,9 @@ function ConnectCliAuthMessage({
 }) {
   return (
     <>
-      {eyebrow ? (
-        <p className="text-[10px] font-semibold tracking-[0.18em] text-blue-600 uppercase dark:text-blue-400">
-          {eyebrow}
-        </p>
-      ) : null}
-      <h1 className="mt-2 font-display text-xl font-normal sm:text-2xl">{title}</h1>
-      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{description}</p>
+      {eyebrow ? <p className="text-xs font-medium text-muted-foreground">{eyebrow}</p> : null}
+      <h1 className="mt-1 text-[22px] leading-tight font-bold tracking-[-0.015em]">{title}</h1>
+      <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">{description}</p>
     </>
   );
 }
@@ -179,12 +175,12 @@ export function ConnectCliCallbackSurface() {
         }
       />
 
-      <div className="mt-6 overflow-hidden rounded-xl border border-border/80 bg-background/65">
-        <div className="flex items-center justify-between border-b border-border/70 px-4 py-2.5">
-          <span className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
+      <div className="mt-6 overflow-hidden rounded-xl bg-muted">
+        <div className="flex items-center justify-between px-4 pt-3">
+          <span className="text-[13px] font-semibold text-muted-foreground">
             One-time authorization code
           </span>
-          <span className="font-mono text-[10px] text-muted-foreground">expires shortly</span>
+          <span className="text-xs text-muted-foreground">Expires shortly</span>
         </div>
         <code
           className="block p-4 font-mono text-sm leading-relaxed break-all select-all"

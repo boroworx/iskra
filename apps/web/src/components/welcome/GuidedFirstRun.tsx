@@ -17,6 +17,7 @@ import { useEnvironmentCards, useProjects } from "~/state/entities";
 import { usePrimaryEnvironmentId } from "~/state/environments";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { SparkGlyph } from "../iskra/SparkGlyph";
+import { SETTINGS_GROUP_CLASSNAME, SettingsLargeTitle } from "../settings/settingsLayout";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { SidebarInset } from "../ui/sidebar";
@@ -114,16 +115,19 @@ export function GuidedFirstRun() {
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <WorkspacePageHeader className="border-b border-border">
-          <h1 className="truncate text-[15px] font-semibold">Guided first run</h1>
+        <WorkspacePageHeader>
+          <span aria-hidden className="truncate text-[13px] font-semibold">
+            Guided first run
+          </span>
         </WorkspacePageHeader>
         <main className="min-h-0 flex-1 overflow-y-auto px-5 py-6">
           <div className="mx-auto flex max-w-xl flex-col gap-4">
-            <p className="text-sm text-muted-foreground">
+            <SettingsLargeTitle>Guided first run</SettingsLargeTitle>
+            <p className="text-[13px] text-muted-foreground">
               Take one card from proposal to landed on a small sample app with a failing test. It
               takes a few minutes and a little agent spend.
             </p>
-            <ol className="flex flex-col divide-y divide-border overflow-hidden rounded-xl bg-card shadow-[0_0_0_0.5px_var(--border)]">
+            <ol className={cn("flex flex-col overflow-hidden", SETTINGS_GROUP_CLASSNAME)}>
               <Step
                 done={project !== undefined}
                 title="Create the sample project"
