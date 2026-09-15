@@ -50,6 +50,7 @@ const makeQueue = Effect.gen(function* () {
       readonly openAgentPrCap?: number;
       readonly guardAcknowledged?: boolean;
       readonly agents?: OrchestrationReadModel["agents"];
+      readonly exclusivePaths?: NonNullable<OrchestrationReadModel["projects"][number]["orchestration"]>["exclusivePaths"];
     } = {},
   ) => {
     const readModel: OrchestrationReadModel = {
@@ -61,6 +62,7 @@ const makeQueue = Effect.gen(function* () {
           ...project.orchestration!,
           sessionCap: options.sessionCap ?? null,
           openAgentPrCap: options.openAgentPrCap ?? 5,
+          ...(options.exclusivePaths === undefined ? {} : { exclusivePaths: options.exclusivePaths }),
           ...(options.guardAcknowledged === false
             ? { sideEffectGuard: { acknowledgedAt: null, killSwitchEnv: null } }
             : {}),
@@ -77,6 +79,7 @@ const makeQueue = Effect.gen(function* () {
       retryAt: options.retryAt ?? new Map(),
       memoryPressure: options.memoryPressure ?? false,
       now: options.now ?? 0,
+      inFlightChangedFiles: options.inFlightChangedFiles ?? [],
     });
     return {
       ...result,
@@ -130,6 +133,43 @@ describe("environmentSessionCapOf", () => {
 });
 
 it.layer(NodeServices.layer)("planStarts", (it) => {
+  it.effect("holds new work whose likely areas touch an exclusive path another card is changing; restarts go on", () =>
+    Effect.gen(function* () {
+      const { card, plan } = yield* makeQueue;
+      const estimate = (likelyAreas: ReadonlyArray<string>) =>
+        ({ likelyAreas }) as unknown as OrchestrationCard["estimate"];
+      const result = plan(
+        [
+          card("migrating", { status: "inProgress", estimate: estimate(["packages/db"]) }),
+          card("next-migration", { estimate: estimate(["packages/db/migrations/0043.sql"]) }),
+          card("schema", { estimate: estimate(["packages/db"]) }),
+          card("web", { estimate: estimate(["apps/web/**"]) }),
+          card("restart", { status: "inProgress", estimate: estimate(["packages/db/migrations"]) }),
+        ],
+        {
+          exclusivePaths: [{ glob: "packages/db/migrations/**", afterRebase: null }],
+          inFlightChangedFiles: [
+            { cardId: CardId.make("migrating"), files: ["packages/db/migrations/0042.sql"] },
+            { cardId: CardId.make("restart"), files: [] },
+          ],
+          environmentSessionCap: 10,
+        },
+      );
+      expect(result.reasons).toMatchObject({
+        "next-migration": "exclusivePathBusy",
+        schema: "exclusivePathBusy",
+      });
+      expect(result.started.toSorted()).toEqual(["migrating", "restart", "web"]);
+
+      // Once nothing in flight touches the path, the wait clears.
+      const cleared = plan([card("next-migration", { estimate: estimate(["packages/db/migrations/0043.sql"]), waitReason: { code: "exclusivePathBusy", text: "busy", since: now } })], {
+        exclusivePaths: [{ glob: "packages/db/migrations/**", afterRebase: null }],
+      });
+      expect(cleared.started).toEqual(["next-migration"]);
+      expect(cleared.reasons).toEqual({ "next-migration": null });
+    }),
+  );
+
   it.effect("starts by priority, urgent first and unprioritised last, until the machine is full", () =>
     Effect.gen(function* () {
       const { card, plan } = yield* makeQueue;

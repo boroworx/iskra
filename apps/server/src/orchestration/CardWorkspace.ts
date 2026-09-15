@@ -293,6 +293,21 @@ export const exclusivePathConflicts = (
     changedFiles.some((file) => NodePath.posix.matchesGlob(file, entry.glob)),
   );
 
+/**
+ * Whether an estimate's likely area (a path or glob) can touch files an exclusive-path glob covers:
+ * it matches the glob, or either one's fixed leading part contains the other's.
+ * ponytail: prefix overlap, so `packages/core/d` counts as touching `packages/core/db/**`.
+ */
+export const areaOverlapsGlob = (area: string, glob: string): boolean => {
+  const path = area.replace(/^\.?\//, "");
+  const fixed = (pattern: string) => pattern.split(/[*?[{]/)[0] ?? "";
+  return (
+    NodePath.posix.matchesGlob(path, glob) ||
+    fixed(path).startsWith(fixed(glob)) ||
+    fixed(glob).startsWith(fixed(path))
+  );
+};
+
 /** What an open card is told when another card landed changes to an exclusive path it touches. */
 export const exclusivePathReturnMessage = (input: {
   readonly glob: string;

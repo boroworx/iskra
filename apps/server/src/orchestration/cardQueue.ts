@@ -18,6 +18,7 @@ import {
   sessionCapRefusal,
   sideEffectGuardRefusal,
 } from "./cardRules.ts";
+import { areaOverlapsGlob, exclusivePathConflicts } from "./CardWorkspace.ts";
 import { budgetCardOf } from "./decider.ts";
 import { priorityRank } from "./HostAdmission.ts";
 import { busyRunsOf, holdsSlot } from "./wakeRouting.ts";
@@ -34,6 +35,7 @@ export const SCHEDULER_WAIT_CODES = [
   "startFailed",
   "sideEffectGuard",
   "delegateReadOnly",
+  "exclusivePathBusy",
 ] as const;
 export type SchedulerWaitCode = (typeof SCHEDULER_WAIT_CODES)[number];
 
@@ -68,6 +70,11 @@ export interface PlanStartsInput {
   readonly retryAt: ReadonlyMap<CardId, number>;
   readonly memoryPressure: boolean;
   readonly now: number;
+  // What each open card with a worktree changes, for the exclusive-path wait.
+  readonly inFlightChangedFiles: ReadonlyArray<{
+    readonly cardId: CardId;
+    readonly files: ReadonlyArray<string>;
+  }>;
 }
 
 export interface StartPlan {
@@ -99,6 +106,22 @@ export function planStarts(input: PlanStartsInput): StartPlan {
   const projectById = new Map(readModel.projects.map((project) => [project.id, project] as const));
   const policyOf = (projectId: ProjectId) => projectOrchestrationOf(projectById.get(projectId) ?? {});
 
+  /** The exclusive-path glob a card's likely areas share with another open card's changes, or null. */
+  const busyExclusivePath = (card: OrchestrationCard): string | null => {
+    const areas = card.estimate?.likelyAreas ?? [];
+    const policy = policyOf(card.projectId);
+    if (areas.length === 0 || policy.exclusivePaths.length === 0) return null;
+    for (const other of input.inFlightChangedFiles) {
+      const otherCard = cards.find((candidate) => candidate.id === other.cardId);
+      if (other.cardId === card.id || otherCard?.projectId !== card.projectId) continue;
+      const hit = exclusivePathConflicts(other.files, policy).find((entry) =>
+        areas.some((area) => areaOverlapsGlob(area, entry.glob)),
+      );
+      if (hit !== undefined) return hit.glob;
+    }
+    return null;
+  };
+
   const desired = new Map<CardId, Reason>();
   const candidates: Array<OrchestrationCard> = [];
   for (const card of cards) {
@@ -128,6 +151,15 @@ export function planStarts(input: PlanStartsInput): StartPlan {
     }
     if (cardFactsOf(cards, card).openBlockerCount > 0) {
       desired.set(card.id, { code: "blocked", text: BLOCKED_REASON });
+      continue;
+    }
+    // New work stays off an exclusive path another card is changing; a restart finishes what it began.
+    const busyGlob = card.status === "ready" ? busyExclusivePath(card) : null;
+    if (busyGlob !== null) {
+      desired.set(card.id, {
+        code: "exclusivePathBusy",
+        text: `Another card is changing ${busyGlob}; this card starts once that card lands or stops.`,
+      });
       continue;
     }
     if ((input.retryAt.get(card.id) ?? 0) > input.now) {

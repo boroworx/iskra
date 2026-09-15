@@ -3,6 +3,7 @@ import * as NodeOS from "node:os";
 import {
   CommandId,
   DEFAULT_SERVER_SETTINGS,
+  projectOrchestrationOf,
   type CardId,
   type OrchestrationEvent,
   type Reason,
@@ -20,7 +21,8 @@ import * as Stream from "effect/Stream";
 
 import { forkParked } from "../serverActivation.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
-import { environmentSessionCapOf, planStarts } from "./cardQueue.ts";
+import { environmentSessionCapOf, planStarts, type PlanStartsInput } from "./cardQueue.ts";
+import { CardWorkspace } from "./CardWorkspace.ts";
 import { HostAdmission } from "./HostAdmission.ts";
 import { runSessionChange } from "./RunReactor.ts";
 import * as OrchestrationEngine from "./Services/OrchestrationEngine.ts";
@@ -69,6 +71,7 @@ const make = Effect.gen(function* () {
   const snapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const settings = yield* ServerSettingsService;
   const admission = yield* HostAdmission;
+  const workspace = yield* CardWorkspace;
   const crypto = yield* Crypto.Crypto;
   const nowMillis = Effect.map(DateTime.now, DateTime.toEpochMillis);
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -88,8 +91,27 @@ const make = Effect.gen(function* () {
       Effect.orElseSucceed(() => DEFAULT_SERVER_SETTINGS),
     )).cardRuntime;
     const now = yield* nowMillis;
+    // ponytail: diffs every open card of such a project on each plan while a ready card could wait on
+    // an exclusive path; cache per head if plans get slow.
+    const inFlightChangedFiles = yield* Effect.forEach(
+      readModel.projects.filter(
+        (project) =>
+          projectOrchestrationOf(project).exclusivePaths.length > 0 &&
+          (readModel.cards ?? []).some(
+            (card) =>
+              card.projectId === project.id &&
+              card.status === "ready" &&
+              (card.estimate?.likelyAreas.length ?? 0) > 0,
+          ),
+      ),
+      (project) =>
+        workspace
+          .openCardChangedFiles(project.id)
+          .pipe(Effect.orElseSucceed(() => [] as PlanStartsInput["inFlightChangedFiles"])),
+    ).pipe(Effect.map((perProject) => perProject.flat()));
     const result = planStarts({
       readModel,
+      inFlightChangedFiles,
       environmentSessionCap: environmentSessionCapOf({
         cores: NodeOS.availableParallelism(),
         totalMemBytes: NodeOS.totalmem(),
