@@ -31,6 +31,17 @@ import {
 } from "./toolkits/preview/tools.ts";
 import { BoardToolkitHandlersLive } from "./toolkits/board/handlers.ts";
 import { BoardToolkit } from "./toolkits/board/tools.ts";
+import {
+  VerifierScreenshotToolkitHandlersLive,
+  VerifierToolkitHandlersLive,
+} from "./toolkits/verifier/handlers.ts";
+import {
+  VerifierScreenshotToolkit,
+  VerifierToolkit,
+  ViewScreenshotTool,
+} from "./toolkits/verifier/tools.ts";
+import * as OrchestrationEngine from "../orchestration/Services/OrchestrationEngine.ts";
+import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { PullRequestsToolkitHandlersLive } from "./toolkits/pullRequests/handlers.ts";
 import { PullRequestsToolkit } from "./toolkits/pullRequests/tools.ts";
 import {
@@ -614,6 +625,33 @@ export const BoardToolkitRegistrationLive = McpServer.toolkit(BoardToolkit).pipe
   Layer.provide(BoardToolkitHandlersLive),
 );
 
+const registerVerifierScreenshot = Effect.fn("McpHttpServer.registerVerifierScreenshot")(function* () {
+  const engine = yield* OrchestrationEngine.OrchestrationEngineService;
+  const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+  const built = yield* VerifierScreenshotToolkit;
+  yield* registerImageTool(
+    ViewScreenshotTool,
+    (payload) =>
+      built
+        .handle("view_screenshot", payload)
+        .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
+    (effect) =>
+      effect.pipe(
+        Effect.provideService(OrchestrationEngine.OrchestrationEngineService, engine),
+        Effect.provideService(ProjectionSnapshotQuery.ProjectionSnapshotQuery, snapshots),
+      ),
+    "screenshot",
+    "Evidence screenshot failed.",
+  );
+});
+
+export const VerifierToolkitRegistrationLive = Layer.mergeAll(
+  McpServer.toolkit(VerifierToolkit).pipe(Layer.provide(VerifierToolkitHandlersLive)),
+  Layer.effectDiscard(registerVerifierScreenshot()).pipe(
+    Layer.provide(VerifierScreenshotToolkitHandlersLive),
+  ),
+);
+
 const DeviceStandardToolkitRegistrationLive =McpServer.toolkit(DeviceStandardToolkit).pipe(
   Layer.provide(DeviceStandardToolkitHandlersLive),
 );
@@ -638,5 +676,6 @@ export const layer = Layer.mergeAll(
   PreviewToolkitRegistrationLive,
   PullRequestsToolkitRegistrationLive,
   BoardToolkitRegistrationLive,
+  VerifierToolkitRegistrationLive,
   DeviceToolkitRegistrationLive,
 ).pipe(Layer.provideMerge(McpTransportLive));

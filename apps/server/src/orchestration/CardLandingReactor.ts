@@ -64,6 +64,7 @@ export class CardLandingReactor extends Context.Service<
 
 type LandingJob =
   | { readonly kind: "open"; readonly cardId: CardId }
+  | { readonly kind: "begin"; readonly cardId: CardId }
   | { readonly kind: "land"; readonly cardId: CardId; readonly key: string }
   | { readonly kind: "poll" };
 
@@ -644,12 +645,18 @@ const make = Effect.gen(function* () {
       ? guarded(job.kind)(
           openPullRequest(job.cardId).pipe(Effect.andThen(beginLandingIfAllowed(job.cardId))),
         )
-      : job.kind === "land"
-        ? guarded(job.kind)(land(job.cardId, job.key))
-        : guarded(job.kind)(poll()),
+      : job.kind === "begin"
+        ? guarded(job.kind)(beginLandingIfAllowed(job.cardId))
+        : job.kind === "land"
+          ? guarded(job.kind)(land(job.cardId, job.key))
+          : guarded(job.kind)(poll()),
   );
 
   const processEvent = (event: OrchestrationEvent) => {
+    // A verdict or an override may be what a plan child or auto-merge was waiting on.
+    if (event.type === "card.verdict-recorded" || event.type === "card.verifier-overridden") {
+      return worker.enqueue({ kind: "begin", cardId: event.payload.cardId });
+    }
     if (event.type !== "card.status-changed") return Effect.void;
     switch (event.payload.to) {
       case "inReview":
