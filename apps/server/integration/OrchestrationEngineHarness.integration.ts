@@ -457,6 +457,10 @@ export const makeOrchestrationIntegrationHarness = (
           projectFile: () => Effect.die("card workspaces are not used by the engine harness"),
           openCardChangedFiles: () =>
             Effect.die("card workspaces are not used by the engine harness"),
+          snapshot: () => Effect.die("card workspaces are not used by the engine harness"),
+          ensureServices: () => Effect.die("card workspaces are not used by the engine harness"),
+          runJourneys: () => Effect.die("card workspaces are not used by the engine harness"),
+          serviceHealth: () => Effect.succeed([]),
           withCardLock: (_cardId, effect) => effect,
         }),
       ),

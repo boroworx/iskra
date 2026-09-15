@@ -699,6 +699,7 @@ export function withCardAttention(
     ];
   }
   if (code === PULL_REQUEST_REOPENED_CODE) return withoutCodes(attention, ["pullRequestClosed"]);
+  if (code === "serviceRestored") return withoutCodes(attention, ["serviceDown", "previewDown"]);
   const { answers } = activity;
   return answers === null || !attention.some((item) => item.activityId === answers.questionId)
     ? attention
