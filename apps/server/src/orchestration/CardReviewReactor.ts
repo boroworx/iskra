@@ -552,6 +552,10 @@ const make = Effect.gen(function* () {
           : Effect.void;
       }
       case "card.checkpoint-requested":
+        // A plan's slice and a migration's tuning checkpoints must not rebase the integration branch.
+        if (/^(plan-slice-|migration-tune-)/.test(event.payload.checkpoint.checkpointId)) {
+          return Effect.void;
+        }
         return enqueue({
           purpose: "checkpoint",
           cardId: event.payload.cardId,

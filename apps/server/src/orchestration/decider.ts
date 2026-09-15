@@ -4018,7 +4018,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           author: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
           body: command.body,
           runThreadId: null,
-          deliverTo: question.kind === "plan" ? "coordinator" : "builder",
+          // A plan card's questions come from its coordinator, whatever their kind.
+          deliverTo: question.kind === "plan" || card.kind === "plan" ? "coordinator" : "builder",
           delivery: "pending",
           elicitation: null,
           answers: { questionId: command.activityId, optionId: command.optionId },
@@ -4979,7 +4980,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       if (migration === null) {
         return yield* refuse(command, NOT_MIGRATION_CARD_REASON);
       }
-      if (!migrationPhaseAllowed(migration.phase, command.phase)) {
+      // A sweep starts later batches as capacity frees up, so sweeping repeats when it starts children.
+      const laterSweepBatch =
+        migration.phase === "sweeping" &&
+        command.phase === "sweeping" &&
+        (command.children?.length ?? 0) > 0;
+      if (!migrationPhaseAllowed(migration.phase, command.phase) && !laterSweepBatch) {
         return yield* refuse(command, MIGRATION_PHASE_ORDER_REASON);
       }
       const children = command.children ?? [];

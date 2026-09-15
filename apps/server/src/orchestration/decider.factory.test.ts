@@ -243,6 +243,43 @@ it.layer(NodeServices.layer)("decider card factory", (it) => {
         payload: { deliverTo: "coordinator", answers: { questionId: "plan:card-plan:2" } },
       });
 
+      // Any other question on a plan card (the coordinator's, from its live run) is answered back to
+      // the coordinator; the routing keys on the card, not the author.
+      const asked = yield* applyTo(proposed, [
+        {
+          type: "card.activity.record",
+          commandId: nextCommandId(),
+          activityId: "coordinator-question-1",
+          cardId: planCardId,
+          kind: "elicitation",
+          author: { kind: "system", id: "coordinator" },
+          body: "Which store?",
+          runThreadId: null,
+          deliverTo: null,
+          elicitation: {
+            question: "Which store?",
+            options: [
+              { id: "redis", label: "Redis" },
+              { id: "memory", label: "Memory" },
+            ],
+            recommendedOptionId: null,
+            allowText: true,
+            kind: "question",
+          },
+          answers: null,
+          status: null,
+          evidenceId: null,
+          reason: null,
+          createdAt: now,
+        } as OrchestrationCommand,
+      ]);
+      expect(
+        (yield* decide(asked, { ...answer("redis", "Redis"), activityId: "coordinator-question-1" } as OrchestrationCommand))[0],
+      ).toMatchObject({
+        type: "card.activity-recorded",
+        payload: { deliverTo: "coordinator", answers: { questionId: "coordinator-question-1" } },
+      });
+
       const release = (slice: number): OrchestrationCommand => ({
         type: "card.plan.slice.release",
         commandId: nextCommandId(),
@@ -396,6 +433,21 @@ it.layer(NodeServices.layer)("decider card factory", (it) => {
       expect(
         cardIn(tuning, migrationId)?.migration?.items.map((item) => item.state),
       ).toEqual(["landed", "pending", "blocked", "pending"]);
+
+      // The sweep starts its items in batches as capacity frees up; a repeat with nothing to start is refused.
+      const swept = yield* applyTo(tuning, [
+        phase("sweeping", [{ key: "b", cardId: CardId.make("card-b") }]),
+        phase("sweeping", [{ key: "d", cardId: CardId.make("card-d") }]),
+      ]);
+      expect(
+        cardIn(swept, migrationId)?.migration?.items.map((item) => [item.key, item.childCardId, item.state]),
+      ).toEqual([
+        ["a", "card-a", "landed"],
+        ["b", "card-b", "running"],
+        ["c", "card-c", "blocked"],
+        ["d", "card-d", "running"],
+      ]);
+      expect(yield* refusal(swept, phase("sweeping"))).toBe(MIGRATION_PHASE_ORDER_REASON);
     }),
   );
 
