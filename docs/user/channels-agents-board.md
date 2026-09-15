@@ -325,10 +325,11 @@ agent can only read, questions from agents, comments on a card's pull request fr
 people outside the repository, merges the host refused, verifiers that didn't finish, card services
 or previews that went down, branches or tags that changed outside a card while its agent worked,
 plans to approve, plan slices that landed, lessons agents proposed, flawed outcomes, conflicting
-reverts, and monthly budgets that hold work. Decide most of them right in the list: answer a question in one click,
+reverts, network access agents request, and monthly budgets that hold work. Decide most of them right in the list: answer a question in one click,
 approve or dismiss a lesson,
 forward a comment to the agent or dismiss it, retry a landing, rerun a verifier, restart a card's
-services, or restore or keep changed refs and then resume the card. **Approve & Start** on a proposal starts it with the owner you pick.
+services, allow an agent's network access for the project, or restore or keep changed refs and then
+resume the card. **Approve & Start** on a proposal starts it with the owner you pick.
 
 ## Project orchestration
 
@@ -413,6 +414,12 @@ names none. **Remove** takes one back.
 **None**, the default, gives agents' shells no network. **Allowlist** allows only the domains under
 **Allowed domains**, and web fetches follow the same list. A domain listed as both allowed and
 denied stops agent runs from starting.
+
+An agent's **Network** capability only reaches the domains on this list. When the sandbox blocks a
+domain an agent needs, it requests access instead of asking you to run commands. The request shows
+in Needs you and on the card with the agent's reason: **Allow for this project** switches the list to
+**Allowlist**, adds the domains, and the agent continues with them on its next turn; **Dismiss** tells
+the agent to work without them.
 
 ### Heavy commands
 

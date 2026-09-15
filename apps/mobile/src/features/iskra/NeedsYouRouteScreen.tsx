@@ -49,6 +49,8 @@ export function NeedsYouRouteScreen() {
   const setBudget = useRefusableCommand(cardEnvironment.setBudget);
   const approveLesson = useRefusableCommand(channelEnvironment.approveLesson);
   const dismissLesson = useRefusableCommand(channelEnvironment.dismissLesson);
+  const allowAccess = useRefusableCommand(cardEnvironment.allowAccess);
+  const dismissAttention = useRefusableCommand(cardEnvironment.dismissAttention);
   const withItems = environments.filter((entry) => entry.items.length > 0);
   const snoozed = environments.flatMap((entry) =>
     entry.cards
@@ -128,7 +130,31 @@ export function NeedsYouRouteScreen() {
                       <CheckpointControls environmentId={environmentId} card={card} />
                     ) : null}
                     <ButtonRow>
-                      {item.kind === "triage" ? (
+                      {item.kind === "accessRequest" && item.activityId !== null ? (
+                        <>
+                          <ActionButton
+                            label="Allow for this project"
+                            kind="primary"
+                            onPress={() => {
+                              if (item.activityId === null) return;
+                              void allowAccess(
+                                { environmentId, input: { cardId: item.cardId, activityId: item.activityId } },
+                                "Access was not allowed",
+                              );
+                            }}
+                          />
+                          <ActionButton
+                            label="Dismiss"
+                            onPress={() => {
+                              if (item.activityId === null) return;
+                              void dismissAttention(
+                                { environmentId, input: { cardId: item.cardId, activityId: item.activityId } },
+                                "It was not dismissed",
+                              );
+                            }}
+                          />
+                        </>
+                      ) : item.kind === "triage" ? (
                         <ActionButton
                           label="Drop"
                           kind="destructive"
