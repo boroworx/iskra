@@ -266,7 +266,7 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
     }),
   );
 
-  it.effect("keeps one live run per agent: joins it from the same channel, refuses elsewhere", () =>
+  it.effect("joins an agent's live run from the same channel and starts another instance elsewhere", () =>
     Effect.gen(function* () {
       const base = [
         ...setup,
@@ -276,13 +276,11 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
       ];
 
       const elsewhere = yield* decidePost(base, "general", "@backend ping");
-      expect(elsewhere.map((event) => event.type)).toEqual([
-        "channel.message-posted",
-        "channel.message-posted",
-      ]);
       expect(elsewhere[1]).toMatchObject({
-        payload: { authorKind: "system", body: "@backend is busy in another channel." },
+        type: "channel.agent-wake-requested",
+        payload: { agentId: backend },
       });
+      expect(elsewhere[1]).not.toHaveProperty("payload.liveRunThreadId");
 
       const sameChannel = yield* decidePost(base, "other", "@backend one more thing");
       expect(sameChannel[1]).toMatchObject({
@@ -292,9 +290,9 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
     }),
   );
 
-  it.effect("queues a DM to an agent busy in another channel instead of refusing it", () =>
+  it.effect("wakes a DM at once while the agent converses in another channel", () =>
     Effect.gen(function* () {
-      const queued = yield* decidePost(
+      const woken = yield* decidePost(
         [
           ...setup,
           createChannel("other", "channel", [backend]),
@@ -305,11 +303,12 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
         "ping when you're free",
       );
 
-      expect(queued).toMatchObject([
+      expect(woken).toMatchObject([
         { type: "channel.message-posted", payload: { authorKind: "human" } },
-        { type: "channel.agent-wake-requested", payload: { agentId: backend, queued: true } },
+        { type: "channel.agent-wake-requested", payload: { agentId: backend } },
       ]);
-      expect(queued[1]).not.toHaveProperty("payload.liveRunThreadId");
+      expect(woken[1]).not.toHaveProperty("payload.queued");
+      expect(woken[1]).not.toHaveProperty("payload.liveRunThreadId");
     }),
   );
 

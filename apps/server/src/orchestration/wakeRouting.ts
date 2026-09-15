@@ -10,6 +10,8 @@ import {
 
 export type WakeDecision =
   | { readonly kind: "wake"; readonly liveRunThreadId?: ThreadId }
+  // Never decided any more: every wake is its own run. Kept only while decider.ts's `wakeTarget`
+  // still names it; the integration patch removes both.
   | { readonly kind: "queue" }
   | { readonly kind: "refuse"; readonly reason: string };
 
@@ -56,12 +58,11 @@ export function projectLiveRunCount(
 }
 
 /**
- * Whether a message in `channel` may wake `agent` now. An agent has one live
- * conversation at a time: a wake from the same channel joins it, a wake from
- * another channel is refused so contexts never mix (a DM instead queues until
- * that conversation ends), and a project at its own session cap (card sessions
- * included) starts nothing new. `newRuns` counts runs the same message has
- * already started.
+ * Whether a message in `channel` may wake `agent` now. Each channel or DM gets its own run of the
+ * agent: a wake joins the agent's live run in the same channel, anywhere else it starts another
+ * instance, and a project at its own session cap (card sessions included) starts nothing new.
+ * `newRuns` counts runs the same message has already started. The machine's cap is RunReactor's:
+ * a wake past it waits for a slot instead of being refused.
  */
 export function decideWake(input: {
   readonly readModel: OrchestrationReadModel;
@@ -78,18 +79,12 @@ export function decideWake(input: {
   }
 
   const agentRun = (readModel.liveRuns ?? []).find(
-    (run) => run.agentId === agent.id && run.channelId !== null,
+    (run) => run.agentId === agent.id && run.channelId === channel.id,
   );
   if (agentRun !== undefined) {
-    if (agentRun.channelId === channel.id) {
-      return { kind: "wake", liveRunThreadId: agentRun.threadId };
-    }
-    return channel.kind === "dm"
-      ? { kind: "queue" }
-      : { kind: "refuse", reason: `@${agent.name} is busy in another channel.` };
+    return { kind: "wake", liveRunThreadId: agentRun.threadId };
   }
 
-  // The environment's cap is machine-local and the card scheduler's; a wake only meets the project's.
   const { sessionCap } = projectOrchestrationOf(
     readModel.projects.find((project) => project.id === channel.projectId) ?? {},
   );

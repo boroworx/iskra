@@ -20,6 +20,7 @@ import { OrchestrationCommandReceiptRepositoryLive } from "../persistence/Layers
 import { OrchestrationEventStoreLive } from "../persistence/Layers/OrchestrationEventStore.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import { OrchestrationEngineLive } from "./Layers/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./Layers/ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./Layers/ProjectionSnapshotQuery.ts";
@@ -281,12 +282,11 @@ it.layer(layer)("RunReactor", (it) => {
       }),
     ),
   );
-  it.effect("queues a DM while the agent converses elsewhere and picks it up when that ends", () =>
+  it.effect("runs a DM as its own instance at once while the agent converses elsewhere", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const world = yield* startChannel("dmqueue");
-        const reactor = yield* RunReactor.RunReactor;
-        yield* world.post("dmqueue-channel", "@dmqueue what changed?");
+        const world = yield* startChannel("dminstance");
+        yield* world.post("dminstance-channel", "@dminstance what changed?");
         const channelRun = ThreadId.make(
           (yield* world.nextEvent("thread.turn-start-requested")).aggregateId,
         );
@@ -294,45 +294,33 @@ it.layer(layer)("RunReactor", (it) => {
 
         yield* world.engine.dispatch({
           type: "agent.dm.post",
-          commandId: CommandId.make("cmd-dmqueue-dm"),
-          agentId: AgentId.make("agent-dmqueue"),
-          messageId: MessageId.make("dmqueue-dm"),
-          body: "ping when you're free",
+          commandId: CommandId.make("cmd-dminstance-dm"),
+          agentId: AgentId.make("agent-dminstance"),
+          messageId: MessageId.make("dminstance-dm"),
+          body: "what's 2+2?",
           createdAt: now,
         });
-        const dmChannelId = ChannelId.make("dm:dmqueue-dm");
-        yield* world.nextEvent(
-          "channel.agent-wake-requested",
-          (event) => event.payload.channelId === dmChannelId && event.payload.queued === true,
-        );
-        yield* reactor.drain;
-        const dmRunsWhileBusy = Array.from(
-          yield* Stream.runCollect(world.engine.readEvents(0)),
-        ).filter(
-          (event) => event.type === "channel.run-started" && event.payload.channelId === dmChannelId,
-        );
-        expect(dmRunsWhileBusy).toHaveLength(0);
-
-        yield* world.answer(channelRun, "turn-1", "The API.");
-        yield* world.setSession(channelRun, "ready", null);
-        yield* world.nextEvent(
-          "thread.session-stop-requested",
-          (event) => event.aggregateId === channelRun,
-        );
-        yield* world.setSession(channelRun, "stopped", null);
-
+        const dmChannelId = ChannelId.make("dm:dminstance-dm");
         const dmRun = yield* world.nextEvent(
           "channel.run-started",
           (event) => event.payload.channelId === dmChannelId,
         );
-        expect(dmRun.payload.triggerMessageId).toBe("dmqueue-dm");
-        const sent = yield* world.nextEvent(
-          "channel.delivery-updated",
-          (event) =>
-            event.payload.status === "sent" &&
-            event.payload.messageIds.includes(MessageId.make("dmqueue-dm")),
-        );
-        expect(sent.payload.runThreadId).toBe(dmRun.payload.threadId);
+        expect(dmRun.payload.threadId).not.toBe(channelRun);
+        expect(dmRun.payload.triggerMessageId).toBe("dminstance-dm");
+
+        const snapshotQuery = yield* ProjectionSnapshotQuery;
+        const live = (yield* snapshotQuery.getCommandReadModel()).liveRuns ?? [];
+        expect(
+          live
+            .filter((run) => run.agentId === AgentId.make("agent-dminstance"))
+            .map((run) => run.threadId)
+            .toSorted(),
+        ).toEqual([channelRun, dmRun.payload.threadId].toSorted());
+
+        // Later tests share this database; leave no live runs behind.
+        yield* world.setSession(channelRun, "stopped", null);
+        yield* world.setSession(dmRun.payload.threadId, "stopped", null);
+        yield* (yield* RunReactor.RunReactor).drain;
       }),
     ),
   );
@@ -362,7 +350,7 @@ it.layer(layer)("RunReactor", (it) => {
         yield* world.setSession(threadId, "running", "turn-member-lead");
         yield* world.answer(threadId, "turn-member-lead", "Yes, since this morning.");
         yield* world.setSession(threadId, "ready", null);
-        yield* world.nextEvent("thread.session-stop-requested");
+        yield* world.nextEvent("thread.session-stop-requested", (event) => event.aggregateId === threadId);
         const messages = yield* snapshotQuery.listChannelMessages(memberChannelId, 50);
         expect(messages.map((message) => [message.authorKind, message.body])).toEqual([
           ["human", "@memberlead is the export fixed?"],
@@ -446,6 +434,102 @@ it.layer(layer)("RunReactor", (it) => {
         expect(answerRun.rendered.firstMessage).toContain(
           "New message for you:\n[2026-01-01T00:00:00.000Z] user: a landing page for iskra, in apps/web",
         );
+      }),
+    ),
+  );
+});
+
+// A fresh database whose machine runs two sessions at once.
+const cappedLayer = RunReactor.layer.pipe(
+  Layer.provideMerge(
+    OrchestrationEngineLive.pipe(Layer.provide(OrchestrationProjectionPipelineLive)),
+  ),
+  Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
+  Layer.provideMerge(ThreadBackgroundLiveness.layer),
+  Layer.provide(ThreadPlanProgress.layer),
+  Layer.provide(OrchestrationEventStoreLive),
+  Layer.provideMerge(OrchestrationCommandReceiptRepositoryLive),
+  Layer.provide(RepositoryIdentityResolver.layer),
+  Layer.provide(SqlitePersistenceMemory),
+  Layer.provideMerge(ServerSettings.layerTest({ cardRuntime: { environmentSessionCap: 2 } })),
+  Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "iskra-run-reactor-cap-" })),
+  Layer.provideMerge(NodeServices.layer),
+);
+
+it.layer(cappedLayer)("RunReactor at the machine's session cap", (it) => {
+  it.effect("keeps a wake's message pending until a slot frees, then starts its run", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const world = yield* startChannel("capped");
+        const reactor = yield* RunReactor.RunReactor;
+        const otherChannelId = ChannelId.make("channel-capped-other");
+        yield* world.engine.dispatch({
+          type: "channel.create",
+          commandId: CommandId.make("cmd-channel-capped-other"),
+          channelId: otherChannelId,
+          projectId: ProjectId.make("project-capped"),
+          kind: "channel",
+          name: "capped-other",
+          memberAgentIds: [AgentId.make("agent-capped")],
+          createdAt: now,
+        });
+
+        yield* world.post("capped-first", "@capped what changed?");
+        const firstRun = ThreadId.make(
+          (yield* world.nextEvent("thread.turn-start-requested")).aggregateId,
+        );
+        yield* world.engine.dispatch({
+          type: "agent.dm.post",
+          commandId: CommandId.make("cmd-capped-dm"),
+          agentId: AgentId.make("agent-capped"),
+          messageId: MessageId.make("capped-dm"),
+          body: "ping",
+          createdAt: now,
+        });
+        yield* world.nextEvent(
+          "channel.run-started",
+          (event) => event.payload.channelId === ChannelId.make("dm:capped-dm"),
+        );
+
+        yield* world.engine.dispatch({
+          type: "channel.message.post",
+          commandId: CommandId.make("cmd-post-capped-third"),
+          channelId: otherChannelId,
+          messageId: MessageId.make("capped-third"),
+          body: "@capped and here?",
+          createdAt: now,
+        });
+        const note = yield* world.nextEvent(
+          "channel.message-posted",
+          (event) =>
+            event.payload.channelId === otherChannelId && event.payload.authorKind === "system",
+        );
+        expect(note.payload.body).toBe(
+          "@capped starts when one of this machine's 2 session slots frees.",
+        );
+        yield* reactor.drain;
+        const whileFull = Array.from(yield* Stream.runCollect(world.engine.readEvents(0)));
+        expect(
+          whileFull.filter(
+            (event) =>
+              event.type === "channel.run-started" && event.payload.channelId === otherChannelId,
+          ),
+        ).toHaveLength(0);
+
+        yield* world.setSession(firstRun, "running", "turn-1");
+        yield* world.answer(firstRun, "turn-1", "The API.");
+        yield* world.setSession(firstRun, "ready", null);
+        yield* world.nextEvent(
+          "thread.session-stop-requested",
+          (event) => event.aggregateId === firstRun,
+        );
+        yield* world.setSession(firstRun, "stopped", null);
+
+        const started = yield* world.nextEvent(
+          "channel.run-started",
+          (event) => event.payload.channelId === otherChannelId,
+        );
+        expect(started.payload.triggerMessageId).toBe("capped-third");
       }),
     ),
   );

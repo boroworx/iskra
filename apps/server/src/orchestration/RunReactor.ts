@@ -1,3 +1,5 @@
+import * as NodeOS from "node:os";
+
 import {
   CommandId,
   MessageId,
@@ -16,6 +18,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schedule from "effect/Schedule";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
@@ -26,6 +29,8 @@ import {
   type ProjectionOpenChannelDelivery,
 } from "../persistence/Services/ProjectionChannels.ts";
 import { forkParked } from "../serverActivation.ts";
+import { ServerSettingsService } from "../serverSettings.ts";
+import { environmentSessionCapOf } from "./cardQueue.ts";
 import {
   buildRunContext,
   renderNewMessage,
@@ -35,6 +40,7 @@ import {
 import { parseMentions } from "./mentions.ts";
 import * as OrchestrationEngine from "./Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts";
+import { busyRunsOf } from "./wakeRouting.ts";
 
 /**
  * Turns agent wakes into runs, and runs' answers into channel messages. A wake
@@ -47,8 +53,11 @@ import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts"
  * turn ends with nothing waiting, the reply is posted and the session stopped,
  * so the next wake starts a fresh run. A run that ends with messages still
  * waiting wakes the agent again for them; a message whose turn never ran is
- * marked `undelivered` (invariant 10). A DM sent while the agent converses in
- * another channel waits as `queued` and wakes it once that conversation ends.
+ * marked `undelivered` (invariant 10).
+ *
+ * Every channel and DM gets its own run of an agent. A wake past the machine's session cap keeps
+ * its messages pending and starts once a session ends (or on the minute tick), saying so in the
+ * channel once. Deliveries still `queued` from before instances are woken at startup.
  */
 export class RunReactor extends Context.Service<
   RunReactor,
@@ -64,7 +73,9 @@ type RunRequest =
   | { readonly kind: "wake"; readonly event: WakeRequestedEvent }
   | { readonly kind: "settled"; readonly threadId: ThreadId }
   | { readonly kind: "running"; readonly threadId: ThreadId }
-  | { readonly kind: "ended"; readonly threadId: ThreadId };
+  | { readonly kind: "ended"; readonly threadId: ThreadId }
+  | { readonly kind: "retry" }
+  | { readonly kind: "pickUpQueued" };
 
 /** What a session change means for the run on its thread, if anything. */
 export const runSessionChange = (
@@ -89,7 +100,29 @@ const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngine.OrchestrationEngineService;
   const snapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const channels = yield* ProjectionChannelRepository;
+  // Optional so the reactor still builds without settings; wakes then meet no machine cap.
+  const settings = yield* Effect.serviceOption(ServerSettingsService);
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
+  // Wakes waiting for a session slot, the newest per agent and channel. In memory: after a restart
+  // their messages are still pending, and the next message or run end wakes the agent again.
+  const waiting = new Map<string, WakeRequestedEvent>();
+  const waitKey = (event: WakeRequestedEvent) =>
+    `${event.payload.channelId}:${event.payload.agentId}`;
+
+  const environmentSessionCap = Effect.gen(function* () {
+    if (Option.isNone(settings)) return null;
+    const runtime = yield* settings.value.getSettings.pipe(
+      Effect.map((current) => current.cardRuntime),
+      Effect.orElseSucceed(() => null),
+    );
+    return runtime === null
+      ? null
+      : environmentSessionCapOf({
+          cores: NodeOS.availableParallelism(),
+          totalMemBytes: NodeOS.totalmem(),
+          override: runtime.environmentSessionCap,
+        });
+  });
 
   const updateDeliveries = Effect.fn("RunReactor.updateDeliveries")(function* (input: {
     readonly channelId: ChannelId;
@@ -120,8 +153,7 @@ const make = Effect.gen(function* () {
   const startRun = Effect.fn("RunReactor.startRun")(function* (event: WakeRequestedEvent) {
     // The agent is already working in this channel: the message stays pending
     // until the current turn ends, then goes in as the run's next turn.
-    // A queued DM waits for the agent's other conversation to end (see endRun).
-    if (event.payload.liveRunThreadId !== undefined || event.payload.queued === true) {
+    if (event.payload.liveRunThreadId !== undefined) {
       return;
     }
 
@@ -133,12 +165,40 @@ const make = Effect.gen(function* () {
     const agent = readModel.agents?.find((candidate) => candidate.id === agentId);
     const trigger = yield* channels.getMessageById({ messageId: triggerMessageId });
     if (!channel || !agent || Option.isNone(trigger)) {
+      waiting.delete(waitKey(event));
       return yield* Effect.logWarning("run reactor could not resolve a wake", {
         channelId,
         agentId,
         triggerMessageId,
       });
     }
+    // A run of the agent started here meanwhile (a rewake, a later message): it takes the messages.
+    if (
+      (readModel.liveRuns ?? []).some(
+        (run) => run.agentId === agentId && run.channelId === channelId,
+      )
+    ) {
+      waiting.delete(waitKey(event));
+      return;
+    }
+    const cap = yield* environmentSessionCap;
+    if (cap !== null && busyRunsOf(readModel).length >= cap) {
+      const first = !waiting.has(waitKey(event));
+      waiting.set(waitKey(event), event);
+      if (first) {
+        // Said once per wait, and the id derives from the wake, so a replayed wake says it once.
+        yield* engine.dispatch({
+          type: "channel.message.system.post",
+          commandId: CommandId.make(`run-wait:${event.eventId}`),
+          channelId,
+          messageId: MessageId.make(`run-wait:${event.eventId}`),
+          body: `@${agent.name} starts when one of this machine's ${cap} session slots frees.`,
+          createdAt: yield* nowIso,
+        });
+      }
+      return;
+    }
+    waiting.delete(waitKey(event));
 
     const projectAgents = (readModel.agents ?? []).filter(
       (candidate) => candidate.projectId === channel.projectId,
@@ -202,11 +262,11 @@ const make = Effect.gen(function* () {
       createdAt: startedAt,
     });
     // Everything waiting on the agent here is in the first turn's context.
-    const waiting = yield* channels.listOpenDeliveries({ agentId, channelId });
+    const open = yield* channels.listOpenDeliveries({ agentId, channelId });
     yield* updateDeliveries({
       channelId,
       agentId,
-      deliveries: waiting.filter(
+      deliveries: open.filter(
         (delivery) => delivery.status === "pending" || delivery.status === "queued",
       ),
       status: "sent",
@@ -369,38 +429,39 @@ const make = Effect.gen(function* () {
 
     // Still waiting when the run ended: wake the agent again here in a fresh run,
     // whose context carries them. The channel keeps the agent until then.
-    const rewoken = yield* wakeForWaiting({
+    yield* wakeForWaiting({
       commandId: CommandId.make(`run-rewake:${threadId}`),
       channelId,
       agentId,
       waiting: open.filter((delivery) => delivery.status === "pending"),
     });
-    if (rewoken) {
-      return;
-    }
+  });
 
-    // The agent is free: a DM queued behind this conversation is picked up now.
-    // ponytail: reads the whole command read model per ended run; add a narrow
-    // DM-by-agent query if run endings become frequent enough to show up in profiles.
-    const readModel = yield* snapshotQuery.getCommandReadModel();
-    const dm = (readModel.channels ?? []).find(
-      (candidate) =>
-        candidate.kind === "dm" &&
-        candidate.archivedAt === null &&
-        candidate.id !== channelId &&
-        candidate.memberAgentIds.includes(agentId),
-    );
-    if (dm === undefined) {
-      return;
+  const retryWaiting = Effect.fn("RunReactor.retryWaiting")(function* () {
+    for (const event of waiting.values()) {
+      yield* startRun(event);
     }
-    yield* wakeForWaiting({
-      commandId: CommandId.make(`run-dm-pickup:${threadId}`),
-      channelId: dm.id,
-      agentId,
-      waiting: (yield* channels.listOpenDeliveries({ agentId, channelId: dm.id })).filter(
-        (delivery) => delivery.status === "queued",
-      ),
-    });
+  });
+
+  /** Wakes DMs whose messages were `queued` behind another conversation before instances. */
+  const pickUpQueued = Effect.fn("RunReactor.pickUpQueued")(function* () {
+    const readModel = yield* snapshotQuery.getCommandReadModel();
+    for (const channel of readModel.channels ?? []) {
+      if (channel.kind !== "dm" || channel.archivedAt !== null) continue;
+      for (const agentId of channel.memberAgentIds) {
+        const queued = (yield* channels.listOpenDeliveries({ agentId, channelId: channel.id })).filter(
+          (delivery) => delivery.status === "queued",
+        );
+        yield* wakeForWaiting({
+          commandId: CommandId.make(
+            `run-queued-pickup:${channel.id}:${queued.at(-1)?.messageId ?? "none"}`,
+          ),
+          channelId: channel.id,
+          agentId,
+          waiting: queued,
+        });
+      }
+    }
   });
 
   const handle = (request: RunRequest) => {
@@ -413,6 +474,10 @@ const make = Effect.gen(function* () {
         return markDelivered(request.threadId);
       case "ended":
         return endRun(request.threadId);
+      case "retry":
+        return retryWaiting();
+      case "pickUpQueued":
+        return pickUpQueued();
     }
   };
 
@@ -435,7 +500,12 @@ const make = Effect.gen(function* () {
         return worker.enqueue({ kind: "wake", event });
       case "thread.session-set": {
         const kind = runSessionChange(event.payload.session);
-        return kind === null ? Effect.void : worker.enqueue({ kind, threadId: event.payload.threadId });
+        const handled =
+          kind === null ? Effect.void : worker.enqueue({ kind, threadId: event.payload.threadId });
+        // Any session going quiet, a card's included, may free the slot a wake waits for.
+        return (kind === "settled" || kind === "ended") && waiting.size > 0
+          ? Effect.andThen(handled, worker.enqueue({ kind: "retry" }))
+          : handled;
       }
       default:
         return Effect.void;
@@ -445,6 +515,13 @@ const make = Effect.gen(function* () {
   const start = Effect.fn("RunReactor.start")(function* () {
     const events = yield* engine.subscribeDomainEvents;
     yield* forkParked(Stream.runForEach(events, processEvent));
+    yield* worker.enqueue({ kind: "pickUpQueued" });
+    yield* forkParked(
+      Effect.suspend(() => (waiting.size > 0 ? worker.enqueue({ kind: "retry" }) : Effect.void)).pipe(
+        Effect.repeat(Schedule.spaced("1 minute")),
+        Effect.asVoid,
+      ),
+    );
   });
 
   return { start, drain: worker.drain } satisfies RunReactor["Service"];
