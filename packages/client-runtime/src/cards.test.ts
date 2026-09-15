@@ -865,6 +865,101 @@ describe("needsYouItems on budget", () => {
   });
 });
 
+describe("needsYouItems for plans, lessons, outcomes, reverts and budgets", () => {
+  it("lists each new kind once, with what it decides", () => {
+    const project = {
+      id: projectId,
+      orchestration: {
+        ...DEFAULT_PROJECT_ORCHESTRATION,
+        sideEffectGuard: { acknowledgedAt: at(0), killSwitchEnv: null },
+      },
+      knowledge: [
+        {
+          lessonId: "lesson-1",
+          kind: "quirk" as const,
+          text: "Run migrations before tests.",
+          paths: [],
+          state: "proposed" as const,
+          sourceCardId: CardId.make("landed"),
+          createdAt: at(6),
+        },
+        {
+          lessonId: "lesson-2",
+          kind: "quirk" as const,
+          text: "Already approved.",
+          paths: [],
+          state: "approved" as const,
+          sourceCardId: CardId.make("landed"),
+          createdAt: at(6),
+        },
+      ],
+    };
+    const attention = (activityId: string, code: "outcomeFlawed" | "revertConflict", minute: number) => ({
+      activityId,
+      code,
+      text: code,
+      createdAt: at(minute),
+      actions: [],
+    });
+    const items = needsYouItems({
+      cards: [
+        card("plan", {
+          kind: "plan",
+          status: "inProgress",
+          specState: "approved",
+          openElicitations: [openQuestion("plan-q", "plan", at(1), { question: "Approve?" })],
+        }),
+        card("slice", {
+          kind: "plan",
+          status: "inProgress",
+          specState: "approved",
+          checkpoint: {
+            checkpointId: "slice-1",
+            whatToTry: "Slice 1 landed.",
+            question: null,
+            evidenceId: null,
+            requestedAt: at(2),
+          },
+          openElicitations: [openQuestion("slice-q", "checkpoint", at(2))],
+        }),
+        card("landed", {
+          status: "landed",
+          specState: "approved",
+          attention: [attention("flawed-a", "outcomeFlawed", 3)],
+        }),
+        card("revert", {
+          status: "inProgress",
+          specState: "approved",
+          attention: [attention("conflict-a", "revertConflict", 4)],
+        }),
+        card("capped-1", {
+          specState: "approved",
+          waitReason: { code: "budgetCap", text: "This project reached its $5 monthly budget.", since: at(5) },
+        }),
+        card("capped-2", {
+          specState: "approved",
+          waitReason: { code: "budgetCap", text: "This project reached its $5 monthly budget.", since: at(7) },
+        }),
+      ],
+      sessions: [],
+      projects: [project],
+      now: Date.parse(at(10)),
+    });
+
+    expect(items.map((item) => [item.kind, item.cardId, item.activityId ?? item.lessonId])).toEqual([
+      ["planApproval", "plan", "plan-q"],
+      ["sliceCheckpoint", "slice", null],
+      ["outcomeFlawed", "landed", "flawed-a"],
+      ["revertConflict", "revert", "conflict-a"],
+      ["budgetCap", "capped-1", null],
+      ["lessonProposed", "landed", "lesson-1"],
+    ]);
+    expect(needsYouLabel(items[2]!)).toBe("It turned out flawed; add a hidden scenario");
+    // A budget wait is a person's, so it isn't listed as waiting on Iskra too.
+    expect(cardWaitItems([card("capped-1", { waitReason: { code: "budgetCap", text: "x", since: at(5) } })])).toEqual([]);
+  });
+});
+
 describe("waitingLabel", () => {
   it("says how long at the coarsest unit", () => {
     const now = Date.parse(at(0)) + 3 * 24 * 60 * 60_000;

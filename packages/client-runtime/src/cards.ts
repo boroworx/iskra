@@ -14,6 +14,7 @@ import {
   type OrchestrationProjectShell,
   type ProjectId,
   type ProjectOrchestration,
+  type ProjectTrigger,
   type Reason,
   type RunSessionState,
   type CardPriority,
@@ -423,7 +424,92 @@ export const REASON_LABEL: Readonly<Record<string, ReasonLabel>> = {
     label: "Screenshots captured",
     hint: "A desktop app connected, so Iskra captured the screenshots review was missing.",
   },
+  // Plans, budgets, outcomes and reverts.
+  coordinatorPaused: {
+    label: "Paused by its plan's coordinator",
+    hint: "The coordinator paused this child; its activity says why. Resume it when you agree.",
+  },
+  heldByCheckpoint: {
+    label: "Held for slice checkpoint",
+    hint: "It starts once you continue at the plan's checkpoint after the earlier slice lands.",
+  },
+  budgetCap: {
+    label: "Budget reached",
+    hint: "The project spent its monthly budget. Raise it in project settings to start more work.",
+  },
+  agentBudgetCap: {
+    label: "Agent budget reached",
+    hint: "Its agent spent its monthly budget in this project. Raise it in project settings.",
+  },
+  environmentBudgetCap: {
+    label: "Machine budget reached",
+    hint: "This machine spent its monthly budget across projects. Raise it in settings.",
+  },
+  revertConflict: {
+    label: "Revert conflicts",
+    hint: "The revert didn't apply cleanly. Assign an agent to resolve it, or dismiss it.",
+  },
+  outcomeFlawed: {
+    label: "Turned out flawed",
+    hint: "It landed, then was reverted or broke CI. Add a hidden scenario so it doesn't happen again.",
+  },
+  outcomeSetByPerson: {
+    label: "Outcome set by you",
+    hint: "A person set how this card turned out and said why.",
+  },
+  triggerRefused: {
+    label: "Trigger refused",
+    hint: "The trigger fired but made no card; the reason says why.",
+  },
 };
+
+const BUDGET_WAIT_CODES: ReadonlySet<string> = new Set([
+  "budgetCap",
+  "agentBudgetCap",
+  "environmentBudgetCap",
+]);
+
+/** The server's refusals a person can see coming, so buttons say them before trying. */
+export const REVERT_NOT_LANDED_TEXT = "Only a landed card can be reverted.";
+export const REVERT_IN_PROGRESS_TEXT = "This card already has a revert in progress.";
+export const RESTORE_NEEDS_STOPPED_TEXT =
+  "Restore needs the card's agent stopped; pause the card first.";
+export const AUTO_MERGE_NEEDS_VERIFIER_TEXT =
+  "Turn on the verifier before auto-merge; it merges only verified work.";
+export const TRIGGER_WORK_WAITS_TEXT = "Work started by a trigger always waits for a person to merge.";
+
+/** Why a card can't be reverted now, or null (mirrors the decider). */
+export function revertRefusal(
+  card: Pick<OrchestrationCard, "id" | "status">,
+  cards: ReadonlyArray<Pick<OrchestrationCard, "revertsCardId" | "status">>,
+): string | null {
+  if (card.status !== "landed") return REVERT_NOT_LANDED_TEXT;
+  return cards.some((other) => other.revertsCardId === card.id && isOpenStatus(other.status))
+    ? REVERT_IN_PROGRESS_TEXT
+    : null;
+}
+
+/** Why a card's worktree can't be restored now, or null: its agent must be stopped by a pause. */
+export function restoreRefusal(
+  card: Pick<OrchestrationCardShell, "status" | "paused" | "ownerSession">,
+): string | null {
+  return isOpenStatus(card.status) &&
+    card.paused !== null &&
+    card.ownerSession?.state !== "active" &&
+    card.ownerSession?.state !== "pending"
+    ? null
+    : RESTORE_NEEDS_STOPPED_TEXT;
+}
+
+/** Why a trigger can't be saved as set, or null (mirrors the decider's policy check). */
+export function triggerConfigRefusal(
+  trigger: Pick<ProjectTrigger, "id" | "kind" | "intake" | "template">,
+): string | null {
+  return trigger.intake === "ready" &&
+    (trigger.kind !== "schedule" || trigger.template.criteria.length === 0)
+    ? `Trigger '${trigger.id}' can't start ready work: only schedule triggers with fixed criteria can.`
+    : null;
+}
 
 /** The approve-merge refusal while a required verifier hasn't passed, in the server's words. */
 export const VERIFIER_NOT_PASSED_TEXT = "The verifier hasn't passed every criterion yet.";
@@ -555,6 +641,13 @@ export function cardBadges(
     badges.push({
       label,
       hint: label === card.waitReason.text ? hint : card.waitReason.text,
+      alarming: false,
+    });
+  }
+  if (open && card.unattended) {
+    badges.push({
+      label: "Draft PR",
+      hint: "A trigger started it with nobody approving, so its pull request opens as a draft and a person merges it.",
       alarming: false,
     });
   }
@@ -725,7 +818,13 @@ export type NeedsYouKind =
   | "budgetReached"
   | "unpricedModel"
   | "attention"
-  | "refsChanged";
+  | "refsChanged"
+  | "planApproval"
+  | "sliceCheckpoint"
+  | "lessonProposed"
+  | "outcomeFlawed"
+  | "revertConflict"
+  | "budgetCap";
 
 /** Linear's priority names, most urgent first, then none. */
 export const CARD_PRIORITIES: ReadonlyArray<CardPriority> = [1, 2, 3, 4, 0];
@@ -751,6 +850,8 @@ interface NeedsYouItem {
   readonly code: string | null;
   /** The question or attention item it is answered on; null when it isn't one. */
   readonly activityId: string | null;
+  /** The proposed lesson it decides; null unless it is a lessonProposed item. */
+  readonly lessonId: string | null;
   /** A session waiting on an answer is never snoozed away. */
   readonly snoozable: boolean;
 }
@@ -775,11 +876,21 @@ export const NEEDS_YOU_LABEL: Record<NeedsYouKind, string> = {
   unpricedModel: "Its model has no known price; accept running it uncapped",
   attention: "Something on it waits on you",
   refsChanged: "Refs changed outside this card; restore or keep them",
+  planApproval: "Plan to approve",
+  sliceCheckpoint: "A plan slice landed; continue?",
+  lessonProposed: "An agent proposed a lesson about the project",
+  outcomeFlawed: "It turned out flawed; add a hidden scenario",
+  revertConflict: "Its revert conflicts; assign an agent",
+  budgetCap: "A monthly budget holds its work; raise it to continue",
 };
 
 /** A Needs you item's label: its pause's own name when Iskra knows the code, else its kind's. */
 export function needsYouLabel(item: Pick<NeedsYouItem, "kind" | "code" | "reason">): string {
-  return item.code !== null && Object.hasOwn(REASON_LABEL, item.code)
+  // These kinds say what to do; their codes only say what happened.
+  return item.code !== null &&
+    Object.hasOwn(REASON_LABEL, item.code) &&
+    item.kind !== "outcomeFlawed" &&
+    item.kind !== "revertConflict"
     ? REASON_LABEL[item.code]!.label
     : NEEDS_YOU_LABEL[item.kind];
 }
@@ -794,11 +905,17 @@ const DELEGATE_READ_ONLY_CODE = "delegateReadOnly";
 const PERSON_WAIT_CODES: ReadonlySet<string> = new Set([
   DELEGATE_READ_ONLY_CODE,
   "sideEffectGuard",
+  ...BUDGET_WAIT_CODES,
 ]);
+/** Attention codes that are their own Needs you kinds; the rest read as "attention". */
+const ATTENTION_KINDS: Readonly<Record<string, NeedsYouKind>> = {
+  outcomeFlawed: "outcomeFlawed",
+  revertConflict: "revertConflict",
+};
 const SIDE_EFFECT_GUARD_REASON =
   "Agents don't start work until someone checks this project's scheduled jobs and outbound APIs in project settings.";
 
-type NeedsYouProject = Pick<OrchestrationProjectShell, "id" | "orchestration">;
+type NeedsYouProject = Pick<OrchestrationProjectShell, "id" | "orchestration" | "knowledge">;
 
 /**
  * Everything across projects waiting on a person, longest waiting first. Derived,
@@ -837,8 +954,22 @@ export function needsYouItems(input: {
       reason: null,
       code: null,
       activityId: null,
+      lessonId: null,
     };
     const open = isOpenStatus(card.status);
+    // A flawed outcome is found after a card lands, so it waits on a person on a finished card.
+    for (const item of card.attention) {
+      if (item.code !== "outcomeFlawed") continue;
+      add({
+        ...base,
+        key: `attention:${item.activityId}`,
+        kind: ATTENTION_KINDS[item.code] ?? "attention",
+        since: item.createdAt,
+        reason: item.text,
+        code: item.code,
+        activityId: item.activityId,
+      });
+    }
     if (card.status === "triage") {
       add({
         ...base,
@@ -892,13 +1023,25 @@ export function needsYouItems(input: {
           reason: card.waitReason.text,
           code: DELEGATE_READ_ONLY_CODE,
         });
+      } else if (card.waitReason !== null && BUDGET_WAIT_CODES.has(card.waitReason.code)) {
+        // One item per project and cap: every card it holds waits on the same raise.
+        add({
+          ...base,
+          key: `budgetCap:${card.projectId}:${card.waitReason.code}`,
+          kind: "budgetCap",
+          since: card.waitReason.since,
+          reason: card.waitReason.text,
+          code: card.waitReason.code,
+          snoozable: false,
+        });
       }
     }
     if (card.checkpoint !== null) {
       add({
         ...base,
         key: `checkpoint:${card.id}`,
-        kind: "checkpoint",
+        // A plan's or migration's checkpoint comes after a slice or sample lands.
+        kind: card.kind === "plan" || card.kind === "migration" ? "sliceCheckpoint" : "checkpoint",
         since: card.checkpoint.requestedAt,
         reason: card.checkpoint.question ?? card.checkpoint.whatToTry,
         snoozable: false,
@@ -925,7 +1068,12 @@ export function needsYouItems(input: {
       add({
         ...base,
         key: `question:${question.activityId}`,
-        kind: question.kind === "criteriaChange" ? "criteriaChange" : "awaitingInput",
+        kind:
+          question.kind === "criteriaChange"
+            ? "criteriaChange"
+            : question.kind === "plan"
+              ? "planApproval"
+              : "awaitingInput",
         since: question.askedAt,
         reason: question.question.length > 0 ? question.question : null,
         activityId: question.activityId,
@@ -936,7 +1084,7 @@ export function needsYouItems(input: {
       add({
         ...base,
         key: `attention:${item.activityId}`,
-        kind: "attention",
+        kind: ATTENTION_KINDS[item.code] ?? "attention",
         since: item.createdAt,
         reason: item.text,
         code: item.code,
@@ -1056,6 +1204,7 @@ export function needsYouItems(input: {
       reason: null,
       code: null,
       activityId: null,
+      lessonId: null,
     };
     if (session.state === "awaitingInput") {
       // An open question already says what the session waits on.
@@ -1063,6 +1212,26 @@ export function needsYouItems(input: {
       add({ ...base, key: `input:${card.id}`, kind: "awaitingInput", snoozable: false });
     } else if (session.state === "error" || session.state === "stale") {
       add({ ...base, key: `failed:${card.id}`, kind: "sessionFailed", snoozable: true });
+    }
+  }
+  // Lessons are the project's, decided from the card they came from.
+  for (const project of input.projects ?? []) {
+    for (const lesson of project.knowledge ?? []) {
+      const card = lesson.sourceCardId === null ? undefined : cardsById.get(lesson.sourceCardId);
+      if (lesson.state !== "proposed" || card === undefined) continue;
+      add({
+        key: `lesson:${lesson.lessonId}`,
+        kind: "lessonProposed",
+        cardId: card.id,
+        projectId: project.id,
+        title: card.title,
+        since: lesson.createdAt,
+        reason: lesson.text,
+        code: null,
+        activityId: null,
+        lessonId: lesson.lessonId,
+        snoozable: false,
+      });
     }
   }
   return (

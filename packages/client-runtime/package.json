@@ -31,6 +31,18 @@
       "types": "./src/cardFace.ts",
       "default": "./src/cardFace.ts"
     },
+    "./metrics": {
+      "types": "./src/metrics.ts",
+      "default": "./src/metrics.ts"
+    },
+    "./undo": {
+      "types": "./src/undo.ts",
+      "default": "./src/undo.ts"
+    },
+    "./plan-view": {
+      "types": "./src/planView.ts",
+      "default": "./src/planView.ts"
+    },
     "./run-enforcement": {
       "types": "./src/runEnforcementView.ts",
       "default": "./src/runEnforcementView.ts"

@@ -1,4 +1,4 @@
-import type { CardStatus, OrchestrationCardShell } from "@iskra/contracts";
+import type { CardOutcome, CardStatus, OrchestrationCardShell } from "@iskra/contracts";
 
 import type { CriterionState } from "./cardReview.ts";
 
@@ -48,6 +48,21 @@ export function cardStatusPill(card: FaceFacts): {
     }
   }
   return STATUS_PILL[card.status];
+}
+
+const OUTCOME_PILL: Record<CardOutcome["state"], { readonly label: string; readonly tone: PillTone }> =
+  {
+    success: { label: "Success", tone: "green" },
+    flawed: { label: "Flawed", tone: "red" },
+    blocked: { label: "Blocked", tone: "orange" },
+    manual: { label: "Manual", tone: "gray" },
+  };
+
+/** How a finished card turned out, as a pill; null until its outcome is decided. */
+export function outcomePill(
+  outcome: CardOutcome | null,
+): { readonly label: string; readonly tone: PillTone } | null {
+  return outcome === null ? null : OUTCOME_PILL[outcome.state];
 }
 
 /** The card's spark: whether it works, waits on a person, landed, or rests. */

@@ -8,6 +8,7 @@ import {
   addCardRelation,
   answerCardElicitation,
   approveAndStartCard,
+  approveCardPlan,
   assignCard,
   commentOnCardReview,
   createCard,
@@ -18,17 +19,37 @@ import {
   overrideCardVerifier,
   postCardMessage,
   removeCardRelation,
+  restoreCardCheckpoint,
   restoreCardRefs,
+  revertCard,
   setCardBudget,
   setCardCriteria,
+  setCardOutcome,
   setProjectOrchestration,
   startCardAttempts,
   snoozeCard,
   unsnoozeCard,
   updateCard,
 } from "../operations/commands.ts";
+import type { UndoCommand } from "../undo.ts";
 import { createCardActivityAtomFamily } from "./cardActivity.ts";
 import { createEnvironmentCommand, createEnvironmentRpcQueryAtomFamily } from "./runtime.ts";
+
+/** Sends an Undo toast's reverse command through the command that carries it. */
+const undoCard = (command: UndoCommand) => {
+  switch (command.type) {
+    case "card.unsnooze":
+      return unsnoozeCard({ cardId: command.cardId });
+    case "card.relation.remove":
+      return removeCardRelation({
+        cardId: command.cardId,
+        kind: command.kind,
+        otherCardId: command.otherCardId,
+      });
+    default:
+      return decideCard({ type: command.type, cardId: command.cardId });
+  }
+};
 
 /** A person's commands on cards: the board's decisions and Needs you snoozes. */
 export function createCardEnvironmentAtoms<R, E>(
@@ -127,6 +148,27 @@ export function createCardEnvironmentAtoms<R, E>(
     removeRelation: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:card:remove-relation",
       execute: removeCardRelation,
+    }),
+    approvePlan: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:card:approve-plan",
+      execute: approveCardPlan,
+    }),
+    setOutcome: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:card:set-outcome",
+      execute: setCardOutcome,
+    }),
+    revert: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:card:revert",
+      execute: revertCard,
+    }),
+    restoreCheckpoint: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:card:restore-checkpoint",
+      execute: restoreCardCheckpoint,
+    }),
+    /** The reverse command an Undo toast sends; see `undoCommandOf`. */
+    undo: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:card:undo",
+      execute: undoCard,
     }),
   };
 }
