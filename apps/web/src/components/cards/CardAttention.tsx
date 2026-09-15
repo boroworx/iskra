@@ -32,6 +32,7 @@ import {
 } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
+import { ActionButton } from "./cardChrome";
 
 const refused = (title: string) => (result: AtomCommandResult<unknown, unknown>) =>
   toastCommandFailure(result, title, "The request was refused.");
@@ -68,41 +69,37 @@ export function AttentionActions(props: {
   };
 
   return (
-    <div className="flex flex-wrap gap-1">
+    <div className="flex flex-wrap items-center gap-2">
       {item.actions.map((action) => {
         switch (action) {
           case "forward":
             return (
-              <Button
+              <ActionButton
                 key={action}
-                size="sm"
-                variant="outline"
+                tone="primary"
                 disabled={sending}
                 onClick={() =>
                   void send(forward({ environmentId, input }), "The comment was not forwarded")
                 }
               >
                 Forward to the agent
-              </Button>
+              </ActionButton>
             );
           case "dismiss":
             return (
-              <Button
+              <ActionButton
                 key={action}
-                size="sm"
-                variant="ghost-muted"
                 disabled={sending}
                 onClick={() => void send(dismiss({ environmentId, input }), "It was not dismissed")}
               >
                 Dismiss
-              </Button>
+              </ActionButton>
             );
           case "retryLanding":
             return (
-              <Button
+              <ActionButton
                 key={action}
-                size="sm"
-                variant="outline"
+                tone="primary"
                 disabled={sending}
                 onClick={() =>
                   void send(
@@ -115,14 +112,13 @@ export function AttentionActions(props: {
                 }
               >
                 Retry landing
-              </Button>
+              </ActionButton>
             );
           case "rerunVerifier":
             return (
-              <Button
+              <ActionButton
                 key={action}
-                size="sm"
-                variant="outline"
+                tone="primary"
                 disabled={sending}
                 onClick={() =>
                   void send(
@@ -135,14 +131,13 @@ export function AttentionActions(props: {
                 }
               >
                 Rerun verifier
-              </Button>
+              </ActionButton>
             );
           case "restartServices":
             return (
-              <Button
+              <ActionButton
                 key={action}
-                size="sm"
-                variant="outline"
+                tone="primary"
                 disabled={sending}
                 onClick={() =>
                   void send(
@@ -155,14 +150,12 @@ export function AttentionActions(props: {
                 }
               >
                 Restart
-              </Button>
+              </ActionButton>
             );
           case "openSettings":
             return project === undefined ? null : (
-              <Button
+              <ActionButton
                 key={action}
-                size="sm"
-                variant="ghost-muted"
                 render={
                   <Link
                     to="/settings/projects"
@@ -172,7 +165,7 @@ export function AttentionActions(props: {
                 }
               >
                 Project settings
-              </Button>
+              </ActionButton>
             );
           case "addHoldout":
             return project === undefined ? null : (
@@ -186,10 +179,9 @@ export function AttentionActions(props: {
             );
           case "assignAgent":
             return props.onCard ? null : (
-              <Button
+              <ActionButton
                 key={action}
-                size="sm"
-                variant="outline"
+                tone="primary"
                 render={
                   <Link
                     to="/board/$environmentId/$projectId"
@@ -199,14 +191,12 @@ export function AttentionActions(props: {
                 }
               >
                 Assign an agent
-              </Button>
+              </ActionButton>
             );
           case "addCriteria":
             return props.onCard ? null : (
-              <Button
+              <ActionButton
                 key={action}
-                size="sm"
-                variant="ghost-muted"
                 render={
                   <Link
                     to="/board/$environmentId/$projectId"
@@ -216,7 +206,7 @@ export function AttentionActions(props: {
                 }
               >
                 Add criteria
-              </Button>
+              </ActionButton>
             );
         }
       })}
@@ -275,9 +265,9 @@ function AddHoldoutButton(props: {
 
   return (
     <>
-      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+      <ActionButton tone="primary" onClick={() => setOpen(true)}>
         Add hidden scenario
-      </Button>
+      </ActionButton>
       <AlertDialog open={open} onOpenChange={(next) => !saving && setOpen(next)}>
         <AlertDialogPopup>
           <AlertDialogHeader>
@@ -337,58 +327,61 @@ export function RefsChangedControls(props: {
   const everyRef = chosen.size === refs.length;
 
   return (
-    <div className="flex flex-col gap-1.5 text-xs">
-      <p className="text-sm">
+    <div className="flex flex-col gap-2 text-xs">
+      <p className="text-[13px] text-muted-foreground">
         These refs changed outside this card during an agent turn. If the agent did this, restore
         them; if you did, keep them. Then resume the card.
       </p>
-      <ul className="flex flex-col gap-1">
-        {refs.map((change) => (
-          <li key={change.ref} className="flex min-w-0 flex-wrap items-center gap-x-2">
-            <Checkbox
-              aria-label={`Restore ${change.ref}`}
-              checked={chosen.has(change.ref)}
-              disabled={sending}
-              onCheckedChange={(checked) =>
-                setChosen((current) => {
-                  const next = new Set(current);
-                  if (checked) next.add(change.ref);
-                  else next.delete(change.ref);
-                  return next;
-                })
-              }
-            />
-            <span className="min-w-0 truncate font-mono">{change.ref}</span>
-            <span className="text-muted-foreground">{change.kind}</span>
-            <span className="font-mono text-muted-foreground">
-              {shortId(change.before)} → {shortId(change.after)}
-            </span>
-          </li>
-        ))}
-      </ul>
-      <div className="flex flex-wrap gap-1.5">
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={sending || chosen.size === 0}
-          onClick={() => setConfirming(true)}
-        >
-          {everyRef ? "Restore…" : `Restore ${chosen.size} of ${refs.length}…`}
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost-muted"
-          disabled={sending}
-          onClick={async () => {
-            setSending(true);
-            refused("The refs were not kept")(
-              await keep({ environmentId: props.environmentId, input }),
-            );
-            setSending(false);
-          }}
-        >
-          Keep
-        </Button>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <ul className="grid w-max max-w-full grid-cols-[auto_auto_auto_12px_auto] items-center gap-x-2.5 gap-y-1.5 rounded-lg bg-muted px-3.5 py-2.5 tabular-nums">
+          {refs.map((change) => (
+            <li key={change.ref} className="contents">
+              <Checkbox
+                aria-label={`Restore ${change.ref}`}
+                checked={chosen.has(change.ref)}
+                disabled={sending}
+                onCheckedChange={(checked) =>
+                  setChosen((current) => {
+                    const next = new Set(current);
+                    if (checked) next.add(change.ref);
+                    else next.delete(change.ref);
+                    return next;
+                  })
+                }
+              />
+              <span className="min-w-0 truncate font-semibold">
+                {change.ref}
+                <span className="ms-1.5 font-normal text-muted-foreground/55">{change.kind}</span>
+              </span>
+              <span className="font-mono text-muted-foreground/55">{shortId(change.before)}</span>
+              <span aria-label="to" className="text-muted-foreground/75">
+                →
+              </span>
+              <span className="font-mono">{shortId(change.after)}</span>
+            </li>
+          ))}
+        </ul>
+        <div className="flex flex-wrap gap-2">
+          <ActionButton
+            disabled={sending}
+            onClick={async () => {
+              setSending(true);
+              refused("The refs were not kept")(
+                await keep({ environmentId: props.environmentId, input }),
+              );
+              setSending(false);
+            }}
+          >
+            Keep
+          </ActionButton>
+          <ActionButton
+            tone="primary"
+            disabled={sending || chosen.size === 0}
+            onClick={() => setConfirming(true)}
+          >
+            {everyRef ? "Restore…" : `Restore ${chosen.size} of ${refs.length}…`}
+          </ActionButton>
+        </div>
       </div>
       <AlertDialog open={confirming} onOpenChange={(open) => !sending && setConfirming(open)}>
         <AlertDialogPopup>

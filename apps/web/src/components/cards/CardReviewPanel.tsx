@@ -5,6 +5,7 @@ import {
   fixRoundsView,
   reviewByCriterion,
   riskClaimsOf,
+  type EvidenceItemState,
   type EvidenceItemView,
 } from "@iskra/client-runtime/card-review";
 import {
@@ -33,7 +34,8 @@ import {
   type OrchestrationCardShell,
   type ProjectOrchestration,
 } from "@iskra/contracts";
-import { memo, useMemo, useState } from "react";
+import { CircleAlertIcon, GitBranchIcon, Trash2Icon } from "lucide-react";
+import { memo, useMemo, useState, type ReactNode } from "react";
 
 import { useAssetUrlState } from "~/assets/assetUrls";
 import { cn } from "~/lib/utils";
@@ -43,9 +45,22 @@ import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useEnvironmentProviders } from "../channels/AgentModelPicker";
 import { toastCommandFailure } from "../toastCommandFailure";
-import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
+import { AgentAvatar } from "../iskra/AgentAvatar";
+import { RoundDots } from "../iskra/Marks";
 import { StatusPill } from "../iskra/StatusPill";
+import {
+  ActionButton,
+  ClaimMarks,
+  DisclosureRow,
+  Group,
+  Row,
+  RowLink,
+  Section,
+  Trail,
+  VerdictGlyph,
+  type VerdictGlyphState,
+} from "./cardChrome";
 import { DisabledReason } from "./DisabledReason";
 
 const refused = (title: string) => (result: AtomCommandResult<unknown, unknown>) =>
@@ -54,16 +69,23 @@ const refused = (title: string) => (result: AtomCommandResult<unknown, unknown>)
 const NO_ITEMS: ReadonlyArray<CardEvidenceItem> = [];
 const CHECKS_ANCHOR = "card-review-checks";
 
-const MARK_TONE: Record<CriterionMark, PillTone> = {
-  passed: "green",
-  failed: "red",
-  needsYou: "orange",
-  pending: "gray",
+/** Pending and a person's check both read orange: something still has to happen before it's green. */
+const MARK_GLYPH: Record<CriterionMark, VerdictGlyphState> = {
+  passed: "passed",
+  failed: "failed",
+  needsYou: "pending",
+  pending: "pending",
 };
 
-// A grouped inset list, as macOS settings group rows on one rounded surface.
-const GROUP_CLASS =
-  "flex flex-col overflow-hidden rounded-xl bg-card shadow-[0_0_0_0.5px_var(--border)]";
+const ITEM_GLYPH: Record<EvidenceItemState, VerdictGlyphState> = {
+  passed: "passed",
+  failed: "failed",
+  pending: "pending",
+  unavailable: "pending",
+  captured: "neutral",
+};
+
+const dateTime = (iso: string) => new Date(iso).toLocaleString();
 
 /**
  * A card's review, organized by its acceptance criteria: the evidence captured for each, what
@@ -84,6 +106,8 @@ export function CardReview(props: {
   readonly verificationRequired: boolean;
   readonly agents: ReadonlyArray<OrchestrationAgentShell>;
   readonly environmentId: EnvironmentId;
+  /** Requests fresh evidence, offered beside the checks while the card is in review. */
+  readonly onCapture?: (() => void) | undefined;
 }) {
   const { card, environmentId } = props;
   const acknowledge = useAtomCommand(cardEnvironment.acknowledgeFlags);
@@ -105,48 +129,257 @@ export function CardReview(props: {
     [card.id, card.acceptance.criteria, items, verdict],
   );
   // Screenshots numbered in reading order, so a note can point at "Exhibit 2".
-  const exhibits = useMemo(
+  const exhibitViews = useMemo(
     () =>
-      new Map(
-        [...review.criteria.flatMap((entry) => entry.items), ...review.general]
-          .filter((view) => view.item.kind === "screenshot" && view.artifact !== null)
-          .map((view, index) => [view.item.itemId, index + 1] as const),
+      [...review.criteria.flatMap((entry) => entry.items), ...review.general].filter(
+        (view) => view.item.kind === "screenshot" && view.artifact !== null,
       ),
     [review],
   );
+  const exhibits = useMemo(
+    () => new Map(exhibitViews.map((view, index) => [view.item.itemId, index + 1] as const)),
+    [exhibitViews],
+  );
+  const capture =
+    props.onCapture === undefined ? null : (
+      <RowLink className="text-xs" onClick={props.onCapture}>
+        Capture evidence
+      </RowLink>
+    );
 
   if (summary === null) {
     return (
-      <p className="text-xs text-muted-foreground">
-        No evidence yet. Iskra captures it when the agent asks for review or a checkpoint.
-      </p>
+      <Section label="Evidence" trailing={capture ?? undefined}>
+        <p className="px-1 text-xs text-muted-foreground">
+          No evidence yet. Iskra captures it when the agent asks for review or a checkpoint.
+        </p>
+      </Section>
     );
   }
   return (
-    <div className="flex flex-col gap-3">
-      <p className="text-xs text-muted-foreground">
-        {summary.purpose === "checkpoint" ? "Checkpoint evidence" : "Evidence"} for{" "}
-        <span className="tabular-nums">{summary.headSha.slice(0, 7)}</span> ·{" "}
-        <span
-          className={summary.passed ? "text-success-foreground" : "text-destructive-foreground"}
-        >
-          {summary.passed ? "passed" : "failed"}
-        </span>{" "}
-        · {new Date(summary.recordedAt).toLocaleString()}
-      </p>
+    <>
+      <Section label="Criteria">
+        {review.criteria.length === 0 ? (
+          <p className="px-1 text-xs text-muted-foreground">
+            This card has no acceptance criteria, so only its checks speak for it.
+          </p>
+        ) : (
+          <Group>
+            {review.criteria.map((entry) => {
+              const firstShot = entry.items.find(
+                (view) => view.item.kind === "screenshot" && view.artifact !== null,
+              );
+              const note =
+                entry.verdict === null
+                  ? ""
+                  : entry.verdict.note.length > 0
+                    ? entry.verdict.note
+                    : entry.verdict.evidence;
+              const detailed =
+                note.length > 0 ||
+                entry.items.length > 0 ||
+                entry.state === "needsYourCheck" ||
+                entry.state === "coveredByChecks";
+              return (
+                <DisclosureRow
+                  key={entry.criterion.id}
+                  leading={
+                    <VerdictGlyph
+                      state={MARK_GLYPH[markOfCriterionState(entry.state)]}
+                      label={CRITERION_STATE_LABEL[entry.state]}
+                    />
+                  }
+                  label={entry.criterion.text}
+                  trailing={
+                    firstShot?.artifact != null ? (
+                      <EvidenceThumb resource={firstShot.artifact} environmentId={environmentId} />
+                    ) : undefined
+                  }
+                >
+                  {detailed ? (
+                    <>
+                      <span className="text-muted-foreground">
+                        {CRITERION_STATE_LABEL[entry.state]}
+                      </span>
+                      {note.length > 0 ? (
+                        <p className="whitespace-pre-wrap break-words text-muted-foreground">
+                          {note}
+                        </p>
+                      ) : null}
+                      {entry.state === "needsYourCheck" ? (
+                        <p className="text-muted-foreground">
+                          Check this yourself; the evidence below only covers what automation can.
+                        </p>
+                      ) : null}
+                      {entry.state === "coveredByChecks" ? (
+                        <p className="text-muted-foreground">
+                          Nothing was captured for it alone, and the project's{" "}
+                          <a href={`#${CHECKS_ANCHOR}`} className="underline underline-offset-2">
+                            checks
+                          </a>{" "}
+                          passed.
+                        </p>
+                      ) : null}
+                      {entry.items.map((view) => (
+                        <EvidenceDetail
+                          key={view.item.itemId}
+                          view={view}
+                          exhibit={exhibits.get(view.item.itemId)}
+                          environmentId={environmentId}
+                          named
+                        />
+                      ))}
+                    </>
+                  ) : null}
+                </DisclosureRow>
+              );
+            })}
+          </Group>
+        )}
+      </Section>
+
+      {exhibitViews.length > 0 ? (
+        <Section label="Exhibits">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {exhibitViews.map((view) => (
+              <ExhibitFigure
+                key={view.item.itemId}
+                resource={view.artifact!}
+                name={view.item.name}
+                exhibit={exhibits.get(view.item.itemId)!}
+                environmentId={environmentId}
+              />
+            ))}
+          </div>
+        </Section>
+      ) : null}
+
+      <Section
+        id={CHECKS_ANCHOR}
+        label="Checks"
+        trailing={
+          <>
+            <span className="truncate tabular-nums">
+              {summary.purpose === "checkpoint" ? "Checkpoint · " : ""}
+              {summary.headSha.slice(0, 7)} ·{" "}
+              <span
+                className={
+                  summary.passed ? "text-success-foreground" : "text-destructive-foreground"
+                }
+              >
+                {summary.passed ? "passed" : "failed"}
+              </span>{" "}
+              · {dateTime(summary.recordedAt)}
+            </span>
+            {capture}
+          </>
+        }
+      >
+        {review.general.length === 0 ? (
+          <p className="px-1 text-xs text-muted-foreground">No checks ran for this commit.</p>
+        ) : (
+          <Group className="tabular-nums">
+            {review.general.map((view) => (
+              <EvidenceRow
+                key={view.item.itemId}
+                view={view}
+                exhibit={exhibits.get(view.item.itemId)}
+                environmentId={environmentId}
+              />
+            ))}
+          </Group>
+        )}
+      </Section>
+
+      {summary.flags.length > 0 ? (
+        <Section label="Flagged changes">
+          <Group>
+            {summary.flags.map((flag, index) => {
+              const Icon = flag.kind === "deletedTest" ? Trash2Icon : CircleAlertIcon;
+              const last = index === summary.flags.length - 1;
+              return (
+                <Row key={`${flag.kind}:${flag.path}`} className="py-2">
+                  <Icon
+                    aria-hidden
+                    className={cn(
+                      "size-[18px] shrink-0",
+                      flag.hard ? "text-warning" : "text-muted-foreground",
+                    )}
+                    strokeWidth={1.8}
+                  />
+                  <span className="flex min-w-0 flex-col">
+                    <span
+                      className={cn(
+                        "truncate font-mono text-xs",
+                        flag.kind === "deletedTest" &&
+                          "line-through decoration-muted-foreground/75",
+                      )}
+                    >
+                      {flag.path}
+                    </span>
+                    <span className="truncate text-xs text-muted-foreground/55">
+                      {SCOPE_FLAG_LABEL[flag.kind]}
+                      {flag.detail.length > 0 ? ` · ${flag.detail}` : ""}
+                    </span>
+                  </span>
+                  {last ? (
+                    <Trail>
+                      {hasUnacknowledgedHardFlags(summary) ? (
+                        <RowLink
+                          onClick={() =>
+                            void acknowledge({
+                              environmentId,
+                              input: { cardId: card.id, evidenceId: summary.evidenceId },
+                            }).then(refused("The flags were not acknowledged"))
+                          }
+                        >
+                          Acknowledge
+                        </RowLink>
+                      ) : summary.flagsAcknowledgedAt !== null ? (
+                        <span className="text-xs text-muted-foreground/55">Acknowledged</span>
+                      ) : null}
+                    </Trail>
+                  ) : null}
+                </Row>
+              );
+            })}
+          </Group>
+        </Section>
+      ) : null}
 
       {claims !== null ? (
-        <div className="flex flex-col gap-0.5 text-xs">
-          <h4 className="font-medium text-muted-foreground">The agent's claims</h4>
-          <p>
-            Side effects {claims.sideEffect} · performance {claims.performance} · compatibility{" "}
-            {claims.compatibility}
+        <Section label="Agent's Claims">
+          <Group>
+            <Row>
+              <span className="text-muted-foreground">Side effects</span>
+              <Trail>
+                <ClaimMarks label="Side effects" level={claims.sideEffect} />
+              </Trail>
+            </Row>
+            <Row>
+              <span className="text-muted-foreground">Performance</span>
+              <Trail>
+                <ClaimMarks label="Performance" level={claims.performance} />
+              </Trail>
+            </Row>
+            <Row>
+              <span className="text-muted-foreground">Compatibility</span>
+              <Trail>
+                <ClaimMarks label="Compatibility" level={claims.compatibility} />
+              </Trail>
+            </Row>
+            {claims.notes.length > 0 ? (
+              <DisclosureRow label={<span className="text-muted-foreground">Notes</span>}>
+                <p className="whitespace-pre-wrap break-words text-muted-foreground">
+                  {claims.notes}
+                </p>
+              </DisclosureRow>
+            ) : null}
+          </Group>
+          <p className="px-1 text-xs text-muted-foreground/55">
+            Its own assessment when it asked for review, not evidence.
           </p>
-          {claims.notes.length > 0 ? (
-            <p className="whitespace-pre-wrap break-words text-muted-foreground">{claims.notes}</p>
-          ) : null}
-          <p className="text-muted-foreground">Its own assessment when it asked for review, not evidence.</p>
-        </div>
+        </Section>
       ) : null}
 
       {props.verificationRequired ? (
@@ -158,99 +391,10 @@ export function CardReview(props: {
         />
       ) : null}
 
-      {review.criteria.length === 0 ? (
-        <p className="text-xs text-muted-foreground">
-          This card has no acceptance criteria, so only its checks speak for it.
-        </p>
-      ) : (
-        <ol aria-label="Criteria" className={GROUP_CLASS}>
-          {review.criteria.map((entry) => (
-            <li
-              key={entry.criterion.id}
-              className="flex flex-col gap-1 border-t border-border px-3.5 py-2.5 first:border-t-0"
-            >
-              <div className="flex items-center gap-3">
-                <span className="min-w-0 flex-1 text-sm">{entry.criterion.text}</span>
-                <StatusPill
-                  label={CRITERION_STATE_LABEL[entry.state]}
-                  tone={MARK_TONE[markOfCriterionState(entry.state)]}
-                />
-              </div>
-              {entry.verdict !== null &&
-              (entry.verdict.note.length > 0 || entry.verdict.evidence.length > 0) ? (
-                <p className="whitespace-pre-wrap break-words text-xs text-muted-foreground">
-                  {entry.verdict.note.length > 0 ? entry.verdict.note : entry.verdict.evidence}
-                </p>
-              ) : null}
-              {entry.state === "needsYourCheck" ? (
-                <p className="text-xs text-muted-foreground">
-                  Check this yourself; the evidence below only covers what automation can.
-                </p>
-              ) : null}
-              {entry.state === "coveredByChecks" ? (
-                <p className="text-xs text-muted-foreground">
-                  Nothing was captured for it alone, and the project's{" "}
-                  <a href={`#${CHECKS_ANCHOR}`} className="underline underline-offset-2">
-                    checks
-                  </a>{" "}
-                  passed.
-                </p>
-              ) : null}
-              {entry.items.length > 0 ? (
-                <EvidenceList items={entry.items} exhibits={exhibits} environmentId={environmentId} />
-              ) : null}
-            </li>
-          ))}
-        </ol>
-      )}
-
-      {review.general.length > 0 ? (
-        <div id={CHECKS_ANCHOR} className="flex flex-col gap-1">
-          <h4 className="text-xs font-medium text-muted-foreground">Checks</h4>
-          <EvidenceList items={review.general} exhibits={exhibits} environmentId={environmentId} />
-        </div>
-      ) : null}
-
-      {summary.flags.length > 0 ? (
-        <div className="flex flex-col gap-1">
-          <h4 className="text-xs font-medium text-muted-foreground">Flagged changes</h4>
-          <ul className="flex flex-col gap-0.5 text-xs">
-            {summary.flags.map((flag) => (
-              <li key={`${flag.kind}:${flag.path}`} className="flex min-w-0 gap-2">
-                <span
-                  className={flag.hard ? "text-destructive-foreground" : "text-muted-foreground"}
-                >
-                  {SCOPE_FLAG_LABEL[flag.kind]}
-                </span>
-                <span className="min-w-0 truncate font-mono">{flag.path}</span>
-                {flag.detail.length > 0 ? (
-                  <span className="min-w-0 truncate text-muted-foreground">{flag.detail}</span>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-          {hasUnacknowledgedHardFlags(summary) ? (
-            <Button
-              size="sm"
-              variant="outline"
-              className="self-start"
-              onClick={() =>
-                void acknowledge({
-                  environmentId,
-                  input: { cardId: card.id, evidenceId: summary.evidenceId },
-                }).then(refused("The flags were not acknowledged"))
-              }
-            >
-              Acknowledge flagged changes
-            </Button>
-          ) : summary.flagsAcknowledgedAt !== null ? (
-            <p className="text-xs text-muted-foreground">Acknowledged.</p>
-          ) : null}
-        </div>
-      ) : null}
-
-      <CardDiff card={card} environmentId={environmentId} />
-    </div>
+      <Group>
+        <CardDiff card={card} environmentId={environmentId} />
+      </Group>
+    </>
   );
 }
 
@@ -261,6 +405,18 @@ const VERIFICATION_TITLE: Record<CardVerification["state"], string> = {
   passed: "Verified",
   failed: "The verifier didn't pass this commit",
   overridden: "Verifier overridden",
+};
+
+const VERIFICATION_PILL: Record<
+  CardVerification["state"],
+  { readonly label: string; readonly tone: PillTone }
+> = {
+  off: { label: "Waiting", tone: "gray" },
+  pending: { label: "Waiting", tone: "gray" },
+  running: { label: "Verifying", tone: "blue" },
+  passed: { label: "Passed", tone: "green" },
+  failed: { label: "Failed", tone: "red" },
+  overridden: { label: "Overridden", tone: "orange" },
 };
 
 /**
@@ -309,202 +465,254 @@ function VerifierPanel(props: {
   };
 
   return (
-    <section aria-label="Verifier" className="flex flex-col gap-1.5 text-xs">
-      <h4 className="text-sm font-medium">{VERIFICATION_TITLE[verification.state]}</h4>
-      {selection !== null && why !== null ? (
-        <DisabledReason reason={why.hint}>
-          <span className="text-muted-foreground">
-            @{verifierName} on {provider} · {selection.model} — {why.label}
-          </span>
-        </DisabledReason>
-      ) : null}
-      {verification.override !== null ? (
-        <p className="text-muted-foreground">You overrode it: {verification.override.reason}</p>
-      ) : null}
-      {satisfaction !== null && satisfaction.total > 0 ? (
-        <p className="tabular-nums">
-          Hidden scenarios {satisfaction.satisfied}/{satisfaction.total} satisfied
-        </p>
-      ) : null}
-      {judge !== undefined && (!judge.matchesCriteria || judge.concerns.length > 0) ? (
-        <div className="flex flex-col gap-0.5">
-          <p className={judge.matchesCriteria ? "text-muted-foreground" : "text-destructive-foreground"}>
-            {judge.matchesCriteria
-              ? "The diff does what the criteria ask, with concerns:"
-              : "The diff doesn't do what the criteria ask."}
-          </p>
-          {judge.concerns.length > 0 ? (
-            <ul className="list-disc ps-4">
-              {judge.concerns.map((concern) => (
-                <li key={concern} className="break-words">
-                  {concern}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
-      ) : null}
-      <div className="flex flex-wrap gap-1.5">
-        <DisabledReason reason={rerunRefusal}>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={rerunRefusal !== null || sending}
-            onClick={() =>
-              void run(
-                decide({ environmentId, input: { type: "card.verifier.rerun", cardId: card.id } }),
-                "The verifier was not rerun",
-              )
+    <Section label={VERIFICATION_TITLE[verification.state]}>
+      <Group>
+        {selection !== null && verifierName !== null ? (
+          <Row className="py-2">
+            <AgentAvatar name={verifierName} />
+            <span className="flex min-w-0 flex-col">
+              <span className="truncate">@{verifierName}</span>
+              {why !== null ? (
+                <DisabledReason reason={why.hint}>
+                  <span className="truncate text-xs text-muted-foreground/55">
+                    {provider} · {selection.model} · {why.label}
+                  </span>
+                </DisabledReason>
+              ) : null}
+            </span>
+            <Trail>
+              <StatusPill {...VERIFICATION_PILL[verification.state]} />
+            </Trail>
+          </Row>
+        ) : null}
+        {verification.override !== null ? (
+          <Row className="py-2.5">
+            <span className="text-muted-foreground">
+              You overrode it: {verification.override.reason}
+            </span>
+          </Row>
+        ) : null}
+        {satisfaction !== null && satisfaction.total > 0 ? (
+          <Row>
+            <span className="text-muted-foreground">Hidden scenarios</span>
+            <Trail className="tabular-nums text-muted-foreground">
+              {satisfaction.satisfied}/{satisfaction.total} satisfied
+            </Trail>
+          </Row>
+        ) : null}
+        {judge !== undefined && (!judge.matchesCriteria || judge.concerns.length > 0) ? (
+          <DisclosureRow
+            leading={<VerdictGlyph state={judge.matchesCriteria ? "pending" : "failed"} />}
+            label={
+              judge.matchesCriteria
+                ? `The diff does what the criteria ask, with ${judge.concerns.length} concern${judge.concerns.length === 1 ? "" : "s"}`
+                : "The diff doesn't do what the criteria ask"
             }
           >
-            Rerun verifier
-          </Button>
-        </DisabledReason>
-        {overrideRefusal === null && !overriding ? (
-          <Button size="sm" variant="ghost-muted" onClick={() => setOverriding(true)}>
-            Override…
-          </Button>
+            {judge.concerns.length > 0 ? (
+              <ul className="list-disc ps-4 text-muted-foreground">
+                {judge.concerns.map((concern) => (
+                  <li key={concern} className="break-words">
+                    {concern}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </DisclosureRow>
         ) : null}
-      </div>
-      {overriding ? (
-        <div className="flex flex-col gap-1.5">
-          <Textarea
-            aria-label="Why you're overriding the verifier"
-            placeholder="Why this card may merge without the verifier passing"
-            value={reason}
-            onChange={(event) => setReason(event.target.value)}
-          />
-          <div className="flex flex-wrap gap-1.5">
-            <DisabledReason reason={trimmedReason.length === 0 ? OVERRIDE_REASON_REQUIRED_TEXT : null}>
-              <Button
-                size="sm"
-                disabled={trimmedReason.length === 0 || sending}
-                onClick={async () => {
-                  const done = await run(
-                    override({ environmentId, input: { cardId: card.id, reason: trimmedReason } }),
-                    "The verifier was not overridden",
-                  );
-                  if (done) {
+        <Row className="flex-wrap gap-2 py-2.5">
+          <DisabledReason reason={rerunRefusal}>
+            <ActionButton
+              disabled={rerunRefusal !== null || sending}
+              onClick={() =>
+                void run(
+                  decide({
+                    environmentId,
+                    input: { type: "card.verifier.rerun", cardId: card.id },
+                  }),
+                  "The verifier was not rerun",
+                )
+              }
+            >
+              Rerun verifier
+            </ActionButton>
+          </DisabledReason>
+          {overrideRefusal === null && !overriding ? (
+            <ActionButton onClick={() => setOverriding(true)}>Override…</ActionButton>
+          ) : null}
+          {overriding ? (
+            <div className="flex w-full flex-col gap-2">
+              <Textarea
+                aria-label="Why you're overriding the verifier"
+                placeholder="Why this card may merge without the verifier passing"
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+              />
+              <div className="flex flex-wrap gap-2">
+                <ActionButton
+                  onClick={() => {
                     setOverriding(false);
                     setReason("");
-                  }
-                }}
-              >
-                Save override
-              </Button>
-            </DisabledReason>
-            <Button
-              size="sm"
-              variant="ghost-muted"
-              onClick={() => {
-                setOverriding(false);
-                setReason("");
-              }}
-            >
-              Cancel
-            </Button>
-          </div>
-        </div>
-      ) : null}
-    </section>
+                  }}
+                >
+                  Cancel
+                </ActionButton>
+                <DisabledReason
+                  reason={trimmedReason.length === 0 ? OVERRIDE_REASON_REQUIRED_TEXT : null}
+                >
+                  <ActionButton
+                    tone="primary"
+                    disabled={trimmedReason.length === 0 || sending}
+                    onClick={async () => {
+                      const done = await run(
+                        override({
+                          environmentId,
+                          input: { cardId: card.id, reason: trimmedReason },
+                        }),
+                        "The verifier was not overridden",
+                      );
+                      if (done) {
+                        setOverriding(false);
+                        setReason("");
+                      }
+                    }}
+                  >
+                    Save override
+                  </ActionButton>
+                </DisabledReason>
+              </div>
+            </div>
+          ) : null}
+        </Row>
+      </Group>
+    </Section>
   );
 }
 
-function EvidenceList(props: {
-  readonly items: ReadonlyArray<EvidenceItemView>;
-  /** Each screenshot's exhibit number. */
-  readonly exhibits: ReadonlyMap<string, number>;
-  readonly environmentId: EnvironmentId;
-}) {
-  return (
-    <ul className="flex flex-col gap-1">
-      {props.items.map((view) => (
-        <EvidenceRow
-          key={view.item.itemId}
-          view={view}
-          exhibit={props.exhibits.get(view.item.itemId)}
-          environmentId={props.environmentId}
-        />
-      ))}
-    </ul>
-  );
+function itemStateText(view: EvidenceItemView): string | null {
+  const { item, state } = view;
+  return state === "failed" && item.timedOut
+    ? "Timed out"
+    : state === "failed"
+      ? `Exit ${item.exitCode}`
+      : state === "pending"
+        ? "Waiting for CI"
+        : state === "unavailable"
+          ? "Not captured"
+          : state === "captured"
+            ? "Captured"
+            : null;
 }
 
+/** One check or capture as a row: its verdict, name and duration, opening to its output. */
 const EvidenceRow = memo(function EvidenceRow(props: {
   readonly view: EvidenceItemView;
   readonly exhibit: number | undefined;
   readonly environmentId: EnvironmentId;
 }) {
   const { item, state } = props.view;
+  const stateText = itemStateText(props.view);
+  const hasDetail =
+    (state === "unavailable" && props.view.unavailableText !== null) ||
+    ((item.kind === "check" || item.kind === "journey") && item.logTail.length > 0) ||
+    props.view.artifact !== null ||
+    props.view.log !== null;
   return (
-    <li className="flex min-w-0 flex-col gap-1 rounded-lg bg-muted px-2.5 py-2 text-xs">
-      <div className="flex min-w-0 items-baseline gap-2">
-        <span className="min-w-0 flex-1 truncate">
+    <DisclosureRow
+      leading={<VerdictGlyph state={ITEM_GLYPH[state]} label={stateText ?? "Passed"} />}
+      label={
+        <>
           {item.name}
-          <span className="text-muted-foreground"> · {item.source}</span>
-        </span>
-        {item.durationMs !== null ? (
-          <span className="shrink-0 tabular-nums text-muted-foreground">
-            {Math.round(item.durationMs / 1000)}s
+          <span className="text-muted-foreground/55"> · {item.source}</span>
+        </>
+      }
+      trailing={
+        <>
+          {stateText !== null && state !== "captured" ? (
+            <span
+              className={cn(
+                "text-xs",
+                state === "failed" ? "text-destructive-foreground" : "text-warning-foreground",
+              )}
+            >
+              {stateText}
+            </span>
+          ) : null}
+          {item.durationMs !== null ? (
+            <span className="text-muted-foreground/55">{Math.round(item.durationMs / 1000)}s</span>
+          ) : null}
+        </>
+      }
+    >
+      {hasDetail ? (
+        <EvidenceDetail view={props.view} exhibit={props.exhibit} environmentId={props.environmentId} />
+      ) : null}
+    </DisclosureRow>
+  );
+});
+
+/** What an evidence item carries beyond its row: why it's missing, its output, and its files. */
+function EvidenceDetail(props: {
+  readonly view: EvidenceItemView;
+  readonly exhibit: number | undefined;
+  readonly environmentId: EnvironmentId;
+  /** Names the item first, for evidence listed under a criterion. */
+  readonly named?: boolean;
+}) {
+  const { item, state } = props.view;
+  const stateText = itemStateText(props.view);
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      {props.named ? (
+        <div className="flex min-w-0 items-center gap-2">
+          <VerdictGlyph state={ITEM_GLYPH[state]} size={13} label={stateText ?? "Passed"} />
+          <span className="min-w-0 truncate">
+            {item.name}
+            <span className="text-muted-foreground/55"> · {item.source}</span>
           </span>
-        ) : null}
-        <span
-          className={cn(
-            "shrink-0",
-            state === "failed"
-              ? "text-destructive-foreground"
-              : state === "unavailable"
-                ? "text-warning-foreground"
-                : "text-muted-foreground",
-          )}
-        >
-          {state === "failed" && item.timedOut
-            ? "Timed out"
-            : state === "failed"
-              ? `Exit ${item.exitCode}`
-              : state === "pending"
-                ? "Waiting for CI"
-                : state === "unavailable"
-                  ? "Not captured"
-                  : state === "passed"
-                    ? "Passed"
-                    : "Captured"}
-        </span>
-      </div>
+          {item.durationMs !== null ? (
+            <span className="ms-auto shrink-0 tabular-nums text-muted-foreground/55">
+              {Math.round(item.durationMs / 1000)}s
+            </span>
+          ) : null}
+        </div>
+      ) : null}
       {state === "unavailable" && props.view.unavailableText !== null ? (
         <p className="text-muted-foreground">{props.view.unavailableText}</p>
       ) : null}
       {(item.kind === "check" || item.kind === "journey") && item.logTail.length > 0 ? (
-        <details>
-          <summary className="cursor-pointer text-muted-foreground">Output tail</summary>
-          <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px]">
-            {item.logTail}
-          </pre>
-        </details>
+        <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted p-2 font-mono text-[11px]">
+          {item.logTail}
+        </pre>
       ) : null}
-      {props.view.artifact !== null ? (
-        <EvidenceFile
-          resource={props.view.artifact}
-          item={item}
-          exhibit={props.exhibit}
-          environmentId={props.environmentId}
-        />
-      ) : null}
-      {props.view.log !== null ? (
-        <EvidenceFile resource={props.view.log} item={item} environmentId={props.environmentId} />
-      ) : null}
-    </li>
+      <div className="flex flex-wrap gap-x-3">
+        {props.view.artifact !== null ? (
+          <EvidenceLink
+            resource={props.view.artifact}
+            label={
+              item.kind === "screenshot"
+                ? props.exhibit !== undefined
+                  ? `Exhibit ${props.exhibit}`
+                  : "Open the screenshot"
+                : item.kind === "recording"
+                  ? "Open the recording"
+                  : "Open the file"
+            }
+            environmentId={props.environmentId}
+          />
+        ) : null}
+        {props.view.log !== null ? (
+          <EvidenceLink resource={props.view.log} label="Full log" environmentId={props.environmentId} />
+        ) : null}
+      </div>
+    </div>
   );
-});
+}
 
-/**
- * A screenshot inline, or a link to a recording or a check's full log (served as plain text),
- * through a signed asset URL.
- */
-function EvidenceFile(props: {
+/** A recording, screenshot or check's full log (served as plain text), through a signed asset URL. */
+function EvidenceLink(props: {
   readonly resource: AssetResource;
-  readonly item: CardEvidenceItem;
-  readonly exhibit?: number | undefined;
+  readonly label: string;
   readonly environmentId: EnvironmentId;
 }) {
   const url = useAssetUrlState(props.environmentId, props.resource);
@@ -512,28 +720,63 @@ function EvidenceFile(props: {
   if (url._tag === "Failure") {
     return <span className="text-muted-foreground">The file is no longer available.</span>;
   }
-  return props.resource._tag !== "card-check-log" && props.item.kind === "screenshot" ? (
-    <figure className="flex flex-col gap-1.5">
-      <a href={url.url} target="_blank" rel="noreferrer">
-        <img
-          src={url.url}
-          alt={props.item.name}
-          loading="lazy"
-          className="max-h-64 w-auto rounded-lg shadow-[0_0_0_0.5px_var(--border)]"
-        />
-      </a>
-      {props.exhibit !== undefined ? (
-        <figcaption className="text-muted-foreground">Exhibit {props.exhibit}</figcaption>
-      ) : null}
-    </figure>
-  ) : (
-    <a href={url.url} target="_blank" rel="noreferrer" className="self-start underline">
-      {props.resource._tag === "card-check-log"
-        ? "Full log"
-        : props.item.kind === "recording"
-          ? "Open the recording"
-          : "Open the file"}
+  return (
+    <a
+      href={url.url}
+      target="_blank"
+      rel="noreferrer"
+      className="font-medium text-info-foreground hover:underline"
+    >
+      {props.label}
     </a>
+  );
+}
+
+function EvidenceThumb(props: {
+  readonly resource: AssetResource;
+  readonly environmentId: EnvironmentId;
+}) {
+  const url = useAssetUrlState(props.environmentId, props.resource);
+  return url._tag === "Success" ? (
+    <img
+      src={url.url}
+      alt=""
+      loading="lazy"
+      className="h-6 w-9 rounded-[4px] object-cover object-top shadow-[0_0_0_0.5px_var(--border)]"
+    />
+  ) : (
+    <span className="h-6 w-9 rounded-[4px] bg-muted shadow-[0_0_0_0.5px_var(--border)]" />
+  );
+}
+
+/** A screenshot as a numbered exhibit, opening full size. */
+function ExhibitFigure(props: {
+  readonly resource: AssetResource;
+  readonly name: string;
+  readonly exhibit: number;
+  readonly environmentId: EnvironmentId;
+}) {
+  const url = useAssetUrlState(props.environmentId, props.resource);
+  return (
+    <figure className="m-0 flex min-w-0 flex-col gap-2">
+      {url._tag === "Success" ? (
+        <a href={url.url} target="_blank" rel="noreferrer">
+          <img
+            src={url.url}
+            alt={props.name}
+            loading="lazy"
+            className="h-40 w-full rounded-[10px] bg-card object-cover object-top shadow-[0_0_0_0.5px_var(--border)]"
+          />
+        </a>
+      ) : (
+        <div className="flex h-40 items-center justify-center rounded-[10px] bg-card text-xs text-muted-foreground shadow-[0_0_0_0.5px_var(--border)]">
+          {url._tag === "Loading" ? "Loading…" : "The file is no longer available."}
+        </div>
+      )}
+      <figcaption className="truncate text-xs text-muted-foreground/55">
+        Exhibit {props.exhibit} · {props.name}
+      </figcaption>
+    </figure>
   );
 }
 
@@ -542,18 +785,21 @@ function CardDiff(props: {
   readonly card: OrchestrationCardShell;
   readonly environmentId: EnvironmentId;
 }) {
-  const [open, setOpen] = useState(false);
   const stat = props.card.diffStat;
   return (
-    <details onToggle={(event) => setOpen(event.currentTarget.open)}>
-      <summary className="cursor-pointer text-xs text-muted-foreground">
-        Diff
-        {stat !== null && stat.files > 0
-          ? ` · ${stat.files} file${stat.files === 1 ? "" : "s"} +${stat.additions} −${stat.deletions}`
-          : ""}
-      </summary>
-      {open ? <CardDiffBody cardId={props.card.id} environmentId={props.environmentId} /> : null}
-    </details>
+    <DisclosureRow
+      leading={<GitBranchIcon aria-hidden className="size-[18px] text-muted-foreground" />}
+      label="Diff"
+      trailing={
+        stat !== null && stat.files > 0 ? (
+          <span className="tabular-nums text-xs text-muted-foreground/55">
+            {stat.files} file{stat.files === 1 ? "" : "s"} +{stat.additions} −{stat.deletions}
+          </span>
+        ) : undefined
+      }
+    >
+      <CardDiffBody cardId={props.card.id} environmentId={props.environmentId} />
+    </DisclosureRow>
   );
 }
 
@@ -567,7 +813,7 @@ function CardDiffBody(props: {
   if (diff.error !== null) return <p className="text-xs text-destructive">{diff.error}</p>;
   if (diff.data === null) return <p className="text-xs text-muted-foreground">Loading…</p>;
   return (
-    <pre className="mt-1 max-h-96 overflow-auto whitespace-pre font-mono text-[11px]">
+    <pre className="-ms-[30px] max-h-96 overflow-auto whitespace-pre font-mono text-[11px]">
       {diff.data.diff.length === 0 ? "No changes." : diff.data.diff}
       {diff.data.truncated ? "\n… truncated" : ""}
     </pre>
@@ -590,67 +836,101 @@ export function CardLandingPanel(props: {
   const ci = useMemo(() => ciSummary(props.items), [props.items]);
   const roundsOut = rounds.exhausted || card.paused?.reason.code === "fixRoundsExhausted";
   const landing = card.landing;
+  let target: ReactNode;
+  if (landing === null) {
+    target = <span className="text-muted-foreground">Not linked to a pull request yet.</span>;
+  } else if (landing.mode === "local") {
+    target = <span>Lands locally by fast-forwarding the base branch.</span>;
+  } else if (landing.url !== null) {
+    target = (
+      <>
+        <a
+          href={landing.url}
+          target="_blank"
+          rel="noreferrer"
+          className="font-medium text-info-foreground hover:underline"
+        >
+          Pull request{landing.number !== null ? ` #${landing.number}` : ""}
+        </a>
+        {landing.draft ? <StatusPill label="Draft" tone="gray" /> : null}
+      </>
+    );
+  } else {
+    target = <span>Pull request opening…</span>;
+  }
 
   return (
-    <div className="flex flex-col gap-2 text-xs">
-      <p>
+    <Group>
+      <Row className="flex-wrap py-2">
+        <GitBranchIcon aria-hidden className="size-[18px] shrink-0 text-muted-foreground" />
+        {target}
         {card.status === "landed" && landing?.mergedOnHostUrl !== undefined ? (
-          <span>
-            <a href={landing.mergedOnHostUrl} target="_blank" rel="noreferrer" className="underline">
+          <Trail>
+            <a
+              href={landing.mergedOnHostUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs text-info-foreground hover:underline"
+            >
               Merged on the host
-            </a>{" "}
-            ·{" "}
-          </span>
-        ) : null}
-        {landing === null ? (
-          <span className="text-muted-foreground">Not linked to a pull request yet.</span>
-        ) : landing.mode === "local" ? (
-          <span>Lands locally by fast-forwarding the base branch.</span>
-        ) : landing.url !== null ? (
-          <>
-            <a href={landing.url} target="_blank" rel="noreferrer" className="underline">
-              Pull request{landing.number !== null ? ` #${landing.number}` : ""}
             </a>
-            {landing.draft ? <span className="text-muted-foreground"> · draft</span> : null}
-          </>
-        ) : (
-          <span>Pull request opening…</span>
-        )}
-      </p>
+          </Trail>
+        ) : null}
+      </Row>
       {landing?.mode === "pullRequest" ? (
-        <p
-          className={ci.failed.length > 0 ? "text-destructive-foreground" : "text-muted-foreground"}
-        >
-          {ci.total === 0
-            ? "No CI results yet."
-            : ci.failed.length > 0
-              ? `CI failing: ${ci.failed.join(", ")}`
-              : ci.pending.length > 0
-                ? `Waiting for CI: ${ci.pending.join(", ")}. The merge waits for it.`
-                : `CI passed (${ci.total})`}
-        </p>
-      ) : null}
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="tabular-nums text-muted-foreground">
-          CI fixes {rounds.ci.used} of {rounds.ci.cap} · review fixes {rounds.review.used} of{" "}
-          {rounds.review.cap}
-        </span>
-        {roundsOut ? (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() =>
-              void decide({
-                environmentId,
-                input: { type: "card.fix-rounds.reset", cardId: card.id },
-              }).then(refused("The fix rounds were not reset"))
+        <Row className="py-2">
+          <VerdictGlyph
+            state={
+              ci.total === 0
+                ? "neutral"
+                : ci.failed.length > 0
+                  ? "failed"
+                  : ci.pending.length > 0
+                    ? "pending"
+                    : "passed"
+            }
+          />
+          <span
+            className={
+              ci.failed.length > 0 ? "text-destructive-foreground" : "text-muted-foreground"
             }
           >
-            Give it {Math.max(props.policy.ciFixRounds, props.policy.reviewFixRounds)} more rounds
-          </Button>
-        ) : null}
-      </div>
-    </div>
+            {ci.total === 0
+              ? "No CI results yet."
+              : ci.failed.length > 0
+                ? `CI failing: ${ci.failed.join(", ")}`
+                : ci.pending.length > 0
+                  ? `Waiting for CI: ${ci.pending.join(", ")}. The merge waits for it.`
+                  : `CI passed (${ci.total})`}
+          </span>
+        </Row>
+      ) : null}
+      <Row className="flex-wrap py-2">
+        <span className="text-muted-foreground">Fix rounds</span>
+        <Trail className="text-xs text-muted-foreground/75">
+          <span className="inline-flex items-center gap-1.5">
+            CI
+            <RoundDots used={rounds.ci.used} cap={rounds.ci.cap} label="CI fix rounds" />
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            Review
+            <RoundDots used={rounds.review.used} cap={rounds.review.cap} label="Review fix rounds" />
+          </span>
+          {roundsOut ? (
+            <ActionButton
+              onClick={() =>
+                void decide({
+                  environmentId,
+                  input: { type: "card.fix-rounds.reset", cardId: card.id },
+                }).then(refused("The fix rounds were not reset"))
+              }
+            >
+              Give it {Math.max(props.policy.ciFixRounds, props.policy.reviewFixRounds)} more rounds
+            </ActionButton>
+          ) : null}
+        </Trail>
+      </Row>
+    </Group>
   );
 }
 
@@ -697,10 +977,14 @@ export function CheckpointControls(props: {
   };
 
   return (
-    <div className="flex flex-col gap-1.5">
-      <p className="whitespace-pre-wrap break-words text-sm">{checkpoint.whatToTry}</p>
+    <div className="flex flex-col gap-2">
+      <p className="whitespace-pre-wrap break-words text-[13px] text-muted-foreground">
+        {checkpoint.whatToTry}
+      </p>
       {checkpoint.question !== null ? (
-        <p className="whitespace-pre-wrap break-words text-sm font-medium">{checkpoint.question}</p>
+        <p className="whitespace-pre-wrap break-words text-[13px] font-medium">
+          {checkpoint.question}
+        </p>
       ) : null}
       {redirecting ? (
         <Textarea
@@ -710,37 +994,25 @@ export function CheckpointControls(props: {
           onChange={(event) => setNote(event.target.value)}
         />
       ) : null}
-      <div className="flex flex-wrap gap-1.5">
-        <Button size="sm" disabled={sending} onClick={() => void send("continue")}>
-          Continue <span className="text-xs opacity-80">(recommended)</span>
-        </Button>
+      <div className="flex flex-wrap gap-2">
+        <ActionButton tone="tinted" disabled={sending} onClick={() => void send("continue")}>
+          Continue <span className="sr-only">(recommended)</span>
+        </ActionButton>
         {redirecting ? (
-          <Button
-            size="sm"
-            variant="outline"
+          <ActionButton
             disabled={sending || note.trim().length === 0}
             onClick={() => void send("redirect")}
           >
             Send redirect
-          </Button>
+          </ActionButton>
         ) : (
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={sending}
-            onClick={() => setRedirecting(true)}
-          >
+          <ActionButton disabled={sending} onClick={() => setRedirecting(true)}>
             Redirect…
-          </Button>
+          </ActionButton>
         )}
-        <Button
-          size="sm"
-          variant="destructive-outline"
-          disabled={sending}
-          onClick={() => void send("stop")}
-        >
+        <ActionButton tone="destructive" disabled={sending} onClick={() => void send("stop")}>
           Stop
-        </Button>
+        </ActionButton>
       </div>
     </div>
   );

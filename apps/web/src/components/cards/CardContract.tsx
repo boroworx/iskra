@@ -18,7 +18,7 @@ import {
 import { PlusIcon, XIcon } from "lucide-react";
 import { useState } from "react";
 
-import { randomUUID } from "~/lib/utils";
+import { cn, randomUUID } from "~/lib/utils";
 import { cardEnvironment } from "~/state/cards";
 import { channelEnvironment } from "~/state/channels";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -26,6 +26,8 @@ import { toastCommandFailure } from "../toastCommandFailure";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { AgentAvatar } from "../iskra/AgentAvatar";
+import { ActionButton } from "./cardChrome";
 import { DisabledReason } from "./DisabledReason";
 
 const VERIFICATION_LABEL: Record<CardCriterion["verification"], string> = {
@@ -221,16 +223,19 @@ export function ElicitationOptions(props: {
   const [text, setText] = useState("");
   const written = elicitationAnswer(elicitation, { text });
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex flex-wrap gap-1.5">
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap gap-2">
         {elicitation.options.map((option) => {
           const recommended = option.id === elicitation.recommendedOptionId;
           return (
-            <Button
+            <button
               key={option.id}
-              size="sm"
-              variant={recommended ? "default" : "outline"}
+              type="button"
               disabled={props.disabled}
+              className={cn(
+                "inline-flex h-[30px] items-center gap-1.5 rounded-lg px-3 text-[13px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
+                recommended ? "bg-primary/18 text-info-foreground" : "bg-secondary hover:bg-secondary/80",
+              )}
               onClick={() => {
                 const answer = elicitationAnswer(elicitation, { optionId: option.id });
                 if (answer !== null) props.onAnswer(answer);
@@ -238,13 +243,13 @@ export function ElicitationOptions(props: {
             >
               {option.label}
               {recommended ? <span className="text-xs opacity-80">(recommended)</span> : null}
-            </Button>
+            </button>
           );
         })}
       </div>
       {elicitation.allowText ? (
         <form
-          className="flex gap-1.5"
+          className="flex max-w-md gap-2"
           onSubmit={(event) => {
             event.preventDefault();
             if (written === null) return;
@@ -260,14 +265,9 @@ export function ElicitationOptions(props: {
             disabled={props.disabled}
             onChange={(event) => setText(event.target.value)}
           />
-          <Button
-            type="submit"
-            size="sm"
-            variant="outline"
-            disabled={props.disabled || written === null}
-          >
+          <ActionButton type="submit" disabled={props.disabled || written === null}>
             Send
-          </Button>
+          </ActionButton>
         </form>
       ) : null}
     </div>
@@ -327,14 +327,19 @@ export function CardQuestion(props: {
   readonly cardId: OrchestrationCardShell["id"];
   readonly question: CardOpenElicitation;
   readonly environmentId: EnvironmentId;
+  /** The agent asking, shown as its avatar beside the question. */
+  readonly agentName?: string | undefined;
 }) {
   const answer = useAtomCommand(cardEnvironment.answerElicitation);
   const [sending, setSending] = useState(false);
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-2.5">
       {props.question.question.length > 0 ? (
-        <p className="whitespace-pre-wrap break-words text-sm font-medium">
-          {props.question.question}
+        <p className="flex min-w-0 items-start gap-2 text-[13px] text-muted-foreground">
+          {props.agentName !== undefined ? (
+            <AgentAvatar name={props.agentName} className="mt-px size-[18px] text-[9px]" />
+          ) : null}
+          <span className="min-w-0 whitespace-pre-wrap break-words">{props.question.question}</span>
         </p>
       ) : null}
       <ElicitationOptions
@@ -366,17 +371,19 @@ export function CardQuestion(props: {
 export function CardQuestions(props: {
   readonly card: Pick<OrchestrationCardShell, "id" | "openElicitations" | "attention">;
   readonly environmentId: EnvironmentId;
+  readonly agentName?: string | undefined;
 }) {
   const questions = cardQuestionsOf(props.card);
   if (questions.length === 0) return null;
   return (
-    <ol className="flex flex-col gap-3">
+    <ol className="flex flex-col gap-4">
       {questions.map((question) => (
         <li key={question.activityId}>
           <CardQuestion
             cardId={props.card.id}
             question={question}
             environmentId={props.environmentId}
+            agentName={props.agentName}
           />
         </li>
       ))}
@@ -388,7 +395,7 @@ const sameCriteria = (left: ReadonlyArray<CardCriterion>, right: ReadonlyArray<C
   JSON.stringify(left) === JSON.stringify(right);
 
 /**
- * A card's acceptance criteria in the sheet: edited as a draft in triage (Approve & start confirms
+ * A card's acceptance criteria in the sheet: edited as a draft in triage (Approve & Start confirms
  * them), and saved as confirmed once the card is approved, which tells a running agent.
  */
 export function CardCriteria(props: {
@@ -406,18 +413,18 @@ export function CardCriteria(props: {
 
   return (
     <>
-      <p className="text-xs text-muted-foreground">
+      <p className="px-1 text-xs text-muted-foreground">
         {card.status === "triage"
-          ? "A draft until you approve the card; Approve & start confirms them."
+          ? "A draft until you approve the card; Approve & Start confirms them."
           : draft
             ? "Not confirmed: work starts only once you confirm them."
             : "Confirmed. Checks and review hold the work to these."}
       </p>
       <CriteriaEditor criteria={criteria} onChange={setDraft} disabled={!open} />
       {open ? (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Button
-            size="sm"
+        <div className="flex flex-wrap items-center gap-2">
+          <ActionButton
+            tone="primary"
             disabled={!edited}
             onClick={() =>
               void setCriteria({ environmentId, input: { cardId: card.id, criteria: saved } }).then(
@@ -431,7 +438,7 @@ export function CardCriteria(props: {
             }
           >
             Save criteria
-          </Button>
+          </ActionButton>
           {draft && card.status !== "triage" ? (
             <DisabledReason
               reason={
@@ -442,9 +449,7 @@ export function CardCriteria(props: {
                     : null
               }
             >
-              <Button
-                size="sm"
-                variant="outline"
+              <ActionButton
                 disabled={edited || card.acceptance.criteria.length === 0}
                 onClick={() =>
                   void decide({
@@ -460,7 +465,7 @@ export function CardCriteria(props: {
                 }
               >
                 Confirm criteria
-              </Button>
+              </ActionButton>
             </DisabledReason>
           ) : null}
         </div>

@@ -13,8 +13,8 @@ import { cardEnvironment } from "~/state/cards";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { StatusPill } from "../iskra/StatusPill";
 import { toastCommandFailure } from "../toastCommandFailure";
-import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
+import { ActionButton, Group, Row, Section, Trail } from "./cardChrome";
 
 const CHILD_TONE: Record<PlanChildState, PillTone> = {
   proposed: "gray",
@@ -83,77 +83,75 @@ export function PlanReview(props: {
   };
 
   return (
-    <div className="flex flex-col gap-3">
-      <p className="text-xs text-muted-foreground">
-        {plan.state === "drafting"
-          ? planDraftLine(card.status)
-          : plan.state === "proposed"
-            ? `Revision ${plan.revision}, waiting for your approval.`
-            : `Revision ${plan.revision} approved · ${landed} of ${children.length} landed`}
-        {plan.integrationBranch !== null ? ` · lands into ${plan.integrationBranch}` : ""}
-      </p>
-      {plan.premise.trim().length > 0 ? (
-        <p className="whitespace-pre-wrap break-words text-sm">{plan.premise}</p>
-      ) : null}
+    <>
+      <Section
+        label="Plan"
+        trailing={
+          <span className="truncate tabular-nums">
+            {plan.state === "drafting"
+              ? planDraftLine(card.status)
+              : plan.state === "proposed"
+                ? `Revision ${plan.revision}, waiting for your approval`
+                : `Revision ${plan.revision} approved · ${landed} of ${children.length} landed`}
+            {plan.integrationBranch !== null ? ` · lands into ${plan.integrationBranch}` : ""}
+          </span>
+        }
+      >
+        {plan.premise.trim().length > 0 ? (
+          <p className="whitespace-pre-wrap break-words px-1 text-[13px]">{plan.premise}</p>
+        ) : null}
+      </Section>
       {slices.map((slice) => (
-        <section
+        <Section
           key={slice.slice}
-          aria-label={`Slice ${slice.slice}`}
-          className="flex flex-col gap-1.5"
-        >
-          <h4 className="text-xs font-medium text-muted-foreground">
-            Slice {slice.slice}
-            {plan.state === "approved" && slice.slice > plan.currentSlice
+          label={`Slice ${slice.slice}${
+            plan.state === "approved" && slice.slice > plan.currentSlice
               ? " · waits for the checkpoint"
               : slice.finished
                 ? " · finished"
-                : ""}
-          </h4>
-          <ol className="flex flex-col gap-1.5">
+                : ""
+          }`}
+        >
+          <Group>
             {slice.children.map((view) => (
-              <li
-                key={view.child.key}
-                className="flex min-w-0 flex-col gap-1 rounded-xl bg-card px-3 py-2 shadow-[0_0_0_0.5px_var(--border)]"
-              >
-                <div className="flex min-w-0 items-center gap-2">
+              <Row key={view.child.key} className="py-2.5">
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                   {view.cardId === null ? (
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                      {view.child.title}
-                    </span>
+                    <span className="truncate font-medium">{view.child.title}</span>
                   ) : (
                     <Link
                       to="/board/$environmentId/$projectId"
                       params={{ environmentId, projectId: card.projectId }}
                       search={{ card: view.cardId }}
-                      className="min-w-0 flex-1 truncate text-sm font-medium hover:underline"
+                      className="truncate font-medium hover:underline"
                     >
                       {view.child.title}
                     </Link>
                   )}
+                  <span className="truncate text-xs text-muted-foreground/55">
+                    {view.child.criteria.length} criteri
+                    {view.child.criteria.length === 1 ? "on" : "a"}
+                    {view.child.suggestedAgent !== null
+                      ? ` · @${view.child.suggestedAgent}`
+                      : " · no agent suggested"}
+                    {view.dependsOnTitles.length > 0
+                      ? ` · after ${view.dependsOnTitles.join(", ")}`
+                      : ""}
+                  </span>
+                </span>
+                <Trail>
                   <StatusPill
                     label={PLAN_CHILD_STATE_LABEL[view.state]}
                     tone={CHILD_TONE[view.state]}
                   />
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {view.child.criteria.length} criteri
-                  {view.child.criteria.length === 1 ? "on" : "a"}
-                  {view.child.suggestedAgent !== null
-                    ? ` · @${view.child.suggestedAgent}`
-                    : " · no agent suggested"}
-                </p>
-                {view.dependsOnTitles.length > 0 ? (
-                  <p className="text-xs text-muted-foreground">
-                    ↳ After {view.dependsOnTitles.join(", ")}
-                  </p>
-                ) : null}
-              </li>
+                </Trail>
+              </Row>
             ))}
-          </ol>
-        </section>
+          </Group>
+        </Section>
       ))}
       {plan.state === "proposed" ? (
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-2">
           {redirecting ? (
             <Textarea
               aria-label="What the coordinator should change"
@@ -162,32 +160,39 @@ export function PlanReview(props: {
               onChange={(event) => setNote(event.target.value)}
             />
           ) : null}
-          <div className="flex flex-wrap gap-1.5">
-            <Button size="sm" disabled={sending} onClick={() => void approvePlan()}>
-              Approve plan
-            </Button>
+          <div className="flex flex-wrap justify-end gap-2">
             {redirecting ? (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={sending || note.trim().length === 0 || question === undefined}
-                onClick={() => void redirect()}
-              >
-                Send redirect
-              </Button>
+              <>
+                <ActionButton
+                  disabled={sending}
+                  onClick={() => {
+                    setRedirecting(false);
+                    setNote("");
+                  }}
+                >
+                  Cancel
+                </ActionButton>
+                <ActionButton
+                  disabled={sending || note.trim().length === 0 || question === undefined}
+                  onClick={() => void redirect()}
+                >
+                  Send redirect
+                </ActionButton>
+              </>
             ) : (
-              <Button
-                size="sm"
-                variant="outline"
+              <ActionButton
                 disabled={sending || question === undefined}
                 onClick={() => setRedirecting(true)}
               >
                 Redirect…
-              </Button>
+              </ActionButton>
             )}
+            <ActionButton tone="primary" disabled={sending} onClick={() => void approvePlan()}>
+              Approve plan
+            </ActionButton>
           </div>
         </div>
       ) : null}
-    </div>
+    </>
   );
 }

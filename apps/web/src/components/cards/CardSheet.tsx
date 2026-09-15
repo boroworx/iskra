@@ -1,8 +1,6 @@
 import {
-  BOARD_COLUMN_LABEL,
   CARD_RELATION_LABEL,
   CARD_SESSION_LABEL,
-  boardColumnOf,
   cardMoveActions,
   cardVerificationRequired,
   isCardSnoozed,
@@ -26,23 +24,28 @@ import {
   type CardActivity,
   CardId,
   type CardOutcome,
-  type CardStatus,
   type EnvironmentId,
   type OrchestrationAgentShell,
   type OrchestrationCardShell,
+  type RunSessionState,
 } from "@iskra/contracts";
 import { Link } from "@tanstack/react-router";
-import { XIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ChevronRightIcon, ClockIcon, EllipsisIcon, PauseIcon, XIcon } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 
-import { randomUUID } from "~/lib/utils";
+import { cn, randomUUID } from "~/lib/utils";
 import { cardEnvironment } from "~/state/cards";
 import { useProjects, useThread } from "~/state/entities";
 import { scopeThreadRef } from "@iskra/client-runtime/environment";
 import { metricsLine, templateMetrics } from "@iskra/client-runtime/metrics";
 import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
-import { cardSparkState, cardStatusPill, outcomePill } from "@iskra/client-runtime/card-face";
+import {
+  cardSparkState,
+  cardStatusPill,
+  outcomePill,
+  type PillTone,
+} from "@iskra/client-runtime/card-face";
 import { ApproveAndStart } from "../channels/CardProposal";
 import { ownerCandidates } from "../channels/channels.logic";
 import { MigrationPanel } from "./MigrationPanel";
@@ -66,16 +69,55 @@ import { CardCriteria, CardPreviewPanel, CardQuestions, cardQuestionsOf } from "
 import { CardLandingPanel, CardReview, CheckpointControls } from "./CardReviewPanel";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import {
+  Menu,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuItem,
+  MenuPopup,
+  MenuSeparator,
+  MenuTrigger,
+} from "../ui/menu";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
-import { Sheet, SheetHeader, SheetPanel, SheetPopup, SheetTitle } from "../ui/sheet";
+import {
+  Sheet,
+  SheetClose,
+  SheetHeader,
+  SheetPanel,
+  SheetPopup,
+  SheetTitle,
+} from "../ui/sheet";
 import { Textarea } from "../ui/textarea";
 import { toastCommandFailure } from "../toastCommandFailure";
+import {
+  ActionButton,
+  BranchGlyph,
+  Group,
+  Row,
+  RowLink,
+  Section,
+  Trail,
+} from "./cardChrome";
+import { cardShortId } from "../iskra/cardLabel";
 import { DisabledReason } from "./DisabledReason";
 
 const HOUR_MS = 60 * 60_000;
 
 /** The server's own sentence for assigning before approval; the picker says it before trying. */
 const APPROVE_BEFORE_ASSIGN_TEXT = "Approve the card before assigning an agent.";
+
+const SESSION_TONE: Record<RunSessionState, PillTone> = {
+  pending: "blue",
+  active: "blue",
+  awaitingInput: "orange",
+  complete: "gray",
+  error: "red",
+  stale: "gray",
+  ended: "gray",
+};
+
+/** The footer's larger buttons, as the review canvas draws them. */
+const FOOTER_BUTTON = "h-8 rounded-lg px-4 sm:h-8";
 
 /** Toasts a refused command and hands its reason to `onRefused`, so the sheet says it in place. */
 const refusedWith =
@@ -87,14 +129,6 @@ const refusedWith =
       onRefused(`${title}. ${atomCommandFailureMessage(result, "The request was refused.")}`);
     }
   };
-
-function statusLabel(status: CardStatus): string {
-  return status === "landed"
-    ? "Landed"
-    : status === "abandoned"
-      ? "Abandoned"
-      : BOARD_COLUMN_LABEL[boardColumnOf(status)];
-}
 
 /**
  * One card's detail and every decision on it, as buttons that follow the same
@@ -114,6 +148,7 @@ export function CardSheet(props: {
   readonly focus?: "agent" | "criteria" | undefined;
   readonly onClose: () => void;
 }) {
+  const closeButton = useRef<HTMLButtonElement>(null);
   return (
     <Sheet
       open={props.card !== null}
@@ -121,7 +156,11 @@ export function CardSheet(props: {
         if (!open) props.onClose();
       }}
     >
-      <SheetPopup className="max-w-lg">
+      <SheetPopup
+        showCloseButton={false}
+        initialFocus={closeButton}
+        className="max-w-[640px] bg-background"
+      >
         {props.card === null ? null : (
           <CardSheetBody
             key={props.card.id}
@@ -131,6 +170,7 @@ export function CardSheet(props: {
             agents={props.agents}
             now={props.now}
             focus={props.focus}
+            closeButton={closeButton}
           />
         )}
       </SheetPopup>
@@ -145,6 +185,7 @@ function CardSheetBody(props: {
   readonly agents: ReadonlyArray<OrchestrationAgentShell>;
   readonly now: number;
   readonly focus?: "agent" | "criteria" | undefined;
+  readonly closeButton: RefObject<HTMLButtonElement | null>;
 }) {
   const { card, environmentId } = props;
   // Needs you opens the sheet at what it asks for: once, when the body mounts for this card.
@@ -191,6 +232,10 @@ function CardSheetBody(props: {
     [projects, environmentId, card.projectId],
   );
 
+  // A proposal is mostly edited before it's approved, so it opens in its edit layout.
+  const [editing, setEditing] = useState(card.status === "triage");
+  const [requesting, setRequesting] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(false);
   const [title, setTitle] = useState(card.title);
   const [spec, setSpec] = useState(card.spec);
   const [message, setMessage] = useState("");
@@ -228,10 +273,14 @@ function CardSheetBody(props: {
   const builder = props.agents.find((agent) => agent.id === card.delegateAgentId);
   const verificationRequired = cardVerificationRequired(card, policy, builder);
   const mergeRefusal = verifierMergeRefusal(card, verificationRequired);
+  const moves = cardMoveActions(card.status, mergeRefusal);
+  const merge = card.status === "inReview" ? moves.find((move) => move.column === "landing") : undefined;
   const outcome = outcomePill(card.outcome);
   const previewAgent =
     props.agents.find((agent) => agent.id === (card.delegateAgentId ?? card.suggestedAgentId)) ??
     null;
+  const showsAttempts = card.status === "ready" || card.attemptGroupId !== null;
+  const branch = card.branch ?? card.baseBranch;
 
   const send = (kind: "message" | "review") => {
     const input = {
@@ -247,23 +296,184 @@ function CardSheetBody(props: {
     setMessage("");
   };
 
+  // One criteria editor, placed in the edit layout or the body, where Needs you's focus finds it.
+  const criteriaEditor = (
+    <div ref={criteriaSection} className="contents">
+      <Section label="Acceptance criteria">
+        <CardCriteria card={card} environmentId={environmentId} />
+      </Section>
+    </div>
+  );
+  const criteriaInBody =
+    card.evidence === null || card.acceptance.state === "draft" || props.focus === "criteria";
+
   return (
     <>
-      <SheetHeader>
-        <div className="flex flex-wrap items-center gap-1.5 pe-8">
-          <StatusPill {...cardStatusPill(card)} />
-          {outcome !== null ? <StatusPill {...outcome} /> : null}
-          {card.unattended ? <StatusPill label="Draft PR" tone="gray" /> : null}
+      <SheetHeader className="gap-2.5 px-7 pt-7 pb-4">
+        <div className="flex min-h-7 items-center gap-2">
+          <span className="text-xs font-medium tabular-nums text-muted-foreground/55">
+            {cardShortId(card)}
+          </span>
+          <div className="ms-auto flex flex-wrap items-center justify-end gap-1.5">
+            {card.ownerSession !== null && open ? (
+              <StatusPill
+                label={CARD_SESSION_LABEL[card.ownerSession.state]}
+                tone={SESSION_TONE[card.ownerSession.state]}
+              />
+            ) : null}
+            {snoozed ? <StatusPill label="Snoozed" tone="gray" /> : null}
+            {card.unattended ? <StatusPill label="Draft PR" tone="gray" /> : null}
+            {outcome !== null ? <StatusPill {...outcome} /> : null}
+            <StatusPill {...cardStatusPill(card)} className="h-[22px] px-[9px] text-xs" />
+            <RowLink className="ms-1" aria-pressed={editing} onClick={() => setEditing((current) => !current)}>
+              {editing ? "Done" : "Edit"}
+            </RowLink>
+            <Menu>
+              <MenuTrigger
+                render={<Button size="icon-xs" variant="ghost-muted" aria-label="Card actions" />}
+              >
+                <EllipsisIcon />
+              </MenuTrigger>
+              <MenuPopup align="end" className="w-64">
+                <MenuItem onClick={() => setEditing((current) => !current)}>
+                  {editing ? "Done editing" : "Edit card"}
+                </MenuItem>
+                {open && card.status !== "triage" ? (
+                  <MenuItem
+                    onClick={() =>
+                      card.paused === null
+                        ? decideOn("card.pause", "The card was not paused")
+                        : decideOn("card.resume", "The card was not resumed")
+                    }
+                  >
+                    {card.paused === null ? "Pause" : "Resume"}
+                  </MenuItem>
+                ) : null}
+                {moves.length > 0 ? (
+                  <>
+                    <MenuSeparator />
+                    <MenuGroup>
+                      <MenuGroupLabel>Move</MenuGroupLabel>
+                      {moves.map((action) => (
+                        <MenuItem
+                          key={action.column}
+                          disabled={action.type === null}
+                          variant={action.type === "card.abandon" ? "destructive" : "default"}
+                          onClick={() => {
+                            if (action.type !== null)
+                              decideOn(action.type, "The card stays where it was");
+                          }}
+                        >
+                          <span className="flex min-w-0 flex-col">
+                            {action.label}
+                            {action.reason !== null ? (
+                              <span className="text-xs text-muted-foreground">{action.reason}</span>
+                            ) : null}
+                          </span>
+                        </MenuItem>
+                      ))}
+                    </MenuGroup>
+                  </>
+                ) : null}
+                {open ? (
+                  <>
+                    <MenuSeparator />
+                    <MenuGroup>
+                      <MenuGroupLabel>Needs you</MenuGroupLabel>
+                      {snoozed ? (
+                        <MenuItem
+                          onClick={() =>
+                            void unsnooze({ environmentId, input: { cardId: card.id } }).then(
+                              refused("The card was not woken"),
+                            )
+                          }
+                        >
+                          Wake
+                        </MenuItem>
+                      ) : (
+                        <>
+                          <MenuItem
+                            onClick={() =>
+                              void snooze({
+                                environmentId,
+                                input: {
+                                  cardId: card.id,
+                                  snoozedUntil: new Date(Date.now() + HOUR_MS).toISOString(),
+                                },
+                              }).then(afterSnooze)
+                            }
+                          >
+                            Snooze 1 hour
+                          </MenuItem>
+                          <MenuItem
+                            onClick={() =>
+                              void snooze({
+                                environmentId,
+                                input: { cardId: card.id, snoozedUntil: null },
+                              }).then(afterSnooze)
+                            }
+                          >
+                            Snooze until it changes
+                          </MenuItem>
+                        </>
+                      )}
+                    </MenuGroup>
+                  </>
+                ) : null}
+                {sessionAgent !== undefined || showsAttempts ? <MenuSeparator /> : null}
+                {sessionAgent !== undefined ? (
+                  <MenuItem
+                    render={
+                      <Link
+                        to="/agents/$environmentId/$agentId"
+                        params={{ environmentId, agentId: sessionAgent.id }}
+                      />
+                    }
+                  >
+                    Open @{sessionAgent.name}
+                  </MenuItem>
+                ) : null}
+                {showsAttempts ? (
+                  <MenuItem
+                    render={
+                      <Link
+                        to="/attempts/$environmentId/$cardId"
+                        params={{ environmentId, cardId: card.id }}
+                      />
+                    }
+                  >
+                    Attempts
+                  </MenuItem>
+                ) : null}
+              </MenuPopup>
+            </Menu>
+            <SheetClose
+              render={
+                <Button
+                  ref={props.closeButton}
+                  size="icon-xs"
+                  variant="ghost-muted"
+                  aria-label="Close"
+                />
+              }
+            >
+              <XIcon />
+            </SheetClose>
+          </div>
         </div>
-        <SheetTitle className="pe-8 text-[22px] font-bold leading-tight tracking-[-0.015em]">
+        <SheetTitle className="text-[22px] font-bold leading-tight tracking-[-0.015em]">
           {card.title}
         </SheetTitle>
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-[13px] text-muted-foreground">
+        <div className="mt-1 flex flex-wrap items-center gap-x-[22px] gap-y-1.5 text-[13px] text-muted-foreground">
           {sessionAgent !== undefined ? (
-            <span className="inline-flex items-center gap-2">
+            <Link
+              to="/agents/$environmentId/$agentId"
+              params={{ environmentId, agentId: sessionAgent.id }}
+              className="inline-flex items-center gap-2 rounded-sm hover:text-foreground"
+            >
               <AgentAvatar name={sessionAgent.name} spark={cardSparkState(card)} />
               {sessionAgent.name}
-            </span>
+            </Link>
           ) : null}
           <span className="inline-flex items-center gap-2">
             <SpendBar spentUsd={card.spentUsd} capUsd={card.budgetCapUsd} className="w-22" />
@@ -277,59 +487,31 @@ function CardSheetBody(props: {
             />
             Fix rounds
           </span>
-        </div>
-        <p className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
-          <span>
-            {statusLabel(card.status)}
-            {card.status === "landed" && card.landing?.mergedOnHostUrl !== undefined ? (
-              <>
-                {" · "}
-                <a
-                  href={card.landing.mergedOnHostUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="underline-offset-2 hover:text-foreground hover:underline"
-                >
-                  merged on the host
-                </a>
-              </>
-            ) : null}
-          </span>
-          {card.ownerSession !== null ? (
-            <span>· {CARD_SESSION_LABEL[card.ownerSession.state]}</span>
-          ) : null}
-          {sessionAgent !== undefined ? (
-            <Link
-              to="/agents/$environmentId/$agentId"
-              params={{ environmentId, agentId: sessionAgent.id }}
-              className="underline-offset-2 hover:text-foreground hover:underline"
-            >
-              · Open @{sessionAgent.name}
-            </Link>
-          ) : null}
           {card.revertsCardId !== null ? (
-            <span>· Reverts {cardById.get(card.revertsCardId)?.title ?? "a landed card"}</span>
+            <span className="min-w-0 truncate text-muted-foreground/55">
+              Reverts {cardById.get(card.revertsCardId)?.title ?? "a landed card"}
+            </span>
           ) : null}
-          {card.status === "ready" || card.attemptGroupId !== null ? (
+          {showsAttempts ? (
             <Link
               to="/attempts/$environmentId/$cardId"
               params={{ environmentId, cardId: card.id }}
-              className="underline-offset-2 hover:text-foreground hover:underline"
+              className="text-info-foreground hover:underline"
             >
-              · Attempts
+              Attempts
             </Link>
           ) : null}
-        </p>
+        </div>
       </SheetHeader>
-      <SheetPanel className="flex flex-col gap-5">
+      <SheetPanel className="flex flex-col gap-6 px-7 pb-7">
         {refusal !== null ? (
           <div
             role="alert"
-            className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/8 px-3 py-2 text-xs text-destructive-foreground"
+            className="flex items-start gap-2 rounded-xl bg-destructive/12 px-3.5 py-2.5 text-xs text-destructive-foreground"
           >
             <p className="min-w-0 flex-1 break-words">{refusal}</p>
             <Button
-              size="icon-sm"
+              size="icon-xs"
               variant="ghost-muted"
               aria-label="Dismiss"
               onClick={() => setRefusal(null)}
@@ -338,179 +520,154 @@ function CardSheetBody(props: {
             </Button>
           </div>
         ) : null}
-        <Section label="Move">
-          {open && card.status !== "triage" ? (
-            <div className="flex flex-wrap items-center gap-1.5">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  card.paused === null
-                    ? decideOn("card.pause", "The card was not paused")
-                    : decideOn("card.resume", "The card was not resumed")
-                }
-              >
-                {card.paused === null ? "Pause" : "Resume"}
-              </Button>
-              {card.paused !== null ? (
+
+        {card.status === "triage" && card.proposalReasoning !== null ? (
+          <p className="px-1 text-[13px] text-muted-foreground">{card.proposalReasoning}</p>
+        ) : null}
+
+        {editing ? (
+          <>
+            <Section label="Card">
+              <Input
+                aria-label="Title"
+                value={title}
+                disabled={!open}
+                onChange={(event) => setTitle(event.target.value)}
+              />
+              <Textarea
+                aria-label="Spec"
+                placeholder="What should be built, and how you will know it is done"
+                value={spec}
+                disabled={!open}
+                onChange={(event) => setSpec(event.target.value)}
+              />
+              {open ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <ActionButton
+                    tone="primary"
+                    disabled={!edited || title.trim().length === 0}
+                    onClick={() =>
+                      void update({
+                        environmentId,
+                        input: {
+                          cardId: card.id,
+                          ...(title.trim() !== card.title ? { title: title.trim() } : {}),
+                          ...(spec !== card.spec ? { spec } : {}),
+                        },
+                      }).then(refused("The card was not saved"))
+                    }
+                  >
+                    Save
+                  </ActionButton>
+                  {card.specState === "draft" ? (
+                    <>
+                      <DisabledReason
+                        reason={
+                          card.spec.trim().length === 0
+                            ? "Write and save a spec first, or skip it."
+                            : null
+                        }
+                      >
+                        <ActionButton
+                          disabled={card.spec.trim().length === 0 || edited}
+                          onClick={() => decideOn("card.spec.approve", "The spec was not approved")}
+                        >
+                          Approve spec
+                        </ActionButton>
+                      </DisabledReason>
+                      <ActionButton
+                        onClick={() => decideOn("card.spec.skip", "The spec was not skipped")}
+                      >
+                        Skip spec
+                      </ActionButton>
+                    </>
+                  ) : (
+                    <>
+                      <StatusPill
+                        label={card.specState === "approved" ? "Spec approved" : "Spec skipped"}
+                        tone={card.specState === "approved" ? "green" : "gray"}
+                      />
+                      <RowLink
+                        onClick={() => decideOn("card.spec.reopen", "The spec was not reopened")}
+                      >
+                        Reopen spec
+                      </RowLink>
+                    </>
+                  )}
+                </div>
+              ) : null}
+            </Section>
+            {criteriaEditor}
+          </>
+        ) : null}
+
+        {open && (card.paused !== null || card.waitReason !== null) ? (
+          <Group>
+            {card.paused !== null ? (
+              <Row className="py-2">
+                <PauseIcon aria-hidden className="size-[18px] shrink-0 text-muted-foreground" />
                 <DisabledReason reason={reasonLabel(card.paused.reason).hint}>
-                  <span className="text-xs text-muted-foreground">
+                  <span className="min-w-0 text-muted-foreground">
                     Paused · {reasonLine(card.paused.reason)}
                   </span>
                 </DisabledReason>
-              ) : card.waitReason !== null ? (
-                <DisabledReason reason={reasonLabel(card.waitReason).hint}>
-                  <span className="text-xs text-muted-foreground">
-                    {reasonLine(card.waitReason)}
-                  </span>
-                </DisabledReason>
-              ) : null}
-            </div>
-          ) : null}
-          {open && card.paused !== null && card.ownerSession !== null ? (
-            <RestoreControl card={card} environmentId={environmentId} />
-          ) : null}
-          {card.status === "landed" ? (
-            <p className="text-xs text-muted-foreground">A landed card is finished.</p>
-          ) : (
-            <div className="flex flex-wrap gap-1.5">
-              {cardMoveActions(card.status, mergeRefusal).map((action) => (
-                <DisabledReason key={action.column} reason={action.reason}>
-                  <Button
-                    size="sm"
-                    variant={action.type === "card.abandon" ? "destructive-outline" : "outline"}
-                    disabled={action.type === null}
-                    onClick={() => {
-                      if (action.type !== null)
-                        decideOn(action.type, "The card stays where it was");
-                    }}
-                  >
-                    {action.label}
-                  </Button>
-                </DisabledReason>
-              ))}
-            </div>
-          )}
-          {card.status === "triage" ? (
-            <div className="flex flex-wrap items-center gap-1.5">
-              <ApproveAndStart card={card} agents={props.agents} environmentId={environmentId} />
-            </div>
-          ) : null}
-          {card.status === "triage" && card.proposalReasoning !== null ? (
-            <p className="text-xs text-muted-foreground">{card.proposalReasoning}</p>
-          ) : null}
-        </Section>
-
-        <Section label="Card">
-          <Input
-            aria-label="Title"
-            value={title}
-            disabled={!open}
-            onChange={(event) => setTitle(event.target.value)}
-          />
-          <Textarea
-            aria-label="Spec"
-            placeholder="What should be built, and how you will know it is done"
-            value={spec}
-            disabled={!open}
-            onChange={(event) => setSpec(event.target.value)}
-          />
-          {open ? (
-            <div className="flex flex-wrap items-center gap-1.5">
-              <Button
-                size="sm"
-                disabled={!edited || title.trim().length === 0}
-                onClick={() =>
-                  void update({
-                    environmentId,
-                    input: {
-                      cardId: card.id,
-                      ...(title.trim() !== card.title ? { title: title.trim() } : {}),
-                      ...(spec !== card.spec ? { spec } : {}),
-                    },
-                  }).then(refused("The card was not saved"))
-                }
-              >
-                Save
-              </Button>
-              {card.specState === "draft" ? (
-                <>
-                  <DisabledReason
-                    reason={
-                      card.spec.trim().length === 0
-                        ? "Write and save a spec first, or skip it."
-                        : null
-                    }
-                  >
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={card.spec.trim().length === 0 || edited}
-                      onClick={() => decideOn("card.spec.approve", "The spec was not approved")}
+                {card.status !== "triage" ? (
+                  <Trail>
+                    <ActionButton
+                      tone="primary"
+                      onClick={() => decideOn("card.resume", "The card was not resumed")}
                     >
-                      Approve spec
-                    </Button>
-                  </DisabledReason>
-                  <Button
-                    size="sm"
-                    variant="ghost-muted"
-                    onClick={() => decideOn("card.spec.skip", "The spec was not skipped")}
-                  >
-                    Skip spec
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <span className="text-xs text-muted-foreground">
-                    Spec {card.specState === "approved" ? "approved" : "skipped"}
+                      Resume
+                    </ActionButton>
+                  </Trail>
+                ) : null}
+              </Row>
+            ) : (
+              <Row className="py-2">
+                <ClockIcon aria-hidden className="size-[18px] shrink-0 text-muted-foreground" />
+                <DisabledReason reason={card.waitReason === null ? null : reasonLabel(card.waitReason).hint}>
+                  <span className="min-w-0 text-muted-foreground">
+                    {card.waitReason === null ? "" : reasonLine(card.waitReason)}
                   </span>
-                  <Button
-                    size="sm"
-                    variant="ghost-muted"
-                    onClick={() => decideOn("card.spec.reopen", "The spec was not reopened")}
-                  >
-                    Reopen spec
-                  </Button>
-                </>
-              )}
-            </div>
-          ) : null}
-        </Section>
-
-        {card.kind === "plan" && card.plan !== null ? (
-          <Section label="Plan">
-            <PlanReview card={card} cards={props.cards} environmentId={environmentId} />
-          </Section>
-        ) : null}
-
-        {card.kind === "migration" && card.migration !== null ? (
-          <Section label="Migration">
-            <MigrationPanel card={card} environmentId={environmentId} />
-          </Section>
+                </DisabledReason>
+              </Row>
+            )}
+            {card.paused !== null && card.ownerSession !== null ? (
+              <RestoreControl card={card} environmentId={environmentId} />
+            ) : null}
+          </Group>
         ) : null}
 
         {open && card.attention.length > 0 ? (
           <Section label="Waiting on you">
-            <ol className="flex flex-col gap-3">
+            <Group>
               {card.attention.map((item) => (
-                <li key={item.activityId} className="flex flex-col gap-1">
-                  <span className="text-xs text-muted-foreground">
+                <Row key={item.activityId} className="flex-col items-stretch gap-1.5 py-3">
+                  <span className="text-xs text-muted-foreground/55">
                     {reasonLabel({ code: item.code, text: item.text }).label}
                   </span>
-                  <p className="whitespace-pre-wrap break-words text-sm">{item.text}</p>
+                  <p className="whitespace-pre-wrap break-words">{item.text}</p>
                   <AttentionActions card={card} item={item} environmentId={environmentId} onCard />
-                </li>
+                </Row>
               ))}
-            </ol>
+            </Group>
           </Section>
         ) : null}
 
-        {open ? <CardQuestionsSection card={card} environmentId={environmentId} /> : null}
+        {open && cardQuestionsOf(card).length > 0 ? (
+          <Section label="Questions for you">
+            <Group className="p-3.5">
+              <CardQuestions card={card} environmentId={environmentId} agentName={sessionAgent?.name} />
+            </Group>
+          </Section>
+        ) : null}
 
         {/* A migration's tune checkpoint is answered in its panel, with the instructions editor. */}
         {open && card.checkpoint !== null && card.migration?.phase !== "tuning" ? (
           <Section label="Checkpoint">
-            <CheckpointControls card={card} environmentId={environmentId} />
+            <Group className="p-3.5">
+              <CheckpointControls card={card} environmentId={environmentId} />
+            </Group>
           </Section>
         ) : null}
 
@@ -519,38 +676,43 @@ function CardSheetBody(props: {
               .filter((question) => question.kind === "refsChanged")
               .map((report) => (
                 <Section key={report.activityId} label="Refs changed outside this card">
-                  <RefsChangedControls
-                    cardId={card.id}
-                    report={report}
-                    environmentId={environmentId}
-                  />
+                  <Group className="p-3.5">
+                    <RefsChangedControls
+                      cardId={card.id}
+                      report={report}
+                      environmentId={environmentId}
+                    />
+                  </Group>
                 </Section>
               ))
           : null}
 
-        {card.evidence !== null || card.status === "inReview" || card.status === "landing" ? (
-          <Section label="Review">
-            {card.status === "inReview" ? (
-              // Cards that reached review before evidence existed get theirs here; any card may recapture.
-              <Button
-                size="sm"
-                variant="outline"
-                className="self-start"
-                onClick={() => decideOn("card.evidence.capture", "Evidence was not requested")}
-              >
-                Capture evidence
-              </Button>
-            ) : null}
-            <CardReview
-              card={card}
-              evidence={evidence}
-              activities={activities}
-              verdict={activity.data?.verdict ?? null}
-              verificationRequired={verificationRequired}
-              agents={props.agents}
-              environmentId={environmentId}
-            />
+        {card.kind === "plan" && card.plan !== null ? (
+          <PlanReview card={card} cards={props.cards} environmentId={environmentId} />
+        ) : null}
+
+        {card.kind === "migration" && card.migration !== null ? (
+          <Section label="Migration">
+            <MigrationPanel card={card} environmentId={environmentId} />
           </Section>
+        ) : null}
+
+        {card.evidence !== null || card.status === "inReview" || card.status === "landing" ? (
+          <CardReview
+            card={card}
+            evidence={evidence}
+            activities={activities}
+            verdict={activity.data?.verdict ?? null}
+            verificationRequired={verificationRequired}
+            agents={props.agents}
+            environmentId={environmentId}
+            // Cards that reached review before evidence existed get theirs here; any card may recapture.
+            onCapture={
+              card.status === "inReview"
+                ? () => decideOn("card.evidence.capture", "Evidence was not requested")
+                : undefined
+            }
+          />
         ) : null}
 
         {card.landing !== null || card.status === "inReview" || card.status === "landing" ? (
@@ -570,324 +732,372 @@ function CardSheetBody(props: {
           </Section>
         ) : null}
 
-        <div ref={criteriaSection} className="contents">
-          <Section label="Acceptance criteria">
-            <CardCriteria card={card} environmentId={environmentId} />
-          </Section>
-        </div>
+        {!editing && criteriaInBody ? criteriaEditor : null}
 
         {card.status === "triage" || card.status === "ready" ? (
           <Section label="Before it starts">
-            <CardPreviewPanel
-              estimate={card.estimate}
-              agent={previewAgent}
-              hint={
-                previewAgent === null
-                  ? null
-                  : metricsLine(
-                      previewAgent.name,
-                      templateMetrics(props.cards, props.now).get(previewAgent.id),
-                    )
-              }
-            />
+            <Group className="p-3.5">
+              <CardPreviewPanel
+                estimate={card.estimate}
+                agent={previewAgent}
+                hint={
+                  previewAgent === null
+                    ? null
+                    : metricsLine(
+                        previewAgent.name,
+                        templateMetrics(props.cards, props.now).get(previewAgent.id),
+                      )
+                }
+              />
+            </Group>
           </Section>
         ) : null}
 
         {open ? (
           <div ref={agentSection} className="contents">
             <Section label="Agent">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <Select
-                  value={card.delegateAgentId}
-                  disabled={card.status === "triage"}
-                  onValueChange={(value) => {
-                    if (value !== null && value !== card.delegateAgentId) {
-                      void assign({
-                        environmentId,
-                        input: { cardId: card.id, agentId: value as AgentId },
-                      }).then(refused("The agent was not assigned"));
-                    }
-                  }}
-                >
-                  <SelectTrigger aria-label="Agent" className="w-auto min-w-40">
-                    <SelectValue>
-                      {(value: string | null) =>
-                        value === null
-                          ? "No agent"
-                          : `@${props.agents.find((agent) => agent.id === value)?.name ?? "archived agent"}`
+              <Group>
+                <Row className="flex-wrap py-2">
+                  <Select
+                    value={card.delegateAgentId}
+                    disabled={card.status === "triage"}
+                    onValueChange={(value) => {
+                      if (value !== null && value !== card.delegateAgentId) {
+                        void assign({
+                          environmentId,
+                          input: { cardId: card.id, agentId: value as AgentId },
+                        }).then(refused("The agent was not assigned"));
                       }
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectPopup>
-                    {ownerCandidates(props.agents, card.kind, card.delegateAgentId).map((agent) => (
-                      <SelectItem key={agent.id} value={agent.id}>
-                        @{agent.name}
-                      </SelectItem>
-                    ))}
-                  </SelectPopup>
-                </Select>
-                {card.delegateAgentId !== null ? (
-                  <Button
-                    size="sm"
-                    variant="ghost-muted"
-                    onClick={() => decideOn("card.unassign", "The agent was not unassigned")}
+                    }}
                   >
-                    Unassign
-                  </Button>
-                ) : null}
-              </div>
-              {card.status === "triage" ? (
-                <p className="text-xs text-muted-foreground">{APPROVE_BEFORE_ASSIGN_TEXT}</p>
-              ) : null}
-              <Textarea
-                aria-label="Message to the card's agent"
-                placeholder={
-                  card.status === "inReview"
-                    ? "A message, or what to change before it lands"
-                    : "A message to the card's agent"
-                }
-                value={message}
-                onChange={(event) => setMessage(event.target.value)}
-              />
-              <div className="flex flex-wrap gap-1.5">
-                <DisabledReason
-                  reason={card.delegateAgentId === null ? "Assign an agent first." : null}
-                >
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={card.delegateAgentId === null || trimmedMessage.length === 0}
-                    onClick={() => send("message")}
+                    <SelectTrigger aria-label="Agent" className="w-auto min-w-40">
+                      <SelectValue>
+                        {(value: string | null) =>
+                          value === null
+                            ? "No agent"
+                            : `@${props.agents.find((agent) => agent.id === value)?.name ?? "archived agent"}`
+                        }
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup>
+                      {ownerCandidates(props.agents, card.kind, card.delegateAgentId).map(
+                        (agent) => (
+                          <SelectItem key={agent.id} value={agent.id}>
+                            @{agent.name}
+                          </SelectItem>
+                        ),
+                      )}
+                    </SelectPopup>
+                  </Select>
+                  {card.status === "triage" ? (
+                    <span className="text-xs text-muted-foreground/55">
+                      {APPROVE_BEFORE_ASSIGN_TEXT}
+                    </span>
+                  ) : null}
+                  {card.delegateAgentId !== null ? (
+                    <Trail>
+                      <RowLink
+                        onClick={() => decideOn("card.unassign", "The agent was not unassigned")}
+                      >
+                        Unassign
+                      </RowLink>
+                    </Trail>
+                  ) : null}
+                </Row>
+                <Row className="flex-col items-stretch gap-2 py-3">
+                  <Textarea
+                    aria-label="Message to the card's agent"
+                    placeholder="A message to the card's agent"
+                    value={message}
+                    onChange={(event) => setMessage(event.target.value)}
+                  />
+                  <DisabledReason
+                    reason={card.delegateAgentId === null ? "Assign an agent first." : null}
                   >
-                    Send to agent
-                  </Button>
-                </DisabledReason>
-                {card.status === "inReview" ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={trimmedMessage.length === 0}
-                    onClick={() => send("review")}
-                  >
-                    Request changes
-                  </Button>
-                ) : null}
-              </div>
+                    <ActionButton
+                      className="self-end"
+                      disabled={card.delegateAgentId === null || trimmedMessage.length === 0}
+                      onClick={() => send("message")}
+                    >
+                      Send to agent
+                    </ActionButton>
+                  </DisabledReason>
+                </Row>
+              </Group>
             </Section>
           </div>
         ) : null}
 
-        <Section label="Relations">
-          {card.relations.length > 0 ? (
-            <ul className="flex flex-col gap-1">
-              {card.relations.map((relation) => (
-                <li
-                  key={`${relation.kind}:${relation.cardId}`}
-                  className="flex min-w-0 items-center gap-2 text-sm"
-                >
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    {CARD_RELATION_LABEL[relation.kind]}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate">
-                    {cardById.get(relation.cardId)?.title ?? "A card on another board"}
-                  </span>
-                  <Button
-                    size="icon-xs"
-                    variant="ghost-muted"
-                    aria-label="Remove relation"
-                    onClick={() =>
-                      void removeRelation({
-                        environmentId,
-                        input: {
-                          cardId: card.id,
-                          kind: relation.kind,
-                          otherCardId: relation.cardId,
-                        },
-                      }).then(refused("The relation was not removed"))
-                    }
-                  >
-                    <XIcon />
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Select
-              value={relationKind}
-              onValueChange={(value) => setRelationKind(value ?? "blockedBy")}
-            >
-              <SelectTrigger aria-label="Relation" className="w-auto min-w-28">
-                <SelectValue>
-                  {(value: CardRelationKind | null) => CARD_RELATION_LABEL[value ?? "blockedBy"]}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup>
-                {CardRelationKind.literals.map((kind) => (
-                  <SelectItem key={kind} value={kind}>
-                    {CARD_RELATION_LABEL[kind]}
-                  </SelectItem>
+        {editing || card.relations.length > 0 ? (
+          <Section label="Relations">
+            {card.relations.length > 0 ? (
+              <Group>
+                {card.relations.map((relation) => (
+                  <Row key={`${relation.kind}:${relation.cardId}`}>
+                    <span className="shrink-0 text-xs text-muted-foreground/55">
+                      {CARD_RELATION_LABEL[relation.kind]}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">
+                      {cardById.get(relation.cardId)?.title ?? "A card on another board"}
+                    </span>
+                    {editing ? (
+                      <Button
+                        size="icon-xs"
+                        variant="ghost-muted"
+                        aria-label="Remove relation"
+                        onClick={() =>
+                          void removeRelation({
+                            environmentId,
+                            input: {
+                              cardId: card.id,
+                              kind: relation.kind,
+                              otherCardId: relation.cardId,
+                            },
+                          }).then(refused("The relation was not removed"))
+                        }
+                      >
+                        <XIcon />
+                      </Button>
+                    ) : null}
+                  </Row>
                 ))}
-              </SelectPopup>
-            </Select>
-            <Select
-              value={relationCardId}
-              onValueChange={(value) => setRelationCardId(value as CardId | null)}
-            >
-              <SelectTrigger aria-label="Other card" className="w-auto min-w-40 max-w-56">
-                <SelectValue>
-                  {(value: string | null) =>
-                    value === null ? "Choose a card" : (cardById.get(value as CardId)?.title ?? "")
-                  }
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup>
-                {props.cards
-                  .filter((entry) => entry.id !== card.id)
-                  .map((entry) => (
-                    <SelectItem key={entry.id} value={entry.id}>
-                      {entry.title}
-                    </SelectItem>
-                  ))}
-              </SelectPopup>
-            </Select>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={relationCardId === null}
-              onClick={() => {
-                if (relationCardId === null) return;
-                const input = { cardId: card.id, kind: relationKind, otherCardId: relationCardId };
-                void addRelation({ environmentId, input }).then((result) => {
-                  refused("The relation was not added")(result);
-                  if (result._tag === "Success") {
-                    undoToast(environmentId, { type: "card.relation.add", ...input });
-                  }
-                });
-                setRelationCardId(null);
-              }}
-            >
-              Add
-            </Button>
-          </div>
-        </Section>
-
-        <Section label="Budget">
-          <p className="text-xs tabular-nums text-muted-foreground">
-            ${card.spentUsd.toFixed(2)} spent of a ${card.budgetCapUsd.toFixed(2)} cap
-          </p>
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Input
-              aria-label="Budget cap in dollars"
-              type="number"
-              min={0}
-              step={1}
-              className="w-28"
-              value={capUsd}
-              onChange={(event) => setCapUsd(event.target.value)}
-            />
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!Number.isFinite(cap) || cap <= 0 || cap === card.budgetCapUsd}
-              onClick={() =>
-                void setBudget({ environmentId, input: { cardId: card.id, capUsd: cap } }).then(
-                  refused("The budget was not set"),
-                )
-              }
-            >
-              Set cap
-            </Button>
-            {card.unpricedTurns > 0 ? (
-              card.acceptsUnpriced ? (
-                <Button
-                  size="sm"
-                  variant="ghost-muted"
-                  onClick={() => decideOn("card.unpriced.refuse", "The card still runs uncapped")}
-                >
-                  Stop running uncapped
-                </Button>
-              ) : (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() =>
-                    decideOn("card.unpriced.accept", "The card was not allowed to run uncapped")
-                  }
-                >
-                  Run uncapped
-                </Button>
-              )
+              </Group>
             ) : null}
-          </div>
-        </Section>
+            {editing ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  value={relationKind}
+                  onValueChange={(value) => setRelationKind(value ?? "blockedBy")}
+                >
+                  <SelectTrigger aria-label="Relation" className="w-auto min-w-28">
+                    <SelectValue>
+                      {(value: CardRelationKind | null) =>
+                        CARD_RELATION_LABEL[value ?? "blockedBy"]
+                      }
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup>
+                    {CardRelationKind.literals.map((kind) => (
+                      <SelectItem key={kind} value={kind}>
+                        {CARD_RELATION_LABEL[kind]}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+                <Select
+                  value={relationCardId}
+                  onValueChange={(value) => setRelationCardId(value as CardId | null)}
+                >
+                  <SelectTrigger aria-label="Other card" className="w-auto min-w-40 max-w-56">
+                    <SelectValue>
+                      {(value: string | null) =>
+                        value === null
+                          ? "Choose a card"
+                          : (cardById.get(value as CardId)?.title ?? "")
+                      }
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup>
+                    {props.cards
+                      .filter((entry) => entry.id !== card.id)
+                      .map((entry) => (
+                        <SelectItem key={entry.id} value={entry.id}>
+                          {entry.title}
+                        </SelectItem>
+                      ))}
+                  </SelectPopup>
+                </Select>
+                <ActionButton
+                  disabled={relationCardId === null}
+                  onClick={() => {
+                    if (relationCardId === null) return;
+                    const input = {
+                      cardId: card.id,
+                      kind: relationKind,
+                      otherCardId: relationCardId,
+                    };
+                    void addRelation({ environmentId, input }).then((result) => {
+                      refused("The relation was not added")(result);
+                      if (result._tag === "Success") {
+                        undoToast(environmentId, { type: "card.relation.add", ...input });
+                      }
+                    });
+                    setRelationCardId(null);
+                  }}
+                >
+                  Add
+                </ActionButton>
+              </div>
+            ) : null}
+          </Section>
+        ) : null}
 
-        {open ? (
-          <Section label="Needs you">
-            <div className="flex flex-wrap items-center gap-1.5">
-              {snoozed ? (
-                <>
-                  <span className="text-xs text-muted-foreground">
-                    Snoozed{" "}
-                    {card.snoozedUntil === null
-                      ? "until it changes"
-                      : `until ${new Date(card.snoozedUntil).toLocaleString()}`}
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="ghost-muted"
+        {editing ? (
+          <Section
+            label="Budget"
+            trailing={
+              <span className="tabular-nums">
+                ${card.spentUsd.toFixed(2)} spent of a ${card.budgetCapUsd.toFixed(2)} cap
+              </span>
+            }
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                aria-label="Budget cap in dollars"
+                type="number"
+                min={0}
+                step={1}
+                className="w-28"
+                value={capUsd}
+                onChange={(event) => setCapUsd(event.target.value)}
+              />
+              <ActionButton
+                disabled={!Number.isFinite(cap) || cap <= 0 || cap === card.budgetCapUsd}
+                onClick={() =>
+                  void setBudget({ environmentId, input: { cardId: card.id, capUsd: cap } }).then(
+                    refused("The budget was not set"),
+                  )
+                }
+              >
+                Set cap
+              </ActionButton>
+              {card.unpricedTurns > 0 ? (
+                card.acceptsUnpriced ? (
+                  <RowLink
                     onClick={() =>
-                      void unsnooze({ environmentId, input: { cardId: card.id } }).then(
-                        refused("The card was not woken"),
-                      )
+                      decideOn("card.unpriced.refuse", "The card still runs uncapped")
                     }
                   >
-                    Wake
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Button
-                    size="sm"
-                    variant="ghost-muted"
+                    Stop running uncapped
+                  </RowLink>
+                ) : (
+                  <ActionButton
                     onClick={() =>
-                      void snooze({
-                        environmentId,
-                        input: {
-                          cardId: card.id,
-                          snoozedUntil: new Date(Date.now() + HOUR_MS).toISOString(),
-                        },
-                      }).then(afterSnooze)
+                      decideOn("card.unpriced.accept", "The card was not allowed to run uncapped")
                     }
                   >
-                    Snooze 1 hour
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost-muted"
-                    onClick={() =>
-                      void snooze({
-                        environmentId,
-                        input: { cardId: card.id, snoozedUntil: null },
-                      }).then(afterSnooze)
-                    }
-                  >
-                    Snooze until it changes
-                  </Button>
-                </>
-              )}
+                    Run uncapped
+                  </ActionButton>
+                )
+              ) : null}
             </div>
           </Section>
         ) : null}
 
-        <Section label="Activity">
-          <CardActivityTimeline
-            activities={activities}
-            agents={props.agents}
-            error={activity.error}
-          />
-        </Section>
+        <div className="flex flex-col gap-2">
+          <Group>
+            <button
+              type="button"
+              aria-expanded={activityOpen}
+              className="flex min-h-[46px] cursor-pointer items-center gap-3 px-3.5 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+              onClick={() => setActivityOpen((current) => !current)}
+            >
+              <span className="font-semibold text-muted-foreground">Activity</span>
+              <span className="tabular-nums text-xs text-muted-foreground/55">
+                {activities.length}
+              </span>
+              <ChevronRightIcon
+                aria-hidden
+                className={cn(
+                  "ms-auto size-3 text-muted-foreground/55 transition-transform duration-150 motion-reduce:transition-none",
+                  activityOpen && "rotate-90",
+                )}
+              />
+            </button>
+          </Group>
+          {activityOpen ? (
+            <CardActivityTimeline
+              activities={activities}
+              agents={props.agents}
+              error={activity.error}
+            />
+          ) : null}
+        </div>
       </SheetPanel>
+
+      {card.status === "inReview" || card.status === "triage" ? (
+        <div className="flex flex-col gap-2.5 bg-sidebar px-7 py-4 shadow-[inset_0_0.5px_var(--border)]">
+          {requesting ? (
+            <Textarea
+              aria-label="What to change before it lands"
+              placeholder="What to change before it lands"
+              value={message}
+              autoFocus
+              onChange={(event) => setMessage(event.target.value)}
+            />
+          ) : null}
+          <div className="flex flex-wrap items-center gap-2.5">
+            {branch !== null ? (
+              <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground/55">
+                <BranchGlyph className="shrink-0" />
+                <span className="truncate">{branch}</span>
+              </span>
+            ) : null}
+            <div className="ms-auto flex flex-wrap items-center gap-2.5">
+              {card.status === "triage" ? (
+                <>
+                  <ActionButton
+                    className={FOOTER_BUTTON}
+                    onClick={() => decideOn("card.abandon", "The card was not dropped")}
+                  >
+                    Drop
+                  </ActionButton>
+                  <ApproveAndStart
+                    card={card}
+                    agents={props.agents}
+                    environmentId={environmentId}
+                    className={cn(FOOTER_BUTTON, "text-[13px]")}
+                  />
+                </>
+              ) : requesting ? (
+                <>
+                  <ActionButton
+                    className={FOOTER_BUTTON}
+                    onClick={() => {
+                      setRequesting(false);
+                      setMessage("");
+                    }}
+                  >
+                    Cancel
+                  </ActionButton>
+                  <ActionButton
+                    tone="primary"
+                    className={FOOTER_BUTTON}
+                    disabled={trimmedMessage.length === 0}
+                    onClick={() => {
+                      send("review");
+                      setRequesting(false);
+                    }}
+                  >
+                    Request Changes
+                  </ActionButton>
+                </>
+              ) : (
+                <>
+                  <ActionButton className={FOOTER_BUTTON} onClick={() => setRequesting(true)}>
+                    Request Changes
+                  </ActionButton>
+                  {merge !== undefined ? (
+                    <DisabledReason reason={merge.reason}>
+                      <ActionButton
+                        tone="primary"
+                        className={FOOTER_BUTTON}
+                        disabled={merge.type === null}
+                        onClick={() => {
+                          if (merge.type !== null)
+                            decideOn(merge.type, "The card stays where it was");
+                        }}
+                      >
+                        {merge.label}
+                      </ActionButton>
+                    </DisabledReason>
+                  ) : null}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }
@@ -914,42 +1124,43 @@ function RestoreControl(props: {
   const chosen = turn ?? String(turns.at(-1));
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <Select value={chosen} onValueChange={(value) => setTurn(value)}>
-        <SelectTrigger aria-label="Turn to restore before" className="w-auto min-w-36">
-          <SelectValue>{(value: string | null) => `Before turn ${value ?? chosen}`}</SelectValue>
-        </SelectTrigger>
-        <SelectPopup>
-          {turns.map((count) => (
-            <SelectItem key={count} value={String(count)}>
-              Before turn {count}
-            </SelectItem>
-          ))}
-        </SelectPopup>
-      </Select>
-      <DisabledReason reason={refusal}>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={refusal !== null || sending}
-          onClick={async () => {
-            setSending(true);
-            const result = await restore({
-              environmentId,
-              input: { cardId: card.id, turnCount: Number(chosen) - 1 },
-            });
-            setSending(false);
-            toastCommandFailure(
-              result,
-              "The worktree was not restored",
-              "The request was refused.",
-            );
-          }}
-        >
-          Restore
-        </Button>
-      </DisabledReason>
-    </div>
+    <Row className="flex-wrap py-2">
+      <span className="text-muted-foreground">Restore the worktree</span>
+      <Trail>
+        <Select value={chosen} onValueChange={(value) => setTurn(value)}>
+          <SelectTrigger aria-label="Turn to restore before" className="w-auto min-w-36">
+            <SelectValue>{(value: string | null) => `Before turn ${value ?? chosen}`}</SelectValue>
+          </SelectTrigger>
+          <SelectPopup>
+            {turns.map((count) => (
+              <SelectItem key={count} value={String(count)}>
+                Before turn {count}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+        <DisabledReason reason={refusal}>
+          <ActionButton
+            disabled={refusal !== null || sending}
+            onClick={async () => {
+              setSending(true);
+              const result = await restore({
+                environmentId,
+                input: { cardId: card.id, turnCount: Number(chosen) - 1 },
+              });
+              setSending(false);
+              toastCommandFailure(
+                result,
+                "The worktree was not restored",
+                "The request was refused.",
+              );
+            }}
+          >
+            Restore
+          </ActionButton>
+        </DisabledReason>
+      </Trail>
+    </Row>
   );
 }
 
@@ -979,16 +1190,22 @@ function OutcomeControls(props: {
   const refusal = revertRefusal(card, props.cards);
   const heuristic = card.outcome?.signals.find((signal) => signal.code !== "outcomeSetByPerson");
 
+  let summary: ReactNode;
+  if (card.outcome === null) {
+    summary =
+      card.status === "landed"
+        ? "Iskra decides how it turned out a week after it landed."
+        : "No outcome yet.";
+  } else {
+    summary = `${OUTCOME_LABEL[card.outcome.state]}${heuristic !== undefined ? ` · ${heuristic.text} (a heuristic)` : ""}`;
+  }
+
   return (
-    <div className="flex flex-col gap-2">
-      <p className="text-xs text-muted-foreground">
-        {card.outcome === null
-          ? card.status === "landed"
-            ? "Iskra decides how it turned out a week after it landed."
-            : "No outcome yet."
-          : `${OUTCOME_LABEL[card.outcome.state]}${heuristic !== undefined ? ` · ${heuristic.text} (a heuristic)` : ""}`}
-      </p>
-      <div className="flex flex-wrap items-center gap-1.5">
+    <Group>
+      <Row className="py-2.5">
+        <span className="text-muted-foreground">{summary}</span>
+      </Row>
+      <Row className="flex-wrap gap-2 py-2">
         <Select
           value={state}
           onValueChange={(value) => {
@@ -1026,9 +1243,7 @@ function OutcomeControls(props: {
                 : null
           }
         >
-          <Button
-            size="sm"
-            variant="outline"
+          <ActionButton
             disabled={sending || state === null || note.trim().length === 0}
             onClick={async () => {
               if (state === null) return;
@@ -1043,21 +1258,24 @@ function OutcomeControls(props: {
             }}
           >
             Set outcome
-          </Button>
+          </ActionButton>
         </DisabledReason>
-      </div>
+      </Row>
       {card.status === "landed" ? (
-        <DisabledReason reason={refusal}>
-          <Button
-            size="sm"
-            variant="destructive-outline"
-            className="self-start"
-            disabled={refusal !== null || sending}
-            onClick={() => setConfirming(true)}
-          >
-            Revert…
-          </Button>
-        </DisabledReason>
+        <Row>
+          <span className="text-muted-foreground">Undo this card on the base branch</span>
+          <Trail>
+            <DisabledReason reason={refusal}>
+              <ActionButton
+                tone="destructive"
+                disabled={refusal !== null || sending}
+                onClick={() => setConfirming(true)}
+              >
+                Revert…
+              </ActionButton>
+            </DisabledReason>
+          </Trail>
+        </Row>
       ) : null}
       <AlertDialog open={confirming} onOpenChange={(next) => !sending && setConfirming(next)}>
         <AlertDialogPopup>
@@ -1095,27 +1313,9 @@ function OutcomeControls(props: {
           </AlertDialogFooter>
         </AlertDialogPopup>
       </AlertDialog>
-    </div>
+    </Group>
   );
 }
 
 const NO_ACTIVITIES: ReadonlyArray<CardActivity> = [];
 const NO_EVIDENCE_ITEMS: ReadonlyArray<CardEvidenceItem> = [];
-
-/** The card's open questions, titled only when there are some it answers in place. */
-function CardQuestionsSection(props: Parameters<typeof CardQuestions>[0]) {
-  return cardQuestionsOf(props.card).length > 0 ? (
-    <Section label="Questions for you">
-      <CardQuestions {...props} />
-    </Section>
-  ) : null;
-}
-
-function Section(props: { readonly label: string; readonly children: ReactNode }) {
-  return (
-    <section aria-label={props.label} className="flex flex-col gap-2">
-      <h3 className="text-xs font-medium text-muted-foreground">{props.label}</h3>
-      {props.children}
-    </section>
-  );
-}

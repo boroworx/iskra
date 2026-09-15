@@ -64,12 +64,17 @@ export function CardActivityTimeline(props: {
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-1" role="group" aria-label="Show activity from">
+      <div
+        className="flex items-center gap-0.5 self-start rounded-lg bg-muted p-0.5"
+        role="group"
+        aria-label="Show activity from"
+      >
         {FILTERS.map((entry) => (
           <Button
             key={entry.value}
             size="compact"
-            variant={filter === entry.value ? "outline" : "ghost-muted"}
+            variant={filter === entry.value ? "secondary" : "ghost-muted"}
+            className="h-7 rounded-md px-3"
             aria-pressed={filter === entry.value}
             onClick={() => {
               setFilter(entry.value);
@@ -82,9 +87,9 @@ export function CardActivityTimeline(props: {
       </div>
       {props.error !== null ? <p className="text-xs text-destructive">{props.error}</p> : null}
       {newestFirst.length === 0 ? (
-        <p className="text-xs text-muted-foreground">Nothing here yet.</p>
+        <p className="px-1 text-xs text-muted-foreground">Nothing here yet.</p>
       ) : (
-        <ol className="flex flex-col divide-y divide-border">
+        <ol className="flex flex-col divide-y divide-border rounded-xl bg-card px-3.5 shadow-[0_0_0_0.5px_var(--border)]">
           {newestFirst.slice(0, shown).map((activity) => (
             <ActivityRow
               key={activity.activityId}
@@ -136,7 +141,7 @@ const ActivityRow = memo(function ActivityRow(props: {
   const checksOutput =
     reason?.code === "runChecksResult" || reason?.code === "runChecksRequested";
   return (
-    <li className="flex min-w-0 flex-col gap-0.5 py-2">
+    <li className="flex min-w-0 flex-col gap-0.5 py-2.5">
       <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
         <span className="font-medium text-foreground">{props.authorName}</span>
         <span>{known ? REASON_LABEL[reason.code]!.label : KIND_LABEL[activity.kind]}</span>
@@ -148,7 +153,7 @@ const ActivityRow = memo(function ActivityRow(props: {
         <p
           className={cn(
             "whitespace-pre-wrap break-words",
-            checksOutput ? "font-mono text-xs" : "text-sm",
+            checksOutput ? "font-mono text-xs" : "text-[13px]",
             activity.kind === "error" && "text-destructive-foreground",
           )}
         >
