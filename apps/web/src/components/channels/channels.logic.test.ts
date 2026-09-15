@@ -27,6 +27,7 @@ import {
   channelMemberEntries,
   channelMessageRows,
   deliveryNotes,
+  leadCandidates,
   liveInstances,
   dmTargets,
   mentionCandidates,
@@ -181,6 +182,28 @@ describe("agentListEntries", () => {
       ["backend", "running"],
       ["writer", "blocked"],
     ]);
+  });
+});
+
+describe("leadCandidates", () => {
+  it("offers agents that may lead, counting agents without roles as having the defaults", () => {
+    const agents = [
+      agent("agent-legacy", "legacy"),
+      agent("agent-verifier", "verifier-oc", { roles: ["verifier"] }),
+      agent("agent-builder", "builder", { roles: ["builder", "lead"] }),
+      agent("agent-other", "other", { projectId: otherProjectId }),
+    ];
+    expect(leadCandidates(agents, projectId, null).map((entry) => entry.name)).toEqual([
+      "builder",
+      "legacy",
+    ]);
+  });
+
+  it("keeps the current lead after it loses the role, so the picker still shows it", () => {
+    const agents = [agent("agent-former", "former", { roles: ["verifier"] })];
+    expect(
+      leadCandidates(agents, projectId, AgentId.make("agent-former")).map((entry) => entry.name),
+    ).toEqual(["former"]);
   });
 });
 

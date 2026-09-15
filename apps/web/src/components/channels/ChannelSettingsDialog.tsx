@@ -23,7 +23,7 @@ import {
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
-import { agentListEntries, toChannelName } from "./channels.logic";
+import { agentListEntries, leadCandidates, toChannelName } from "./channels.logic";
 import { PresenceBadge } from "./ChannelView";
 
 const NO_LEAD = "none";
@@ -63,6 +63,10 @@ function ChannelSettingsForm(props: {
   const projectAgents = useMemo(
     () => agentListEntries(agents, channel.projectId),
     [agents, channel.projectId],
+  );
+  const leadAgents = useMemo(
+    () => leadCandidates(agents, channel.projectId, channel.leadAgentId),
+    [agents, channel.projectId, channel.leadAgentId],
   );
   const update = useAtomCommand(channelEnvironment.update);
   const archive = useAtomCommand(channelEnvironment.archive);
@@ -167,7 +171,7 @@ function ChannelSettingsForm(props: {
               </SelectTrigger>
               <SelectPopup>
                 <SelectItem value={NO_LEAD}>No lead</SelectItem>
-                {projectAgents.map((agent) => (
+                {leadAgents.map((agent) => (
                   <SelectItem key={agent.id} value={agent.id}>
                     @{agent.name}
                   </SelectItem>

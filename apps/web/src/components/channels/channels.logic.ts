@@ -12,6 +12,7 @@ import type {
   ProjectId,
   ThreadId,
 } from "@iskra/contracts";
+import { DEFAULT_AGENT_ROLES } from "@iskra/contracts";
 
 export interface ChannelListEntry {
   readonly id: ChannelId;
@@ -108,6 +109,23 @@ export function mentionCandidates<T extends { readonly name: string }>(
 /** A project's agents by name. */
 export function agentListEntries(agents: ReadonlyArray<OrchestrationAgentShell>, projectId: ProjectId) {
   return agentEntries(agents, (agent) => agent.projectId === projectId);
+}
+
+/**
+ * The agents a channel's lead picker offers: the project's agents whose roles include lead (older
+ * servers send no roles, so the defaults apply), plus the current lead even if it lost the role.
+ */
+export function leadCandidates(
+  agents: ReadonlyArray<OrchestrationAgentShell>,
+  projectId: ProjectId,
+  currentLeadId: AgentId | null,
+) {
+  return agentEntries(
+    agents,
+    (agent) =>
+      agent.projectId === projectId &&
+      (agent.id === currentLeadId || (agent.roles ?? DEFAULT_AGENT_ROLES).includes("lead")),
+  );
 }
 
 /** Where a session works: the channel it talks in, or the card it builds or helps on. */
