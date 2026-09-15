@@ -21,6 +21,7 @@ import { cn } from "../../lib/utils";
 import { WorkspacePageContainer, type WorkspacePageWidth } from "../WorkspacePageContainer";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { settingsPageTitle } from "./settingsSearch";
 import { useOptionalSettingsScope } from "./SettingsScopeContext";
 import {
   isProjectScopedSettingKey,
@@ -172,6 +173,37 @@ export function useRelativeTimeTick(intervalMs = 1_000) {
   return nowMs;
 }
 
+/** Hairline between grouped rows, inset from the leading edge like a macOS grouped list. */
+export const SETTINGS_GROUP_ROWS_CLASSNAME =
+  "[&>*+*]:bg-[linear-gradient(var(--border),var(--border))] [&>*+*]:bg-[length:calc(100%-1rem)_0.5px] [&>*+*]:bg-right-top [&>*+*]:bg-no-repeat";
+
+/** A grouped inset list: 12px corners on the card surface, rows split by inset hairlines. */
+export const SETTINGS_GROUP_CLASSNAME = `rounded-xl bg-card text-card-foreground ${SETTINGS_GROUP_ROWS_CLASSNAME}`;
+
+/** Section heads: 13px semibold secondary text over the group. */
+export const SETTINGS_SECTION_HEAD_CLASSNAME =
+  "flex min-h-6 items-center gap-2 text-[13px] font-semibold text-muted-foreground";
+
+/** The large page title shared by settings and the other workspace pages. */
+export function SettingsLargeTitle({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <h1
+      className={cn(
+        "text-[28px] leading-tight font-bold tracking-[-0.02em] text-foreground",
+        className,
+      )}
+    >
+      {children}
+    </h1>
+  );
+}
+
 /** Muted section headings have no descriptions; explanatory copy belongs to individual settings. */
 export function SettingsSection({
   title,
@@ -197,17 +229,17 @@ export function SettingsSection({
       {...sectionProps}
       ref={targetRef}
       tabIndex={sectionProps.id ? -1 : sectionProps.tabIndex}
-      className={cn(!hideTitle && "space-y-2.5", className)}
+      className={cn(!hideTitle && "space-y-2", className)}
     >
       {hideTitle ? (
         <h2 className="sr-only">{title}</h2>
       ) : (
         <div
           data-settings-scroll-target
-          className="flex min-h-7 items-start justify-between gap-4 px-3 sm:px-4"
+          className="flex min-h-7 items-end justify-between gap-4 px-4"
         >
           <div className="min-w-0">
-            <h2 className="flex min-h-7 items-center gap-2 text-sm font-normal tracking-[-0.005em] text-foreground/70">
+            <h2 className={SETTINGS_SECTION_HEAD_CLASSNAME}>
               {icon}
               {title}
             </h2>
@@ -220,7 +252,7 @@ export function SettingsSection({
         className={cn(
           "relative overflow-visible text-foreground",
           variant === "grouped"
-            ? "rounded-xl border border-border/60 bg-card/40 shadow-xs/5 [&>*+*]:border-t [&>*+*]:border-border/50 [&>[data-slot=settings-row]]:rounded-none"
+            ? cn(SETTINGS_GROUP_CLASSNAME, "[&>[data-slot=settings-row]]:rounded-none")
             : "space-y-1",
         )}
       >
@@ -437,15 +469,15 @@ export function SettingsRow({
       tabIndex={rowProps.id ? -1 : rowProps.tabIndex}
       data-slot="settings-row"
       className={cn(
-        "rounded-xl px-3 sm:px-4 aria-disabled:opacity-50 aria-disabled:[&_*]:text-muted-foreground",
-        children ? "pt-3 pb-1" : "py-3",
+        "flex min-h-11 flex-col justify-center rounded-xl px-4 aria-disabled:opacity-50 aria-disabled:[&_*]:text-muted-foreground",
+        children ? "pt-2.5 pb-1" : "py-2",
         className,
       )}
     >
-      <div className="flex flex-col gap-3 sm:grid sm:grid-cols-[minmax(0,1fr)_minmax(10rem,auto)] sm:items-center sm:gap-8">
-        <div className="min-w-0 flex-1 space-y-1">
+      <div className="flex flex-col gap-2.5 sm:grid sm:grid-cols-[minmax(0,1fr)_minmax(10rem,auto)] sm:items-center sm:gap-6">
+        <div className="min-w-0 flex-1 space-y-0.5">
           <div className="flex min-h-5 items-center gap-1.5">
-            <h3 className="text-sm font-medium tracking-[-0.005em] text-foreground">{title}</h3>
+            <h3 className="text-[13px] font-normal text-foreground">{title}</h3>
             {renderedInheritance ? (
               <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
                 {renderedInheritance}
@@ -456,12 +488,10 @@ export function SettingsRow({
             </span>
           </div>
           {description ? (
-            <p className="max-w-xl text-[13px] leading-[1.45] text-muted-foreground/80">
-              {description}
-            </p>
+            <p className="max-w-xl text-xs leading-4 text-muted-foreground">{description}</p>
           ) : null}
           {renderedStatus ? (
-            <div className="pt-0.5 text-xs text-muted-foreground">{renderedStatus}</div>
+            <div className="text-xs text-muted-foreground">{renderedStatus}</div>
           ) : null}
         </div>
         {renderedControl ? (
@@ -515,16 +545,24 @@ export function SettingResetButton({
   );
 }
 
+/**
+ * The scrolling frame of a settings page. It opens with the page's large title,
+ * named after the settings section unless `title` names something narrower.
+ */
 export function SettingsPageContainer({
   children,
   className,
+  title,
   width = "readable",
 }: {
   children: ReactNode;
   className?: string;
+  title?: ReactNode;
   width?: WorkspacePageWidth;
 }) {
   const navigate = useNavigate();
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const pageTitle = title ?? settingsPageTitle(pathname);
   const hash = useLocation({ select: (location) => location.hash });
   const highlightTarget = useLocation({
     select: (location) => location.state.settingsTargetHighlight !== false,
@@ -550,7 +588,11 @@ export function SettingsPageContainer({
         className="topbar-scroll-fade scrollbar-gutter-both flex-1 overflow-y-auto"
         data-settings-page-scroll
       >
-        <WorkspacePageContainer width={width} className={cn("gap-8", className)}>
+        <WorkspacePageContainer
+          width={width}
+          className={cn("gap-7 pt-2", width === "readable" && "max-w-[46rem]", className)}
+        >
+          {pageTitle ? <SettingsLargeTitle>{pageTitle}</SettingsLargeTitle> : null}
           {children}
         </WorkspacePageContainer>
       </div>

@@ -48,7 +48,9 @@ describe("searchSettings", () => {
   it("matches titles, sections, and remembered setting details", () => {
     expect(searchSettings("word", ITEMS).map((item) => item.id)).toEqual(["word-wrap"]);
     expect(searchSettings("network", ITEMS).map((item) => item.id)).toEqual(["network-access"]);
-    expect(searchSettings("connections", ITEMS).map((item) => item.id)).toEqual(["network-access"]);
+    expect(searchSettings("environments", ITEMS).map((item) => item.id)).toEqual([
+      "network-access",
+    ]);
     expect(searchSettings("claude", ITEMS).map((item) => item.id)).toEqual(["providers"]);
     expect(searchSettings("long lines", ITEMS).map((item) => item.id)).toEqual(["word-wrap"]);
   });
@@ -285,8 +287,12 @@ describe("searchSettings", () => {
   });
 
   it.each([
-    ["default model", "default-model", "/settings/general"],
-    ["new threads", "new-threads", "/settings/general"],
+    ["default model", "default-model", "/settings/providers"],
+    ["new threads", "new-threads", "/settings/providers"],
+    ["card runtime", "card-runtime", "/settings/providers"],
+    ["diff layout", "diff-layout", "/settings/archived"],
+    ["time format", "time-format", "/settings/general"],
+    ["diagnostics", "diagnostics", "/settings/diagnostics"],
     ["agent browser access", "agent-browser-access", "/settings/integrations"],
     ["automatically pull", "automatic-pull", "/settings/source-control"],
     ["actions", "project-actions", "/settings/projects"],

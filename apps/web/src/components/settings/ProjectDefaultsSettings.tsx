@@ -147,9 +147,9 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
       }
       title={
         category === "general"
-          ? "New threads"
+          ? "New agent threads"
           : category === "integrations"
-            ? "Browser"
+            ? "Agent access & Linear"
             : "Repositories"
       }
     >

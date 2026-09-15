@@ -18,7 +18,9 @@ export type SettingsPath =
   | "/settings/integrations"
   | "/settings/source-control"
   | "/settings/connections"
-  | "/settings/archived";
+  | "/settings/archived"
+  | "/settings/diagnostics"
+  | "/settings/open-source-licenses";
 
 /**
  * Where a setting can be edited. Device-local rows have no scope: they render
@@ -68,21 +70,54 @@ export interface SettingsSearchAvailability {
 }
 
 /**
- * Section labels in sidebar order. The sidebar nav and the search-result
- * subtitles both render from this record, so each label exists once.
+ * Page labels. The sidebar nav and the search-result subtitles both render from
+ * this record, so each label exists once; `SETTINGS_NAV_GROUPS` sets the order.
  */
 export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
-  "/settings/projects": "Project",
+  "/settings/projects": "Projects",
+  "/settings/providers": "Agents & Providers",
+  "/settings/source-control": "Source Control",
   "/settings/general": "General",
   "/settings/appearance": "Appearance",
   "/settings/keybindings": "Keybindings",
-  "/settings/snap-shot": "SnapShots",
-  "/settings/providers": "Providers",
+  "/settings/connections": "Environments",
   "/settings/integrations": "Integrations",
-  "/settings/source-control": "Source Control",
-  "/settings/connections": "Connections",
-  "/settings/archived": "Archive",
+  "/settings/snap-shot": "SnapShots",
+  "/settings/archived": "Agent threads",
+  "/settings/diagnostics": "Diagnostics",
+  "/settings/open-source-licenses": "Licenses",
 };
+
+/** The large title of the settings page at `pathname`, or null outside settings pages. */
+export function settingsPageTitle(pathname: string): string | null {
+  const normalized = pathname.replace(/\/+$/, "");
+  if (normalized === "/settings/open-source-licenses") return "Open source licenses";
+  return Object.hasOwn(SETTINGS_SECTION_LABELS, normalized)
+    ? SETTINGS_SECTION_LABELS[normalized as SettingsPath]
+    : null;
+}
+
+/** Sidebar groups, Iskra's own work first. Every path appears exactly once. */
+export const SETTINGS_NAV_GROUPS: ReadonlyArray<{
+  readonly label: string;
+  readonly paths: ReadonlyArray<SettingsPath>;
+}> = [
+  {
+    label: "Iskra",
+    paths: ["/settings/projects", "/settings/providers", "/settings/source-control"],
+  },
+  { label: "App", paths: ["/settings/general", "/settings/appearance", "/settings/keybindings"] },
+  { label: "Connections", paths: ["/settings/connections", "/settings/integrations"] },
+  {
+    label: "Advanced",
+    paths: [
+      "/settings/snap-shot",
+      "/settings/archived",
+      "/settings/diagnostics",
+      "/settings/open-source-licenses",
+    ],
+  },
+];
 
 /**
  * Searchable settings and stable destinations, in result order. Rows with a
@@ -93,7 +128,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "project-defaults",
     title: "Project defaults and overrides",
-    to: "/settings/general",
+    to: "/settings/providers",
     scope: "project-defaults",
     searchTerms: ["model workspace environments projects inheritance checkout"],
   },
@@ -106,14 +141,14 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "default-model",
     title: "Default model",
-    to: "/settings/general",
+    to: "/settings/providers",
     scope: "project-defaults",
     searchTerms: ["new thread project provider reasoning effort"],
   },
   {
     id: "default-permissions",
     title: "Permissions",
-    to: "/settings/general",
+    to: "/settings/providers",
     scope: "project-defaults",
     searchTerms: [
       "new thread default runtime mode supervised approvals auto accept edits full access",
@@ -215,7 +250,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "auto-settle-inactive-threads",
     title: "Auto-settle inactive threads",
-    to: "/settings/general",
+    to: "/settings/archived",
     searchTerms: ["sidebar inactivity days no activity automatically"],
     requiresThreadAutoSettlement: true,
     scope: "project-defaults",
@@ -223,7 +258,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "auto-settle-merged-threads",
     title: "Auto-settle merged threads",
-    to: "/settings/general",
+    to: "/settings/archived",
     searchTerms: ["pull request merge closed automatically sidebar"],
     requiresThreadAutoSettlement: true,
     scope: "project-defaults",
@@ -231,7 +266,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "days-before-auto-settle",
     title: "Days of inactivity before auto-settle",
-    to: "/settings/general",
+    to: "/settings/archived",
     targetId: "auto-settle-inactive-threads",
     searchTerms: ["thread timeout activity sidebar"],
     requiresThreadAutoSettlement: true,
@@ -258,57 +293,57 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "response-streaming",
     title: "Response streaming",
-    to: "/settings/general",
+    to: "/settings/providers",
     scope: "project-defaults",
     searchTerms: ["output token paragraph buffered wait turn legacy"],
   },
   {
     id: "hide-whitespace-changes",
     title: "Hide whitespace changes",
-    to: "/settings/general",
+    to: "/settings/archived",
     searchTerms: ["diff ignore spaces edits default"],
   },
   {
     id: "default-diff-file-state",
     title: "Default diff file state",
-    to: "/settings/general",
+    to: "/settings/archived",
     searchTerms: ["collapsed expanded collapse expand files pull request pr code tab"],
   },
   {
     id: "diff-layout",
     title: "Diff layout",
-    to: "/settings/general",
+    to: "/settings/archived",
     searchTerms: ["stacked split side by side unified inline view"],
   },
   {
     id: "proactive-panels",
     title: "Proactive panels",
-    to: "/settings/general",
+    to: "/settings/archived",
     searchTerms: ["automatically open diff pull request pr right panel agent completion"],
   },
   {
     id: "skills-in-slash-menu",
     title: "Show skills in slash menu",
-    to: "/settings/general",
+    to: "/settings/archived",
     searchTerms: ["command menu dollar $ slash /"],
   },
   {
     id: "composer-collapse",
     title: "Collapse composer on scroll",
-    to: "/settings/general",
+    to: "/settings/archived",
     searchTerms: ["composer rest resting scroll wheel conversation timeline shrink minimize"],
   },
   {
     id: "provider-update-checks",
     title: "Provider update checks",
-    to: "/settings/general",
+    to: "/settings/providers",
     searchTerms: ["installed cli versions newer available codex claude cursor grok opencode"],
     scope: "environment-defaults",
   },
   {
     id: "continue-threads-after-server-update",
     title: "Continue threads after restarts",
-    to: "/settings/general",
+    to: "/settings/providers",
     scope: "project-defaults",
     searchTerms: [
       "resume running active interrupted work restart reboot machine crash desktop update automatically",
@@ -326,14 +361,14 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "new-threads",
     title: "New threads",
-    to: "/settings/general",
+    to: "/settings/providers",
     scope: "project-defaults",
     searchTerms: ["default workspace mode draft local worktree"],
   },
   {
     id: "start-from-origin",
     title: "Start from origin",
-    to: "/settings/general",
+    to: "/settings/providers",
     scope: "project-defaults",
     searchTerms: ["new worktrees latest matching remote branch local"],
   },
@@ -347,19 +382,19 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "unpin-confirmation",
     title: "Unpin confirmation",
-    to: "/settings/general",
+    to: "/settings/archived",
     searchTerms: ["ask before thread pinned section"],
   },
   {
     id: "archive-confirmation",
     title: "Archive confirmation",
-    to: "/settings/general",
+    to: "/settings/archived",
     searchTerms: ["ask before thread second click inline action"],
   },
   {
     id: "delete-confirmation",
     title: "Delete confirmation",
-    to: "/settings/general",
+    to: "/settings/archived",
     searchTerms: ["ask before thread chat history"],
   },
   {
@@ -372,37 +407,37 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "text-generation-model",
     title: "Text generation model",
-    to: "/settings/general",
+    to: "/settings/providers",
     scope: "project-defaults",
     searchTerms: ["generated thread titles source control content default provider"],
   },
   {
     id: "diagnostics",
     title: "Diagnostics",
-    to: "/settings/general",
+    to: "/settings/diagnostics",
     searchTerms: ["logs traces processes resource history failures spans cpu memory"],
   },
   {
     id: "open-source-licenses",
     title: "Open source licenses",
-    to: "/settings/general",
+    to: "/settings/open-source-licenses",
   },
   {
     id: "legacy-plan-mode",
     title: "Plan mode (legacy)",
-    to: "/settings/general",
+    to: "/settings/archived",
     searchTerms: ["build plan composer old"],
   },
   {
     id: "legacy-context-window-indicator",
     title: "Context window indicator (legacy)",
-    to: "/settings/general",
+    to: "/settings/archived",
     searchTerms: ["composer meter usage tokens circle old"],
   },
   {
     id: "legacy-sidebar",
     title: "Sidebar (legacy)",
-    to: "/settings/general",
+    to: "/settings/archived",
     searchTerms: ["project thread tree old flat list"],
   },
   {
@@ -652,7 +687,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "project-triggers",
     title: "Triggers",
     to: "/settings/projects",
-    searchTerms: ["schedule cron ci failure failed runs pr comment @iskra automation intake template"],
+    searchTerms: [
+      "schedule cron ci failure failed runs pr comment @iskra automation intake template",
+    ],
   },
   {
     id: "project-budgets",
@@ -755,7 +792,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "card-runtime",
     title: "Card runtime",
-    to: "/settings/connections",
+    to: "/settings/providers",
     searchTerms: [
       "heavy jobs concurrency agent sessions admission load memory resource profile turbo vitest node heap cards",
     ],
@@ -790,8 +827,20 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/integrations": null,
   "/settings/source-control": "environment-defaults",
   "/settings/connections": "connections",
-  "/settings/archived": "project-defaults",
+  // The archive follows the selection but renders at every scope.
+  "/settings/archived": null,
+  "/settings/diagnostics": null,
+  "/settings/open-source-licenses": null,
 };
+
+/** The page a search anchor lives on, so a deep link from before a setting moved still lands. */
+export function settingsHomeForAnchor(anchor: string): SettingsPath | null {
+  const items: readonly SettingsSearchItem[] = SETTINGS_SEARCH_ITEMS;
+  return (
+    (items.find((item) => item.id === anchor) ?? items.find((item) => item.targetId === anchor))
+      ?.to ?? null
+  );
+}
 
 /** Search keeps the selected target. A missing row can explain its owning scope instead. */
 export function getSettingsSearchTargetScope(targetId: string) {

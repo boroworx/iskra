@@ -10,7 +10,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import {
-  ArchiveIcon,
+  ActivityIcon,
   BlocksIcon,
   BotIcon,
   createLucideIcon,
@@ -18,13 +18,16 @@ import {
   PanelsTopLeftIcon,
   KeyboardIcon,
   Link2Icon,
+  MessagesSquareIcon,
   PaletteIcon,
+  ScrollTextIcon,
   SearchIcon,
   Settings2Icon,
   XIcon,
 } from "lucide-react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 
+import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Kbd } from "../ui/kbd";
@@ -41,13 +44,12 @@ import { SidebarUtilityMenu } from "../sidebar/SidebarChrome";
 import { scrollToSettingsTarget } from "./settingsLayout";
 import {
   searchSettings,
-  isSettingsOverviewVisible,
+  SETTINGS_NAV_GROUPS,
   SETTINGS_SECTION_LABELS,
   type SettingsPath,
   type SettingsSearchItem,
 } from "./settingsSearch";
 import { useAvailableSettingsSearchItems } from "./useAvailableSettingsSearchItems";
-import { validateSettingsScopeSearch } from "./settingsScope";
 
 const SnapShotIcon = createLucideIcon("snap-shot", [
   [
@@ -84,32 +86,49 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/integrations": BlocksIcon,
   "/settings/source-control": GitBranchIcon,
   "/settings/connections": Link2Icon,
-  "/settings/archived": ArchiveIcon,
+  "/settings/archived": MessagesSquareIcon,
+  "/settings/diagnostics": ActivityIcon,
+  "/settings/open-source-licenses": ScrollTextIcon,
 };
 
-const SETTINGS_NAV_ITEMS: ReadonlyArray<{
-  label: string;
-  to: SettingsPath;
-  icon: ComponentType<{ className?: string }>;
-}> = (Object.keys(SETTINGS_SECTION_LABELS) as SettingsPath[]).map((to) => ({
-  to,
-  label: SETTINGS_SECTION_LABELS[to],
-  icon: SETTINGS_SECTION_ICONS[to],
-}));
+/** Tile fills, System Settings style. Orange and red stay reserved for "needs you" and failures. */
+const SETTINGS_SECTION_TILES: Readonly<Record<SettingsPath, string>> = {
+  "/settings/general": "from-[#a1a1a6] to-[#6e6e73]",
+  "/settings/appearance": "from-[#da8fff] to-[#af52de]",
+  "/settings/projects": "from-[#409cff] to-[#0a6fe0]",
+  "/settings/keybindings": "from-[#8e8e93] to-[#58585c]",
+  "/settings/snap-shot": "from-[#70d7e0] to-[#30b0c7]",
+  "/settings/providers": "from-[#8e8cff] to-[#5e5ce6]",
+  "/settings/integrations": "from-[#64d2ff] to-[#0a9fd8]",
+  "/settings/source-control": "from-[#4cd964] to-[#28a745]",
+  "/settings/connections": "from-[#409cff] to-[#3a5bd9]",
+  "/settings/archived": "from-[#b0a58f] to-[#8a7f6a]",
+  "/settings/diagnostics": "from-[#8e8e93] to-[#58585c]",
+  "/settings/open-source-licenses": "from-[#a1a1a6] to-[#6e6e73]",
+};
 
+/** A section's glyph on its colored rounded-square tile. */
 function SettingsSectionIcon({ to }: { to: SettingsPath }) {
   const Icon = SETTINGS_SECTION_ICONS[to];
-  return <Icon className="mt-0.5 size-3.5 shrink-0 text-sidebar-muted-foreground/60" />;
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "inline-flex size-5 shrink-0 items-center justify-center rounded-[5px] bg-linear-to-b text-white shadow-[inset_0_0.5px_0_rgb(255_255_255/25%)]",
+        SETTINGS_SECTION_TILES[to],
+      )}
+    >
+      <Icon className="size-3 text-white" />
+    </span>
+  );
 }
+
+const SETTINGS_NAV_ROW_CLASSNAME =
+  "h-7 gap-2 rounded-md px-1.5 text-[13px] font-normal text-sidebar-foreground data-[active=true]:bg-[rgb(0_0_0/8%)] data-[active=true]:font-normal dark:data-[active=true]:bg-white/10";
 
 export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const navigate = useNavigate();
   const currentHash = useLocation({ select: (location) => location.hash });
-  const currentSearch = useLocation({ select: (location) => location.search });
-  const scopeSearch = useMemo(() => validateSettingsScopeSearch(currentSearch), [currentSearch]);
-  const navItems = SETTINGS_NAV_ITEMS.filter(
-    (item) => item.to !== "/settings/projects" || isSettingsOverviewVisible(scopeSearch),
-  );
   const { isMobile, setOpenMobile, open, setOpen } = useSidebar();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
@@ -233,8 +252,8 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
     <>
       <SidebarContent className="overflow-x-hidden">
         <SidebarGroup className="gap-2 p-[var(--sidebar-content-inset)]">
-          <div className="flex h-8 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground">
-            <SearchIcon className="size-4 shrink-0 text-sidebar-muted-foreground/80" />
+          <div className="flex h-7 items-center gap-1.5 rounded-[7px] bg-[rgb(120_120_128/12%)] px-2 text-[13px] text-sidebar-muted-foreground focus-within:ring-2 focus-within:ring-ring dark:bg-[rgb(120_120_128/24%)]">
+            <SearchIcon className="size-3.5 shrink-0 text-sidebar-muted-foreground" />
             <Input
               ref={searchInputRef}
               nativeInput
@@ -257,7 +276,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                   ? `settings-search-result-${results[activeResultIndex].id}`
                   : undefined
               }
-              className="min-w-0 flex-1 [&_[data-slot=input]]:h-auto [&_[data-slot=input]]:p-0 [&_[data-slot=input]]:leading-normal [&_[data-slot=input]]:text-sm [&_[data-slot=input]]:font-medium [&_[data-slot=input]]:text-sidebar-foreground [&_[data-slot=input]]:placeholder:text-sidebar-muted-foreground"
+              className="min-w-0 flex-1 [&_[data-slot=input]]:h-auto [&_[data-slot=input]]:p-0 [&_[data-slot=input]]:leading-normal [&_[data-slot=input]]:text-[13px] [&_[data-slot=input]]:font-normal [&_[data-slot=input]]:text-sidebar-foreground [&_[data-slot=input]]:placeholder:text-sidebar-muted-foreground"
             />
             {isSearching ? (
               <Button
@@ -274,7 +293,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                 <XIcon className="size-3" />
               </Button>
             ) : (
-              <Kbd className="h-4 min-w-0 rounded-sm px-1.5 text-[10px]">/</Kbd>
+              <Kbd className="h-4 min-w-0 rounded-sm bg-transparent px-1 text-[10px]">/</Kbd>
             )}
           </div>
           {isSearching && results.length === 0 ? (
@@ -301,13 +320,13 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                     tabIndex={-1}
                     size="sm"
                     isActive={index === activeResultIndex}
-                    className="h-auto min-h-10 items-start gap-2 rounded-md px-2 py-2 text-left hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                    className="h-auto min-h-9 items-center gap-2 rounded-md px-1.5 py-1.5 text-left hover:bg-sidebar-row-hover hover:text-sidebar-foreground data-[active=true]:bg-[rgb(0_0_0/8%)] dark:data-[active=true]:bg-white/10"
                     onMouseMove={() => setActiveResultIndex(index)}
                     onClick={() => handleSearchResultClick(item)}
                   >
                     <SettingsSectionIcon to={item.to} />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-sidebar-foreground">
+                      <span className="block truncate text-[13px] text-sidebar-foreground">
                         {item.title}
                       </span>
                       <span className="block truncate text-[11px] text-sidebar-muted-foreground/75">
@@ -319,26 +338,32 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
               ))}
             </SidebarMenu>
           ) : (
-            <SidebarMenu className="ps-px">
-              {navItems.map((item) => {
-                const Icon = item.icon;
-                const isGeneralDetailPage =
-                  item.to === "/settings/general" && pathname === "/settings/open-source-licenses";
-                const isActive =
-                  isGeneralDetailPage || pathname === item.to || pathname.startsWith(`${item.to}/`);
-                return (
-                  <SidebarMenuItem key={item.to}>
-                    <SidebarMenuButton
-                      isActive={isActive}
-                      onClick={() => handleSectionClick(item.to)}
-                    >
-                      <Icon />
-                      <span className="truncate">{item.label}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
-            </SidebarMenu>
+            <div className="flex flex-col gap-3">
+              {SETTINGS_NAV_GROUPS.map((group) => (
+                <div key={group.label} className="flex flex-col gap-0.5">
+                  <p className="px-1.5 pb-0.5 text-[11px] font-semibold text-sidebar-muted-foreground/70">
+                    {group.label}
+                  </p>
+                  <SidebarMenu className="gap-0.5 ps-px">
+                    {group.paths.map((to) => {
+                      const isActive = pathname === to || pathname.startsWith(`${to}/`);
+                      return (
+                        <SidebarMenuItem key={to}>
+                          <SidebarMenuButton
+                            isActive={isActive}
+                            className={SETTINGS_NAV_ROW_CLASSNAME}
+                            onClick={() => handleSectionClick(to)}
+                          >
+                            <SettingsSectionIcon to={to} />
+                            <span className="truncate">{SETTINGS_SECTION_LABELS[to]}</span>
+                          </SidebarMenuButton>
+                        </SidebarMenuItem>
+                      );
+                    })}
+                  </SidebarMenu>
+                </div>
+              ))}
+            </div>
           )}
         </SidebarGroup>
       </SidebarContent>

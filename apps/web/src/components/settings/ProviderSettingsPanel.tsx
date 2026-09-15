@@ -171,7 +171,7 @@ function providerEnvironmentDetail(environment: EnvironmentPresentation): string
   return environment.displayUrl ?? "Remote device";
 }
 
-const providerCardClassName = "rounded-xl border border-border/60 bg-card/40 shadow-xs/5";
+const providerCardClassName = "rounded-xl bg-card text-card-foreground";
 // Shared by the editor grid and the placeholder states so switching devices
 // never changes the card's footprint.
 const providerCardHeightClassName = "lg:h-[min(44rem,calc(100dvh-11rem))] lg:min-h-[32rem]";
@@ -269,13 +269,17 @@ interface ProviderSettingsTarget {
   readonly scoped?: boolean;
 }
 
-export function ProviderSettingsPanel(target: ProviderSettingsTarget) {
+export function ProviderSettingsPanel({
+  children,
+  ...target
+}: ProviderSettingsTarget & { readonly children?: ReactNode }) {
   return (
     <SettingsPageContainer width="wide" className="gap-8">
       <ProviderSettingsPanelContent
         key={`${target.environmentId ?? ""}:${target.instanceId ?? ""}`}
         {...target}
       />
+      {children}
     </SettingsPageContainer>
   );
 }

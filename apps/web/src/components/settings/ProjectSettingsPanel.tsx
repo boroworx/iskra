@@ -406,8 +406,10 @@ function ProjectDetail({
 
   return (
     <>
-      <SettingsPageContainer className="gap-6">
-        <SettingsSection id="project-overview" title="Project" hideTitle>
+      <SettingsPageContainer className="gap-6" title={group.displayName}>
+        <ProjectOrchestrationSettings members={group.memberProjects} />
+        <ProjectActionsSettings />
+        <SettingsSection id="project-overview" title="Project">
           <SettingsRow
             title="Name"
             description="The shared name for this project group in the sidebar and thread lists."
@@ -479,8 +481,6 @@ function ProjectDetail({
             }
           />
         </SettingsSection>
-        <ProjectActionsSettings />
-        <ProjectOrchestrationSettings members={group.memberProjects} />
         {hasMultipleCheckouts ? checkoutChoices : null}
         <SettingsSection title="Danger">
           <SettingsRow

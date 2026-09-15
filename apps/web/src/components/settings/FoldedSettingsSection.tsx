@@ -3,7 +3,12 @@ import { type ReactNode, useState } from "react";
 
 import { cn } from "~/lib/utils";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
-import { useSettingsSearchTarget, useSettingsSearchTargetId } from "./settingsLayout";
+import {
+  SETTINGS_GROUP_CLASSNAME,
+  SETTINGS_GROUP_ROWS_CLASSNAME,
+  useSettingsSearchTarget,
+  useSettingsSearchTargetId,
+} from "./settingsLayout";
 
 /**
  * A grouped settings section that starts closed. The header carries the title,
@@ -35,31 +40,28 @@ export function FoldedSettingsSection({
 
   return (
     <section id={id} ref={targetRef} tabIndex={-1} className="outline-none">
-      <Collapsible
-        open={open}
-        onOpenChange={setOpen}
-        className="rounded-xl border border-border/60 bg-card/40 text-foreground shadow-xs/5"
-      >
-        <div className="flex items-center gap-4 px-3 sm:px-4">
-          <CollapsibleTrigger className="flex min-h-11 min-w-0 flex-1 items-center gap-2 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md">
+      <Collapsible open={open} onOpenChange={setOpen} className={SETTINGS_GROUP_CLASSNAME}>
+        <div className="flex items-center gap-4 px-4">
+          <CollapsibleTrigger className="flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-md py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <span className="shrink-0 text-[13px]">{title}</span>
+            {summary ? (
+              <span className="ms-auto min-w-0 truncate text-[13px] text-muted-foreground">
+                {summary}
+              </span>
+            ) : null}
             <ChevronRightIcon
               aria-hidden
               className={cn(
-                "size-4 shrink-0 text-muted-foreground transition-transform duration-150 motion-reduce:transition-none",
+                "size-3.5 shrink-0 text-muted-foreground/60 transition-transform duration-150 motion-reduce:transition-none",
+                !summary && "ms-auto",
                 open && "rotate-90",
               )}
             />
-            <span className="shrink-0 text-sm font-medium">{title}</span>
-            {summary ? (
-              <span className="min-w-0 truncate text-xs text-muted-foreground">{summary}</span>
-            ) : null}
           </CollapsibleTrigger>
           {control ? <div className="flex shrink-0 items-center">{control}</div> : null}
         </div>
         <CollapsiblePanel>
-          <div className="border-t border-border/50 [&>*+*]:border-t [&>*+*]:border-border/50">
-            {children}
-          </div>
+          <div className={SETTINGS_GROUP_ROWS_CLASSNAME}>{children}</div>
         </CollapsiblePanel>
       </Collapsible>
     </section>

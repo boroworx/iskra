@@ -30,6 +30,7 @@ import {
   getSettingsSearchTargetScope,
   getThreadAutoSettlementSearchAvailability,
   isSettingsSearchScopeAvailable,
+  settingsHomeForAnchor,
 } from "../components/settings/settingsSearch";
 
 function RestoreDeviceDefaultsButton({ onRestored }: { onRestored: () => void }) {
@@ -37,11 +38,11 @@ function RestoreDeviceDefaultsButton({ onRestored }: { onRestored: () => void })
   return (
     <Button
       size="xs"
-      variant="ghost"
+      variant="ghost-muted"
       disabled={changedSettingLabels.length === 0}
       onClick={() => void restoreDefaults()}
     >
-      <RotateCcwIcon className="mx-1 size-3.5" />
+      <RotateCcwIcon className="size-3" />
       Restore device defaults
     </Button>
   );
@@ -158,7 +159,6 @@ function SettingsContentLayout() {
         <WorkspacePageHeader electron={isElectron}>
           <div className="flex w-full items-center gap-3">
             <SettingsBreadcrumb
-              pathname={location.pathname}
               scope={
                 showScope
                   ? { value: search, groups, environments, onChange: selectScope }
@@ -227,7 +227,14 @@ export const Route = createFileRoute("/settings")({
     }
 
     if (location.pathname === "/settings") {
-      throw redirect({ to: "/settings/general", replace: true });
+      throw redirect({ to: "/settings/projects", replace: true });
+    }
+
+    // Settings keep their anchors when they move between pages, so a deep link
+    // from before the move (a palette entry, a Needs you link) lands on the new home.
+    const home = location.hash ? settingsHomeForAnchor(location.hash) : null;
+    if (home !== null && home !== location.pathname) {
+      throw redirect({ to: home, hash: location.hash, search: true, replace: true });
     }
   },
   component: SettingsRouteLayout,

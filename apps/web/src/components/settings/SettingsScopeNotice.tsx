@@ -1,6 +1,7 @@
 import { Button } from "../ui/button";
 import { Alert, AlertAction, AlertDescription } from "../ui/alert";
-import { SettingsPageContainer } from "./settingsLayout";
+import { ChevronRightIcon } from "lucide-react";
+import { SettingsPageContainer, SettingsSection } from "./settingsLayout";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { useEnvironments } from "../../state/environments";
 import type { SettingsScopeSearch } from "./settingsScope";
@@ -61,6 +62,34 @@ export function SettingsScopeNotice({
                 search: { machine: entry.environmentId },
               }))
           : [{ label: "Open all environments", search: {} }];
+  const choose = (choice: (typeof choices)[number]) => {
+    if (targetId) void navigate({ to: pathname, search: () => choice.search, hash: targetId });
+    else selectScope(choice.search);
+  };
+  // Choosing a project is the way into the Projects page, so it reads as a list, not a warning.
+  if (target === "project" && choices.length > 0) {
+    return (
+      <SettingsPageContainer>
+        <SettingsSection title="Choose a project">
+          {choices.map((choice) => (
+            <button
+              key={JSON.stringify(choice.search)}
+              type="button"
+              className="flex min-h-11 w-full items-center gap-3 px-4 text-left text-[13px] outline-none first:rounded-t-xl last:rounded-b-xl hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+              onClick={() => choose(choice)}
+            >
+              <span className="min-w-0 flex-1 truncate">{choice.label}</span>
+              <ChevronRightIcon
+                aria-hidden
+                className="size-3.5 shrink-0 text-muted-foreground/60"
+              />
+            </button>
+          ))}
+        </SettingsSection>
+        <p className="px-4 text-xs text-muted-foreground">{children}</p>
+      </SettingsPageContainer>
+    );
+  }
   return (
     <SettingsPageContainer>
       <Alert role="status">
@@ -73,11 +102,7 @@ export function SettingsScopeNotice({
                 size="sm-multiline"
                 variant="outline"
                 className="max-w-full break-all text-left"
-                onClick={() => {
-                  if (targetId)
-                    void navigate({ to: pathname, search: () => choice.search, hash: targetId });
-                  else selectScope(choice.search);
-                }}
+                onClick={() => choose(choice)}
               >
                 {choice.label}
               </Button>
