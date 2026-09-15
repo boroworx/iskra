@@ -4,7 +4,9 @@ Decisions and traps behind cards running on their own. The user-facing flow is i
 [channels, agents, and the board](../user/channels-agents-board.md); the acceptance tests that
 drive it end to end are [cardFlow.integration.test.ts](../../apps/server/integration/cardFlow.integration.test.ts)
 and, for verifiers, hidden scenarios and agent instances,
-[cardVerifier.integration.test.ts](../../apps/server/integration/cardVerifier.integration.test.ts).
+[cardVerifier.integration.test.ts](../../apps/server/integration/cardVerifier.integration.test.ts),
+and for plans, migrations, triggers, budgets, knowledge, outcomes and reverts,
+[cardFactory.integration.test.ts](../../apps/server/integration/cardFactory.integration.test.ts).
 
 ## Where policy lives
 
@@ -156,6 +158,115 @@ locks in `CardWorkspace` guard worktree mutation only.
   the git write loses the restore. The report keeps full ids for manual recovery.
 - Heavy-command denial matches command patterns, so `sh -c` or `npx` wrappers can slip through. The
   throttled resource environment is the backstop.
+
+## Plans and their coordinator
+
+A plan card's session is a coordinator: a read-only run with no worktree, briefed on its plan
+([coordinatorBrief.ts](../../apps/server/src/orchestration/coordinatorBrief.ts)). Its tools
+([coordinator toolkit](../../apps/server/src/mcp/toolkits/coordinator/handlers.ts)) take the plan
+card and agent from the run behind the thread credential, never from tool input, and resolve a
+child key only under that plan. The question and lesson tools are named `ask_plan_owner` and
+`propose_plan_lesson` because every toolkit registers on one MCP server, where a second tool with the
+same name replaces the first.
+
+Authority stays with people:
+
+- `card.plan.approve` is a client command; no tool dispatches it. It names the revision it read, and a
+  new proposal replaces the revision, so a person can't approve a plan they didn't see.
+- Approval creates every child in one batch: ready, criteria confirmed, `blockedBy` from `dependsOn`,
+  and held for its slice checkpoint past the current slice. A suggested agent without the builder role
+  refuses the approval; an unknown one leaves the child for a person to assign.
+- Children land into the plan's integration branch (`planChild`), which checks, evidence and the
+  verifier gate as usual. Only the plan opens a pull request, against the base, and a person merges
+  it. Plan and migration checkpoints skip the checkpoint blueprint, which would rebase the pushed
+  integration branch.
+- A child spends from its plan's budget (`budgetCardOf`): its turns are charged to the plan card, so
+  the plan's cap sees what its children cost.
+
+## Migrations
+
+A migration lists its items with its enumerate command in a snapshot of its own branch, through
+admission, one item per output line. It samples three, spread across the list, and asks a person to
+tune once they reached review; a redirect note replaces the instructions later children get. The sweep
+starts items while running ones stay under `max(1, sessionCap ?? machine cap)`, in as many batches as
+that takes.
+
+- A migration is capped at 1000 items: it is one card, its shell carries the item list, and all of it
+  lands through one pull request. A longer listing pauses the migration with the refusal.
+- An item whose child is abandoned or paused for a person (fix rounds exhausted, start or session
+  failed) is blocked, and the sweep goes on. The paused child is still an open sub-card, so merging
+  the migration waits until a person lands or drops it.
+
+## Triggers
+
+Triggers turn the outside into cards, so everything a person decides lives in the trigger (class A),
+and the outside only ever supplies text ([triggerRules.ts](../../apps/server/src/orchestration/triggerRules.ts)):
+
+- A pull request comment counts only from a repository collaborator (write, maintain or admin; the gh
+  viewer without a host permission API), the same rule as comments on card pull requests. Anyone else
+  gets a refused fire with the reason on the project; nothing is written back to the host.
+- The outside text lands in the spec only, inside a backtick fence longer than any backtick run in it
+  and labelled untrusted. Title, criteria, agent, intake and budget come from the template.
+- Only a schedule trigger with fixed criteria may create ready work. Such a card is unattended: its
+  pull request opens as a draft, and auto-merge refuses trigger and unattended work.
+- A fire's command and card id are `trigger:<projectId>:<triggerId>:<sourceKey>` (a run id, a
+  comment id, a scheduled minute), so reading the same source again is an engine receipt no-op. No
+  duplicate event is ever recorded. A schedule fires this minute and the one before, so a tick that
+  drifts past a boundary still fires once.
+- What was already read is in memory: runs and comments from before a start, or while the server was
+  down, never fire.
+
+## Budgets
+
+Every run's turns are spend: card runs on the card that holds the budget (`budgetCardOf`: attempts,
+sub-cards and plan or migration children spend from their parent), conversation and lead runs on the
+channel's project. Monthly totals are per calendar month; a past month reads as zero, and the decider
+takes "now" from the command's `createdAt`.
+
+Where a cap holds:
+
+| Point                         | At                              | What happens                                                                |
+| ----------------------------- | ------------------------------- | --------------------------------------------------------------------------- |
+| `decideWake`                  | project or agent cap            | the wake is refused and the refusal is said in the channel                  |
+| scheduler                     | any cap, the machine's included | the card waits with `budgetCap`, `agentBudgetCap` or `environmentBudgetCap` |
+| run and card session reactors | 100%                            | no follow-up turn starts; messages wait                                     |
+| watchdog                      | 120%                            | running turns are interrupted and their cards paused with `budgetBreaker`   |
+
+The machine's monthly budget is class C: the decider can't see it, so a wake past it waits instead of
+being refused, and raising it has no event (held messages go out on the next card or project event).
+Budgets have no agent tools.
+
+## Auto-merge
+
+Off by default. A card lands without a person only when, in order: auto-merge is on; the work
+wasn't started by a trigger or unattended; its review evidence passed; a verifier passed the commit
+under review with at least one hidden scenario (an override never counts); and the scenarios
+satisfied reach `minSatisfaction`. Unacknowledged hard flags refuse it like any merge. Auto-merge can't
+be on while the verifier is off, which also keeps the verifier from being turned off under it. The
+server merges; no agent can.
+
+## Outcomes
+
+Outcomes label finished cards and never move one ([outcomeRules.ts](../../apps/server/src/orchestration/outcomeRules.ts)):
+blocked at once when a card was abandoned after running out of rounds or failing to start; flawed as
+soon as, within seven days, a revert card for it lands, a `This reverts commit <sha>` commit reaches
+the base, or a CI failure fire on a descendant commit names a file it changed; manual at seven days
+when a person merged it on the host or another author committed to its branch; success otherwise.
+A flawed card asks a person for a hidden scenario. A person's outcome is never replaced.
+
+The signals are heuristics, and known to miss: foreign commits are read once at review entry, only
+the project's last 20 fires are consulted, a pull request merge's commit is origin's base tip right
+after the merge, and a fix a person made later is not seen.
+
+## Reverts and restores
+
+Both are client commands; agents have neither. A revert creates a new card in progress with no
+agent, so the scheduler never starts one. The server reverts the landed commit in that card's
+worktree under the card lock (`-m 1` for a merge commit), runs the checks and journeys, records the
+evidence and enters review, where a person merges it like any card. A conflict or failing check stops
+there and asks a person to assign an agent; from then on it is an ordinary card and the reactor leaves
+it alone. A restore needs the card paused with no turn running, and goes through the latest owner
+thread's `thread.checkpoint.revert`.
 
 ## Traps for agents working on this code
 
