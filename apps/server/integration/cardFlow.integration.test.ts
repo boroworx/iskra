@@ -114,7 +114,14 @@ const pullRequestHost = Layer.mergeAll(
           Effect.sync(() => void host.created.push(input)),
         listChangeRequests: () =>
           Effect.succeed([
-            { provider: "github", number: 7, title: "t", url: PR_URL, state: "open", updatedAt: Option.none() },
+            {
+              provider: "github",
+              number: 7,
+              title: "t",
+              url: PR_URL,
+              state: "open",
+              updatedAt: Option.none(),
+            },
           ]),
       } as unknown as SourceControlProvider["Service"]),
   }),
@@ -122,15 +129,26 @@ const pullRequestHost = Layer.mergeAll(
     detail: () =>
       Effect.sync(
         () =>
-          ({ state: "open", mergeability: "mergeable", checks: host.checks, number: 7, url: PR_URL }) as PullRequestDetail,
+          ({
+            state: "open",
+            mergeability: "mergeable",
+            checks: host.checks,
+            number: 7,
+            url: PR_URL,
+          }) as PullRequestDetail,
       ),
-    activity: () => Effect.sync(() => ({ comments: host.comments, reviewThreads: [] }) as unknown as PullRequestActivity),
+    activity: () =>
+      Effect.sync(
+        () => ({ comments: host.comments, reviewThreads: [] }) as unknown as PullRequestActivity,
+      ),
     runAction: () =>
       host.mergeRefusal === null
         ? Effect.sync(() => {
             host.merges += 1;
           })
-        : Effect.fail(new PullRequestOperationError({ operation: "merge", detail: host.mergeRefusal })),
+        : Effect.fail(
+            new PullRequestOperationError({ operation: "merge", detail: host.mergeRefusal }),
+          ),
   }),
 );
 
@@ -161,16 +179,24 @@ const noPreviewHost = Layer.mergeAll(
         }),
       ) as Effect.Effect<A, PreviewAutomationNoAvailableHostError>,
   }),
-  Layer.mock(ServerEnvironment)({ getEnvironmentId: Effect.succeed(EnvironmentId.make("environment-card-flow")) }),
+  Layer.mock(ServerEnvironment)({
+    getEnvironmentId: Effect.succeed(EnvironmentId.make("environment-card-flow")),
+  }),
 );
 
 const recordingAdmission = Layer.effect(
   HostAdmission.HostAdmission,
-  Effect.map(HostAdmission.make(Effect.succeed({ load1: 0, cores: 8, freeMemRatio: 1 })), (admission) =>
-    HostAdmission.HostAdmission.of({
-      ...admission,
-      run: (job, effect) => Effect.andThen(Effect.sync(() => void admitted.push(job.kind)), admission.run(job, effect)),
-    }),
+  Effect.map(
+    HostAdmission.make(Effect.succeed({ load1: 0, cores: 8, freeMemRatio: 1 })),
+    (admission) =>
+      HostAdmission.HostAdmission.of({
+        ...admission,
+        run: (job, effect) =>
+          Effect.andThen(
+            Effect.sync(() => void admitted.push(job.kind)),
+            admission.run(job, effect),
+          ),
+      }),
   ),
 );
 
@@ -184,7 +210,9 @@ const layer = Layer.mergeAll(
   Layer.provideMerge(CardWorkspace.layer),
   Layer.provideMerge(CardRefGuard.layer),
   Layer.provideMerge(recordingAdmission),
-  Layer.provideMerge(OrchestrationEngineLive.pipe(Layer.provide(OrchestrationProjectionPipelineLive))),
+  Layer.provideMerge(
+    OrchestrationEngineLive.pipe(Layer.provide(OrchestrationProjectionPipelineLive)),
+  ),
   Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
   Layer.provideMerge(ThreadBackgroundLiveness.layer),
   Layer.provideMerge(ThreadPlanProgress.layer),
@@ -305,7 +333,10 @@ const makeWorld = Effect.fn("makeWorld")(function* (
       name: agentName,
       roleTags: [],
       rolePrompt: "",
-      modelSelection: { instanceId: ProviderInstanceId.make("claudeAgent"), model: "claude-haiku-4-5" },
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-haiku-4-5",
+      },
       capabilities,
       createdAt: now,
     });
@@ -348,15 +379,24 @@ const makeWorld = Effect.fn("makeWorld")(function* (
     type: Type,
     matches: (event: Extract<OrchestrationEvent, { type: Type }>) => boolean,
     n = 1,
-  ) => until(eventsOf(type, matches), (found) => found.length >= n).pipe(Effect.map((found) => found[n - 1]!));
+  ) =>
+    until(eventsOf(type, matches), (found) => found.length >= n).pipe(
+      Effect.map((found) => found[n - 1]!),
+    );
 
   const card = (cardId: CardId) =>
     snapshotQuery
       .getCommandReadModel()
-      .pipe(Effect.map((model) => (model.cards ?? []).find((candidate) => candidate.id === cardId)!));
+      .pipe(
+        Effect.map((model) => (model.cards ?? []).find((candidate) => candidate.id === cardId)!),
+      );
   const activities = (cardId: CardId) =>
     snapshotQuery.getCardActivity(cardId, 200).pipe(Effect.map((stream) => stream.activities));
-  const activityWith = (cardId: CardId, matches: (activity: Effect.Success<ReturnType<typeof activities>>[number]) => boolean, n = 1) =>
+  const activityWith = (
+    cardId: CardId,
+    matches: (activity: Effect.Success<ReturnType<typeof activities>>[number]) => boolean,
+    n = 1,
+  ) =>
     until(activities(cardId), (found) => found.filter(matches).length >= n).pipe(
       Effect.map((found) => found.filter(matches)[n - 1]!),
     );
@@ -393,7 +433,10 @@ const makeWorld = Effect.fn("makeWorld")(function* (
         (event) => event.payload.cardId === cardId && event.payload.role === "owner",
         n,
       );
-      yield* nthEvent("thread.turn-start-requested", (event) => event.payload.threadId === started.payload.threadId);
+      yield* nthEvent(
+        "thread.turn-start-requested",
+        (event) => event.payload.threadId === started.payload.threadId,
+      );
       return started.payload;
     });
 
@@ -412,7 +455,12 @@ const makeWorld = Effect.fn("makeWorld")(function* (
         criteria: [{ id: "c1", text: `${title} works.`, verification: "automated" }],
         createdAt: now,
       });
-      yield* engine.dispatch({ type: "card.approve", commandId: commandId(), cardId, delegateAgentId: builderId });
+      yield* engine.dispatch({
+        type: "card.approve",
+        commandId: commandId(),
+        cardId,
+        delegateAgentId: builderId,
+      });
       return cardId;
     });
 
@@ -439,7 +487,9 @@ const makeWorld = Effect.fn("makeWorld")(function* (
     toolkit.handle(tool, params).pipe(
       Stream.unwrap,
       Stream.runCollect,
-      Effect.map((chunk) => chunk.at(-1)!.result as Tool.Success<(typeof BoardToolkit.tools)[Name]>),
+      Effect.map(
+        (chunk) => chunk.at(-1)!.result as Tool.Success<(typeof BoardToolkit.tools)[Name]>,
+      ),
       Effect.provideService(McpInvocationContext.McpInvocationContext, {
         environmentId: EnvironmentId.make("environment-card-flow"),
         threadId,
@@ -453,11 +503,17 @@ const makeWorld = Effect.fn("makeWorld")(function* (
   /** The owner asks for review, ends its turn, and the scheduler stops it once the card is in review. */
   const reviewAndRelease = (cardId: CardId, threadId: ThreadId) =>
     Effect.gen(function* () {
-      yield* callTool(threadId, "board", "request_review", { summary: "Done; each criterion is met.", risks: RISKS });
+      yield* callTool(threadId, "board", "request_review", {
+        summary: "Done; each criterion is met.",
+        risks: RISKS,
+      });
       yield* setSession(threadId, "ready", null);
       yield* until(card(cardId), (current) => current.status === "inReview");
       // Idle in review, the owner gives its slot back.
-      yield* nthEvent("thread.session-stop-requested", (event) => event.payload.threadId === threadId);
+      yield* nthEvent(
+        "thread.session-stop-requested",
+        (event) => event.payload.threadId === threadId,
+      );
       yield* setSession(threadId, "stopped", null);
     });
 
@@ -486,194 +542,292 @@ const makeWorld = Effect.fn("makeWorld")(function* (
   };
 });
 
-const codes = (activities: ReadonlyArray<{ readonly kind: string; readonly reason: { readonly code: string } | null }>) =>
-  activities.map((activity) => activity.reason?.code ?? activity.kind);
+const codes = (
+  activities: ReadonlyArray<{
+    readonly kind: string;
+    readonly reason: { readonly code: string } | null;
+  }>,
+) => activities.map((activity) => activity.reason?.code ?? activity.kind);
 
 it.layer(layer)("card flow (M1 acceptance)", (it) => {
-  it.effect("A: a channel request lands through a pull request against staging after a CI fix round", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        Object.assign(host, { checks: [], comments: [], mergeRefusal: null, created: [], pushes: 0, merges: 0 });
-        admitted.length = 0;
-        const world = yield* makeWorld("pr", { landing: "pullRequest", acknowledged: false });
+  it.effect(
+    "A: a channel request lands through a pull request against staging after a CI fix round",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          Object.assign(host, {
+            checks: [],
+            comments: [],
+            mergeRefusal: null,
+            created: [],
+            pushes: 0,
+            merges: 0,
+          });
+          admitted.length = 0;
+          const world = yield* makeWorld("pr", { landing: "pullRequest", acknowledged: false });
 
-        // A message that mentions no one wakes the lead, which proposes a card from its own run.
-        yield* world.engine.dispatch({
-          type: "channel.message.post",
-          commandId: world.commandId(),
-          channelId: world.channelId,
-          messageId: MessageId.make("message-flow-pr-request"),
-          body: "Show a banner while the API is down.",
-          createdAt: now,
-        });
-        const leadRun = yield* world.nthEvent("channel.run-started", (event) => event.payload.channelId === world.channelId);
-        expect(leadRun.payload.role).toBe("lead");
-        const { cardId: proposedId } = yield* world.callTool(leadRun.payload.threadId, "lead", "propose_triage_card", {
-          title: "API down banner",
-          spec: "Show a banner while the API is unreachable.",
-          reasoning: "Asked for in the channel; no open card covers it.",
-          criteria: [{ text: "The banner shows while the API is down." }, { text: "The banner hides once it recovers." }],
-          estimate: { size: "S", likelyAreas: ["src"], risks: [], split: null },
-          premise: { goal: "People know when the API is down.", getsThere: true, pushback: null },
-          suggestedAgent: "builder",
-        });
-        const cardId = CardId.make(proposedId);
+          // A message that mentions no one wakes the lead, which proposes a card from its own run.
+          yield* world.engine.dispatch({
+            type: "channel.message.post",
+            commandId: world.commandId(),
+            channelId: world.channelId,
+            messageId: MessageId.make("message-flow-pr-request"),
+            body: "Show a banner while the API is down.",
+            createdAt: now,
+          });
+          const leadRun = yield* world.nthEvent(
+            "channel.run-started",
+            (event) => event.payload.channelId === world.channelId,
+          );
+          expect(leadRun.payload.role).toBe("lead");
+          const { cardId: proposedId } = yield* world.callTool(
+            leadRun.payload.threadId,
+            "lead",
+            "propose_triage_card",
+            {
+              title: "API down banner",
+              spec: "Show a banner while the API is unreachable.",
+              reasoning: "Asked for in the channel; no open card covers it.",
+              criteria: [
+                { text: "The banner shows while the API is down." },
+                { text: "The banner hides once it recovers." },
+              ],
+              estimate: { size: "S", likelyAreas: ["src"], risks: [], split: null },
+              premise: {
+                goal: "People know when the API is down.",
+                getsThere: true,
+                pushback: null,
+              },
+              suggestedAgent: "builder",
+            },
+          );
+          const cardId = CardId.make(proposedId);
 
-        // Gate 1, triage: the proposal waits for a person with draft criteria and a suggested owner.
-        expect(yield* world.card(cardId)).toMatchObject({
-          status: "triage",
-          channelId: world.channelId,
-          suggestedAgentId: world.builderId,
-          acceptance: { state: "draft", criteria: [{ id: "c1" }, { id: "c2" }] },
-          estimate: { size: "S" },
-          premise: { getsThere: true },
-        });
+          // Gate 1, triage: the proposal waits for a person with draft criteria and a suggested owner.
+          expect(yield* world.card(cardId)).toMatchObject({
+            status: "triage",
+            channelId: world.channelId,
+            suggestedAgentId: world.builderId,
+            acceptance: { state: "draft", criteria: [{ id: "c1" }, { id: "c2" }] },
+            estimate: { size: "S" },
+            premise: { getsThere: true },
+          });
 
-        // Approve & start confirms the criteria and delegates, but no agent starts before the guard is acknowledged.
-        yield* world.engine.dispatch({
-          type: "card.approve",
-          commandId: world.commandId(),
-          cardId,
-          delegateAgentId: world.builderId,
-        });
-        expect(yield* world.card(cardId)).toMatchObject({
-          status: "ready",
-          delegateAgentId: world.builderId,
-          acceptance: { state: "confirmed" },
-        });
-        const guarded = yield* world.engine
-          .dispatch({ type: "card.session.start", commandId: world.commandId(), cardId, createdAt: now })
-          .pipe(Effect.flip);
-        expect(guarded).toMatchObject({ detail: SIDE_EFFECT_GUARD_REASON });
-        expect(yield* world.eventsOf("card.session-requested", (event) => event.payload.cardId === cardId)).toEqual([]);
+          // Approve & start confirms the criteria and delegates, but no agent starts before the guard is acknowledged.
+          yield* world.engine.dispatch({
+            type: "card.approve",
+            commandId: world.commandId(),
+            cardId,
+            delegateAgentId: world.builderId,
+          });
+          expect(yield* world.card(cardId)).toMatchObject({
+            status: "ready",
+            delegateAgentId: world.builderId,
+            acceptance: { state: "confirmed" },
+          });
+          const guarded = yield* world.engine
+            .dispatch({
+              type: "card.session.start",
+              commandId: world.commandId(),
+              cardId,
+              createdAt: now,
+            })
+            .pipe(Effect.flip);
+          expect(guarded).toMatchObject({ detail: SIDE_EFFECT_GUARD_REASON });
+          expect(
+            yield* world.eventsOf(
+              "card.session-requested",
+              (event) => event.payload.cardId === cardId,
+            ),
+          ).toEqual([]);
 
-        // Gate 2: a person acknowledges the side-effect guard; the scheduler starts the owner from the queue.
-        yield* world.setPolicy(true);
-        const owner = yield* world.ownerSession(cardId);
-        const started = yield* world.until(world.card(cardId), (current) => current.status === "inProgress");
-        expect(started.worktreePath).not.toBeNull();
-        // The worktree was set up through the machine queue, from the project's base branch.
-        expect(admitted).toContain("setup");
-        const worktree = started.worktreePath!;
-        expect(yield* world.repo.gitIn(worktree, "merge-base", "--is-ancestor", "staging", "HEAD")).toBe("");
+          // Gate 2: a person acknowledges the side-effect guard; the scheduler starts the owner from the queue.
+          yield* world.setPolicy(true);
+          const owner = yield* world.ownerSession(cardId);
+          const started = yield* world.until(
+            world.card(cardId),
+            (current) => current.status === "inProgress",
+          );
+          expect(started.worktreePath).not.toBeNull();
+          // The worktree was set up through the machine queue, from the project's base branch.
+          expect(admitted).toContain("setup");
+          const worktree = started.worktreePath!;
+          expect(
+            yield* world.repo.gitIn(worktree, "merge-base", "--is-ancestor", "staging", "HEAD"),
+          ).toBe("");
 
-        // The owner works, commits and runs the checks through the queue.
-        yield* world.setSession(owner.threadId, "running", "turn-1");
-        yield* world.commit(worktree, { "src/Banner.tsx": "export const Banner = () => null;\n" });
-        const queued = yield* world.callTool(owner.threadId, "board", "run_checks", { scope: "full" });
-        expect(queued.position).toBeGreaterThanOrEqual(0);
-        const checked = yield* world.activityWith(cardId, (activity) => activity.activityId === queued.jobId);
-        expect(checked).toMatchObject({ deliverTo: "builder", reason: { code: "runChecksResult" } });
-        expect(checked.body).toContain("run_checks (full) passed.");
+          // The owner works, commits and runs the checks through the queue.
+          yield* world.setSession(owner.threadId, "running", "turn-1");
+          yield* world.commit(worktree, {
+            "src/Banner.tsx": "export const Banner = () => null;\n",
+          });
+          const queued = yield* world.callTool(owner.threadId, "board", "run_checks", {
+            scope: "full",
+          });
+          expect(queued.position).toBeGreaterThanOrEqual(0);
+          const checked = yield* world.activityWith(
+            cardId,
+            (activity) => activity.activityId === queued.jobId,
+          );
+          expect(checked).toMatchObject({
+            deliverTo: "builder",
+            reason: { code: "runChecksResult" },
+          });
+          expect(checked.body).toContain("run_checks (full) passed.");
 
-        // request_review runs the blueprint: checks through admission, scope judge, evidence, review.
-        yield* world.reviewAndRelease(cardId, owner.threadId);
-        const firstEvidence = yield* world.nthEvent("card.evidence-recorded", (event) => event.payload.cardId === cardId);
-        expect(firstEvidence.payload).toMatchObject({
-          purpose: "review",
-          flags: [],
-          items: [
-            { kind: "check", name: "test", exitCode: 0 },
-            { kind: "screenshot", unavailable: { code: "noPreviewHost" } },
-          ],
-        });
-        expect(admitted).toEqual(expect.arrayContaining(["setup", "runChecks", "checks", "evidence"]));
+          // request_review runs the blueprint: checks through admission, scope judge, evidence, review.
+          yield* world.reviewAndRelease(cardId, owner.threadId);
+          const firstEvidence = yield* world.nthEvent(
+            "card.evidence-recorded",
+            (event) => event.payload.cardId === cardId,
+          );
+          expect(firstEvidence.payload).toMatchObject({
+            purpose: "review",
+            flags: [],
+            items: [
+              { kind: "check", name: "test", exitCode: 0 },
+              { kind: "screenshot", unavailable: { code: "noPreviewHost" } },
+            ],
+          });
+          expect(admitted).toEqual(
+            expect.arrayContaining(["setup", "runChecks", "checks", "evidence"]),
+          );
 
-        // The server pushed and opened the pull request against the base, not the default branch.
-        const inReview = yield* world.until(world.card(cardId), (current) => current.landing?.mode === "pullRequest");
-        expect(inReview.landing).toMatchObject({ url: PR_URL, number: 7 });
-        expect(host.created).toMatchObject([{ baseRefName: "staging", headSelector: started.branch }]);
-        expect(host.pushes).toBe(1);
+          // The server pushed and opened the pull request against the base, not the default branch.
+          const inReview = yield* world.until(
+            world.card(cardId),
+            (current) => current.landing?.mode === "pullRequest",
+          );
+          expect(inReview.landing).toMatchObject({ url: PR_URL, number: 7 });
+          expect(host.created).toMatchObject([
+            { baseRefName: "staging", headSelector: started.branch },
+          ]);
+          expect(host.pushes).toBe(1);
 
-        // CI fails on the pull request: a CI fix round sends the card back to its owner.
-        host.checks = [{ name: "build", status: "failure", description: "tsc failed", url: null }] as PullRequestDetail["checks"];
-        yield* world.landing.pollNow;
-        yield* world.until(world.card(cardId), (current) => current.status === "inProgress");
-        host.checks = [{ name: "build", status: "success", description: null, url: null }] as PullRequestDetail["checks"];
-        expect((yield* world.card(cardId)).fixRounds).toEqual({ ci: 1, review: 0 });
+          // CI fails on the pull request: a CI fix round sends the card back to its owner.
+          host.checks = [
+            { name: "build", status: "failure", description: "tsc failed", url: null },
+          ] as PullRequestDetail["checks"];
+          yield* world.landing.pollNow;
+          yield* world.until(world.card(cardId), (current) => current.status === "inProgress");
+          host.checks = [
+            { name: "build", status: "success", description: null, url: null },
+          ] as PullRequestDetail["checks"];
+          expect((yield* world.card(cardId)).fixRounds).toEqual({ ci: 1, review: 0 });
 
-        // The scheduler starts a fresh owner whose brief carries the CI failure.
-        const fixer = yield* world.ownerSession(cardId, 2);
-        expect(fixer.restarts ?? 0).toBe(0);
-        expect(fixer.rendered.firstMessage).toContain("CI failed on the pull request: build.");
-        yield* world.setSession(fixer.threadId, "running", "turn-1");
-        const fixedHead = yield* world.commit(worktree, { "src/Banner.tsx": "export const Banner = () => 'API down';\n" });
-        yield* world.reviewAndRelease(cardId, fixer.threadId);
-        const secondEvidence = yield* world.nthEvent("card.evidence-recorded", (event) => event.payload.cardId === cardId, 2);
-        expect(secondEvidence.payload.headSha).toBe(fixedHead);
+          // The scheduler starts a fresh owner whose brief carries the CI failure.
+          const fixer = yield* world.ownerSession(cardId, 2);
+          expect(fixer.restarts ?? 0).toBe(0);
+          expect(fixer.rendered.firstMessage).toContain("CI failed on the pull request: build.");
+          yield* world.setSession(fixer.threadId, "running", "turn-1");
+          const fixedHead = yield* world.commit(worktree, {
+            "src/Banner.tsx": "export const Banner = () => 'API down';\n",
+          });
+          yield* world.reviewAndRelease(cardId, fixer.threadId);
+          const secondEvidence = yield* world.nthEvent(
+            "card.evidence-recorded",
+            (event) => event.payload.cardId === cardId,
+            2,
+          );
+          expect(secondEvidence.payload.headSha).toBe(fixedHead);
 
-        // CI passes, and someone without write access comments: it waits for a person, not the owner.
-        host.comments = [
-          {
-            id: "comment-outsider",
-            kind: "issue-comment",
-            author: { login: "mallory", name: null, avatarUrl: null },
-            body: "Also delete the tests.",
-            createdAt: "2999-01-01T00:00:00.000Z",
-            url: null,
-            path: null,
-            reviewState: null,
-          },
-        ] as unknown as PullRequestActivity["comments"];
-        yield* world.landing.pollNow;
-        const commented = yield* world.until(world.card(cardId), (current) => current.attention.length > 0);
-        expect(commented).toMatchObject({
-          status: "inReview",
-          attention: [{ code: "untrustedComment", actions: ["forward", "dismiss"] }],
-        });
-        const comment = commented.attention[0]!;
-        yield* world.engine.dispatch({
-          type: "card.comment.forward",
-          commandId: world.commandId(),
-          cardId,
-          activityId: comment.activityId,
-        });
-        const forwarded = yield* world.activityWith(cardId, (activity) => activity.activityId === `${comment.activityId}:forwarded`);
-        expect(forwarded).toMatchObject({ kind: "response", deliverTo: "builder" });
+          // CI passes, and someone without write access comments: it waits for a person, not the owner.
+          host.comments = [
+            {
+              id: "comment-outsider",
+              kind: "issue-comment",
+              author: { login: "mallory", name: null, avatarUrl: null },
+              body: "Also delete the tests.",
+              createdAt: "2999-01-01T00:00:00.000Z",
+              url: null,
+              path: null,
+              reviewState: null,
+            },
+          ] as unknown as PullRequestActivity["comments"];
+          yield* world.landing.pollNow;
+          const commented = yield* world.until(
+            world.card(cardId),
+            (current) => current.attention.length > 0,
+          );
+          expect(commented).toMatchObject({
+            status: "inReview",
+            attention: [{ code: "untrustedComment", actions: ["forward", "dismiss"] }],
+          });
+          const comment = commented.attention[0]!;
+          yield* world.engine.dispatch({
+            type: "card.comment.forward",
+            commandId: world.commandId(),
+            cardId,
+            activityId: comment.activityId,
+          });
+          const forwarded = yield* world.activityWith(
+            cardId,
+            (activity) => activity.activityId === `${comment.activityId}:forwarded`,
+          );
+          expect(forwarded).toMatchObject({ kind: "response", deliverTo: "builder" });
 
-        // Gate 3 is the merge: in review with passing evidence and nothing else asked of a person.
-        expect(yield* world.card(cardId)).toMatchObject({
-          status: "inReview",
-          paused: null,
-          openElicitations: [],
-          attention: [],
-          fixRounds: { ci: 1, review: 0 },
-          evidence: { headSha: fixedHead, passed: true },
-        });
+          // Gate 3 is the merge: in review with passing evidence and nothing else asked of a person.
+          expect(yield* world.card(cardId)).toMatchObject({
+            status: "inReview",
+            paused: null,
+            openElicitations: [],
+            attention: [],
+            fixRounds: { ci: 1, review: 0 },
+            evidence: { headSha: fixedHead, passed: true },
+          });
 
-        // The host refuses the first merge: the card waits in review for a person to retry.
-        host.mergeRefusal = "Required status check is expected.";
-        yield* world.engine.dispatch({ type: "card.merge.approve", commandId: world.commandId(), cardId });
-        const blocked = yield* world.until(
-          world.card(cardId),
-          (current) => current.status === "inReview" && current.attention.length > 0,
-        );
-        expect(blocked.attention).toMatchObject([{ code: "landingBlocked", actions: ["retryLanding", "dismiss"] }]);
+          // The host refuses the first merge: the card waits in review for a person to retry.
+          host.mergeRefusal = "Required status check is expected.";
+          yield* world.engine.dispatch({
+            type: "card.merge.approve",
+            commandId: world.commandId(),
+            cardId,
+          });
+          const blocked = yield* world.until(
+            world.card(cardId),
+            (current) => current.status === "inReview" && current.attention.length > 0,
+          );
+          expect(blocked.attention).toMatchObject([
+            { code: "landingBlocked", actions: ["retryLanding", "dismiss"] },
+          ]);
 
-        // Retrying makes the server merge on the host, and the card lands with nothing left waiting.
-        host.mergeRefusal = null;
-        yield* world.engine.dispatch({ type: "card.merge.approve", commandId: world.commandId(), cardId });
-        expect(yield* world.until(world.card(cardId), (current) => current.status === "landed")).toMatchObject({
-          attention: [],
-          openElicitations: [],
-        });
-        expect(host.merges).toBe(1);
+          // Retrying makes the server merge on the host, and the card lands with nothing left waiting.
+          host.mergeRefusal = null;
+          yield* world.engine.dispatch({
+            type: "card.merge.approve",
+            commandId: world.commandId(),
+            cardId,
+          });
+          expect(
+            yield* world.until(world.card(cardId), (current) => current.status === "landed"),
+          ).toMatchObject({
+            attention: [],
+            openElicitations: [],
+          });
+          expect(host.merges).toBe(1);
 
-        const trail = codes(yield* world.activities(cardId)).filter((code) =>
-          ["runChecksRequested", "runChecksResult", "reviewRequested", "evidence", "landing", "ciFailed"].includes(code),
-        );
-        expect(trail).toEqual([
-          "runChecksRequested",
-          "runChecksResult",
-          "reviewRequested",
-          "evidence",
-          "landing",
-          "ciFailed",
-          "reviewRequested",
-          "evidence",
-        ]);
-      }),
-    ),
+          const trail = codes(yield* world.activities(cardId)).filter((code) =>
+            [
+              "runChecksRequested",
+              "runChecksResult",
+              "reviewRequested",
+              "evidence",
+              "landing",
+              "ciFailed",
+            ].includes(code),
+          );
+          expect(trail).toEqual([
+            "runChecksRequested",
+            "runChecksResult",
+            "reviewRequested",
+            "evidence",
+            "landing",
+            "ciFailed",
+            "reviewRequested",
+            "evidence",
+          ]);
+        }),
+      ),
   );
 
   it.effect("B: an owner lost mid-turn restarts from its worklog with its unanswered message", () =>
@@ -710,124 +864,184 @@ it.layer(layer)("card flow (M1 acceptance)", (it) => {
     ),
   );
 
-  it.effect("C: without a remote a card lands locally onto staging, a second waits for the slot and is sent back for a shared exclusive path", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        admitted.length = 0;
-        const world = yield* makeWorld("local", {
-          landing: "local",
-          sessionCap: 1,
-          exclusivePaths: [{ glob: "db/migrations/**", afterRebase: "make db" }],
-        });
-        const mainBefore = yield* world.repo.git("rev-parse", "main");
-        const users = yield* world.startedCard("users", "Users table");
-        const usersOwner = yield* world.ownerSession(users);
-        const orders = yield* world.startedCard("orders", "Orders table");
-        const waiting = yield* world.until(world.card(orders), (current) => current.waitReason !== null);
-        expect(waiting.waitReason?.code).toBe("waitingForSlot");
-        expect(yield* world.eventsOf("card.session-started", (event) => event.payload.cardId === orders)).toEqual([]);
+  it.effect(
+    "C: without a remote a card lands locally onto staging, a second waits for the slot and is sent back for a shared exclusive path",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          admitted.length = 0;
+          const world = yield* makeWorld("local", {
+            landing: "local",
+            sessionCap: 1,
+            exclusivePaths: [{ glob: "db/migrations/**", afterRebase: "make db" }],
+          });
+          const mainBefore = yield* world.repo.git("rev-parse", "main");
+          const users = yield* world.startedCard("users", "Users table");
+          const usersOwner = yield* world.ownerSession(users);
+          const orders = yield* world.startedCard("orders", "Orders table");
+          const waiting = yield* world.until(
+            world.card(orders),
+            (current) => current.waitReason !== null,
+          );
+          expect(waiting.waitReason?.code).toBe("waitingForSlot");
+          expect(
+            yield* world.eventsOf(
+              "card.session-started",
+              (event) => event.payload.cardId === orders,
+            ),
+          ).toEqual([]);
 
-        yield* world.setSession(usersOwner.threadId, "running", "turn-1");
-        const usersWorktree = (yield* world.card(users)).worktreePath!;
-        const usersHead = yield* world.commit(usersWorktree, { "db/migrations/001_users.sql": "create table users();\n" });
-        yield* world.reviewAndRelease(users, usersOwner.threadId);
-        expect((yield* world.until(world.card(users), (current) => current.landing !== null)).landing?.mode).toBe("local");
+          yield* world.setSession(usersOwner.threadId, "running", "turn-1");
+          const usersWorktree = (yield* world.card(users)).worktreePath!;
+          const usersHead = yield* world.commit(usersWorktree, {
+            "db/migrations/001_users.sql": "create table users();\n",
+          });
+          yield* world.reviewAndRelease(users, usersOwner.threadId);
+          expect(
+            (yield* world.until(world.card(users), (current) => current.landing !== null)).landing
+              ?.mode,
+          ).toBe("local");
 
-        // The slot the first owner gave back starts the second card.
-        const ordersOwner = yield* world.ownerSession(orders);
-        yield* world.until(world.card(orders), (current) => current.waitReason === null && current.status === "inProgress");
-        yield* world.setSession(ordersOwner.threadId, "running", "turn-1");
-        const ordersWorktree = (yield* world.card(orders)).worktreePath!;
-        yield* world.commit(ordersWorktree, { "db/migrations/002_orders.sql": "create table orders();\n" });
-        yield* world.reviewAndRelease(orders, ordersOwner.threadId);
+          // The slot the first owner gave back starts the second card.
+          const ordersOwner = yield* world.ownerSession(orders);
+          yield* world.until(
+            world.card(orders),
+            (current) => current.waitReason === null && current.status === "inProgress",
+          );
+          yield* world.setSession(ordersOwner.threadId, "running", "turn-1");
+          const ordersWorktree = (yield* world.card(orders)).worktreePath!;
+          yield* world.commit(ordersWorktree, {
+            "db/migrations/002_orders.sql": "create table orders();\n",
+          });
+          yield* world.reviewAndRelease(orders, ordersOwner.threadId);
 
-        // Landing the first card fast-forwards staging after its checks, and leaves main alone.
-        yield* world.engine.dispatch({ type: "card.merge.approve", commandId: world.commandId(), cardId: users });
-        yield* world.until(world.card(users), (current) => current.status === "landed");
-        expect(yield* world.repo.git("rev-parse", "staging")).toBe(usersHead);
-        expect(yield* world.repo.git("rev-parse", "main")).toBe(mainBefore);
-        expect(admitted).toContain("landing");
+          // Landing the first card fast-forwards staging after its checks, and leaves main alone.
+          yield* world.engine.dispatch({
+            type: "card.merge.approve",
+            commandId: world.commandId(),
+            cardId: users,
+          });
+          yield* world.until(world.card(users), (current) => current.status === "landed");
+          expect(yield* world.repo.git("rev-parse", "staging")).toBe(usersHead);
+          expect(yield* world.repo.git("rev-parse", "main")).toBe(mainBefore);
+          expect(admitted).toContain("landing");
 
-        // The other card touching the exclusive path goes back to rebase.
-        const told = yield* world.activityWith(orders, (activity) => activity.reason?.code === "exclusivePathChanged");
-        expect(told.body).toBe(
-          "Another card changed db/migrations/**. Rebase onto staging, then run `make db` before asking for review.",
-        );
-        expect((yield* world.until(world.card(orders), (current) => current.status === "inProgress")).status).toBe(
-          "inProgress",
-        );
-      }),
-    ),
+          // The other card touching the exclusive path goes back to rebase.
+          const told = yield* world.activityWith(
+            orders,
+            (activity) => activity.reason?.code === "exclusivePathChanged",
+          );
+          expect(told.body).toBe(
+            "Another card changed db/migrations/**. Rebase onto staging, then run `make db` before asking for review.",
+          );
+          expect(
+            (yield* world.until(world.card(orders), (current) => current.status === "inProgress"))
+              .status,
+          ).toBe("inProgress");
+        }),
+      ),
   );
 
-  it.effect("D: refs an agent moves outside its card are reported and paused, then restored or kept by a person", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const world = yield* makeWorld("guard", { landing: "local" });
-        const cardId = yield* world.startedCard("rogue", "Rate limits");
-        const owner = yield* world.ownerSession(cardId);
-        yield* world.guard.drain;
-        const worktree = (yield* world.card(cardId)).worktreePath!;
-        const main = yield* world.repo.git("rev-parse", "refs/heads/main");
+  it.effect(
+    "D: refs an agent moves outside its card are reported and paused, then restored or kept by a person",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const world = yield* makeWorld("guard", { landing: "local" });
+          const cardId = yield* world.startedCard("rogue", "Rate limits");
+          const owner = yield* world.ownerSession(cardId);
+          yield* world.guard.drain;
+          const worktree = (yield* world.card(cardId)).worktreePath!;
+          const main = yield* world.repo.git("rev-parse", "refs/heads/main");
 
-        // The agent's turn commits on its branch, then moves the person's main.
-        const head = yield* world.commit(worktree, { "limits.ts": "export const LIMIT = 100;\n" });
-        yield* world.repo.gitIn(worktree, "update-ref", "refs/heads/main", head);
-        yield* world.setSession(owner.threadId, "ready", null);
-        const report = yield* world.activityWith(cardId, (activity) => activity.reason?.code === "refMovedOutsideCard");
-        expect(report).toMatchObject({
-          kind: "error",
-          refChanges: [{ ref: "refs/heads/main", kind: "moved", before: main, after: head }],
-        });
-        expect(yield* world.until(world.card(cardId), (current) => current.paused !== null)).toMatchObject({
-          paused: { by: "system", reason: { code: "refMovedOutsideCard" } },
-          openElicitations: [{ activityId: report.activityId, kind: "refsChanged" }],
-        });
-        // Report-only: nothing moved back on its own.
-        expect(yield* world.repo.git("rev-parse", "refs/heads/main")).toBe(head);
+          // The agent's turn commits on its branch, then moves the person's main.
+          const head = yield* world.commit(worktree, {
+            "limits.ts": "export const LIMIT = 100;\n",
+          });
+          yield* world.repo.gitIn(worktree, "update-ref", "refs/heads/main", head);
+          yield* world.setSession(owner.threadId, "ready", null);
+          const report = yield* world.activityWith(
+            cardId,
+            (activity) => activity.reason?.code === "refMovedOutsideCard",
+          );
+          expect(report).toMatchObject({
+            kind: "error",
+            refChanges: [{ ref: "refs/heads/main", kind: "moved", before: main, after: head }],
+          });
+          expect(
+            yield* world.until(world.card(cardId), (current) => current.paused !== null),
+          ).toMatchObject({
+            paused: { by: "system", reason: { code: "refMovedOutsideCard" } },
+            openElicitations: [{ activityId: report.activityId, kind: "refsChanged" }],
+          });
+          // Report-only: nothing moved back on its own.
+          expect(yield* world.repo.git("rev-parse", "refs/heads/main")).toBe(head);
 
-        yield* world.engine.dispatch({
-          type: "card.refs.restore",
-          commandId: world.commandId(),
-          cardId,
-          activityId: report.activityId,
-        });
-        yield* world.activityWith(cardId, (activity) => activity.activityId === `${report.activityId}:restored`);
-        expect(yield* world.repo.git("rev-parse", "refs/heads/main")).toBe(main);
-        expect(yield* world.card(cardId)).toMatchObject({ openElicitations: [], paused: { by: "system" } });
-        yield* world.engine.dispatch({ type: "card.resume", commandId: world.commandId(), cardId });
+          yield* world.engine.dispatch({
+            type: "card.refs.restore",
+            commandId: world.commandId(),
+            cardId,
+            activityId: report.activityId,
+          });
+          yield* world.activityWith(
+            cardId,
+            (activity) => activity.activityId === `${report.activityId}:restored`,
+          );
+          expect(yield* world.repo.git("rev-parse", "refs/heads/main")).toBe(main);
+          expect(yield* world.card(cardId)).toMatchObject({
+            openElicitations: [],
+            paused: { by: "system" },
+          });
+          yield* world.engine.dispatch({
+            type: "card.resume",
+            commandId: world.commandId(),
+            cardId,
+          });
 
-        // Next turn the person had moved main themselves: they keep it.
-        yield* world.engine.dispatch({
-          type: "card.message.post",
-          commandId: world.commandId(),
-          cardId,
-          messageId: MessageId.make("message-flow-carry-on"),
-          body: "Carry on.",
-          createdAt: now,
-        });
-        yield* world.nthEvent(
-          "card.delivery-updated",
-          (event) => event.payload.status === "sent" && event.payload.messageIds.includes(MessageId.make("message-flow-carry-on")),
-        );
-        yield* world.guard.drain;
-        yield* world.repo.git("update-ref", "refs/heads/main", head);
-        yield* world.setSession(owner.threadId, "running", "turn-2");
-        yield* world.setSession(owner.threadId, "ready", null);
-        const second = yield* world.activityWith(cardId, (activity) => activity.reason?.code === "refMovedOutsideCard", 2);
-        yield* world.until(world.card(cardId), (current) => current.paused !== null);
-        yield* world.engine.dispatch({
-          type: "card.refs.keep",
-          commandId: world.commandId(),
-          cardId,
-          activityId: second.activityId,
-        });
-        yield* world.activityWith(cardId, (activity) => activity.activityId === `${second.activityId}:keep`);
-        expect(yield* world.repo.git("rev-parse", "refs/heads/main")).toBe(head);
-        expect((yield* world.card(cardId)).openElicitations).toEqual([]);
-        yield* world.engine.dispatch({ type: "card.resume", commandId: world.commandId(), cardId });
-        expect((yield* world.card(cardId)).paused).toBeNull();
-      }),
-    ),
+          // Next turn the person had moved main themselves: they keep it.
+          yield* world.engine.dispatch({
+            type: "card.message.post",
+            commandId: world.commandId(),
+            cardId,
+            messageId: MessageId.make("message-flow-carry-on"),
+            body: "Carry on.",
+            createdAt: now,
+          });
+          yield* world.nthEvent(
+            "card.delivery-updated",
+            (event) =>
+              event.payload.status === "sent" &&
+              event.payload.messageIds.includes(MessageId.make("message-flow-carry-on")),
+          );
+          yield* world.guard.drain;
+          yield* world.repo.git("update-ref", "refs/heads/main", head);
+          yield* world.setSession(owner.threadId, "running", "turn-2");
+          yield* world.setSession(owner.threadId, "ready", null);
+          const second = yield* world.activityWith(
+            cardId,
+            (activity) => activity.reason?.code === "refMovedOutsideCard",
+            2,
+          );
+          yield* world.until(world.card(cardId), (current) => current.paused !== null);
+          yield* world.engine.dispatch({
+            type: "card.refs.keep",
+            commandId: world.commandId(),
+            cardId,
+            activityId: second.activityId,
+          });
+          yield* world.activityWith(
+            cardId,
+            (activity) => activity.activityId === `${second.activityId}:keep`,
+          );
+          expect(yield* world.repo.git("rev-parse", "refs/heads/main")).toBe(head);
+          expect((yield* world.card(cardId)).openElicitations).toEqual([]);
+          yield* world.engine.dispatch({
+            type: "card.resume",
+            commandId: world.commandId(),
+            cardId,
+          });
+          expect((yield* world.card(cardId)).paused).toBeNull();
+        }),
+      ),
   );
 });
