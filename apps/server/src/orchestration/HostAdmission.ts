@@ -256,7 +256,7 @@ export const make = (sample: Effect.Effect<HostSample>) =>
           startedAt: null,
           admit: yield* Deferred.make<void>(),
           cancel: yield* Deferred.make<HeavyJobCancel>(),
-          noted: false,
+          noted: null,
         };
         while (true) {
           waiting.push(entry);
