@@ -25,6 +25,7 @@ import {
   AUTO_MERGE_OFF_REASON,
   NO_VERIFIER_RUNNING_REASON,
   OPEN_ASSIST_RUNS_REASON,
+  RESTART_SERVICES_REASON,
   OVERRIDE_REASON_REQUIRED,
   OVERRIDE_STATE_REASON,
   VERDICT_INCOMPLETE_REASON,
@@ -549,6 +550,27 @@ it.layer(NodeServices.layer)("decider card contract", (it) => {
       );
       const paired = yield* applyTo(started, [verifyWith("reviewer")]);
       expect(paired.agents?.find((agent) => agent.id === backend)?.verifyWith).toBe("reviewer");
+    }),
+  );
+
+  it.effect("a person restarts the services of a card still being worked on, with a worktree", () =>
+    Effect.gen(function* () {
+      const restart: OrchestrationCommand = {
+        type: "card.services.restart",
+        commandId: nextCommandId(),
+        cardId,
+      };
+      expect(isClientCommand(restart)).toBe(true);
+      const bare = yield* applyCommands([...setup, bareCard()]);
+      expect(yield* refusal(bare, restart)).toBe(RESTART_SERVICES_REASON);
+
+      const withWorktree = yield* applyTo(bare, [setWorkspace()]);
+      expect((yield* decide(withWorktree, restart)).map((event) => event.type)).toEqual([
+        "card.services-restart-requested",
+      ]);
+
+      const abandoned = yield* applyTo(withWorktree, [onCard("card.abandon")]);
+      expect(yield* refusal(abandoned, restart)).toBe(RESTART_SERVICES_REASON);
     }),
   );
 

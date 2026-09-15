@@ -1092,6 +1092,7 @@ export const CardAttentionAction = Schema.Literals([
   "openSettings",
   "addCriteria",
   "rerunVerifier",
+  "restartServices",
 ]);
 export type CardAttentionAction = typeof CardAttentionAction.Type;
 
@@ -2438,6 +2439,11 @@ export const CardVerifierRerunRequestedPayload = Schema.Struct({
   requestedAt: IsoDateTime,
 });
 
+export const CardServicesRestartRequestedPayload = Schema.Struct({
+  cardId: CardId,
+  requestedAt: IsoDateTime,
+});
+
 export const CardMessageAuthorKind = Schema.Literals(["human", "agent", "system", "linear"]);
 export type CardMessageAuthorKind = typeof CardMessageAuthorKind.Type;
 
@@ -3194,6 +3200,9 @@ const CardVerifierOverrideCommand = Schema.Struct({
 /** A person asking the verifier to check the card's commit again. */
 const CardVerifierRerunCommand = cardStatusCommand("card.verifier.rerun");
 
+/** A person asking Iskra to bring the card's services (and its preview) back up. */
+const CardServicesRestartCommand = cardStatusCommand("card.services.restart");
+
 /** A person's message for the card's owner session, delivered as its next turn. */
 const CardMessagePostCommand = Schema.Struct({
   type: Schema.Literal("card.message.post"),
@@ -3687,6 +3696,7 @@ const IskraClientCommands = [
   CardAttentionDismissCommand,
   CardVerifierOverrideCommand,
   CardVerifierRerunCommand,
+  CardServicesRestartCommand,
   CardFlagsAcknowledgeCommand,
   CardFixRoundsResetCommand,
   CardPauseCommand,
@@ -3960,6 +3970,7 @@ export const OrchestrationEventType = Schema.Literals([
   "card.verdict-recorded",
   "card.verifier-overridden",
   "card.verifier-rerun-requested",
+  "card.services-restart-requested",
   "card.message-posted",
   "card.delivery-updated",
   "card.spec-submitted",
@@ -4459,6 +4470,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("card.verifier-rerun-requested"),
     payload: CardVerifierRerunRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.services-restart-requested"),
+    payload: CardServicesRestartRequestedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

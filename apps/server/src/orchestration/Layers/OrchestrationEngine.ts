@@ -142,6 +142,7 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "card.verdict.record":
     case "card.verifier.override":
     case "card.verifier.rerun":
+    case "card.services.restart":
       return {
         aggregateKind: "card",
         aggregateId: command.cardId,

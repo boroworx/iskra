@@ -167,6 +167,7 @@ export type CardDecisionInput = CommandInput<"card.approve"> & {
     | "card.criteria.confirm"
     | "card.evidence.capture"
     | "card.verifier.rerun"
+    | "card.services.restart"
     | "card.fix-rounds.reset"
     | "card.pause"
     | "card.resume";

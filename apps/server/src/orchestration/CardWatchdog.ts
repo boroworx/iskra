@@ -52,7 +52,8 @@ import {
  * and pauses the card when a nudge did not help, a question went unanswered, the card ran too long
  * or overspent. It flags check runs that hang, and under memory pressure cancels the
  * lowest-priority heavy job and interrupts the lowest-priority owner turn. It only ever records,
- * nudges, stops, interrupts and pauses; it never kills a process itself.
+ * nudges, stops, interrupts and pauses; it never kills a process itself. When a person asks, it
+ * restarts a card's services and its preview.
  */
 export class CardWatchdog extends Context.Service<
   CardWatchdog,
@@ -273,6 +274,20 @@ const make = Effect.gen(function* () {
     }
   });
 
+  /** Says on the card that its services are back, which clears their serviceDown and previewDown. */
+  const sayRestored = (cardId: CardId, name: string, text: string) =>
+    Effect.gen(function* () {
+      yield* record({
+        activityId: `watchdog-restored:${cardId}:${name}:${yield* nowMillis}`,
+        cardId,
+        threadId: null,
+        kind: "message",
+        body: text,
+        reason: { code: SERVICE_RESTORED_CODE, text },
+        forBuilder: false,
+      });
+    });
+
   /** Brings a service (or the preview's run script) back, and says so on the card once it answers. */
   const restartService = (cardId: CardId, down: ServiceProbe) =>
     Effect.gen(function* () {
@@ -281,19 +296,44 @@ const make = Effect.gen(function* () {
       } else {
         yield* workspace.runScript({ cardId, scriptId: down.name });
       }
-      const text = `${down.kind === "service" ? `Service ${down.name}` : "The preview"} is running again.`;
-      yield* record({
-        activityId: `watchdog-restored:${cardId}:${down.name}:${yield* nowMillis}`,
+      yield* sayRestored(
         cardId,
-        threadId: null,
-        kind: "message",
-        body: text,
-        reason: { code: SERVICE_RESTORED_CODE, text },
-        forBuilder: false,
-      });
+        down.name,
+        `${down.kind === "service" ? `Service ${down.name}` : "The preview"} is running again.`,
+      );
     }).pipe(
       Effect.catch((error) =>
         Effect.logWarning("card watchdog could not restart a service", { cardId, error: error.message }),
+      ),
+    );
+
+  /**
+   * A person's Restart: every service, then the preview if this process started it and it stopped
+   * answering. A failure is recorded on the card, so the person isn't left guessing.
+   */
+  const restartOnRequest = (cardId: CardId) =>
+    Effect.gen(function* () {
+      yield* workspace.ensureServices(cardId);
+      for (const probe of yield* workspace.serviceHealth(cardId)) {
+        if (probe.kind === "preview" && !probe.up) {
+          yield* workspace.runScript({ cardId, scriptId: probe.name });
+        }
+      }
+      yield* sayRestored(cardId, "restart", "The card's services are running again.");
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.gen(function* () {
+          const text = `Iskra could not restart the card's services: ${error.message}`.slice(0, 500);
+          yield* record({
+            activityId: `watchdog-restart-failed:${cardId}:${yield* nowMillis}`,
+            cardId,
+            threadId: null,
+            kind: "error",
+            body: text,
+            reason: null,
+            forBuilder: false,
+          });
+        }),
       ),
     );
 
@@ -498,14 +538,19 @@ const make = Effect.gen(function* () {
     return worker.enqueue("check");
   });
 
-  const processEvent = (event: OrchestrationEvent) =>
-    event.type === "thread.activity-appended" && event.payload.activity.kind === "tool.completed"
+  const processEvent = (event: OrchestrationEvent) => {
+    if (event.type === "card.services-restart-requested") {
+      // A restart can wait a minute on readiness, so it never holds up the event stream.
+      return restartOnRequest(event.payload.cardId).pipe(Effect.forkIn(layerScope), Effect.asVoid);
+    }
+    return event.type === "thread.activity-appended" && event.payload.activity.kind === "tool.completed"
       ? nowMillis.pipe(
           Effect.flatMap((now) =>
             now - lastCheckAt >= ACTIVITY_CHECK_SPACING_MS ? requestCheck : Effect.void,
           ),
         )
       : Effect.void;
+  };
 
   const start = Effect.fn("CardWatchdog.start")(function* () {
     const events = yield* engine.subscribeDomainEvents;

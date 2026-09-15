@@ -104,6 +104,7 @@ import {
   OVERRIDE_STATE_REASON,
   VERIFIER_RUNNING_REASON,
   VERIFY_IN_REVIEW_REASON,
+  RESTART_SERVICES_REASON,
   VERIFY_LATEST_COMMIT_REASON,
   BUILDER_ONLY_ASSIST_REASON,
   openAssistRunsRefusal,
@@ -3583,6 +3584,21 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const occurredAt = yield* nowIso;
       return yield* planned(command, "card", card.id, occurredAt, {
         type: "card.verifier-rerun-requested",
+        payload: { cardId: card.id, requestedAt: occurredAt },
+      });
+    }
+
+    case "card.services.restart": {
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        RESTART_SERVICES_REASON,
+      );
+      if (card.worktreePath === null) {
+        return yield* refuse(command, RESTART_SERVICES_REASON);
+      }
+      const occurredAt = yield* nowIso;
+      return yield* planned(command, "card", card.id, occurredAt, {
+        type: "card.services-restart-requested",
         payload: { cardId: card.id, requestedAt: occurredAt },
       });
     }

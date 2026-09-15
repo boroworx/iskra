@@ -4,6 +4,7 @@ import {
   ProjectId,
   ThreadId,
   type OrchestrationCommand,
+  type OrchestrationEvent,
   type OrchestrationReadModel,
 } from "@iskra/contracts";
 import { expect, it } from "@effect/vitest";
@@ -54,6 +55,7 @@ const makeWatchdog = (
   dispatched: Ref.Ref<ReadonlyArray<OrchestrationCommand>>,
   model: OrchestrationReadModel = readModel,
   workspace = Layer.mock(CardWorkspace)({ serviceHealth: () => Effect.succeed([]) }),
+  events: Stream.Stream<OrchestrationEvent> = Stream.never,
 ) =>
   CardWatchdog.layer.pipe(
     Layer.provide(workspace),
@@ -61,7 +63,7 @@ const makeWatchdog = (
       Layer.mock(OrchestrationEngineService)({
         dispatch: (command) =>
           Ref.update(dispatched, (all) => [...all, command]).pipe(Effect.as({ sequence: 0 })),
-        subscribeDomainEvents: Effect.succeed(Stream.never),
+        subscribeDomainEvents: Effect.succeed(events),
       }),
     ),
     Layer.provide(
@@ -163,5 +165,42 @@ it.effect("reports a card's service down for a minute on its tick, restarts it, 
       yield* watchdog.drain;
       expect(yield* Ref.get(dispatched)).toHaveLength(2);
     }).pipe(Effect.provide(makeWatchdog(dispatched, reviewModel, workspace)), Effect.scoped);
+  }),
+);
+
+it.effect("restarts a card's services and its stopped preview when a person asks, and says they are back", () =>
+  Effect.gen(function* () {
+    const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationCommand>>([]);
+    const calls: Array<string> = [];
+    const workspace = Layer.mock(CardWorkspace)({
+      serviceHealth: () =>
+        Effect.succeed([{ kind: "preview" as const, name: "dev", port: 42_003, up: false }]),
+      ensureServices: (id) =>
+        Effect.sync(() => {
+          calls.push(`ensureServices:${id}`);
+        }),
+      runScript: ({ cardId: id, scriptId }) =>
+        Effect.sync(() => {
+          calls.push(`runScript:${id}:${scriptId}`);
+          return { terminalId: `script-${scriptId}` };
+        }),
+    });
+    const requested = {
+      type: "card.services-restart-requested",
+      payload: { cardId, requestedAt: EPOCH },
+    } as unknown as OrchestrationEvent;
+    const noOwners = { ...readModel, liveRuns: [] } as unknown as OrchestrationReadModel;
+    yield* Effect.gen(function* () {
+      const watchdog = yield* CardWatchdog.CardWatchdog;
+      yield* watchdog.start();
+      const commands = yield* Ref.get(dispatched).pipe(
+        Effect.repeat({ until: (all) => all.length >= 1 }),
+      );
+      expect(recorded(commands)).toEqual([["message", "serviceRestored", null]]);
+      expect(calls).toEqual([`ensureServices:${cardId}`, `runScript:${cardId}:dev`]);
+    }).pipe(
+      Effect.provide(makeWatchdog(dispatched, noOwners, workspace, Stream.make(requested))),
+      Effect.scoped,
+    );
   }),
 );

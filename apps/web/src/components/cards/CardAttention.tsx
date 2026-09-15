@@ -33,9 +33,9 @@ const refused = (title: string) => (result: AtomCommandResult<unknown, unknown>)
   toastCommandFailure(result, title, "The request was refused.");
 
 /**
- * What a person can do about one attention item: forward or dismiss it, retry the landing, or go
- * where it gets resolved (project settings, the card's criteria). `onCard` leaves out the link to
- * the card when its sheet is already open.
+ * What a person can do about one attention item: forward or dismiss it, retry the landing, restart
+ * the card's services, or go where it gets resolved (project settings, the card's criteria).
+ * `onCard` leaves out the link to the card when its sheet is already open.
  */
 export function AttentionActions(props: {
   readonly card: Pick<OrchestrationCardShell, "id" | "projectId">;
@@ -128,6 +128,26 @@ export function AttentionActions(props: {
                 }
               >
                 Rerun verifier
+              </Button>
+            );
+          case "restartServices":
+            return (
+              <Button
+                key={action}
+                size="sm"
+                variant="outline"
+                disabled={sending}
+                onClick={() =>
+                  void send(
+                    decide({
+                      environmentId,
+                      input: { type: "card.services.restart", cardId: card.id },
+                    }),
+                    "The services were not restarted",
+                  )
+                }
+              >
+                Restart
               </Button>
             );
           case "openSettings":

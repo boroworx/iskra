@@ -131,6 +131,9 @@ export const OVERRIDE_REASON_REQUIRED = "Say why you're overriding the verifier.
 export const OVERRIDE_STATE_REASON = "Only a failed or pending verification can be overridden.";
 export const VERIFIER_RUNNING_REASON = "The verifier is already checking this commit.";
 export const VERIFY_IN_REVIEW_REASON = "Only a card in review is verified.";
+/** Why a restart of a card's services is refused: the card is finished or has no worktree. */
+export const RESTART_SERVICES_REASON =
+  "Only a card still being worked on, with a worktree, has services to restart.";
 export const VERIFY_LATEST_COMMIT_REASON = "A verifier checks only the card's latest commit.";
 /** MCP tool errors: a verdict comes only from its verifier session, help only from the builder. */
 export const VERIFIER_SESSION_ONLY_REASON = "Only the card's verifier session can record a verdict.";
@@ -653,8 +656,8 @@ export const ATTENTION_ACTIONS: Record<CardAttentionCode, ReadonlyArray<CardAtte
   criteriaMissing: ["addCriteria"],
   ciChecksNeedPullRequest: ["openSettings", "dismiss"],
   verifierError: ["rerunVerifier", "dismiss"],
-  serviceDown: ["dismiss"],
-  previewDown: ["dismiss"],
+  serviceDown: ["restartServices", "dismiss"],
+  previewDown: ["restartServices", "dismiss"],
 };
 
 const isAttentionCode = (code: string): code is CardAttentionCode => Object.hasOwn(ATTENTION_ACTIONS, code);
@@ -964,6 +967,19 @@ export function cardActivitiesOf(event: OrchestrationEvent): ReadonlyArray<CardA
           kind: "status",
           author: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
           body: "A person asked the verifier to check the card again.",
+          createdAt: requestedAt,
+        }),
+      ];
+    }
+    case "card.services-restart-requested": {
+      const { cardId, requestedAt } = event.payload;
+      return [
+        cardActivity({
+          activityId: `services-restart:${event.eventId}`,
+          cardId,
+          kind: "status",
+          author: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
+          body: "A person asked Iskra to restart the card's services.",
           createdAt: requestedAt,
         }),
       ];

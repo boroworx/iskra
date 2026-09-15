@@ -1430,6 +1430,7 @@ export function projectEvent(
     case "card.verdict-recorded":
     case "card.verifier-overridden":
     case "card.verifier-rerun-requested":
+    case "card.services-restart-requested":
       return Effect.succeed(withCardPatches(nextBase, cardPatches(event)));
 
     case "project.orchestration-set":
