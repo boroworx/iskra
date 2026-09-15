@@ -1,8 +1,21 @@
-import { CardId, ThreadId } from "@iskra/contracts";
+import {
+  AgentId,
+  CardId,
+  ChannelId,
+  DEFAULT_PROJECT_ORCHESTRATION,
+  ProjectId,
+  ThreadId,
+  type OrchestrationProject,
+  type OrchestrationReadModel,
+} from "@iskra/contracts";
 import { describe, expect, it } from "@effect/vitest";
 
+import { agentBudgetReason, environmentBudgetReason, projectBudgetReason } from "./cardRules.ts";
 import type { HeavyJobEntry } from "./HostAdmission.ts";
 import {
+  budgetBreaches,
+  budgetHold,
+  environmentSpendUsd,
   checksHung,
   hungJobAction,
   memoryPressureActions,
@@ -221,5 +234,85 @@ describe("watchServices", () => {
       code: "previewDown",
       text: "The preview stopped listening on port 42003; Iskra is restarting it.",
     });
+  });
+});
+
+describe("monthly budgets", () => {
+  const at = "2026-03-02T10:00:00.000Z";
+  const agentId = AgentId.make("agent-builder");
+  const projectId = ProjectId.make("project-budget");
+  const cardThread = ThreadId.make("thread-card");
+  const talkThread = ThreadId.make("thread-talk");
+  const idleThread = ThreadId.make("thread-idle");
+  const project = (
+    budgets: { readonly projectUsd?: number; readonly perAgentUsd?: number },
+    totalUsd: number,
+    agentUsd = 0,
+    month = "2026-03",
+  ) =>
+    ({
+      id: projectId,
+      orchestration: {
+        ...DEFAULT_PROJECT_ORCHESTRATION,
+        budgets: { projectUsd: budgets.projectUsd ?? null, perAgentUsd: budgets.perAgentUsd ?? null, cardDefaultUsd: 5 },
+      },
+      spend: { month, totalUsd, byAgent: [{ agentId, usd: agentUsd }] },
+    }) as unknown as OrchestrationProject;
+  // A card owner and a channel conversation mid-turn, and a card session between turns.
+  const world = (budgeted: OrchestrationProject) =>
+    ({
+      projects: [budgeted],
+      threads: [
+        { id: cardThread, session: { activeTurnId: "turn-card" } },
+        { id: talkThread, session: { activeTurnId: "turn-talk" } },
+        { id: idleThread, session: { activeTurnId: null } },
+      ],
+      agents: [{ id: agentId, name: "builder" }],
+      channels: [{ id: ChannelId.make("channel"), projectId }],
+      cards: [{ id: CardId.make("card"), projectId }],
+      liveRuns: [
+        { threadId: cardThread, cardId: CardId.make("card"), channelId: null, agentId },
+        { threadId: talkThread, cardId: null, channelId: ChannelId.make("channel"), agentId },
+        { threadId: idleThread, cardId: CardId.make("card"), channelId: null, agentId },
+      ],
+    }) as unknown as OrchestrationReadModel;
+  const breaches = (budgeted: OrchestrationProject, environmentBudgetUsd: number | null = null) =>
+    budgetBreaches({ readModel: world(budgeted), environmentBudgetUsd, now: at }).map((breach) => [
+      breach.threadId,
+      breach.turnId,
+      breach.cardId,
+      breach.reason,
+    ]);
+  const both = (text: string) => [
+    [cardThread, "turn-card", "card", { code: "budgetBreaker", text }],
+    [talkThread, "turn-talk", null, { code: "budgetBreaker", text }],
+  ];
+
+  it("breaks running turns at 120% of the project's, the agent's or the machine's cap, and not below", () => {
+    expect(breaches(project({ projectUsd: 10 }, 11.99))).toEqual([]);
+    expect(breaches(project({ projectUsd: 10 }, 12))).toEqual(both(projectBudgetReason(10)));
+    expect(breaches(project({ perAgentUsd: 5 }, 6, 5.99))).toEqual([]);
+    expect(breaches(project({ perAgentUsd: 5 }, 6, 6))).toEqual(both(agentBudgetReason("builder", 5)));
+    expect(breaches(project({}, 11.99), 10)).toEqual([]);
+    expect(breaches(project({}, 12), 10)).toEqual(both(environmentBudgetReason(10)));
+    // Last month's spend is nothing this month.
+    expect(breaches(project({ projectUsd: 10 }, 100, 0, "2026-02"), 10)).toEqual([]);
+  });
+
+  it("holds new turns from 100%: the project's cap, then the agent's, then the machine's", () => {
+    const agent = { id: agentId, name: "builder" };
+    const hold = (budgeted: OrchestrationProject, environmentBudgetUsd: number | null = null) =>
+      budgetHold({
+        project: budgeted,
+        agent,
+        environmentBudgetUsd,
+        environmentSpentUsd: environmentSpendUsd([budgeted], at),
+        now: at,
+      });
+    expect(hold(project({ projectUsd: 10 }, 9.99))).toBeNull();
+    expect(hold(project({ projectUsd: 10 }, 10))).toEqual({ code: "budgetCap", text: projectBudgetReason(10) });
+    expect(hold(project({ perAgentUsd: 5 }, 5, 5))).toEqual({ code: "agentBudgetCap", text: agentBudgetReason("builder", 5) });
+    expect(hold(project({}, 5), 5)).toEqual({ code: "environmentBudgetCap", text: environmentBudgetReason(5) });
+    expect(hold(project({ projectUsd: 10 }, 100, 0, "2026-02"), 5)).toBeNull();
   });
 });

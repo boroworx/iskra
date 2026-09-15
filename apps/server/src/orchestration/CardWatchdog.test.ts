@@ -1,6 +1,7 @@
 import {
   AgentId,
   CardId,
+  DEFAULT_PROJECT_ORCHESTRATION,
   ProjectId,
   ThreadId,
   type OrchestrationCommand,
@@ -28,6 +29,8 @@ const cardId = CardId.make("card-idle");
 
 /** One owner session, settled at the epoch, on a card in progress. */
 const readModel = {
+  projects: [],
+  threads: [],
   cards: [
     {
       id: cardId,
@@ -122,11 +125,57 @@ it.effect("checks live owners on its minute tick and nudges one left idle for fi
   }),
 );
 
+it.effect("interrupts a running turn past 120% of its project's monthly budget and pauses its card", () =>
+  Effect.gen(function* () {
+    const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationCommand>>([]);
+    const overBudget = (totalUsd: number) =>
+      ({
+        ...readModel,
+        projects: [
+          {
+            id: ProjectId.make("project-watchdog"),
+            orchestration: {
+              ...DEFAULT_PROJECT_ORCHESTRATION,
+              budgets: { projectUsd: 10, perAgentUsd: null, cardDefaultUsd: 5 },
+            },
+            // The test clock starts at the epoch, so this is the current month.
+            spend: { month: "1970-01", totalUsd, byAgent: [] },
+          },
+        ],
+        threads: [{ id: threadId, session: { status: "running", activeTurnId: "turn-over" } }],
+      }) as unknown as OrchestrationReadModel;
+
+    // At 110% the turn finishes; only new turns wait.
+    yield* Effect.gen(function* () {
+      const watchdog = yield* CardWatchdog.CardWatchdog;
+      yield* watchdog.start();
+      yield* watchdog.drain;
+      expect(yield* Ref.get(dispatched)).toEqual([]);
+    }).pipe(Effect.provide(makeWatchdog(dispatched, overBudget(11))), Effect.scoped);
+
+    yield* Effect.gen(function* () {
+      const watchdog = yield* CardWatchdog.CardWatchdog;
+      yield* watchdog.start();
+      const commands = yield* Ref.get(dispatched).pipe(Effect.repeat({ until: (all) => all.length >= 2 }));
+      expect(commands).toEqual([
+        expect.objectContaining({ type: "thread.turn.interrupt", threadId, commandId: `card-watchdog-budget:${threadId}:turn-over` }),
+        expect.objectContaining({
+          type: "card.pause.system",
+          cardId,
+          reason: { code: "budgetBreaker", text: "This project reached its $10 monthly budget; raise it in project settings." },
+        }),
+      ]);
+    }).pipe(Effect.provide(makeWatchdog(dispatched, overBudget(12))), Effect.scoped);
+  }),
+);
+
 it.effect("reports a card's service down for a minute on its tick, restarts it, and says when it is back", () =>
   Effect.gen(function* () {
     const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationCommand>>([]);
     let up = false;
     const reviewModel = {
+      projects: [],
+      threads: [],
       cards: [
         {
           ...readModel.cards![0]!,

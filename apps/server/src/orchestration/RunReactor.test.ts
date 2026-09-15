@@ -2,10 +2,12 @@ import {
   AgentId,
   ChannelId,
   CommandId,
+  DEFAULT_PROJECT_ORCHESTRATION,
   MessageId,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  TurnId,
   type RunCapability,
 } from "@iskra/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -14,6 +16,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
+import { TestClock } from "effect/testing";
 
 import { ServerConfig } from "../config.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../persistence/Layers/OrchestrationCommandReceipts.ts";
@@ -24,6 +27,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import { OrchestrationEngineLive } from "./Layers/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./Layers/ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./Layers/ProjectionSnapshotQuery.ts";
+import { environmentBudgetReason, projectBudgetReason } from "./cardRules.ts";
 import { nextEventOn, now, providerSession } from "./reactor.testkit.ts";
 import * as RunReactor from "./RunReactor.ts";
 import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
@@ -530,6 +534,113 @@ it.layer(cappedLayer)("RunReactor at the machine's session cap", (it) => {
           (event) => event.payload.channelId === otherChannelId,
         );
         expect(started.payload.triggerMessageId).toBe("capped-third");
+      }),
+    ),
+  );
+});
+
+/** Sets the project's monthly cap and records a lead turn that spent `costUsd` of it. */
+const spendInProject = Effect.fn("spendInProject")(function* (
+  name: string,
+  budgets: { readonly projectUsd: number | null },
+  costUsd: number,
+) {
+  const engine = yield* OrchestrationEngineService;
+  const projectId = ProjectId.make(`project-${name}`);
+  yield* engine.dispatch({
+    type: "project.orchestration.set",
+    commandId: CommandId.make(`cmd-budget-${name}`),
+    projectId,
+    orchestration: {
+      ...DEFAULT_PROJECT_ORCHESTRATION,
+      budgets: { projectUsd: budgets.projectUsd, perAgentUsd: null, cardDefaultUsd: 5 },
+    },
+  });
+  yield* engine.dispatch({
+    type: "project.spend.record",
+    commandId: CommandId.make(`cmd-spend-${name}`),
+    projectId,
+    agentId: AgentId.make(`agent-${name}`),
+    threadId: ThreadId.make(`thread-spend-${name}`),
+    turnId: TurnId.make(`turn-spend-${name}`),
+    role: "lead",
+    costUsd,
+    costSource: "providerReported",
+    recordedAt: now,
+  });
+});
+
+it.layer(layer)("RunReactor at a project's monthly budget", (it) => {
+  it.effect("refuses a wake past the cap with the budget text", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const world = yield* startChannel("budgeted");
+        yield* spendInProject("budgeted", { projectUsd: 1 }, 1);
+        yield* world.post("budgeted-message", "@budgeted what changed?");
+        const note = yield* world.nextEvent(
+          "channel.message-posted",
+          (event) => event.payload.authorKind === "system",
+        );
+        expect(note.payload.body).toBe(projectBudgetReason(1));
+      }),
+    ),
+  );
+
+  it.effect("ends a run at the cap instead of starting its next turn", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(now));
+        const world = yield* startChannel("spent");
+        yield* world.post("spent-first", "@spent what changed?");
+        const run = ThreadId.make((yield* world.nextEvent("thread.turn-start-requested")).aggregateId);
+        yield* world.setSession(run, "running", "turn-1");
+        // Waits on the running turn, then the project reaches its cap.
+        yield* world.post("spent-second", "@spent and the tests?");
+        yield* spendInProject("spent", { projectUsd: 2 }, 2);
+
+        yield* world.answer(run, "turn-1", "The API.");
+        yield* world.setSession(run, "ready", null);
+        const stopped = yield* world.nextEvent("thread.session-stop-requested", (event) => event.aggregateId === run);
+        expect(stopped.aggregateId).toBe(run);
+      }),
+    ),
+  );
+});
+
+// A fresh database whose machine may spend $5 a month.
+const machineBudgetLayer = RunReactor.layer.pipe(
+  Layer.provideMerge(
+    OrchestrationEngineLive.pipe(Layer.provide(OrchestrationProjectionPipelineLive)),
+  ),
+  Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
+  Layer.provideMerge(ThreadBackgroundLiveness.layer),
+  Layer.provide(ThreadPlanProgress.layer),
+  Layer.provide(OrchestrationEventStoreLive),
+  Layer.provideMerge(OrchestrationCommandReceiptRepositoryLive),
+  Layer.provide(RepositoryIdentityResolver.layer),
+  Layer.provide(SqlitePersistenceMemory),
+  Layer.provideMerge(ServerSettings.layerTest({ cardRuntime: { monthlyBudgetUsd: 5 } })),
+  Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "iskra-run-reactor-budget-" })),
+  Layer.provideMerge(NodeServices.layer),
+);
+
+it.layer(machineBudgetLayer)("RunReactor at the machine's monthly budget", (it) => {
+  it.effect("holds a wake's run and says why", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(now));
+        const world = yield* startChannel("machine");
+        const reactor = yield* RunReactor.RunReactor;
+        yield* spendInProject("machine", { projectUsd: null }, 5);
+        yield* world.post("machine-message", "@machine what changed?");
+        const note = yield* world.nextEvent(
+          "channel.message-posted",
+          (event) => event.payload.authorKind === "system",
+        );
+        expect(note.payload.body).toBe(environmentBudgetReason(5));
+        yield* reactor.drain;
+        const events = Array.from(yield* Stream.runCollect(world.engine.readEvents(0)));
+        expect(events.filter((event) => event.type === "channel.run-started")).toHaveLength(0);
       }),
     ),
   );

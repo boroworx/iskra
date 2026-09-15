@@ -8,8 +8,11 @@ import {
   type AgentId,
   type ChannelDeliveryStatus,
   type ChannelId,
+  type OrchestrationAgent,
   type OrchestrationEvent,
+  type OrchestrationReadModel,
   type OrchestrationSession,
+  type ProjectId,
 } from "@iskra/contracts";
 import { makeDrainableWorker } from "@iskra/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
@@ -41,6 +44,7 @@ import { parseMentions } from "./mentions.ts";
 import * as OrchestrationEngine from "./Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts";
 import { busyRunsOf } from "./wakeRouting.ts";
+import { budgetHold, environmentSpendUsd } from "./watchdogRules.ts";
 
 /**
  * Turns agent wakes into runs, and runs' answers into channel messages. A wake
@@ -109,19 +113,41 @@ const make = Effect.gen(function* () {
   const waitKey = (event: WakeRequestedEvent) =>
     `${event.payload.channelId}:${event.payload.agentId}`;
 
-  const environmentSessionCap = Effect.gen(function* () {
-    if (Option.isNone(settings)) return null;
-    const runtime = yield* settings.value.getSettings.pipe(
-      Effect.map((current) => current.cardRuntime),
-      Effect.orElseSucceed(() => null),
-    );
-    return runtime === null
-      ? null
-      : environmentSessionCapOf({
-          cores: NodeOS.availableParallelism(),
-          totalMemBytes: NodeOS.totalmem(),
-          override: runtime.environmentSessionCap,
-        });
+  const cardRuntime = Option.isNone(settings)
+    ? Effect.succeed(null)
+    : settings.value.getSettings.pipe(
+        Effect.map((current) => current.cardRuntime),
+        Effect.orElseSucceed(() => null),
+      );
+
+  const environmentSessionCap = cardRuntime.pipe(
+    Effect.map((runtime) =>
+      runtime === null
+        ? null
+        : environmentSessionCapOf({
+            cores: NodeOS.availableParallelism(),
+            totalMemBytes: NodeOS.totalmem(),
+            override: runtime.environmentSessionCap,
+          }),
+    ),
+  );
+
+  /** Why a monthly budget holds the agent's next turn in the project (at 100%), or null. */
+  const budgetHoldIn = Effect.fn("RunReactor.budgetHoldIn")(function* (
+    readModel: OrchestrationReadModel,
+    projectId: ProjectId | undefined,
+    agent: OrchestrationAgent | null,
+  ) {
+    const project = readModel.projects.find((candidate) => candidate.id === projectId);
+    if (project === undefined) return null;
+    const now = yield* nowIso;
+    return budgetHold({
+      project,
+      agent,
+      environmentBudgetUsd: (yield* cardRuntime)?.monthlyBudgetUsd ?? null,
+      environmentSpentUsd: environmentSpendUsd(readModel.projects, now),
+      now,
+    });
   });
 
   const updateDeliveries = Effect.fn("RunReactor.updateDeliveries")(function* (input: {
@@ -182,7 +208,9 @@ const make = Effect.gen(function* () {
       return;
     }
     const cap = yield* environmentSessionCap;
-    if (cap !== null && busyRunsOf(readModel).length >= cap) {
+    // A budget past its cap (this machine's included, which wakes don't check) holds new runs too.
+    const hold = yield* budgetHoldIn(readModel, channel.projectId, agent);
+    if (hold !== null || (cap !== null && busyRunsOf(readModel).length >= cap)) {
       const first = !waiting.has(waitKey(event));
       waiting.set(waitKey(event), event);
       if (first) {
@@ -192,7 +220,7 @@ const make = Effect.gen(function* () {
           commandId: CommandId.make(`run-wait:${event.eventId}`),
           channelId,
           messageId: MessageId.make(`run-wait:${event.eventId}`),
-          body: `@${agent.name} starts when one of this machine's ${cap} session slots frees.`,
+          body: hold?.text ?? `@${agent.name} starts when one of this machine's ${cap} session slots frees.`,
           createdAt: yield* nowIso,
         });
       }
@@ -309,13 +337,14 @@ const make = Effect.gen(function* () {
     const waiting = (yield* channels.listOpenDeliveries({ agentId, channelId })).filter(
       (delivery) => delivery.status === "pending",
     );
+    const stopRun = engine.dispatch({
+      type: "thread.session.stop",
+      commandId: CommandId.make(`run-stop:${threadId}:${turnId}`),
+      threadId,
+      createdAt,
+    });
     if (waiting.length === 0) {
-      yield* engine.dispatch({
-        type: "thread.session.stop",
-        commandId: CommandId.make(`run-stop:${threadId}:${turnId}`),
-        threadId,
-        createdAt,
-      });
+      yield* stopRun;
       return;
     }
 
@@ -325,6 +354,12 @@ const make = Effect.gen(function* () {
     const projectId = readModel.channels?.find(
       (candidate) => candidate.id === channelId,
     )?.projectId;
+    // Past a monthly budget no new turn starts: the run ends, and its rewake is refused or waits.
+    const agent = readModel.agents?.find((candidate) => candidate.id === agentId) ?? null;
+    if ((yield* budgetHoldIn(readModel, projectId, agent)) !== null) {
+      yield* stopRun;
+      return;
+    }
     const projectAgents = (readModel.agents ?? []).filter(
       (candidate) => candidate.projectId === projectId,
     );

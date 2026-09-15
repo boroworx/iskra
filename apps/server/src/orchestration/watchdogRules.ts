@@ -1,5 +1,24 @@
-import type { CardId, CardPriority, CardStatus, Reason, ThreadId } from "@iskra/contracts";
+import {
+  projectOrchestrationOf,
+  projectSpendOf,
+  type CardId,
+  type CardPriority,
+  type CardStatus,
+  type OrchestrationAgent,
+  type OrchestrationProject,
+  type OrchestrationReadModel,
+  type Reason,
+  type ThreadId,
+  type TurnId,
+} from "@iskra/contracts";
 
+import {
+  agentBudgetReason,
+  budgetWaitReason,
+  environmentBudgetReason,
+  environmentBudgetWaitReason,
+  projectBudgetReason,
+} from "./cardRules.ts";
 import type { HeavyJobEntry, HostAdmissionSnapshot } from "./HostAdmission.ts";
 import { priorityRank } from "./HostAdmission.ts";
 
@@ -345,3 +364,74 @@ export const MEMORY_PRESSURE_REASON: Reason = {
   code: "memoryPressure",
   text: "Paused: the machine is short on memory.",
 };
+
+/** What this machine's runs spent in the month of `now` (ISO), across every project. */
+export const environmentSpendUsd = (projects: ReadonlyArray<OrchestrationProject>, now: string): number =>
+  projects.reduce((total, project) => total + projectSpendOf(project, now).totalUsd, 0);
+
+/**
+ * Why a monthly budget holds `agent`'s next turn in `project` (at 100%), or null: the project's
+ * cap, then the agent's, then this machine's.
+ */
+export const budgetHold = (input: {
+  readonly project: OrchestrationProject;
+  readonly agent: Pick<OrchestrationAgent, "id" | "name"> | null;
+  readonly environmentBudgetUsd: number | null;
+  readonly environmentSpentUsd: number;
+  readonly now: string;
+}): Reason | null =>
+  budgetWaitReason(projectOrchestrationOf(input.project), projectSpendOf(input.project, input.now), input.agent) ??
+  environmentBudgetWaitReason(input.environmentBudgetUsd, input.environmentSpentUsd);
+
+/** A running turn past 120% of a monthly budget: interrupt it, and pause its card if it has one. */
+export interface BudgetBreach {
+  readonly threadId: ThreadId;
+  readonly turnId: TurnId;
+  readonly cardId: CardId | null;
+  readonly reason: Reason;
+}
+
+/**
+ * Every running turn, card or conversation, whose project, agent or machine spent past
+ * `WATCHDOG_LIMITS.budgetBreaker` times its monthly cap. Between 100% and that, turns finish and
+ * new ones wait instead.
+ */
+export function budgetBreaches(input: {
+  readonly readModel: Pick<OrchestrationReadModel, "projects" | "threads" | "agents" | "channels" | "cards" | "liveRuns">;
+  readonly environmentBudgetUsd: number | null;
+  readonly now: string;
+}): ReadonlyArray<BudgetBreach> {
+  const { readModel, now } = input;
+  const factor = WATCHDOG_LIMITS.budgetBreaker;
+  const turns = new Map(readModel.threads.map((thread) => [thread.id, thread.session?.activeTurnId ?? null] as const));
+  const projects = new Map(readModel.projects.map((project) => [project.id, project] as const));
+  const projectOfChannel = new Map((readModel.channels ?? []).map((channel) => [channel.id, channel.projectId] as const));
+  const projectOfCard = new Map((readModel.cards ?? []).map((card) => [card.id, card.projectId] as const));
+  const agents = new Map((readModel.agents ?? []).map((agent) => [agent.id, agent] as const));
+  const environmentSpent = environmentSpendUsd(readModel.projects, now);
+
+  const breachReason = (project: OrchestrationProject, agentId: OrchestrationAgent["id"]): string | null => {
+    const { projectUsd, perAgentUsd } = projectOrchestrationOf(project).budgets;
+    const spend = projectSpendOf(project, now);
+    if (projectUsd !== null && spend.totalUsd >= projectUsd * factor) return projectBudgetReason(projectUsd);
+    const agentUsd = spend.byAgent.find((entry) => entry.agentId === agentId)?.usd ?? 0;
+    const agent = agents.get(agentId);
+    if (agent !== undefined && perAgentUsd !== null && agentUsd >= perAgentUsd * factor) {
+      return agentBudgetReason(agent.name, perAgentUsd);
+    }
+    const machineUsd = input.environmentBudgetUsd;
+    return machineUsd !== null && environmentSpent >= machineUsd * factor ? environmentBudgetReason(machineUsd) : null;
+  };
+
+  return (readModel.liveRuns ?? []).flatMap((run) => {
+    const turnId = turns.get(run.threadId) ?? null;
+    const projectId =
+      run.cardId !== null ? projectOfCard.get(run.cardId) : run.channelId !== null ? projectOfChannel.get(run.channelId) : undefined;
+    const project = projectId === undefined ? undefined : projects.get(projectId);
+    if (turnId === null || project === undefined) return [];
+    const text = breachReason(project, run.agentId);
+    return text === null
+      ? []
+      : [{ threadId: run.threadId, turnId, cardId: run.cardId, reason: { code: "budgetBreaker", text } }];
+  });
+}

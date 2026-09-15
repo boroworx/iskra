@@ -28,11 +28,13 @@ import {
   type ProjectionThreadActivity,
 } from "../persistence/Services/ProjectionThreadActivities.ts";
 import { forkParked } from "../serverActivation.ts";
+import { ServerSettingsService } from "../serverSettings.ts";
 import { CardWorkspace } from "./CardWorkspace.ts";
 import { HostAdmission } from "./HostAdmission.ts";
 import * as OrchestrationEngine from "./Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts";
 import {
+  budgetBreaches,
   checksHung,
   hungJobAction,
   memoryPressureActions,
@@ -162,6 +164,14 @@ const make = Effect.gen(function* () {
   const liveness = yield* ProjectionRunLivenessRepository;
   const admission = yield* HostAdmission;
   const workspace = yield* CardWorkspace;
+  // Optional so the watchdog still builds without settings; there is then no machine budget.
+  const settings = yield* Effect.serviceOption(ServerSettingsService);
+  const environmentBudgetUsd = Option.isNone(settings)
+    ? Effect.succeed(null)
+    : settings.value.getSettings.pipe(
+        Effect.map((current) => current.cardRuntime.monthlyBudgetUsd),
+        Effect.orElseSucceed(() => null),
+      );
   const layerScope = yield* Scope.Scope;
   const nowMillis = Effect.map(DateTime.now, DateTime.toEpochMillis);
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -472,6 +482,35 @@ const make = Effect.gen(function* () {
         });
         // A restart can wait a minute on readiness, so it never holds up the rest of the check.
         yield* restartService(card.id, down).pipe(Effect.forkIn(layerScope));
+      }
+    }
+
+    // Past 120% of a project's, agent's or this machine's monthly budget, running turns stop and
+    // their cards pause for a person. The ids name the turn, so a later tick repeats nothing.
+    const breaches = budgetBreaches({
+      readModel,
+      environmentBudgetUsd: yield* environmentBudgetUsd,
+      now: DateTime.formatIso(DateTime.makeUnsafe(now)),
+    });
+    for (const breach of breaches) {
+      const key = `${breach.threadId}:${breach.turnId}`;
+      yield* engine
+        .dispatch({
+          type: "thread.turn.interrupt",
+          commandId: CommandId.make(`card-watchdog-budget:${key}`),
+          threadId: breach.threadId,
+          createdAt: yield* nowIso,
+        })
+        .pipe(Effect.catch(logFailure("interrupt a turn")));
+      if (breach.cardId !== null && cards.get(breach.cardId)?.paused === null) {
+        yield* engine
+          .dispatch({
+            type: "card.pause.system",
+            commandId: CommandId.make(`card-watchdog-budget-pause:${key}`),
+            cardId: breach.cardId,
+            reason: breach.reason,
+          })
+          .pipe(Effect.catch(logFailure("pause a card")));
       }
     }
 
