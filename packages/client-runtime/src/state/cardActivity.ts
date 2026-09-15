@@ -2,6 +2,7 @@ import {
   ORCHESTRATION_WS_METHODS,
   type CardActivity,
   type CardEvidenceItem,
+  type CardVerdict,
   type OrchestrationCardStreamItem,
 } from "@iskra/contracts";
 import * as Stream from "effect/Stream";
@@ -19,14 +20,16 @@ export interface CardActivityState {
     readonly evidenceId: string;
     readonly items: ReadonlyArray<CardEvidenceItem>;
   } | null;
+  /** The card's latest verdict, once a verifier recorded one. */
+  readonly verdict: CardVerdict | null;
 }
 
-export const EMPTY_CARD_ACTIVITY: CardActivityState = { activities: [], evidence: null };
+export const EMPTY_CARD_ACTIVITY: CardActivityState = { activities: [], evidence: null, verdict: null };
 
 /**
  * A card's activity after one stream item. A snapshot replaces everything, so a resubscription
  * starts clean; an activity can arrive in both the snapshot and live, and the later copy replaces
- * the one held; a delivery updates its activity; a new evidence recording replaces the last.
+ * the one held; a delivery updates its activity; a new evidence recording or verdict replaces the last.
  */
 export function applyCardStreamItem(
   state: CardActivityState,
@@ -34,7 +37,7 @@ export function applyCardStreamItem(
 ): CardActivityState {
   switch (item.kind) {
     case "snapshot":
-      return { activities: item.activities, evidence: item.evidence };
+      return { activities: item.activities, evidence: item.evidence, verdict: item.verdict ?? null };
     case "activity": {
       const index = state.activities.findIndex(
         (activity) => activity.activityId === item.activity.activityId,
@@ -57,6 +60,8 @@ export function applyCardStreamItem(
       };
     case "evidence":
       return { ...state, evidence: { evidenceId: item.evidenceId, items: item.items } };
+    case "verdict":
+      return { ...state, verdict: item.verdict };
   }
 }
 

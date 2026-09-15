@@ -166,6 +166,7 @@ export type CardDecisionInput = CommandInput<"card.approve"> & {
     | "card.spec.reopen"
     | "card.criteria.confirm"
     | "card.evidence.capture"
+    | "card.verifier.rerun"
     | "card.fix-rounds.reset"
     | "card.pause"
     | "card.resume";
@@ -210,6 +211,8 @@ export const keepCardRefs = command("keepCardRefs", "card.refs.keep");
 export const forwardCardComment = command("forwardCardComment", "card.comment.forward");
 /** A person setting aside something waiting on them that allows it, such as a comment. */
 export const dismissCardAttention = command("dismissCardAttention", "card.attention.dismiss");
+/** A person letting a card past a failed or pending verifier, saying why. */
+export const overrideCardVerifier = command("overrideCardVerifier", "card.verifier.override");
 export const acknowledgeCardFlags = command("acknowledgeCardFlags", "card.flags.acknowledge");
 /**
  * A person answering a card's open question: the owner's, a checkpoint (option ids continue,

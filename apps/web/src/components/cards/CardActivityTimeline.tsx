@@ -35,6 +35,7 @@ const KIND_LABEL: Record<CardActivityKind, string> = {
   error: "Error",
   critique: "Critique",
   help: "Help",
+  verdict: "Verdict",
 };
 
 const timeFormat = new Intl.DateTimeFormat(undefined, {
