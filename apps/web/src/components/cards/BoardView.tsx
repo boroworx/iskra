@@ -46,8 +46,8 @@ import { cardEnvironment } from "~/state/cards";
 import { useEnvironmentAgents, useEnvironmentCards, useProjects } from "~/state/entities";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { AgentAvatar } from "../iskra/AgentAvatar";
+import { EmptyState } from "../iskra/Page";
 import { CriteriaMarks, SpendBar } from "../iskra/Marks";
-import { SparkGlyph } from "../iskra/SparkGlyph";
 import { StatusPill } from "../iskra/StatusPill";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
@@ -183,7 +183,7 @@ export function BoardView(props: {
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <WorkspacePageHeader className="shadow-[inset_0_-0.5px_var(--border)]">
+        <WorkspacePageHeader>
           <h1 className="truncate text-[15px] font-semibold">Board</h1>
           {project !== undefined ? (
             <Menu>
@@ -220,12 +220,12 @@ export function BoardView(props: {
             </Menu>
           ) : null}
           <Button
-            className={cn("text-[13px]", project === undefined && "ml-auto")}
+            className={cn(project === undefined && "ml-auto")}
             size="sm"
             onClick={() => setNewCardOpen(true)}
           >
             <PlusIcon className="size-3" strokeWidth={2.6} />
-            New Card
+            New card
           </Button>
         </WorkspacePageHeader>
         <NewCardDialog
@@ -252,21 +252,25 @@ export function BoardView(props: {
           {({ payload }) => <TooltipPopup className="max-w-64">{payload}</TooltipPopup>}
         </Tooltip>
         {cards.length === 0 ? (
-          <main className="flex min-h-0 flex-1 flex-col items-center justify-center px-5 text-center">
-            <SparkGlyph state="idle" size={32} className="mb-4" />
-            <h2 className="text-[22px] font-bold tracking-[-0.015em]">No cards yet</h2>
-            <p className="mt-1.5 max-w-sm text-[13px] text-muted-foreground">
-              A card is one piece of work on its own branch. You approve it, assign an agent, and
-              approve the merge; the rest moves on its own.
-            </p>
-            <Button size="sm" className="mt-5 text-[13px]" onClick={() => setNewCardOpen(true)}>
-              <PlusIcon className="size-3" strokeWidth={2.6} />
-              New Card
-            </Button>
+          <main className="flex min-h-0 flex-1 flex-col">
+            <EmptyState
+              title="No cards yet"
+              body="A card is one piece of work on its own branch."
+              actions={
+                <Button onClick={() => setNewCardOpen(true)}>
+                  <PlusIcon strokeWidth={2.6} />
+                  New card
+                </Button>
+              }
+            />
           </main>
         ) : (
           <DndContext sensors={sensors} onDragEnd={(event) => void onDragEnd(event)}>
-            <div className="flex min-h-0 flex-1 gap-4 overflow-x-auto px-5 py-4">
+            <div
+              key={props.projectId}
+              ref={boardScrollerRef}
+              className="relative flex min-h-0 flex-1 gap-4 overflow-x-auto px-5 py-4 data-[fade=both]:[mask-image:linear-gradient(to_right,transparent,#000_40px,#000_calc(100%-40px),transparent)] data-[fade=end]:[mask-image:linear-gradient(to_right,#000_calc(100%-40px),transparent)] data-[fade=start]:[mask-image:linear-gradient(to_right,transparent,#000_40px)]"
+            >
               {BOARD_COLUMNS.map((column) => (
                 <BoardColumnView
                   key={column}
@@ -279,12 +283,43 @@ export function BoardView(props: {
                   onOpen={openCard}
                 />
               ))}
+              {/* With the 16px gap, the canvas's 20px end padding, which a scroller drops. */}
+              <div aria-hidden className="w-1 shrink-0" />
             </div>
           </DndContext>
         )}
       </div>
     </SidebarInset>
   );
+}
+
+/**
+ * The column scroller's ref. Columns scroll sideways, so the edge with more columns fades; and a
+ * board whose visible columns are all empty opens scrolled to its first column with cards.
+ */
+function boardScrollerRef(scroller: HTMLDivElement | null) {
+  if (scroller === null) return;
+  const sections = [...scroller.querySelectorAll<HTMLElement>(":scope > section")];
+  const withCards = sections.filter((section) => section.querySelector("li") !== null);
+  const visibleEnd = scroller.clientWidth;
+  if (!withCards.some((section) => section.offsetLeft + section.offsetWidth <= visibleEnd)) {
+    const first = withCards[0];
+    if (first !== undefined) scroller.scrollLeft = first.offsetLeft - 20;
+  }
+  const update = () => {
+    const start = scroller.scrollLeft > 1;
+    const end = scroller.scrollLeft + scroller.clientWidth < scroller.scrollWidth - 1;
+    const fade = start && end ? "both" : start ? "start" : end ? "end" : "";
+    if (scroller.dataset.fade !== fade) scroller.dataset.fade = fade;
+  };
+  update();
+  scroller.addEventListener("scroll", update, { passive: true });
+  const observer = new ResizeObserver(update);
+  observer.observe(scroller);
+  return () => {
+    scroller.removeEventListener("scroll", update);
+    observer.disconnect();
+  };
 }
 
 function BoardColumnView(props: {

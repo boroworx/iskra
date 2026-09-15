@@ -9,7 +9,7 @@ import {
 } from "@iskra/contracts";
 import { useId, useMemo, useState } from "react";
 
-import { randomUUID } from "~/lib/utils";
+import { cn, randomUUID } from "~/lib/utils";
 import { cardEnvironment } from "~/state/cards";
 import { useEnvironmentChannels } from "~/state/entities";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -26,6 +26,7 @@ import {
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Textarea } from "../ui/textarea";
+import { SHEET_INPUT_CLASS, SHEET_TEXTAREA_CLASS, SheetGroup, SheetRow } from "../channels/SheetList";
 import { toastCommandFailure } from "../toastCommandFailure";
 import { DisabledReason } from "./DisabledReason";
 
@@ -133,103 +134,123 @@ export function NewCardDialog(props: {
         <DialogPanel>
           <form
             id={formId}
-            className="flex flex-col gap-3"
+            className="flex flex-col gap-4"
             onSubmit={(event) => {
               event.preventDefault();
               void submit();
             }}
           >
-            <Input
-              aria-label="Title"
-              placeholder="Title"
-              autoFocus
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-            />
-            <Textarea
-              aria-label="Spec"
-              placeholder="What should be built, and how you will know it is done (optional)"
-              value={spec}
-              onChange={(event) => setSpec(event.target.value)}
-            />
-            {kind === "migration" ? (
-              <>
+            <SheetGroup>
+              <SheetRow as="label" label="Title">
                 <Input
-                  aria-label="Command that lists the items"
-                  placeholder="Command that prints one item per line, such as git ls-files 'src/**/*.test.js'"
-                  value={enumerateCommand}
-                  onChange={(event) => setEnumerateCommand(event.target.value)}
+                  unstyled
+                  aria-label="Title"
+                  placeholder="Required"
+                  autoFocus
+                  className={SHEET_INPUT_CLASS}
+                  value={title}
+                  onChange={(event) => setTitle(event.target.value)}
                 />
+              </SheetRow>
+              <Textarea
+                unstyled
+                aria-label="Spec"
+                placeholder="What should be built, and how you will know it is done (optional)"
+                className={cn(SHEET_TEXTAREA_CLASS, "px-4 py-2.5")}
+                value={spec}
+                onChange={(event) => setSpec(event.target.value)}
+              />
+            </SheetGroup>
+            {kind === "migration" ? (
+              <SheetGroup title="Migration">
+                <SheetRow as="label" label="Items">
+                  <Input
+                    unstyled
+                    aria-label="Command that lists the items"
+                    placeholder="git ls-files 'src/**/*.test.js'"
+                    className={SHEET_INPUT_CLASS}
+                    value={enumerateCommand}
+                    onChange={(event) => setEnumerateCommand(event.target.value)}
+                  />
+                </SheetRow>
                 <Textarea
+                  unstyled
                   aria-label="Instructions for each item"
                   placeholder="What to do to each item"
+                  className={cn(SHEET_TEXTAREA_CLASS, "px-4 py-2.5")}
                   value={instructions}
                   onChange={(event) => setInstructions(event.target.value)}
                 />
-              </>
+              </SheetGroup>
             ) : null}
-            <div className="flex flex-wrap gap-2">
-              <Select
-                value={kind}
-                onValueChange={(value) => {
-                  if (value === "task" || value === "plan" || value === "migration") setKind(value);
-                }}
-              >
-                <SelectTrigger aria-label="Kind" className="w-auto min-w-32">
-                  <SelectValue>
-                    {(value: CardKind | null) => KIND_LABEL[value ?? "task"]}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup>
-                  {(Object.keys(KIND_LABEL) as CardKind[]).map((entry) => (
-                    <SelectItem key={entry} value={entry}>
-                      {KIND_LABEL[entry]}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-              <Select
-                value={channelId}
-                onValueChange={(value) => setChannelId(value ?? NO_CHANNEL)}
-              >
-                <SelectTrigger aria-label="Channel" className="w-auto min-w-40">
-                  <SelectValue>
-                    {(value: string | null) =>
-                      value === null || value === NO_CHANNEL
-                        ? "No channel"
-                        : `#${channels.find((channel) => channel.id === value)?.name ?? ""}`
-                    }
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup>
-                  <SelectItem value={NO_CHANNEL}>No channel</SelectItem>
-                  {channels.map((channel) => (
-                    <SelectItem key={channel.id} value={channel.id}>
-                      #{channel.name}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-              <Select
-                value={String(priority)}
-                onValueChange={(value) => setPriority(Number(value ?? 0) as CardPriority)}
-              >
-                <SelectTrigger aria-label="Priority" className="w-auto min-w-32">
-                  <SelectValue>
-                    {(value: string | null) =>
-                      CARD_PRIORITY_LABEL[Number(value ?? 0) as CardPriority]
-                    }
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup>
-                  {CARD_PRIORITIES.map((entry) => (
-                    <SelectItem key={entry} value={String(entry)}>
-                      {CARD_PRIORITY_LABEL[entry]}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-            </div>
+            <SheetGroup>
+              <SheetRow label="Type">
+                <Select
+                  value={kind}
+                  onValueChange={(value) => {
+                    if (value === "task" || value === "plan" || value === "migration") setKind(value);
+                  }}
+                >
+                  <SelectTrigger aria-label="Kind" variant="ghost" className="w-auto min-w-0">
+                    <SelectValue>
+                      {(value: CardKind | null) => KIND_LABEL[value ?? "task"]}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup>
+                    {(Object.keys(KIND_LABEL) as CardKind[]).map((entry) => (
+                      <SelectItem key={entry} value={entry}>
+                        {KIND_LABEL[entry]}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+              </SheetRow>
+              <SheetRow label="Channel">
+                <Select
+                  value={channelId}
+                  onValueChange={(value) => setChannelId(value ?? NO_CHANNEL)}
+                >
+                  <SelectTrigger aria-label="Channel" variant="ghost" className="w-auto min-w-0">
+                    <SelectValue>
+                      {(value: string | null) =>
+                        value === null || value === NO_CHANNEL
+                          ? "No channel"
+                          : `#${channels.find((channel) => channel.id === value)?.name ?? ""}`
+                      }
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup>
+                    <SelectItem value={NO_CHANNEL}>No channel</SelectItem>
+                    {channels.map((channel) => (
+                      <SelectItem key={channel.id} value={channel.id}>
+                        #{channel.name}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+              </SheetRow>
+              <SheetRow label="Priority">
+                <Select
+                  value={String(priority)}
+                  onValueChange={(value) => setPriority(Number(value ?? 0) as CardPriority)}
+                >
+                  <SelectTrigger aria-label="Priority" variant="ghost" className="w-auto min-w-0">
+                    <SelectValue>
+                      {(value: string | null) =>
+                        CARD_PRIORITY_LABEL[Number(value ?? 0) as CardPriority]
+                      }
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup>
+                    {CARD_PRIORITIES.map((entry) => (
+                      <SelectItem key={entry} value={String(entry)}>
+                        {CARD_PRIORITY_LABEL[entry]}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+              </SheetRow>
+            </SheetGroup>
           </form>
         </DialogPanel>
         <DialogFooter>
