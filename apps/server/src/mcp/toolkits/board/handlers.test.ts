@@ -118,7 +118,20 @@ const makeHarness = Effect.fn("makeBoardToolkitHarness")(function* (
       getCommandReadModel: () =>
         Effect.succeed({
           agents: [
-            { id: AgentId.make("agent-reviewer"), projectId: PROJECT_ID, name: "reviewer", archivedAt: null },
+            {
+              id: AgentId.make("agent-reviewer"),
+              projectId: PROJECT_ID,
+              name: "reviewer",
+              roles: ["critic"],
+              archivedAt: null,
+            },
+            {
+              id: AGENT_ID,
+              projectId: PROJECT_ID,
+              name: "backend",
+              roles: ["builder", "critic"],
+              archivedAt: null,
+            },
           ],
         } as unknown as OrchestrationReadModel),
     }),
@@ -220,13 +233,15 @@ describe("board toolkit handlers", () => {
     }),
   );
 
-  it.effect("asks for help or a critique only as the builder, naming a project agent or none", () =>
+  it.effect("asks for help or a critique only as the builder, naming an agent or letting Iskra pick one", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness();
       expect(
         yield* harness.call("request_help", { question: "Per key or per user?", agentName: "@reviewer" }),
       ).toEqual({ requested: true });
+      // Unnamed: another agent with the role comes before the builder's own; none means its own.
       yield* harness.call("request_critique", { focus: "diff" });
+      yield* harness.call("request_help", { question: "Anyone?" });
       expect(yield* Ref.get(harness.commands)).toMatchObject([
         {
           type: "card.help.request",
@@ -234,7 +249,8 @@ describe("board toolkit handlers", () => {
           agentId: "agent-reviewer",
           question: "Per key or per user?",
         },
-        { type: "card.critique.request", cardId: CARD_ID, agentId: null, focus: "diff" },
+        { type: "card.critique.request", cardId: CARD_ID, agentId: "agent-reviewer", focus: "diff" },
+        { type: "card.help.request", cardId: CARD_ID, agentId: null, question: "Anyone?" },
       ]);
 
       expect(

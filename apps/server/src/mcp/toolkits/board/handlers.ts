@@ -134,10 +134,17 @@ const make = Effect.gen(function* () {
     ),
   );
 
-  /** The project agent a builder names, or null for its own template; the decider checks its role. */
-  const assistantOf = (session: OwnerSession, name: string | undefined) =>
+  /**
+   * The agent that answers a builder's request: the one it names, else a project agent whose roles
+   * include `role` (another agent before the builder's own), else null for the builder's own
+   * template. The decider checks the role either way.
+   */
+  const assistantOf = (
+    session: OwnerSession,
+    name: string | undefined,
+    role: "helper" | "critic",
+  ) =>
     Effect.gen(function* () {
-      if (name === undefined) return null;
       const card = yield* snapshots.getCardShellById(session.cardId).pipe(
         Effect.mapError(failed),
         Effect.flatMap(
@@ -147,13 +154,15 @@ const make = Effect.gen(function* () {
       // ponytail: reads the whole command read model to find one agent; add a by-name query if
       // assist requests show up in profiles.
       const model = yield* snapshots.getCommandReadModel().pipe(Effect.mapError(failed));
-      const bare = name.replace(/^@/, "");
-      const agent = (model.agents ?? []).find(
-        (candidate) =>
-          candidate.projectId === card.projectId &&
-          candidate.name === bare &&
-          candidate.archivedAt === null,
+      const projectAgents = (model.agents ?? []).filter(
+        (candidate) => candidate.projectId === card.projectId && candidate.archivedAt === null,
       );
+      if (name === undefined) {
+        const able = projectAgents.filter((candidate) => candidate.roles.includes(role));
+        return (able.find((candidate) => candidate.id !== session.agentId) ?? able[0])?.id ?? null;
+      }
+      const bare = name.replace(/^@/, "");
+      const agent = projectAgents.find((candidate) => candidate.name === bare);
       if (agent === undefined) {
         return yield* new BoardCommandRefusedError({
           detail: `No agent named @${bare} works on this project.`,
@@ -191,7 +200,7 @@ const make = Effect.gen(function* () {
     request_help: (input) =>
       Effect.gen(function* () {
         const session = yield* requireBuilderSession;
-        const agentId = yield* assistantOf(session, input.agentName);
+        const agentId = yield* assistantOf(session, input.agentName, "helper");
         yield* dispatch({
           type: "card.help.request",
           commandId: yield* commandId("help", session.threadId),
@@ -206,7 +215,7 @@ const make = Effect.gen(function* () {
     request_critique: (input) =>
       Effect.gen(function* () {
         const session = yield* requireBuilderSession;
-        const agentId = yield* assistantOf(session, input.agentName);
+        const agentId = yield* assistantOf(session, input.agentName, "critic");
         yield* dispatch({
           type: "card.critique.request",
           commandId: yield* commandId("critique", session.threadId),
