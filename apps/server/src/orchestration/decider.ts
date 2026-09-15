@@ -69,6 +69,7 @@ import {
   ANSWER_OPTION_REASON,
   activityAuthorOf,
   cardActivity,
+  EVIDENCE_CAPTURE_CODE,
   CHECKPOINT_OPTIONS,
   NO_OPEN_QUESTION_REASON,
   NO_OPEN_REF_REPORT_REASON,
@@ -2448,6 +2449,30 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
     case "card.unapprove":
       return yield* decideCardMove({ readModel, command, move: "unapprove" });
+    case "card.evidence.capture": {
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        "A card that has landed or been abandoned takes no new evidence.",
+      );
+      // A card at work captures evidence when its agent asks for review or a checkpoint.
+      if (card.status !== "inReview") {
+        return yield* refuse(command, "Only a card in review captures evidence on request.");
+      }
+      const occurredAt = yield* nowIso;
+      const text = "A person asked Iskra to capture evidence for the current commit.";
+      return yield* planned(command, "card", card.id, occurredAt, {
+        type: "card.activity-recorded",
+        payload: cardActivity({
+          activityId: `evidence-capture:${command.commandId}`,
+          cardId: card.id,
+          kind: "status",
+          author: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
+          body: text,
+          reason: { code: EVIDENCE_CAPTURE_CODE, text },
+          createdAt: occurredAt,
+        }),
+      });
+    }
     case "card.merge.approve": {
       // Invariant 16: an attempt lands only by being promoted into its card.
       const attempt = yield* requireCard({ readModel, command, cardId: command.cardId });

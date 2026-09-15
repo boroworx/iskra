@@ -56,6 +56,31 @@ it.layer(NodeServices.layer)("decider review", (it) => {
     }),
   );
 
+  it.effect("records a person's evidence capture only for a card in review, moving nothing", () =>
+    Effect.gen(function* () {
+      const capture = (id: string): OrchestrationCommand => ({
+        type: "card.evidence.capture",
+        commandId: nextCommandId(),
+        cardId: CardId.make(id),
+      });
+      const inReview = yield* applyCommands([...setup, ...cardInReview("card")]);
+      const events = yield* decide(inReview, capture("card"));
+      expect(
+        events.map((event) => [
+          event.type,
+          event.type === "card.activity-recorded" ? event.payload.reason?.code : null,
+        ]),
+      ).toEqual([["card.activity-recorded", "evidenceCaptureRequested"]]);
+      expect(cardIn(yield* applyTo(inReview, [capture("card")]), "card")?.status).toBe("inReview");
+
+      const atWork = yield* applyTo(inReview, [
+        { type: "card.work.return", commandId: nextCommandId(), cardId: CardId.make("card"), reason: "More." },
+      ]);
+      const refused = yield* Effect.flip(decide(atWork, capture("card")));
+      expect(refused.message).toContain("Only a card in review captures evidence on request.");
+    }),
+  );
+
   it.effect("sends a review comment to the agent and a card in review back to work", () =>
     Effect.gen(function* () {
       const inReview = yield* applyCommands([...setup, ...cardInReview("card")]);

@@ -2576,6 +2576,8 @@ const CardCriteriaSetCommand = Schema.Struct({
   criteria: Schema.Array(CardCriterion),
 });
 const CardCriteriaConfirmCommand = cardStatusCommand("card.criteria.confirm");
+/** A person asking Iskra to capture evidence for a card in review's current commit, moving nothing. */
+const CardEvidenceCaptureCommand = cardStatusCommand("card.evidence.capture");
 
 /** A person answering the owner's checkpoint: go on, go on differently, or stop and pause. */
 const CardCheckpointResolveCommand = Schema.Struct({
@@ -3377,6 +3379,7 @@ const IskraClientCommands = [
   CardCreateCommand,
   CardUpdateCommand,
   CardApproveCommand,
+  CardEvidenceCaptureCommand,
   CardUnapproveCommand,
   CardAssignCommand,
   CardUnassignCommand,

@@ -632,6 +632,9 @@ export const activityAuthorOf = (author: CardAuthor): CardActivity["author"] => 
 const SYSTEM_AUTHOR = { kind: "system", id: CHANNEL_SYSTEM_AUTHOR_ID } as const;
 
 /** A card activity with every optional part empty unless `entry` sets it. */
+/** The reason on a person's request to capture evidence for a card in review; the review reactor acts on it. */
+export const EVIDENCE_CAPTURE_CODE = "evidenceCaptureRequested";
+
 export const cardActivity = (
   entry: Pick<CardActivity, "activityId" | "cardId" | "kind" | "author" | "body" | "createdAt"> &
     Partial<CardActivity>,

@@ -10,8 +10,8 @@ gets an owner agent that works on it in its own session. You review the work, an
 - **Cards start on their own.** A ready card with an owner and confirmed acceptance criteria starts
   from the [queue](#the-queue) as soon as there is room. You no longer start sessions by hand.
 - **Cards already in review have no evidence.** You can still approve their merge. To get evidence
-  first, leave a review comment: the card goes back to its agent, and Iskra captures evidence when
-  the agent asks for review again.
+  first, open the card and choose **Capture evidence** under Review: Iskra runs the checks on its
+  current commit and records the result without moving the card.
 
 ## Channels
 

@@ -92,6 +92,7 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "card.workspace.set":
     case "card.workspace.clear":
     case "card.session.start":
+    case "card.evidence.capture":
     case "card.helper.request":
     case "card.message.post":
     case "card.session.record":

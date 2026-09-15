@@ -497,6 +497,33 @@ it.layer(layer)("CardReviewReactor", (it) => {
     }),
   );
 
+  it.effect("captures evidence for a card already in review when a person asks, without moving it", () =>
+    Effect.gen(function* () {
+      yield* setFakes({ checks: [check("test")], passes: true, webPort: null });
+      const world = yield* makeWorld("capture");
+      yield* world.write("a.ts", "export const a = 5;\n");
+      yield* world.requestReview();
+      const first = yield* world.evidenceRecorded();
+      yield* world.enteredReview();
+      yield* world.reactor.drain;
+
+      yield* world.engine.dispatch({
+        type: "card.evidence.capture",
+        commandId: world.commandId(),
+        cardId: world.cardId,
+      });
+      const captured = yield* world.evidenceRecorded();
+      expect(captured.payload.evidenceId).not.toBe(first.payload.evidenceId);
+      expect(captured.payload).toMatchObject({
+        purpose: "review",
+        passed: true,
+        headSha: yield* world.repo.git("rev-parse", "HEAD"),
+      });
+      yield* world.reactor.drain;
+      expect((yield* world.cardOf()).status).toBe("inReview");
+    }),
+  );
+
   it.effect("records a checkpoint's evidence without moving the card", () =>
     Effect.gen(function* () {
       yield* setFakes({ checks: [check("test")], passes: true, webPort: null });

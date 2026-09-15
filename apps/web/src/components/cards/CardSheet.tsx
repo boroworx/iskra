@@ -405,6 +405,17 @@ function CardSheetBody(props: {
 
         {card.evidence !== null || card.status === "inReview" || card.status === "landing" ? (
           <Section label="Review">
+            {card.status === "inReview" ? (
+              // Cards that reached review before evidence existed get theirs here; any card may recapture.
+              <Button
+                size="sm"
+                variant="outline"
+                className="self-start"
+                onClick={() => decideOn("card.evidence.capture", "Evidence was not requested")}
+              >
+                Capture evidence
+              </Button>
+            ) : null}
             <CardReview
               card={card}
               evidence={evidence}

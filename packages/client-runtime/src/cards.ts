@@ -342,6 +342,10 @@ export const REASON_LABEL: Readonly<Record<string, ReasonLabel>> = {
     hint: "Its agent asked to run the project's checks; they run when the machine has room.",
   },
   runChecksResult: { label: "Checks ran", hint: "The result went to its agent." },
+  evidenceCaptureRequested: {
+    label: "Evidence requested",
+    hint: "A person asked Iskra to capture evidence for the card's current commit.",
+  },
   mergedOnHost: {
     label: "Merged on the host",
     hint: "A person merged its pull request on the host, which counts as approving it.",

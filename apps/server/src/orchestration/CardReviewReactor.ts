@@ -38,6 +38,7 @@ import {
 } from "./CardEvidence.ts";
 import {
   CI_ONLY_NO_PULL_REQUEST_REASON,
+  EVIDENCE_CAPTURE_CODE,
   fixRoundRefusal,
   landsByPullRequest,
   NO_CHECKS_REASON,
@@ -71,6 +72,8 @@ interface ReviewJob {
   readonly cardId: CardId;
   readonly key: string;
   readonly risks: CardRiskClaims | null;
+  /** A person's capture for a card already in review: record evidence for its head, nothing more. */
+  readonly capture?: boolean;
 }
 
 /** A check's result as an evidence item. */
@@ -170,7 +173,9 @@ const make = Effect.gen(function* () {
     const model = yield* readModel();
     const card = model.cards?.find((candidate) => candidate.id === cardId);
     const project = model.projects.find((candidate) => candidate.id === card?.projectId);
-    if (card === undefined || project === undefined || card.status !== "inProgress") return;
+    const capture = job.capture === true;
+    const expectedStatus = capture ? "inReview" : "inProgress";
+    if (card === undefined || project === undefined || card.status !== expectedStatus) return;
     if (card.worktreePath === null || card.portBase === null) {
       return yield* tellBuilder(
         cardId,
@@ -185,11 +190,14 @@ const make = Effect.gen(function* () {
     const base = yield* workspace.projectFile(cardId);
     yield* fetchBase({ worktreePath, baseBranch: base.baseBranch });
     const { baseRef, checks, file } = yield* workspace.projectFile(cardId);
-    const prepared = yield* workspace.withCardLock(
-      cardId,
-      commitAndRebase({ worktreePath, baseRef, message: `${card.title}: work in progress` }),
-    );
-    if (prepared.kind === "conflict") {
+    // A capture describes the branch under review as it is, so it neither commits nor rebases it.
+    const prepared = capture
+      ? null
+      : yield* workspace.withCardLock(
+          cardId,
+          commitAndRebase({ worktreePath, baseRef, message: `${card.title}: work in progress` }),
+        );
+    if (prepared?.kind === "conflict") {
       return yield* tellBuilder(
         cardId,
         key,
@@ -202,7 +210,9 @@ const make = Effect.gen(function* () {
     const localChecks = checks.filter((check) => check.source !== "ci");
     // Checks that only run in CI are verified on the pull request, so review needs one to open.
     const ciOnly = checks.length > 0 && localChecks.length === 0;
-    if (ciOnly && purpose === "review" && !landsByPullRequest(project)) {
+    // A capture refuses nothing: it records what the checks say, and CI items only where CI can report.
+    const pendingCi = ciOnly && (!capture || landsByPullRequest(project));
+    if (ciOnly && purpose === "review" && !capture && !landsByPullRequest(project)) {
       yield* record(cardId, `review-ci-only:${key}`, {
         kind: "error",
         body: CI_ONLY_NO_PULL_REQUEST_REASON,
@@ -279,12 +289,12 @@ const make = Effect.gen(function* () {
       evidenceId,
       headSha: changes.headSha,
       purpose,
-      items: [...run.results.map(checkItem), ...(ciOnly ? checks.map(pendingCiItem) : []), ...ui],
+      items: [...run.results.map(checkItem), ...(pendingCi ? checks.map(pendingCiItem) : []), ...ui],
       flags,
       risks: job.risks,
       recordedAt: yield* nowIso,
     });
-    if (purpose === "checkpoint") return;
+    if (purpose === "checkpoint" || capture) return;
 
     if (!run.passed) {
       if (!roundsLeft) {
@@ -378,6 +388,15 @@ const make = Effect.gen(function* () {
     switch (event.type) {
       case "card.activity-recorded": {
         const activity = event.payload;
+        if (activity.author.kind === "human" && activity.reason?.code === EVIDENCE_CAPTURE_CODE) {
+          return enqueue({
+            purpose: "review",
+            cardId: activity.cardId,
+            key: event.eventId,
+            risks: null,
+            capture: true,
+          });
+        }
         return activity.author.kind === "agent" && activity.reason?.code === REVIEW_REQUESTED_CODE
           ? enqueue({
               purpose: "review",
