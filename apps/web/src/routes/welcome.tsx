@@ -3,9 +3,12 @@ import { useState } from "react";
 
 import { NoProjectsHero } from "../components/NoProjectsHero";
 import { WelcomeWizard } from "../components/onboarding/WelcomeWizard";
+import { GuidedFirstRun } from "../components/welcome/GuidedFirstRun";
 
-/** Onboarding overlays the workspace. Visiting /welcome reopens setup. */
+/** Onboarding overlays the workspace. Visiting /welcome reopens setup; ?guide=1 opens the guided first run. */
 export const Route = createFileRoute("/welcome")({
+  validateSearch: (search: Record<string, unknown>): { guide?: true } =>
+    search.guide === true || search.guide === "1" || search.guide === 1 ? { guide: true } : {},
   beforeLoad: ({ context }) => {
     const { authGateState } = context;
     if (authGateState.status !== "authenticated" && authGateState.status !== "hosted-static") {
@@ -17,6 +20,7 @@ export const Route = createFileRoute("/welcome")({
 
 function WelcomeRouteView() {
   const { authGateState } = Route.useRouteContext();
+  const { guide } = Route.useSearch();
   const navigate = useNavigate();
   // The root shell can remount this pending outlet after the location changes.
   // Never reopen setup while the destination route is still loading.
@@ -27,6 +31,9 @@ function WelcomeRouteView() {
   // no matter what hostname the browser used. Only hosted-static has no
   // local server to offer.
   const localAvailable = authGateState.status === "authenticated";
+  if (guide === true) {
+    return <GuidedFirstRun />;
+  }
   return (
     <>
       <NoProjectsHero />
