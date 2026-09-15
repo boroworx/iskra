@@ -972,7 +972,7 @@ function OutcomeControls(props: {
   const { card, environmentId } = props;
   const setOutcome = useAtomCommand(cardEnvironment.setOutcome);
   const revert = useAtomCommand(cardEnvironment.revert);
-  const [state, setState] = useState<CardOutcome["state"]>(card.outcome?.state ?? "success");
+  const [state, setState] = useState<CardOutcome["state"] | null>(card.outcome?.state ?? null);
   const [note, setNote] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [sending, setSending] = useState(false);
@@ -997,7 +997,9 @@ function OutcomeControls(props: {
         >
           <SelectTrigger aria-label="Outcome" className="w-auto min-w-28">
             <SelectValue>
-              {(value: CardOutcome["state"] | null) => OUTCOME_LABEL[value ?? "success"]}
+              {(value: CardOutcome["state"] | null) =>
+                value === null ? "Choose" : OUTCOME_LABEL[value]
+              }
             </SelectValue>
           </SelectTrigger>
           <SelectPopup>
@@ -1015,12 +1017,21 @@ function OutcomeControls(props: {
           value={note}
           onChange={(event) => setNote(event.target.value)}
         />
-        <DisabledReason reason={note.trim().length === 0 ? "Say why you're setting it." : null}>
+        <DisabledReason
+          reason={
+            state === null
+              ? "Choose how it turned out."
+              : note.trim().length === 0
+                ? "Say why you're setting it."
+                : null
+          }
+        >
           <Button
             size="sm"
             variant="outline"
-            disabled={sending || note.trim().length === 0}
+            disabled={sending || state === null || note.trim().length === 0}
             onClick={async () => {
+              if (state === null) return;
               setSending(true);
               const result = await setOutcome({
                 environmentId,

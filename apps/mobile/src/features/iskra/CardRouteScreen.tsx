@@ -1,4 +1,4 @@
-import { cardSparkState, cardStatusPill } from "@iskra/client-runtime/card-face";
+import { cardSparkState, cardStatusPill, outcomePill } from "@iskra/client-runtime/card-face";
 import {
   CARD_QUESTION_KINDS,
   REASON_LABEL,
@@ -21,7 +21,6 @@ import {
   type CardActivityKind,
   type CardAttention,
   type CardCriterion,
-  type CardOutcome,
   type EnvironmentId,
   type OrchestrationAgentShell,
   type OrchestrationCardShell,
@@ -71,13 +70,6 @@ const UNDO_MS = 8_000;
 const isUndoable = (type: DecisionType): type is "card.pause" | "card.abandon" | "card.unapprove" =>
   type === "card.pause" || type === "card.abandon" || type === "card.unapprove";
 
-const OUTCOME_PILL: Record<CardOutcome["state"], { readonly label: string; readonly tone: "green" | "red" | "orange" | "gray" }> = {
-  success: { label: "Success", tone: "green" },
-  flawed: { label: "Flawed", tone: "red" },
-  blocked: { label: "Blocked", tone: "orange" },
-  manual: { label: "Manual", tone: "gray" },
-};
-
 /** One card and every decision on it that mobile carries, from the same rules as the web sheet. */
 export function CardRouteScreen(props: CardParams) {
   const environmentId = props.route.params.environmentId as EnvironmentId;
@@ -123,6 +115,7 @@ function CardScreenBody(props: {
   const agentOf = (id: string | null) => props.agents.find((agent) => agent.id === id);
   const sessionAgent = agentOf(card.ownerSession?.agentId ?? card.delegateAgentId);
   const builder = agentOf(card.delegateAgentId);
+  const outcome = outcomePill(card.outcome);
   const verificationRequired = cardVerificationRequired(card, policy, builder);
   const mergeRefusal = verifierMergeRefusal(card, verificationRequired);
   const items = currentEvidenceItems(card, activity.data?.evidence ?? null);
@@ -182,7 +175,7 @@ function CardScreenBody(props: {
       <View className="gap-2 px-1">
         <View className="flex-row flex-wrap items-center gap-2">
           <StatusPill {...cardStatusPill(card)} />
-          {card.outcome !== null ? <StatusPill {...OUTCOME_PILL[card.outcome.state]} /> : null}
+          {outcome !== null ? <StatusPill {...outcome} /> : null}
           {card.unattended ? <StatusPill label="Draft PR" tone="gray" /> : null}
         </View>
         <Text className="text-[22px] text-foreground" style={{ fontWeight: "700" }} selectable>

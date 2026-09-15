@@ -9,7 +9,13 @@ import {
 } from "@iskra/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { cardSparkState, cardStatusPill, criteriaMarks, markOfCriterionState } from "./cardFace.ts";
+import {
+  cardSparkState,
+  cardStatusPill,
+  criteriaMarks,
+  markOfCriterionState,
+  outcomePill,
+} from "./cardFace.ts";
 
 const at = "2026-01-01T00:00:00.000Z";
 
@@ -122,5 +128,14 @@ describe("card face", () => {
     expect(markOfCriterionState("coveredByChecks")).toBe("passed");
     expect(markOfCriterionState("failed")).toBe("failed");
     expect(markOfCriterionState("needsYourCheck")).toBe("needsYou");
+  });
+});
+
+describe("outcomePill", () => {
+  it("shows only a recorded outcome, never one inferred from landing", () => {
+    expect(outcomePill(null)).toBeNull();
+    expect(
+      outcomePill({ state: "flawed", decidedAt: "2026-09-15T00:00:00.000Z", signals: [] }),
+    ).toEqual({ label: "Flawed", tone: "red" });
   });
 });
