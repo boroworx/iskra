@@ -16,7 +16,6 @@ import {
   resolveEnvironmentIdentificationPillLabel,
   useEnvironmentStageLabel,
 } from "../SidebarStageBackdrop";
-import { Badge } from "../ui/badge";
 import {
   SidebarFooter,
   SidebarHeader,
@@ -54,30 +53,26 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
       <SidebarTrigger className="md:hidden" />
       <SidebarBrand />
       {pillLabel ? (
-        <Badge
-          className="ml-1 hidden rounded-full px-1.5 text-muted-foreground @[15rem]/sidebar-header:inline-flex"
+        <span
+          className="ml-auto mr-3 hidden truncate text-[11px] font-medium text-tertiary-label @[12rem]/sidebar-header:inline"
           data-environment-identification="pill"
-          size="sm"
-          variant="secondary"
         >
           {pillLabel}
-        </Badge>
+        </span>
       ) : null}
     </SidebarHeader>
   );
 });
 
+/** Iskra's spark beside the sidebar toggle: quiet, and a way home. */
 function SidebarBrand() {
   return (
     <Link
       aria-label="Go home"
-      className="ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center rounded-md px-1 text-sidebar-foreground outline-hidden ring-ring focus-visible:ring-2 md:flex"
+      className="ml-[var(--workspace-titlebar-content-left)] hidden size-7 shrink-0 items-center justify-center rounded-md text-tertiary-label outline-hidden ring-ring hover:text-sidebar-foreground focus-visible:ring-2 md:flex"
       to="/"
     >
-      <span aria-hidden className="flex items-center gap-1.5">
-        <SparkGlyph state="working" size={14} />
-        <span className="text-[13px] font-semibold">Iskra</span>
-      </span>
+      <SparkGlyph state="idle" size={14} className="text-current" />
     </Link>
   );
 }
@@ -96,7 +91,12 @@ function SidebarUtilityItem({
       <Tooltip>
         <TooltipTrigger
           render={
-            <SidebarMenuButton aria-label={label} onClick={onClick} size="icon">
+            <SidebarMenuButton
+              aria-label={label}
+              onClick={onClick}
+              size="icon"
+              className="size-7 text-tertiary-label hover:text-sidebar-foreground [&>svg]:size-3.5! [&>svg]:text-current!"
+            >
               {icon}
             </SidebarMenuButton>
           }
@@ -163,7 +163,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   }, [canGoBack, closeMobileSidebar, navigate]);
 
   return (
-    <SidebarMenu className="flex-row items-center">
+    <SidebarMenu className="flex-row items-center gap-0.5">
       {currentFooterPage ? (
         <SidebarMenuItem className="min-w-0 flex-1">
           <SidebarMenuButton onClick={handleBackClick}>
@@ -199,7 +199,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
 
 export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   return (
-    <SidebarFooter className="px-[var(--sidebar-content-inset)] py-1">
+    <SidebarFooter className="gap-1 px-2.5 py-1.5">
       <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />
       <SidebarUtilityMenu />

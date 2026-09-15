@@ -1,7 +1,14 @@
 import type { EnvironmentProject } from "@iskra/client-runtime/state/models";
 import type { AgentId, ChannelId, EnvironmentId, ProjectId } from "@iskra/contracts";
-import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { ArchiveIcon, AtSignIcon, HashIcon, InboxIcon, PlusIcon, SettingsIcon } from "lucide-react";
+import { Link, useLocation, useNavigate, useParams } from "@tanstack/react-router";
+import {
+  ArchiveIcon,
+  CheckIcon,
+  ChevronsUpDownIcon,
+  LayoutGridIcon,
+  PlusIcon,
+  SettingsIcon,
+} from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { openCommandPalette } from "../commandPaletteBus";
@@ -23,16 +30,27 @@ import { cardOwnerSessions, needsYouItems } from "@iskra/client-runtime/cards";
 import {
   agentListEntries,
   channelListEntries,
-  presenceDotClassName,
   presenceLabel,
+  presenceSpark,
 } from "./channels/channels.logic";
 import { AgentSettingsDialog, useAgentDefinitions } from "./channels/AgentSettingsDialog";
 import { ChannelSettingsDialog } from "./channels/ChannelSettingsDialog";
 import { CreateAgentDialog } from "./channels/CreateAgentDialog";
 import { CreateChannelDialog } from "./channels/CreateChannelDialog";
 import { useProjectRailMemory, useRouteProject } from "./channels/IskraCreateDialogs";
+import { AgentAvatar } from "./iskra/AgentAvatar";
+import { SparkGlyph } from "./iskra/SparkGlyph";
 import { projectKey, projectRailInitials, railClickTarget } from "./projectRail.logic";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
+import {
+  Menu,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuItem,
+  MenuPopup,
+  MenuSeparator,
+  MenuTrigger,
+} from "./ui/menu";
 import {
   SidebarContent,
   SidebarGroup,
@@ -42,10 +60,32 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "./ui/sidebar";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
-/** The cross-project Needs you list, with how many items wait. */
-function NeedsYouEntry() {
+/** A source-list row: 28px, 13px regular text on a subtle fill when selected. */
+const ROW =
+  "h-7 gap-2 rounded-[6px] px-2 text-[13px] font-normal text-sidebar-foreground data-[active=true]:font-normal";
+
+/** A row's hover-only control, such as a channel's settings. */
+const ROW_ACTION =
+  "absolute top-0.5 right-1 flex size-6 items-center justify-center rounded-md text-tertiary-label opacity-0 outline-hidden ring-ring group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100 pointer-coarse:opacity-100 hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 [&>svg]:size-3.5";
+
+/** A project's tile: its initials on Iskra blue. */
+function ProjectTile(props: { readonly initials: string; readonly className?: string }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "flex size-6 shrink-0 items-center justify-center rounded-[6px] bg-linear-to-b from-[#409cff] to-[#0a6fe0] text-[10px] font-bold text-white",
+        props.className,
+      )}
+    >
+      {props.initials}
+    </span>
+  );
+}
+
+/** The cross-project Needs You list, with how many items wait. */
+function NeedsYouRow(props: { readonly active: boolean }) {
   const environmentId = usePrimaryEnvironmentId();
   const cards = useEnvironmentCards(environmentId);
   const allProjects = useProjects();
@@ -57,30 +97,32 @@ function NeedsYouEntry() {
   const [now] = useState(() => Date.now());
   const count = needsYouItems({ cards, sessions: cardOwnerSessions(cards), projects, now }).length;
   return (
-    <SidebarMenu className="px-2 pt-2">
-      <SidebarMenuItem>
-        <SidebarMenuButton render={<Link to="/needs-you" />}>
-          <InboxIcon />
-          <span className="truncate">Needs you</span>
-          {count > 0 ? (
-            <span className="ml-auto text-xs tabular-nums text-sidebar-muted-foreground">
-              {count}
-            </span>
-          ) : null}
-        </SidebarMenuButton>
-      </SidebarMenuItem>
-    </SidebarMenu>
+    <SidebarMenuItem>
+      <SidebarMenuButton className={ROW} isActive={props.active} render={<Link to="/needs-you" />}>
+        <span aria-hidden className="flex shrink-0">
+          <SparkGlyph state="needsYou" size={16} />
+        </span>
+        <span className="truncate">Needs You</span>
+        {count > 0 ? (
+          <span className="ml-auto h-[18px] min-w-[18px] shrink-0 rounded-full bg-[rgb(120_120_128/16%)] px-1.5 text-center text-[11px] leading-[18px] font-semibold tabular-nums dark:bg-[rgb(120_120_128/28%)]">
+            {count}
+          </span>
+        ) : null}
+      </SidebarMenuButton>
+    </SidebarMenuItem>
   );
 }
 
 /**
- * The Iskra sidebar: a rail of projects, and the selected project's channels
- * and agents. The URL decides the selected project (see `useRouteProject`); a
- * rail click navigates into that project rather than selecting it locally.
+ * The Iskra sidebar: a project picker, Needs You and the selected project's
+ * board, channels and agents. The URL decides the selected project (see
+ * `useRouteProject`); picking a project navigates into it rather than
+ * selecting it locally.
  */
 export default function IskraSidebar() {
   const projects = useProjects();
   const navigate = useNavigate();
+  const pathname = useLocation({ select: (location) => location.pathname });
   const routeChannelId = useParams({
     strict: false,
     select: (params) => (params.channelId ?? null) as ChannelId | null,
@@ -92,13 +134,13 @@ export default function IskraSidebar() {
   const selected = useRouteProject();
   const selectedKey = selected === null ? null : projectKey(selected);
   const [memory] = useProjectRailMemory();
-  const railInitials = useMemo(
+  const initials = useMemo(
     () => projectRailInitials(projects.map((project) => project.title)),
     [projects],
   );
   const openProject = (project: EnvironmentProject) => {
     const { environmentId, id: projectId } = project;
-    // Read once on click: subscribing every rail square to its environment's channels would re-render the rail.
+    // Read once on pick: subscribing every project entry to its environment's channels would re-render the picker.
     const channels = appAtomRegistry.get(
       environmentAgentChannels.environmentChannelsAtom(environmentId),
     );
@@ -113,64 +155,84 @@ export default function IskraSidebar() {
         })
       : navigate({ to: "/board/$environmentId/$projectId", params: { environmentId, projectId } }));
   };
+  const selectedIndex = projects.findIndex((project) => projectKey(project) === selectedKey);
 
   return (
     <>
       <SidebarChromeHeader isElectron={isElectron} />
-      <div className="flex min-h-0 flex-1">
-        <nav
-          aria-label="Projects"
-          className="flex w-14 shrink-0 flex-col items-center gap-2 overflow-y-auto border-r border-sidebar-border py-2"
-        >
-          {projects.map((project, index) => {
-            const key = projectKey(project);
-            const active = key === selectedKey;
-            return (
-              <Tooltip key={key}>
-                <TooltipTrigger
+      <div className="flex min-h-0 flex-1 flex-col px-2.5">
+        <Menu>
+          <MenuTrigger
+            render={
+              <button
+                type="button"
+                className="mb-2 flex h-10 w-full shrink-0 items-center gap-2.5 rounded-lg bg-[rgb(120_120_128/10%)] px-2 text-left outline-hidden ring-ring hover:bg-[rgb(120_120_128/16%)] focus-visible:ring-2 data-popup-open:bg-[rgb(120_120_128/16%)] dark:bg-[rgb(120_120_128/14%)] dark:hover:bg-[rgb(120_120_128/20%)]"
+              />
+            }
+          >
+            {selected === null ? (
+              <>
+                <span className="flex size-6 shrink-0 items-center justify-center rounded-[6px] bg-[rgb(120_120_128/24%)] text-sidebar-foreground">
+                  <PlusIcon className="size-3.5" />
+                </span>
+                <span className="truncate text-[13px] font-semibold">Projects</span>
+              </>
+            ) : (
+              <>
+                <ProjectTile initials={initials[selectedIndex] ?? ""} />
+                <span className="truncate text-[13px] font-semibold">{selected.title}</span>
+              </>
+            )}
+            <ChevronsUpDownIcon aria-hidden className="ml-auto size-3 shrink-0 text-tertiary-label" />
+          </MenuTrigger>
+          <MenuPopup align="start" className="w-(--anchor-width) min-w-56">
+            {projects.length > 0 ? (
+              <MenuGroup>
+                <MenuGroupLabel>Projects</MenuGroupLabel>
+                {projects.map((project, index) => {
+                  const key = projectKey(project);
+                  return (
+                    <MenuItem key={key} onClick={() => openProject(project)}>
+                      <ProjectTile initials={initials[index] ?? ""} className="size-5 text-[9px]" />
+                      <span className="min-w-0 flex-1 truncate">{project.title}</span>
+                      {key === selectedKey ? (
+                        <CheckIcon aria-label="Current project" className="size-3.5 text-foreground" />
+                      ) : null}
+                    </MenuItem>
+                  );
+                })}
+              </MenuGroup>
+            ) : null}
+            {projects.length > 0 ? <MenuSeparator /> : null}
+            <MenuItem onClick={() => openCommandPalette({ open: "add-project" })}>
+              <PlusIcon />
+              Add project
+            </MenuItem>
+          </MenuPopup>
+        </Menu>
+        <SidebarContent className="gap-0 pb-2">
+          <SidebarMenu className="gap-0.5">
+            <NeedsYouRow active={pathname === "/needs-you"} />
+            {selected === null ? null : (
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  className={ROW}
+                  isActive={pathname.startsWith(`/board/${selected.environmentId}/${selected.id}`)}
                   render={
-                    <button
-                      type="button"
-                      aria-label={project.title}
-                      aria-current={active ? "true" : undefined}
-                      onClick={() => openProject(project)}
-                      className={cn(
-                        "flex size-9 shrink-0 items-center justify-center rounded-lg text-xs font-semibold outline-hidden ring-ring focus-visible:ring-2",
-                        active
-                          ? "bg-primary/15 text-primary"
-                          : "bg-sidebar-accent text-sidebar-foreground hover:bg-sidebar-accent/70",
-                      )}
-                    >
-                      {railInitials[index]}
-                    </button>
+                    <Link
+                      to="/board/$environmentId/$projectId"
+                      params={{ environmentId: selected.environmentId, projectId: selected.id }}
+                    />
                   }
-                />
-                <TooltipPopup side="right">{project.title}</TooltipPopup>
-              </Tooltip>
-            );
-          })}
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  aria-label="Add project"
-                  onClick={() => openCommandPalette({ open: "add-project" })}
-                  className="flex size-9 shrink-0 items-center justify-center rounded-lg text-sidebar-muted-foreground outline-hidden ring-ring hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-2 [&>svg]:size-4"
                 >
-                  <PlusIcon />
-                </button>
-              }
-            />
-            <TooltipPopup side="right">Add project</TooltipPopup>
-          </Tooltip>
-        </nav>
-        <SidebarContent className="gap-0">
-          <NeedsYouEntry />
+                  <LayoutGridIcon className="text-info-foreground!" />
+                  <span className="truncate">Board</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )}
+          </SidebarMenu>
           {selected === null ? (
-            <p className="px-4 py-3 text-xs text-sidebar-muted-foreground">
-              Add a project to get started.
-            </p>
+            <p className="px-2 py-3 text-xs text-tertiary-label">Add a project to get started.</p>
           ) : (
             <ProjectChannels
               key={selectedKey}
@@ -206,16 +268,6 @@ const ProjectChannels = memo(function ProjectChannels(props: {
 
   return (
     <>
-      <div className="flex h-10 shrink-0 items-center gap-2 px-4 text-sm font-semibold">
-        <span className="truncate">{props.project.title}</span>
-        <Link
-          to="/board/$environmentId/$projectId"
-          params={{ environmentId, projectId }}
-          className="ml-auto shrink-0 rounded-md px-1.5 py-0.5 text-xs font-medium text-sidebar-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
-        >
-          Board
-        </Link>
-      </div>
       <SidebarListGroup
         label="Channels"
         addLabel="New channel"
@@ -225,6 +277,7 @@ const ProjectChannels = memo(function ProjectChannels(props: {
         {channelEntries.map((entry) => (
           <SidebarMenuItem key={entry.id}>
             <SidebarMenuButton
+              className={ROW}
               isActive={entry.id === props.activeChannelId}
               render={
                 <Link
@@ -233,14 +286,16 @@ const ProjectChannels = memo(function ProjectChannels(props: {
                 />
               }
             >
-              <HashIcon />
+              <span aria-hidden className="w-4 shrink-0 text-center font-semibold text-info-foreground">
+                #
+              </span>
               <span className="truncate">{entry.name}</span>
             </SidebarMenuButton>
             <button
               type="button"
               aria-label={`#${entry.name} settings`}
               onClick={() => setSettingsChannelId(entry.id)}
-              className="absolute top-1 right-1 flex size-6 items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 outline-hidden ring-ring group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100 hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-2 [&>svg]:size-3.5"
+              className={ROW_ACTION}
             >
               <SettingsIcon />
             </button>
@@ -258,38 +313,42 @@ const ProjectChannels = memo(function ProjectChannels(props: {
         onAdd={() => setOpenDialog("agent")}
         isEmpty={agentEntries.length === 0}
       >
-        {agentEntries.map((entry) => (
-          <SidebarMenuItem key={entry.id}>
-            {/* An agent's row opens its DM: a window onto its sessions. */}
-            <SidebarMenuButton
-              isActive={entry.id === props.activeAgentId}
-              render={
-                <Link
-                  to="/agents/$environmentId/$agentId"
-                  params={{ environmentId, agentId: entry.id }}
-                />
-              }
-            >
-              <AtSignIcon />
-              <span className="truncate">{entry.name}</span>
-              <span className="ml-auto flex shrink-0 items-center group-focus-within/menu-item:invisible group-hover/menu-item:invisible">
-                <span
-                  aria-hidden
-                  className={cn("size-2 rounded-full", presenceDotClassName(entry.presence))}
-                />
+        {agentEntries.map((entry) => {
+          const spark = presenceSpark(entry.presence);
+          return (
+            <SidebarMenuItem key={entry.id}>
+              {/* An agent's row opens its DM: a window onto its sessions. */}
+              <SidebarMenuButton
+                className={ROW}
+                isActive={entry.id === props.activeAgentId}
+                render={
+                  <Link
+                    to="/agents/$environmentId/$agentId"
+                    params={{ environmentId, agentId: entry.id }}
+                  />
+                }
+              >
+                <span aria-hidden className="flex w-4 shrink-0 justify-center">
+                  <AgentAvatar
+                    name={entry.name}
+                    size="xs"
+                    spark={spark === "idle" ? undefined : spark}
+                  />
+                </span>
                 <span className="sr-only">{presenceLabel(entry.presence)}</span>
-              </span>
-            </SidebarMenuButton>
-            <button
-              type="button"
-              aria-label={`@${entry.name} settings`}
-              onClick={() => setSettingsAgentId(entry.id)}
-              className="absolute top-1 right-1 flex size-6 items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 outline-hidden ring-ring group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100 hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-2 [&>svg]:size-3.5"
-            >
-              <SettingsIcon />
-            </button>
-          </SidebarMenuItem>
-        ))}
+                <span className="truncate">{entry.name}</span>
+              </SidebarMenuButton>
+              <button
+                type="button"
+                aria-label={`@${entry.name} settings`}
+                onClick={() => setSettingsAgentId(entry.id)}
+                className={ROW_ACTION}
+              >
+                <SettingsIcon />
+              </button>
+            </SidebarMenuItem>
+          );
+        })}
         <ArchivedAgents
           environmentId={environmentId}
           projectId={projectId}
@@ -334,6 +393,26 @@ const ProjectChannels = memo(function ProjectChannels(props: {
   );
 });
 
+/** A quiet disclosure row for a list's archived entries. */
+function ArchivedToggle(props: {
+  readonly count: number;
+  readonly open: boolean;
+  readonly onToggle: () => void;
+}) {
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        className={cn(ROW, "text-tertiary-label hover:text-sidebar-foreground")}
+        aria-expanded={props.open}
+        onClick={props.onToggle}
+      >
+        <ArchiveIcon className="size-3.5!" />
+        <span className="truncate">Archived {props.count}</span>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
+}
+
 /**
  * A project's archived channels, collapsed under its channels, so an archive is
  * never a one-way door: each row unarchives its channel and opens it.
@@ -377,29 +456,21 @@ function ArchivedChannels(props: {
   };
   return (
     <>
-      <SidebarMenuItem>
-        <SidebarMenuButton
-          size="sm"
-          aria-expanded={open}
-          onClick={() => setOpen((value) => !value)}
-        >
-          <ArchiveIcon />
-          <span className="truncate text-sidebar-muted-foreground">
-            Archived ({archived.length})
-          </span>
-        </SidebarMenuButton>
-      </SidebarMenuItem>
+      <ArchivedToggle
+        count={archived.length}
+        open={open}
+        onToggle={() => setOpen((value) => !value)}
+      />
       {open
         ? archived.map((channel) => (
             <SidebarMenuItem key={channel.id}>
               <SidebarMenuButton
-                size="sm"
-                className="pl-6 text-sidebar-muted-foreground"
+                className={cn(ROW, "pl-8 text-muted-foreground")}
                 aria-label={`Unarchive #${channel.name}`}
                 onClick={() => void unarchiveChannel(channel.id)}
               >
                 <span className="truncate">#{channel.name}</span>
-                <span className="ml-auto shrink-0 text-xs">Unarchive</span>
+                <span className="ml-auto shrink-0 text-[11px] text-tertiary-label">Unarchive</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
           ))
@@ -442,24 +513,16 @@ function ArchivedAgents(props: {
   }
   return (
     <>
-      <SidebarMenuItem>
-        <SidebarMenuButton
-          size="sm"
-          aria-expanded={open}
-          onClick={() => setOpen((value) => !value)}
-        >
-          <ArchiveIcon />
-          <span className="truncate text-sidebar-muted-foreground">
-            Archived ({archived.length})
-          </span>
-        </SidebarMenuButton>
-      </SidebarMenuItem>
+      <ArchivedToggle
+        count={archived.length}
+        open={open}
+        onToggle={() => setOpen((value) => !value)}
+      />
       {open
         ? archived.map((definition) => (
             <SidebarMenuItem key={definition.id}>
               <SidebarMenuButton
-                size="sm"
-                className="pl-6 text-sidebar-muted-foreground"
+                className={cn(ROW, "pl-8 text-muted-foreground")}
                 onClick={() => props.onOpen(definition.id)}
               >
                 <span className="truncate">@{definition.name}</span>
@@ -479,19 +542,26 @@ function SidebarListGroup(props: {
   readonly children: ReactNode;
 }) {
   return (
-    <SidebarGroup>
-      <SidebarGroupLabel>{props.label}</SidebarGroupLabel>
-      <SidebarGroupAction aria-label={props.addLabel} onClick={props.onAdd}>
+    <SidebarGroup className="group/section p-0">
+      <SidebarGroupLabel className="h-auto rounded-none px-2 pt-3.5 pb-1 text-[11px] font-semibold text-tertiary-label">
+        {props.label}
+      </SidebarGroupLabel>
+      {/* Shown on hover or focus; the empty list's link and touch screens keep a way in. */}
+      <SidebarGroupAction
+        aria-label={props.addLabel}
+        onClick={props.onAdd}
+        className="top-2.5 right-1 text-tertiary-label opacity-0 group-focus-within/section:opacity-100 group-hover/section:opacity-100 pointer-coarse:opacity-100 hover:text-sidebar-foreground [&>svg:not([class*='size-'])]:size-3.5"
+      >
         <PlusIcon />
       </SidebarGroupAction>
-      <SidebarMenu>
+      <SidebarMenu className="gap-0.5">
         {props.isEmpty ? (
-          <p className="px-2 py-1 text-xs text-sidebar-muted-foreground">
+          <p className="px-2 py-1 text-xs text-tertiary-label">
             None yet.{" "}
             <button
               type="button"
               onClick={props.onAdd}
-              className="rounded-sm font-medium text-sidebar-foreground underline-offset-2 outline-hidden ring-ring hover:underline focus-visible:ring-2"
+              className="rounded-sm font-medium text-info-foreground outline-hidden ring-ring hover:underline focus-visible:ring-2"
             >
               {props.addLabel}
             </button>

@@ -28,7 +28,7 @@ import {
   type DragEndEvent,
 } from "@dnd-kit/core";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { PlusIcon } from "lucide-react";
+import { EllipsisIcon, PlusIcon } from "lucide-react";
 import { memo, useCallback, useMemo, useState } from "react";
 
 import { useClientSettings } from "~/hooks/useSettings";
@@ -41,9 +41,12 @@ import { cardEnvironment } from "~/state/cards";
 import { useEnvironmentAgents, useEnvironmentCards, useProjects } from "~/state/entities";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { AgentAvatar } from "../iskra/AgentAvatar";
+import { cardShortId } from "../iskra/cardLabel";
 import { CriteriaMarks, SpendBar } from "../iskra/Marks";
+import { SparkGlyph } from "../iskra/SparkGlyph";
 import { StatusPill } from "../iskra/StatusPill";
 import { Button } from "../ui/button";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { searchableSetting } from "../settings/settingsSearch";
 import { SidebarInset } from "../ui/sidebar";
@@ -176,30 +179,49 @@ export function BoardView(props: {
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <WorkspacePageHeader className="border-b border-border">
-          <h1 className="truncate text-sm font-semibold">
-            {project === undefined ? "Board" : `${project.title} board`}
-          </h1>
+        <WorkspacePageHeader className="shadow-[inset_0_-0.5px_var(--border)]">
+          <h1 className="truncate text-[15px] font-semibold">Board</h1>
           {project !== undefined ? (
-            <Link
-              to="/settings/integrations"
-              search={{
-                project: deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings),
-              }}
-              hash={searchableSetting("linear-team").id}
-              className="ml-auto shrink-0 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-            >
-              Linear sync
-            </Link>
+            <Menu>
+              <MenuTrigger
+                render={
+                  <Button
+                    aria-label="More board actions"
+                    className="ml-auto"
+                    size="icon-sm"
+                    variant="ghost-muted"
+                  />
+                }
+              >
+                <EllipsisIcon />
+              </MenuTrigger>
+              <MenuPopup align="end">
+                <MenuItem
+                  render={
+                    <Link
+                      to="/settings/integrations"
+                      search={{
+                        project: deriveLogicalProjectKeyFromSettings(
+                          project,
+                          projectGroupingSettings,
+                        ),
+                      }}
+                      hash={searchableSetting("linear-team").id}
+                    />
+                  }
+                >
+                  Linear sync
+                </MenuItem>
+              </MenuPopup>
+            </Menu>
           ) : null}
           <Button
-            className={project === undefined ? "ml-auto" : undefined}
+            className={cn("text-[13px]", project === undefined && "ml-auto")}
             size="sm"
-            variant="outline"
             onClick={() => setNewCardOpen(true)}
           >
-            <PlusIcon />
-            New card
+            <PlusIcon className="size-3" strokeWidth={2.6} />
+            New Card
           </Button>
         </WorkspacePageHeader>
         <NewCardDialog
@@ -226,25 +248,21 @@ export function BoardView(props: {
           {({ payload }) => <TooltipPopup className="max-w-64">{payload}</TooltipPopup>}
         </Tooltip>
         {cards.length === 0 ? (
-          <main className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-5 text-center">
-            <div className="flex max-w-md flex-col gap-1 text-sm text-muted-foreground">
-              <p className="font-medium text-foreground">No cards yet</p>
-              <p>
-                A card is one piece of work on its own branch. It moves Triage → Ready → In progress
-                → Review → Landing → Done.
-              </p>
-              <p>
-                You approve it, assign an agent, and approve the merge; the rest moves on its own.
-              </p>
-            </div>
-            <Button size="sm" onClick={() => setNewCardOpen(true)}>
-              <PlusIcon />
-              New card
+          <main className="flex min-h-0 flex-1 flex-col items-center justify-center px-5 text-center">
+            <SparkGlyph state="idle" size={32} className="mb-4" />
+            <h2 className="text-[22px] font-bold tracking-[-0.015em]">No cards yet</h2>
+            <p className="mt-1.5 max-w-sm text-[13px] text-muted-foreground">
+              A card is one piece of work on its own branch. You approve it, assign an agent, and
+              approve the merge; the rest moves on its own.
+            </p>
+            <Button size="sm" className="mt-5 text-[13px]" onClick={() => setNewCardOpen(true)}>
+              <PlusIcon className="size-3" strokeWidth={2.6} />
+              New Card
             </Button>
           </main>
         ) : (
           <DndContext sensors={sensors} onDragEnd={(event) => void onDragEnd(event)}>
-            <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto px-5 py-4">
+            <div className="flex min-h-0 flex-1 gap-4 overflow-x-auto px-5 py-4">
               {BOARD_COLUMNS.map((column) => (
                 <BoardColumnView
                   key={column}
@@ -279,13 +297,16 @@ function BoardColumnView(props: {
     <section
       ref={setNodeRef}
       aria-label={BOARD_COLUMN_LABEL[props.column]}
-      className={cn("flex w-72 shrink-0 flex-col gap-2.5 rounded-xl p-1", isOver && "bg-muted")}
+      className={cn(
+        "-m-1 flex w-[280px] shrink-0 flex-col gap-2.5 rounded-[14px] p-1",
+        isOver && "bg-[rgb(120_120_128/10%)]",
+      )}
     >
-      <h2 className="flex h-7 items-baseline gap-1.5 px-1 text-[13px] font-semibold">
+      <h2 className="flex h-7 shrink-0 items-baseline gap-1.5 px-1 pt-1 text-[13px] font-semibold">
         {BOARD_COLUMN_LABEL[props.column]}
-        <span className="font-normal tabular-nums text-muted-foreground">{props.cards.length}</span>
+        <span className="font-semibold tabular-nums text-tertiary-label">{props.cards.length}</span>
       </h2>
-      <ol className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto">
+      <ol className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto p-px pb-2">
         {props.cards.map((card) => (
           <li key={card.id}>
             <CardFace
@@ -301,6 +322,22 @@ function BoardColumnView(props: {
         ))}
       </ol>
     </section>
+  );
+}
+
+/** Urgent and High show a flag: filled for Urgent, outlined for High. */
+function PriorityFlag(props: { readonly priority: CardPriority }) {
+  if (props.priority !== 1 && props.priority !== 2) return null;
+  return (
+    <svg aria-hidden width={10} height={10} viewBox="0 0 24 24" className="shrink-0 text-warning">
+      <path
+        d="M5 22V3h12l-2.5 5L17 13H5"
+        fill={props.priority === 1 ? "currentColor" : "none"}
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 
@@ -325,6 +362,20 @@ const CardFace = memo(function CardFace(props: {
     blocked: props.blocked,
     snoozed: isCardSnoozed(card, props.now),
   });
+  const finished = card.status === "landed" || card.status === "abandoned";
+  const marks = criteriaMarks(card);
+  // Secondary facts share one quiet caption line; the sheet has the rest.
+  const facts = [
+    card.diffStat !== null && card.diffStat.files > 0
+      ? `+${card.diffStat.additions} −${card.diffStat.deletions}`
+      : null,
+    session?.planProgress != null
+      ? `${session.planProgress.completedSteps}/${session.planProgress.totalSteps} steps`
+      : null,
+    children.length > 0 ? `${children.length} sub-card${children.length === 1 ? "" : "s"}` : null,
+  ].filter((fact) => fact !== null);
+  const showAttempts =
+    card.status === "ready" || children.some((child) => child.attemptGroupId !== null);
 
   return (
     <article
@@ -337,26 +388,53 @@ const CardFace = memo(function CardFace(props: {
           : { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
       }
       className={cn(
-        "flex cursor-grab touch-none flex-col gap-2.5 rounded-xl bg-card p-3 text-sm shadow-[0_0_0_0.5px_var(--border),0_1px_2px_rgb(0_0_0/8%)]",
-        isDragging && "z-10 cursor-grabbing shadow-lg",
+        "flex cursor-grab touch-none flex-col gap-2.5 rounded-xl bg-card p-3 text-[13px] shadow-[0_0_0_0.5px_rgb(0_0_0/6%),0_1px_3px_rgb(0_0_0/7%)] dark:shadow-[0_0_0_0.5px_rgb(255_255_255/7%),0_1px_2px_rgb(0_0_0/32%)]",
+        isDragging && "z-10 cursor-grabbing shadow-lg dark:shadow-lg",
         card.status === "abandoned" && "opacity-60",
       )}
     >
-      <div className="flex items-center justify-end gap-2">
+      <div className="flex items-center justify-between gap-2">
+        {/* The caption is the priority control: its flag shows Urgent or High. */}
+        <Select
+          value={String(card.priority)}
+          disabled={finished}
+          onValueChange={(value) => {
+            if (value === null) return;
+            void update({
+              environmentId: props.environmentId,
+              input: { cardId: card.id, priority: Number(value) as CardPriority },
+            });
+          }}
+        >
+          <SelectTrigger
+            aria-label={`Priority: ${CARD_PRIORITY_LABEL[card.priority]}`}
+            className="-mx-1 h-5 min-h-0 w-auto min-w-0 gap-1 rounded-[5px] border-0 bg-transparent px-1 text-[11px] font-medium tabular-nums text-tertiary-label shadow-none hover:bg-[rgb(120_120_128/12%)] dark:bg-transparent dark:hover:bg-[rgb(120_120_128/20%)] [&>svg:last-child]:hidden"
+          >
+            <PriorityFlag priority={card.priority} />
+            <SelectValue>{() => cardShortId(card)}</SelectValue>
+          </SelectTrigger>
+          <SelectPopup>
+            {CARD_PRIORITIES.map((priority) => (
+              <SelectItem key={priority} value={String(priority)}>
+                {CARD_PRIORITY_LABEL[priority]}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
         <StatusPill {...cardStatusPill(card)} />
       </div>
-      <h3 className="line-clamp-2 font-medium leading-snug tracking-[-0.005em]">
+      <h3 className="line-clamp-3 text-[14px] leading-[1.35] font-medium tracking-[-0.005em] text-pretty">
         {/* dnd-kit swallows the click that ends a drag, so this opens the sheet only on a click. */}
         <button
           type="button"
-          className="text-start hover:underline"
+          className="rounded-sm text-start outline-hidden ring-ring focus-visible:ring-2"
           onClick={() => props.onOpen(card.id)}
         >
           {card.title}
         </button>
       </h3>
       {card.status === "triage" && card.proposalReasoning !== null ? (
-        <p className="line-clamp-3 text-xs text-muted-foreground">{card.proposalReasoning}</p>
+        <p className="line-clamp-2 text-xs text-muted-foreground">{card.proposalReasoning}</p>
       ) : null}
       {badges.length > 0 ? (
         <ul className="flex flex-wrap gap-1">
@@ -368,10 +446,10 @@ const CardFace = memo(function CardFace(props: {
               render={
                 <li
                   className={cn(
-                    "rounded px-1.5 py-0.5 text-[11px] leading-none",
+                    "inline-flex h-[18px] items-center rounded-full px-1.5 text-[11px] font-semibold",
                     badge.alarming
-                      ? "bg-destructive/15 text-destructive-foreground"
-                      : "bg-muted text-muted-foreground",
+                      ? "bg-destructive/14 text-destructive-foreground dark:bg-destructive/16"
+                      : "bg-secondary text-muted-foreground",
                   )}
                 />
               }
@@ -381,10 +459,10 @@ const CardFace = memo(function CardFace(props: {
           ))}
         </ul>
       ) : null}
-      {card.paused !== null && card.status !== "landed" && card.status !== "abandoned" ? (
+      {card.paused !== null && !finished ? (
         <Button
           size="compact"
-          variant="outline"
+          variant="secondary"
           className="self-start"
           onClick={() =>
             void decide({
@@ -398,9 +476,26 @@ const CardFace = memo(function CardFace(props: {
           Resume
         </Button>
       ) : null}
-      <div className="flex items-center gap-2">
-        <CriteriaMarks marks={criteriaMarks(card)} />
-        <span className="ms-auto flex items-center gap-2.5">
+      {facts.length > 0 || showAttempts ? (
+        <p className="flex flex-wrap items-center gap-x-1.5 text-[11px] font-medium tabular-nums text-tertiary-label">
+          {facts.join(" · ")}
+          {showAttempts ? (
+            <>
+              {facts.length > 0 ? <span aria-hidden>·</span> : null}
+              <Link
+                to="/attempts/$environmentId/$cardId"
+                params={{ environmentId: props.environmentId, cardId: card.id }}
+                className="text-info-foreground hover:underline"
+              >
+                Attempts
+              </Link>
+            </>
+          ) : null}
+        </p>
+      ) : null}
+      <div className="flex min-h-5 items-center justify-between gap-2">
+        {marks.length > 0 ? <CriteriaMarks marks={marks} /> : <span />}
+        <span className="flex items-center gap-2.5">
           {card.spentUsd > 0 ? (
             <SpendBar spentUsd={card.spentUsd} capUsd={card.budgetCapUsd} />
           ) : null}
@@ -409,67 +504,6 @@ const CardFace = memo(function CardFace(props: {
           ) : null}
         </span>
       </div>
-      <dl className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-        <dd>
-          <Select
-            value={String(card.priority)}
-            disabled={card.status === "landed" || card.status === "abandoned"}
-            onValueChange={(value) => {
-              if (value === null) return;
-              void update({
-                environmentId: props.environmentId,
-                input: { cardId: card.id, priority: Number(value) as CardPriority },
-              });
-            }}
-          >
-            <SelectTrigger
-              aria-label="Priority"
-              className={cn(
-                "h-auto min-h-0 w-auto gap-1 border-0 bg-transparent p-0 text-xs shadow-none",
-                card.priority === 1 && "text-destructive-foreground",
-              )}
-            >
-              <SelectValue>
-                {(value: string | null) => CARD_PRIORITY_LABEL[Number(value ?? 0) as CardPriority]}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectPopup>
-              {CARD_PRIORITIES.map((priority) => (
-                <SelectItem key={priority} value={String(priority)}>
-                  {CARD_PRIORITY_LABEL[priority]}
-                </SelectItem>
-              ))}
-            </SelectPopup>
-          </Select>
-        </dd>
-        {card.branch !== null ? <dd className="max-w-full truncate">{card.branch}</dd> : null}
-        {card.diffStat !== null && card.diffStat.files > 0 ? (
-          <dd className="tabular-nums">
-            +{card.diffStat.additions} −{card.diffStat.deletions}
-          </dd>
-        ) : null}
-        {session?.planProgress != null ? (
-          <dd className="tabular-nums">
-            {session.planProgress.completedSteps}/{session.planProgress.totalSteps} steps
-          </dd>
-        ) : null}
-        {card.status === "ready" || children.some((child) => child.attemptGroupId !== null) ? (
-          <dd>
-            <Link
-              to="/attempts/$environmentId/$cardId"
-              params={{ environmentId: props.environmentId, cardId: card.id }}
-              className="underline-offset-2 hover:text-foreground hover:underline"
-            >
-              Attempts
-            </Link>
-          </dd>
-        ) : null}
-        {children.length > 0 ? (
-          <dd className="tabular-nums">
-            {children.length} sub-card{children.length === 1 ? "" : "s"}
-          </dd>
-        ) : null}
-      </dl>
     </article>
   );
 });

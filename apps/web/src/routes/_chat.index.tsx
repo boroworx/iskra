@@ -123,23 +123,38 @@ function NoChannelsLanding(props: { readonly project: EnvironmentProject }) {
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <Empty className="flex-1">
         <EmptyHeader className="max-w-md">
-          <EmptyTitle className="text-foreground text-xl">No channels yet</EmptyTitle>
-          <EmptyDescription className="mt-2 text-sm text-muted-foreground/78">
-            How work moves in {props.project.title}:
+          <EmptyTitle className="text-[22px] font-bold tracking-[-0.015em] text-foreground">
+            No channels yet
+          </EmptyTitle>
+          <EmptyDescription className="mt-1.5 text-[13px] text-muted-foreground">
+            How work moves in {props.project.title}
           </EmptyDescription>
-          <ol className="mt-3 list-decimal space-y-1 pl-5 text-left text-sm text-muted-foreground">
-            <li>You talk in a channel, and its lead turns requests into cards.</li>
-            <li>Each card gets an owner agent that works on it in its own session.</li>
-            <li>You review the work, then land it.</li>
+          {/* The three steps as one grouped list: a numbered mark, then the sentence. */}
+          <ol className="mt-5 flex flex-col overflow-hidden rounded-xl bg-card text-left text-[13px] shadow-[0_0_0_0.5px_var(--border),0_1px_2px_rgb(0_0_0/8%)]">
+            {[
+              "You talk in a channel, and its lead turns requests into cards.",
+              "Each card gets an owner agent that works on it in its own session.",
+              "You review the work, then land it.",
+            ].map((step, index) => (
+              <li
+                key={step}
+                className="flex items-center gap-3 px-3.5 py-2.5 not-first:shadow-[inset_0_0.5px_var(--border)]"
+              >
+                <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[11px] font-semibold tabular-nums text-info-foreground">
+                  {index + 1}
+                </span>
+                {step}
+              </li>
+            ))}
           </ol>
           <div className="mt-6 flex justify-center gap-2">
-            <Button size="sm" variant="outline" onClick={() => setOpenDialog("agent")}>
-              <PlusIcon className="size-4" />
-              New agent
+            <Button size="sm" variant="secondary" onClick={() => setOpenDialog("agent")}>
+              <PlusIcon className="size-3" />
+              New Agent
             </Button>
             <Button size="sm" onClick={() => setOpenDialog("channel")}>
-              <PlusIcon className="size-4" />
-              New channel
+              <PlusIcon className="size-3" />
+              New Channel
             </Button>
           </div>
         </EmptyHeader>
