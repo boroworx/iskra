@@ -87,9 +87,9 @@ export function CardActivityTimeline(props: {
       </div>
       {props.error !== null ? <p className="text-xs text-destructive">{props.error}</p> : null}
       {newestFirst.length === 0 ? (
-        <p className="px-1 text-xs text-muted-foreground">Nothing here yet.</p>
+        <p className="px-4 text-xs text-muted-foreground">Nothing here yet.</p>
       ) : (
-        <ol className="flex flex-col divide-y divide-border rounded-xl bg-card px-3.5 shadow-[0_0_0_0.5px_var(--border)]">
+        <ol className="flex flex-col divide-y divide-border rounded-xl bg-card px-4 shadow-[0_0_0_0.5px_var(--border)]">
           {newestFirst.slice(0, shown).map((activity) => (
             <ActivityRow
               key={activity.activityId}

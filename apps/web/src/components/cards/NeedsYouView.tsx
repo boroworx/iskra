@@ -62,6 +62,7 @@ import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuTrigger } fro
 import { SidebarInset } from "../ui/sidebar";
 import { toastCommandFailure } from "../toastCommandFailure";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
+import { EmptyState, PageColumn, PageLargeTitle } from "../iskra/Page";
 import { cardShortId } from "../iskra/cardLabel";
 import { ActionButton } from "./cardChrome";
 import { DisabledReason } from "./DisabledReason";
@@ -208,19 +209,29 @@ export function NeedsYouView() {
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <WorkspacePageHeader />
-        <main className="min-h-0 flex-1 overflow-y-auto px-5 pb-10 sm:px-10">
-          <div className="mx-auto flex w-full max-w-[880px] flex-col gap-2.5 xl:mx-0">
-            <header className="mb-3.5 flex items-center gap-3">
-              <h1 className="text-[28px] font-bold tracking-[-0.02em]">Needs You</h1>
-              {items.length > 0 ? (
-                <span className="inline-flex h-6 items-center rounded-full bg-warning px-[9px] text-[13px] font-bold tabular-nums text-[#1c1c1e]">
-                  {items.length}
-                </span>
-              ) : null}
-            </header>
-            {items.length === 0 ? (
-              <p className="px-1 text-[13px] text-muted-foreground">Nothing is waiting on you.</p>
-            ) : (
+        <main className="flex min-h-0 flex-1 flex-col overflow-y-auto pb-10">
+          <PageColumn width="wide">
+            <PageLargeTitle
+              accessory={
+                items.length > 0 ? (
+                  <span className="inline-flex h-6 shrink-0 items-center rounded-full bg-warning px-[9px] text-[13px] font-bold tabular-nums text-[#1c1c1e]">
+                    {items.length}
+                  </span>
+                ) : null
+              }
+            >
+              Needs You
+            </PageLargeTitle>
+          </PageColumn>
+          {items.length === 0 ? (
+            <EmptyState
+              title="Nothing needs you"
+              body="Questions, reviews and stuck cards show up here."
+              {...(waits.length + snoozed.length > 0 ? { className: "flex-none py-12" } : {})}
+            />
+          ) : null}
+          <PageColumn width="wide" className="flex flex-col">
+            {items.length === 0 ? null : (
               <ol className="flex flex-col gap-2.5">
                 {items.map((item) => {
                   const itemCard = cardById.get(item.cardId);
@@ -467,7 +478,7 @@ export function NeedsYouView() {
                         )}
                       </span>
                       <div className="flex min-w-0 flex-col gap-2">
-                        <div className="flex min-h-8 min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                        <div className="flex min-h-8 min-w-0 items-center gap-x-2">
                           <CardLink
                             environmentId={environmentId}
                             projectId={item.projectId}
@@ -476,7 +487,7 @@ export function NeedsYouView() {
                           >
                             {item.title}
                           </CardLink>
-                          <span className="text-[11px] font-medium tabular-nums text-muted-foreground/55">
+                          <span className="shrink-0 text-[11px] font-medium tabular-nums text-tertiary-label">
                             {cardShortId(itemCard ?? { id: item.cardId, linearIssue: null })}
                           </span>
                           {item.kind === "refsChanged" ? (
@@ -488,12 +499,12 @@ export function NeedsYouView() {
                           {suggested !== undefined ? (
                             <AgentAvatar name={suggested} className="ms-1 size-[18px] text-[9px]" />
                           ) : null}
-                          <span className="truncate text-xs text-muted-foreground/55">
+                          <span className="min-w-0 shrink-[4] truncate text-xs text-tertiary-label">
                             {projectTitle(item.projectId)}
                           </span>
                         </div>
-                        {SELF_EVIDENT.has(item.kind) || answersInPlace ? null : (
-                          <DisabledReason reason={why}>
+                        {SELF_EVIDENT.has(item.kind) || answersInPlace || attention !== undefined ? null : (
+                          <DisabledReason reason={why} className="self-start">
                             <span className="self-start text-[13px] text-muted-foreground">
                               {needsYouLabel(item)}
                             </span>
@@ -505,7 +516,7 @@ export function NeedsYouView() {
                           </p>
                         ) : null}
                         {attention !== undefined ? (
-                          <p className="line-clamp-3 whitespace-pre-wrap break-words text-[13px] text-muted-foreground">
+                          <p className="line-clamp-2 whitespace-pre-wrap break-words text-[13px] text-muted-foreground">
                             {attention.text}
                           </p>
                         ) : null}
@@ -536,7 +547,7 @@ export function NeedsYouView() {
                       </div>
                       <div className="col-start-2 flex min-h-8 flex-wrap items-center justify-end gap-2 md:col-start-3">
                         {primary}
-                        <span className="w-8 text-right text-xs tabular-nums text-muted-foreground/55">
+                        <span className="w-8 text-right text-xs tabular-nums text-tertiary-label">
                           <span className="sr-only">Waiting </span>
                           {waitingLabel(item.since, now)}
                         </span>
@@ -545,7 +556,7 @@ export function NeedsYouView() {
                             <MenuTrigger
                               render={
                                 <Button
-                                  size="icon-xs"
+                                  size="icon-sm"
                                   variant="ghost-muted"
                                   aria-label={`Snooze ${item.title}`}
                                 />
@@ -600,11 +611,11 @@ export function NeedsYouView() {
                       {wait.title}
                     </CardLink>
                     <DisabledReason reason={wait.label === wait.reason ? null : wait.reason}>
-                      <span className="ms-auto min-w-0 truncate text-xs text-muted-foreground/55">
+                      <span className="ms-auto min-w-0 truncate text-xs text-tertiary-label">
                         {wait.label}
                       </span>
                     </DisabledReason>
-                    <span className="w-8 shrink-0 text-right text-xs tabular-nums text-muted-foreground/55">
+                    <span className="w-8 shrink-0 text-right text-xs tabular-nums text-tertiary-label">
                       <span className="sr-only">Waiting </span>
                       {waitingLabel(wait.since, now)}
                     </span>
@@ -620,7 +631,7 @@ export function NeedsYouView() {
                     <span className="min-w-0 truncate text-[13px] text-muted-foreground">
                       {card.title}
                     </span>
-                    <span className="ms-auto shrink-0 text-xs text-muted-foreground/55">
+                    <span className="ms-auto shrink-0 text-xs text-tertiary-label">
                       {card.snoozedUntil === null
                         ? "Until it changes"
                         : `Until ${new Date(card.snoozedUntil).toLocaleString()}`}
@@ -640,7 +651,7 @@ export function NeedsYouView() {
                 ))}
               </ListSection>
             ) : null}
-          </div>
+          </PageColumn>
         </main>
       </div>
     </SidebarInset>
@@ -648,12 +659,12 @@ export function NeedsYouView() {
 }
 
 const LIST_ROW =
-  "relative flex h-12 min-w-0 items-center gap-3 px-4 before:absolute before:top-0 before:right-0 before:left-11 before:border-t-[0.5px] before:border-border before:content-[''] first:before:hidden";
+  "relative flex h-12 min-w-0 items-center gap-3 px-4 before:absolute before:top-0 before:right-0 before:left-4 before:border-t-[0.5px] before:border-border before:content-[''] first:before:hidden";
 
 function ListSection(props: { readonly label: string; readonly children: ReactNode }) {
   return (
-    <section aria-label={props.label} className="mt-[22px] flex flex-col gap-2.5">
-      <h2 className="px-1 text-[13px] font-semibold text-muted-foreground">{props.label}</h2>
+    <section aria-label={props.label} className="mt-7 flex flex-col gap-2">
+      <h2 className="px-4 text-[13px] font-semibold text-muted-foreground">{props.label}</h2>
       <ul className="overflow-hidden rounded-[14px] bg-card shadow-[0_0_0_0.5px_var(--border)]">
         {props.children}
       </ul>

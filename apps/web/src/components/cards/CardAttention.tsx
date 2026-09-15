@@ -351,9 +351,9 @@ export function RefsChangedControls(props: {
               />
               <span className="min-w-0 truncate font-semibold">
                 {change.ref}
-                <span className="ms-1.5 font-normal text-muted-foreground/55">{change.kind}</span>
+                <span className="ms-1.5 font-normal text-tertiary-label">{change.kind}</span>
               </span>
-              <span className="font-mono text-muted-foreground/55">{shortId(change.before)}</span>
+              <span className="font-mono text-tertiary-label">{shortId(change.before)}</span>
               <span aria-label="to" className="text-muted-foreground/75">
                 →
               </span>

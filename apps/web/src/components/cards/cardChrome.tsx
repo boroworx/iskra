@@ -13,7 +13,7 @@ const ACTION_TONE = {
   tinted:
     "border-transparent bg-primary/18 text-info-foreground [:hover,[data-pressed]]:bg-primary/26",
   destructive:
-    "bg-secondary text-destructive-foreground [:hover,[data-pressed]]:bg-destructive/16",
+    "border-transparent bg-transparent text-destructive-foreground [:hover,[data-pressed]]:bg-destructive/12",
 } as const;
 
 /** A 28px action: blue filled primary, gray plain, blue tinted for a recommended answer. */
@@ -45,10 +45,10 @@ export function Section(props: {
 }) {
   return (
     <section id={props.id} aria-label={props.label} className="flex flex-col gap-2">
-      <div className="flex min-h-5 items-center gap-2 px-1">
+      <div className="flex min-h-5 items-center gap-2 px-4">
         <h3 className="text-[13px] font-semibold text-muted-foreground">{props.label}</h3>
         {props.trailing !== undefined ? (
-          <div className="ms-auto flex min-w-0 items-center gap-2 text-xs text-muted-foreground/55">
+          <div className="ms-auto flex min-w-0 items-center gap-2 text-xs text-tertiary-label">
             {props.trailing}
           </div>
         ) : null}
@@ -66,9 +66,9 @@ export function Group(props: { readonly children: ReactNode; readonly className?
   return <div className={cn(GROUP_CLASS, props.className)}>{props.children}</div>;
 }
 
-/** A row's hairline starts past its 18px glyph, as grouped lists inset them. */
+/** Rows and their hairlines share the 16px inset of the section head above them. */
 export const ROW_CLASS =
-  "relative flex min-h-[46px] min-w-0 items-center gap-3 px-3.5 text-[13px] before:absolute before:top-0 before:right-0 before:left-11 before:border-t-[0.5px] before:border-border before:content-[''] first:before:hidden";
+  "relative flex min-h-[46px] min-w-0 items-center gap-3 px-4 text-[13px] before:absolute before:top-0 before:right-0 before:left-4 before:border-t-[0.5px] before:border-border before:content-[''] first:before:hidden";
 
 export function Row(props: { readonly children: ReactNode; readonly className?: string }) {
   return <div className={cn(ROW_CLASS, props.className)}>{props.children}</div>;
@@ -106,7 +106,7 @@ export function DisclosureRow(props: {
           <ChevronRightIcon
             aria-hidden
             className={cn(
-              "size-3 text-muted-foreground/55 transition-transform duration-150 motion-reduce:transition-none",
+              "size-3 text-tertiary-label transition-transform duration-150 motion-reduce:transition-none",
               open && "rotate-90",
             )}
           />

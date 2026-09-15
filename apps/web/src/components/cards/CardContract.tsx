@@ -27,7 +27,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { AgentAvatar } from "../iskra/AgentAvatar";
-import { ActionButton } from "./cardChrome";
+import { ActionButton, Group, Row, RowLink, Trail } from "./cardChrome";
 import { DisabledReason } from "./DisabledReason";
 
 const VERIFICATION_LABEL: Record<CardCriterion["verification"], string> = {
@@ -57,13 +57,27 @@ export function CriteriaEditor(props: {
   const { criteria, onChange } = props;
   const replace = (index: number, next: CardCriterion) =>
     onChange(criteria.map((criterion, at) => (at === index ? next : criterion)));
+  const add = () =>
+    onChange([
+      ...criteria,
+      { id: `criterion-${randomUUID().slice(0, 8)}`, text: "", verification: "automated" },
+    ]);
+  if (criteria.length === 0) {
+    return (
+      <Group>
+        <Row>
+          <span className="min-w-0 truncate text-muted-foreground">No criteria yet</span>
+          <Trail>
+            <RowLink disabled={props.disabled} onClick={add}>
+              Add criterion
+            </RowLink>
+          </Trail>
+        </Row>
+      </Group>
+    );
+  }
   return (
     <div className="flex flex-col gap-1.5">
-      {criteria.length === 0 ? (
-        <p className="text-xs text-muted-foreground">
-          No criteria yet. Add the outcomes that show the work is done.
-        </p>
-      ) : null}
       <ol className="flex flex-col gap-1.5">
         {criteria.map((criterion, index) => (
           <li key={criterion.id} className="flex min-w-0 items-center gap-1.5">
@@ -97,7 +111,7 @@ export function CriteriaEditor(props: {
               </SelectPopup>
             </Select>
             <Button
-              size="icon-xs"
+              size="icon-sm"
               variant="ghost-muted"
               aria-label="Remove criterion"
               disabled={props.disabled}
@@ -113,12 +127,7 @@ export function CriteriaEditor(props: {
         variant="ghost-muted"
         className="self-start"
         disabled={props.disabled}
-        onClick={() =>
-          onChange([
-            ...criteria,
-            { id: `criterion-${randomUUID().slice(0, 8)}`, text: "", verification: "automated" },
-          ])
-        }
+        onClick={add}
       >
         <PlusIcon />
         Add criterion
@@ -136,12 +145,14 @@ export function CardPreviewPanel(props: {
   readonly agent: Pick<OrchestrationAgentShell, "name" | "modelSelection" | "capabilities"> | null;
   /** The agent's track record on this project, as a routing hint. */
   readonly hint?: string | null;
+  /** False where the read-only warning already shows, such as the card sheet's wait row. */
+  readonly showReadOnly?: boolean;
 }) {
   const preview = cardPreview(props);
   const hint =
     props.hint == null ? null : <p className="text-xs text-muted-foreground">{props.hint}</p>;
   // A warning, not a refusal: the card waits in the queue until the agent can write.
-  const readOnly = delegateReadOnlyWarning(props.agent);
+  const readOnly = props.showReadOnly === false ? null : delegateReadOnlyWarning(props.agent);
   const readOnlyWarning =
     readOnly === null ? null : <p className="text-xs text-warning-foreground">{readOnly}</p>;
   if (preview === null) {
@@ -413,16 +424,18 @@ export function CardCriteria(props: {
 
   return (
     <>
-      <p className="px-1 text-xs text-muted-foreground">
+      {criteria.length === 0 ? null : (
+        <p className="px-4 text-xs text-muted-foreground">
         {card.status === "triage"
           ? "A draft until you approve the card; Approve & Start confirms them."
           : draft
             ? "Not confirmed: work starts only once you confirm them."
             : "Confirmed. Checks and review hold the work to these."}
-      </p>
+        </p>
+      )}
       <CriteriaEditor criteria={criteria} onChange={setDraft} disabled={!open} />
       {open ? (
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <ActionButton
             tone="primary"
             disabled={!edited}

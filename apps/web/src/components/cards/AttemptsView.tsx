@@ -9,6 +9,7 @@ import {
   type OrchestrationCardShell,
 } from "@iskra/contracts";
 import { Link } from "@tanstack/react-router";
+import { ChevronLeftIcon } from "lucide-react";
 import { useState } from "react";
 
 import { randomUUID } from "~/lib/utils";
@@ -19,10 +20,12 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import { AgentAvatar } from "../iskra/AgentAvatar";
 import { SpendBar } from "../iskra/Marks";
 import { StatusPill } from "../iskra/StatusPill";
+import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { SidebarInset } from "../ui/sidebar";
 import { toastCommandFailure } from "../toastCommandFailure";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
+import { EmptyState } from "../iskra/Page";
 import { cardShortId } from "../iskra/cardLabel";
 import { ActionButton, Group, ROW_CLASS, RowLink, Section } from "./cardChrome";
 import { DisabledReason } from "./DisabledReason";
@@ -42,47 +45,98 @@ export function AttemptsView(props: {
     (entry) => entry.parentCardId === props.cardId && entry.attemptGroupId !== null,
   );
   const running = attempts.filter((entry) => entry.status !== "abandoned");
+  const projectAgents =
+    card === null ? [] : agents.filter((agent) => agent.projectId === card.projectId);
+  // The picker's choice lives here so its one primary, Start, can sit in the toolbar.
+  const [chosen, setChosen] = useState<ReadonlyArray<AgentId>>([]);
+  const [starting, setStarting] = useState(false);
+  const start = useAtomCommand(cardEnvironment.startAttempts);
+  const ready = card?.status === "ready";
+  const countOk = chosen.length >= CARD_ATTEMPTS_MIN && chosen.length <= CARD_ATTEMPTS_MAX;
+  const picking = card !== null && running.length === 0;
+  const cardLink =
+    card === null ? undefined : (
+      <Link
+        to="/board/$environmentId/$projectId"
+        params={{ environmentId: props.environmentId, projectId: card.projectId }}
+        search={{ card: card.id }}
+      />
+    );
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <WorkspacePageHeader />
-        <header className="flex flex-col gap-1.5 px-5 pb-5 sm:px-10">
-          <div className="flex items-center gap-3">
-            <h1 className="text-[28px] font-bold tracking-[-0.02em]">Attempts</h1>
-            {card !== null ? (
-              <span className="text-xs font-medium tabular-nums text-muted-foreground/55">
-                {cardShortId(card)}
-              </span>
-            ) : null}
-          </div>
-          {card !== null ? (
-            <div className="flex min-w-0 flex-wrap items-center gap-x-[22px] gap-y-1 text-[13px] text-muted-foreground">
-              <Link
-                to="/board/$environmentId/$projectId"
-                params={{ environmentId: props.environmentId, projectId: card.projectId }}
-                search={{ card: card.id }}
-                className="min-w-0 truncate hover:text-foreground hover:underline"
-              >
-                {card.title}
-              </Link>
-              <span className="inline-flex items-center gap-2">
-                <SpendBar spentUsd={card.spentUsd} capUsd={card.budgetCapUsd} className="w-22" />
-                <span className="tabular-nums">
-                  ${card.spentUsd.toFixed(2)} of ${card.budgetCapUsd.toFixed(0)} spent
-                </span>
-              </span>
-            </div>
+        <WorkspacePageHeader className="shadow-[inset_0_-0.5px_var(--border)]">
+          {cardLink !== undefined ? (
+            <Button
+              size="icon-sm"
+              variant="ghost-muted"
+              aria-label="Back to the card"
+              render={cardLink}
+            >
+              <ChevronLeftIcon />
+            </Button>
           ) : null}
-        </header>
-        {card === null ? null : running.length === 0 ? (
-          <StartAttempts
-            environmentId={props.environmentId}
-            card={card}
-            agents={agents.filter((agent) => agent.projectId === card.projectId)}
-          />
-        ) : (
-          <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto px-5 pb-6 sm:px-10">
+          <h1 className="truncate text-[15px] font-semibold">Attempts</h1>
+          {card !== null ? (
+            <span className="shrink-0 text-xs font-medium tabular-nums text-tertiary-label">
+              {cardShortId(card)}
+            </span>
+          ) : null}
+          {picking && ready && projectAgents.length > 0 ? (
+            <DisabledReason
+              className="ms-auto"
+              reason={countOk ? null : `Pick ${CARD_ATTEMPTS_MIN} to ${CARD_ATTEMPTS_MAX} agents.`}
+            >
+              <ActionButton
+                tone="primary"
+                className="ms-auto"
+                disabled={!countOk || starting}
+                onClick={async () => {
+                  setStarting(true);
+                  const result = await start({
+                    environmentId: props.environmentId,
+                    input: {
+                      cardId: card.id,
+                      attempts: chosen.map((agentId) => ({
+                        cardId: CardId.make(randomUUID()),
+                        agentId,
+                      })),
+                    },
+                  });
+                  setStarting(false);
+                  toastCommandFailure(
+                    result,
+                    "The attempts did not start",
+                    "The request was refused.",
+                  );
+                }}
+              >
+                Start {chosen.length > 0 ? chosen.length : ""} attempts
+              </ActionButton>
+            </DisabledReason>
+          ) : null}
+        </WorkspacePageHeader>
+        {card !== null ? (
+          <div className="flex min-w-0 flex-wrap items-center gap-x-[22px] gap-y-1 px-5 pt-5 text-[13px] text-muted-foreground">
+            <Link
+              to="/board/$environmentId/$projectId"
+              params={{ environmentId: props.environmentId, projectId: card.projectId }}
+              search={{ card: card.id }}
+              className="min-w-0 truncate hover:text-foreground hover:underline"
+            >
+              {card.title}
+            </Link>
+            <span className="inline-flex items-center gap-2">
+              <SpendBar spentUsd={card.spentUsd} capUsd={card.budgetCapUsd} className="w-22" />
+              <span className="tabular-nums">
+                ${card.spentUsd.toFixed(2)} of ${card.budgetCapUsd.toFixed(0)} spent
+              </span>
+            </span>
+          </div>
+        ) : null}
+        {card === null ? null : !picking ? (
+          <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto px-5 pt-5 pb-6">
             {running.map((attempt) => (
               <AttemptColumn
                 key={attempt.id}
@@ -92,99 +146,49 @@ export function AttemptsView(props: {
               />
             ))}
           </div>
+        ) : !ready ? (
+          <EmptyState
+            title="No attempts yet"
+            body="Attempts start on a ready card, before its work begins. Approve it on the board first."
+            actions={<ActionButton render={cardLink}>Back to the card</ActionButton>}
+          />
+        ) : projectAgents.length === 0 ? (
+          <EmptyState
+            title="No agents to try it"
+            body="Add agents to this project, then pick two to four of them here."
+            actions={<ActionButton render={cardLink}>Back to the card</ActionButton>}
+          />
+        ) : (
+          <main className="min-h-0 flex-1 overflow-y-auto px-5 pt-7 pb-10">
+            <div className="flex max-w-[720px] flex-col">
+              <Section label="Agents">
+                <p className="px-4 text-xs text-muted-foreground">
+                  Pick {CARD_ATTEMPTS_MIN} to {CARD_ATTEMPTS_MAX} to try this card at once, each on
+                  its own branch.
+                </p>
+                <Group>
+                  {projectAgents.map((agent) => (
+                    <label key={agent.id} className={`${ROW_CLASS} cursor-pointer`}>
+                      <Checkbox
+                        checked={chosen.includes(agent.id)}
+                        onCheckedChange={(checked) =>
+                          setChosen((current) =>
+                            checked
+                              ? [...current, agent.id]
+                              : current.filter((id) => id !== agent.id),
+                          )
+                        }
+                      />
+                      <AgentAvatar name={agent.name} />@{agent.name}
+                    </label>
+                  ))}
+                </Group>
+              </Section>
+            </div>
+          </main>
         )}
       </div>
     </SidebarInset>
-  );
-}
-
-function StartAttempts(props: {
-  readonly environmentId: EnvironmentId;
-  readonly card: OrchestrationCardShell;
-  readonly agents: ReadonlyArray<OrchestrationAgentShell>;
-}) {
-  const [chosen, setChosen] = useState<ReadonlyArray<AgentId>>([]);
-  const [starting, setStarting] = useState(false);
-  const start = useAtomCommand(cardEnvironment.startAttempts);
-  const ready = props.card.status === "ready";
-  const countOk = chosen.length >= CARD_ATTEMPTS_MIN && chosen.length <= CARD_ATTEMPTS_MAX;
-
-  return (
-    <main className="min-h-0 flex-1 overflow-y-auto px-5 pb-10 sm:px-10">
-      <div className="flex max-w-[880px] flex-col gap-4">
-        <Section
-          label={
-            ready
-              ? `Pick ${CARD_ATTEMPTS_MIN} to ${CARD_ATTEMPTS_MAX} agents to try this card at once, each on its own branch`
-              : "Attempts start on a ready card, before its work begins. Approve it on the board first."
-          }
-        >
-          <Group>
-            {props.agents.map((agent) => (
-              <label key={agent.id} className={`${ROW_CLASS} cursor-pointer`}>
-                <Checkbox
-                  disabled={!ready}
-                  checked={chosen.includes(agent.id)}
-                  onCheckedChange={(checked) =>
-                    setChosen((current) =>
-                      checked ? [...current, agent.id] : current.filter((id) => id !== agent.id),
-                    )
-                  }
-                />
-                <AgentAvatar name={agent.name} />
-                @{agent.name}
-              </label>
-            ))}
-          </Group>
-        </Section>
-        <div className="flex flex-wrap items-center gap-2">
-          <Link
-            to="/board/$environmentId/$projectId"
-            params={{ environmentId: props.environmentId, projectId: props.card.projectId }}
-            search={{ card: props.card.id }}
-            className="text-[13px] font-medium text-info-foreground hover:underline"
-          >
-            Back to the card
-          </Link>
-          <DisabledReason
-            reason={
-              !ready
-                ? "Attempts start on a ready card."
-                : !countOk
-                  ? `Pick ${CARD_ATTEMPTS_MIN} to ${CARD_ATTEMPTS_MAX} agents.`
-                  : null
-            }
-          >
-            <ActionButton
-              tone="primary"
-              className="ms-auto"
-              disabled={!ready || !countOk || starting}
-              onClick={async () => {
-                setStarting(true);
-                const result = await start({
-                  environmentId: props.environmentId,
-                  input: {
-                    cardId: props.card.id,
-                    attempts: chosen.map((agentId) => ({
-                      cardId: CardId.make(randomUUID()),
-                      agentId,
-                    })),
-                  },
-                });
-                setStarting(false);
-                toastCommandFailure(
-                  result,
-                  "The attempts did not start",
-                  "The request was refused.",
-                );
-              }}
-            >
-              Start {chosen.length > 0 ? chosen.length : ""} attempts
-            </ActionButton>
-          </DisabledReason>
-        </div>
-      </div>
-    </main>
   );
 }
 
@@ -227,7 +231,7 @@ function AttemptColumn(props: {
           }
         />
         {attempt.diffStat !== null ? (
-          <span className="shrink-0 text-xs tabular-nums text-muted-foreground/55">
+          <span className="shrink-0 text-xs tabular-nums text-tertiary-label">
             +{attempt.diffStat.additions} −{attempt.diffStat.deletions}
           </span>
         ) : null}

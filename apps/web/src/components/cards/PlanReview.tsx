@@ -98,7 +98,7 @@ export function PlanReview(props: {
         }
       >
         {plan.premise.trim().length > 0 ? (
-          <p className="whitespace-pre-wrap break-words px-1 text-[13px]">{plan.premise}</p>
+          <p className="whitespace-pre-wrap break-words px-4 text-[13px]">{plan.premise}</p>
         ) : null}
       </Section>
       {slices.map((slice) => (
@@ -128,7 +128,7 @@ export function PlanReview(props: {
                       {view.child.title}
                     </Link>
                   )}
-                  <span className="truncate text-xs text-muted-foreground/55">
+                  <span className="truncate text-xs text-tertiary-label">
                     {view.child.criteria.length} criteri
                     {view.child.criteria.length === 1 ? "on" : "a"}
                     {view.child.suggestedAgent !== null

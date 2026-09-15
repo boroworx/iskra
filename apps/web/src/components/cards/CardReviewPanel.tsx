@@ -49,6 +49,7 @@ import { Textarea } from "../ui/textarea";
 import { AgentAvatar } from "../iskra/AgentAvatar";
 import { RoundDots } from "../iskra/Marks";
 import { StatusPill } from "../iskra/StatusPill";
+import { formatRelativeTimeLabel } from "~/timestampFormat";
 import {
   ActionButton,
   ClaimMarks,
@@ -150,7 +151,7 @@ export function CardReview(props: {
   if (summary === null) {
     return (
       <Section label="Evidence" trailing={capture ?? undefined}>
-        <p className="px-1 text-xs text-muted-foreground">
+        <p className="px-4 text-xs text-muted-foreground">
           No evidence yet. Iskra captures it when the agent asks for review or a checkpoint.
         </p>
       </Section>
@@ -160,7 +161,7 @@ export function CardReview(props: {
     <>
       <Section label="Criteria">
         {review.criteria.length === 0 ? (
-          <p className="px-1 text-xs text-muted-foreground">
+          <p className="px-4 text-xs text-muted-foreground">
             This card has no acceptance criteria, so only its checks speak for it.
           </p>
         ) : (
@@ -261,22 +262,23 @@ export function CardReview(props: {
           <>
             <span className="truncate tabular-nums">
               {summary.purpose === "checkpoint" ? "Checkpoint · " : ""}
-              {summary.headSha.slice(0, 7)} ·{" "}
-              <span
-                className={
-                  summary.passed ? "text-success-foreground" : "text-destructive-foreground"
-                }
-              >
-                {summary.passed ? "passed" : "failed"}
-              </span>{" "}
-              · {dateTime(summary.recordedAt)}
+              <span className="font-mono">{summary.headSha.slice(0, 7)}</span> ·{" "}
+              <DisabledReason reason={dateTime(summary.recordedAt)}>
+                <time dateTime={summary.recordedAt}>
+                  {formatRelativeTimeLabel(summary.recordedAt)}
+                </time>
+              </DisabledReason>
             </span>
+            <StatusPill
+              label={summary.passed ? "Passed" : "Failed"}
+              tone={summary.passed ? "green" : "red"}
+            />
             {capture}
           </>
         }
       >
         {review.general.length === 0 ? (
-          <p className="px-1 text-xs text-muted-foreground">No checks ran for this commit.</p>
+          <p className="px-4 text-xs text-muted-foreground">No checks ran for this commit.</p>
         ) : (
           <Group className="tabular-nums">
             {review.general.map((view) => (
@@ -317,7 +319,7 @@ export function CardReview(props: {
                     >
                       {flag.path}
                     </span>
-                    <span className="truncate text-xs text-muted-foreground/55">
+                    <span className="truncate text-xs text-tertiary-label">
                       {SCOPE_FLAG_LABEL[flag.kind]}
                       {flag.detail.length > 0 ? ` · ${flag.detail}` : ""}
                     </span>
@@ -336,7 +338,7 @@ export function CardReview(props: {
                           Acknowledge
                         </RowLink>
                       ) : summary.flagsAcknowledgedAt !== null ? (
-                        <span className="text-xs text-muted-foreground/55">Acknowledged</span>
+                        <span className="text-xs text-tertiary-label">Acknowledged</span>
                       ) : null}
                     </Trail>
                   ) : null}
@@ -376,7 +378,7 @@ export function CardReview(props: {
               </DisclosureRow>
             ) : null}
           </Group>
-          <p className="px-1 text-xs text-muted-foreground/55">
+          <p className="px-4 text-xs text-tertiary-label">
             Its own assessment when it asked for review, not evidence.
           </p>
         </Section>
@@ -391,9 +393,11 @@ export function CardReview(props: {
         />
       ) : null}
 
-      <Group>
-        <CardDiff card={card} environmentId={environmentId} />
-      </Group>
+      <Section label="Diff">
+        <Group>
+          <CardDiff card={card} environmentId={environmentId} />
+        </Group>
+      </Section>
     </>
   );
 }
@@ -474,7 +478,7 @@ function VerifierPanel(props: {
               <span className="truncate">@{verifierName}</span>
               {why !== null ? (
                 <DisabledReason reason={why.hint}>
-                  <span className="truncate text-xs text-muted-foreground/55">
+                  <span className="truncate text-xs text-tertiary-label">
                     {provider} · {selection.model} · {why.label}
                   </span>
                 </DisabledReason>
@@ -623,23 +627,16 @@ const EvidenceRow = memo(function EvidenceRow(props: {
       label={
         <>
           {item.name}
-          <span className="text-muted-foreground/55"> · {item.source}</span>
+          <span className="text-tertiary-label"> · {item.source}</span>
         </>
       }
       trailing={
         <>
           {stateText !== null && state !== "captured" ? (
-            <span
-              className={cn(
-                "text-xs",
-                state === "failed" ? "text-destructive-foreground" : "text-warning-foreground",
-              )}
-            >
-              {stateText}
-            </span>
+            <span className="text-xs text-tertiary-label">{stateText}</span>
           ) : null}
           {item.durationMs !== null ? (
-            <span className="text-muted-foreground/55">{Math.round(item.durationMs / 1000)}s</span>
+            <span className="text-tertiary-label">{Math.round(item.durationMs / 1000)}s</span>
           ) : null}
         </>
       }
@@ -668,10 +665,10 @@ function EvidenceDetail(props: {
           <VerdictGlyph state={ITEM_GLYPH[state]} size={13} label={stateText ?? "Passed"} />
           <span className="min-w-0 truncate">
             {item.name}
-            <span className="text-muted-foreground/55"> · {item.source}</span>
+            <span className="text-tertiary-label"> · {item.source}</span>
           </span>
           {item.durationMs !== null ? (
-            <span className="ms-auto shrink-0 tabular-nums text-muted-foreground/55">
+            <span className="ms-auto shrink-0 tabular-nums text-tertiary-label">
               {Math.round(item.durationMs / 1000)}s
             </span>
           ) : null}
@@ -773,7 +770,7 @@ function ExhibitFigure(props: {
           {url._tag === "Loading" ? "Loading…" : "The file is no longer available."}
         </div>
       )}
-      <figcaption className="truncate text-xs text-muted-foreground/55">
+      <figcaption className="truncate text-xs text-tertiary-label">
         Exhibit {props.exhibit} · {props.name}
       </figcaption>
     </figure>
@@ -789,10 +786,10 @@ function CardDiff(props: {
   return (
     <DisclosureRow
       leading={<GitBranchIcon aria-hidden className="size-[18px] text-muted-foreground" />}
-      label="Diff"
+      label="Changes"
       trailing={
         stat !== null && stat.files > 0 ? (
-          <span className="tabular-nums text-xs text-muted-foreground/55">
+          <span className="tabular-nums text-xs text-tertiary-label">
             {stat.files} file{stat.files === 1 ? "" : "s"} +{stat.additions} −{stat.deletions}
           </span>
         ) : undefined
@@ -890,11 +887,7 @@ export function CardLandingPanel(props: {
                     : "passed"
             }
           />
-          <span
-            className={
-              ci.failed.length > 0 ? "text-destructive-foreground" : "text-muted-foreground"
-            }
-          >
+          <span className="text-muted-foreground">
             {ci.total === 0
               ? "No CI results yet."
               : ci.failed.length > 0
@@ -906,15 +899,10 @@ export function CardLandingPanel(props: {
         </Row>
       ) : null}
       <Row className="flex-wrap py-2">
-        <span className="text-muted-foreground">Fix rounds</span>
+        <span className="text-muted-foreground">CI fix rounds</span>
         <Trail className="text-xs text-muted-foreground/75">
           <span className="inline-flex items-center gap-1.5">
-            CI
             <RoundDots used={rounds.ci.used} cap={rounds.ci.cap} label="CI fix rounds" />
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            Review
-            <RoundDots used={rounds.review.used} cap={rounds.review.cap} label="Review fix rounds" />
           </span>
           {roundsOut ? (
             <ActionButton

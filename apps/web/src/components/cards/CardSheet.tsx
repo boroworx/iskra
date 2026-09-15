@@ -31,7 +31,7 @@ import {
 } from "@iskra/contracts";
 import { Link } from "@tanstack/react-router";
 import { ChevronRightIcon, ClockIcon, EllipsisIcon, PauseIcon, XIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { cn, randomUUID } from "~/lib/utils";
 import { cardEnvironment } from "~/state/cards";
@@ -117,7 +117,7 @@ const SESSION_TONE: Record<RunSessionState, PillTone> = {
 };
 
 /** The footer's larger buttons, as the review canvas draws them. */
-const FOOTER_BUTTON = "h-8 rounded-lg px-4 sm:h-8";
+const FOOTER_BUTTON = "h-[30px] rounded-lg px-4 sm:h-[30px]";
 
 /** Toasts a refused command and hands its reason to `onRefused`, so the sheet says it in place. */
 const refusedWith =
@@ -148,7 +148,7 @@ export function CardSheet(props: {
   readonly focus?: "agent" | "criteria" | undefined;
   readonly onClose: () => void;
 }) {
-  const closeButton = useRef<HTMLButtonElement>(null);
+  const popup = useRef<HTMLDivElement>(null);
   return (
     <Sheet
       open={props.card !== null}
@@ -157,9 +157,11 @@ export function CardSheet(props: {
       }}
     >
       <SheetPopup
+        ref={popup}
+        tabIndex={-1}
         showCloseButton={false}
-        initialFocus={closeButton}
-        className="max-w-[640px] bg-background"
+        initialFocus={popup}
+        className="max-w-[640px] bg-background outline-none"
       >
         {props.card === null ? null : (
           <CardSheetBody
@@ -170,7 +172,6 @@ export function CardSheet(props: {
             agents={props.agents}
             now={props.now}
             focus={props.focus}
-            closeButton={closeButton}
           />
         )}
       </SheetPopup>
@@ -185,7 +186,6 @@ function CardSheetBody(props: {
   readonly agents: ReadonlyArray<OrchestrationAgentShell>;
   readonly now: number;
   readonly focus?: "agent" | "criteria" | undefined;
-  readonly closeButton: RefObject<HTMLButtonElement | null>;
 }) {
   const { card, environmentId } = props;
   // Needs you opens the sheet at what it asks for: once, when the body mounts for this card.
@@ -311,7 +311,7 @@ function CardSheetBody(props: {
     <>
       <SheetHeader className="gap-2.5 px-7 pt-7 pb-4">
         <div className="flex min-h-7 items-center gap-2">
-          <span className="text-xs font-medium tabular-nums text-muted-foreground/55">
+          <span className="text-xs font-medium tabular-nums text-tertiary-label">
             {cardShortId(card)}
           </span>
           <div className="ms-auto flex flex-wrap items-center justify-end gap-1.5">
@@ -324,13 +324,13 @@ function CardSheetBody(props: {
             {snoozed ? <StatusPill label="Snoozed" tone="gray" /> : null}
             {card.unattended ? <StatusPill label="Draft PR" tone="gray" /> : null}
             {outcome !== null ? <StatusPill {...outcome} /> : null}
-            <StatusPill {...cardStatusPill(card)} className="h-[22px] px-[9px] text-xs" />
+            <StatusPill {...cardStatusPill(card)} />
             <RowLink className="ms-1" aria-pressed={editing} onClick={() => setEditing((current) => !current)}>
               {editing ? "Done" : "Edit"}
             </RowLink>
             <Menu>
               <MenuTrigger
-                render={<Button size="icon-xs" variant="ghost-muted" aria-label="Card actions" />}
+                render={<Button size="icon-sm" variant="ghost-muted" aria-label="Card actions" />}
               >
                 <EllipsisIcon />
               </MenuTrigger>
@@ -449,12 +449,7 @@ function CardSheetBody(props: {
             </Menu>
             <SheetClose
               render={
-                <Button
-                  ref={props.closeButton}
-                  size="icon-xs"
-                  variant="ghost-muted"
-                  aria-label="Close"
-                />
+                <Button size="icon-sm" variant="ghost-muted" aria-label="Close" />
               }
             >
               <XIcon />
@@ -488,7 +483,7 @@ function CardSheetBody(props: {
             Fix rounds
           </span>
           {card.revertsCardId !== null ? (
-            <span className="min-w-0 truncate text-muted-foreground/55">
+            <span className="min-w-0 truncate text-tertiary-label">
               Reverts {cardById.get(card.revertsCardId)?.title ?? "a landed card"}
             </span>
           ) : null}
@@ -511,7 +506,7 @@ function CardSheetBody(props: {
           >
             <p className="min-w-0 flex-1 break-words">{refusal}</p>
             <Button
-              size="icon-xs"
+              size="icon-sm"
               variant="ghost-muted"
               aria-label="Dismiss"
               onClick={() => setRefusal(null)}
@@ -522,7 +517,7 @@ function CardSheetBody(props: {
         ) : null}
 
         {card.status === "triage" && card.proposalReasoning !== null ? (
-          <p className="px-1 text-[13px] text-muted-foreground">{card.proposalReasoning}</p>
+          <p className="px-4 text-[13px] text-muted-foreground">{card.proposalReasoning}</p>
         ) : null}
 
         {editing ? (
@@ -542,7 +537,7 @@ function CardSheetBody(props: {
                 onChange={(event) => setSpec(event.target.value)}
               />
               {open ? (
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center justify-end gap-2">
                   <ActionButton
                     tone="primary"
                     disabled={!edited || title.trim().length === 0}
@@ -611,7 +606,7 @@ function CardSheetBody(props: {
                     Paused · {reasonLine(card.paused.reason)}
                   </span>
                 </DisabledReason>
-                {card.status !== "triage" ? (
+                {card.status === "inReview" ? (
                   <Trail>
                     <ActionButton
                       tone="primary"
@@ -643,11 +638,13 @@ function CardSheetBody(props: {
             <Group>
               {card.attention.map((item) => (
                 <Row key={item.activityId} className="flex-col items-stretch gap-1.5 py-3">
-                  <span className="text-xs text-muted-foreground/55">
+                  <span className="text-xs text-tertiary-label">
                     {reasonLabel({ code: item.code, text: item.text }).label}
                   </span>
                   <p className="whitespace-pre-wrap break-words">{item.text}</p>
-                  <AttentionActions card={card} item={item} environmentId={environmentId} onCard />
+                  <div className="flex justify-end">
+                    <AttentionActions card={card} item={item} environmentId={environmentId} onCard />
+                  </div>
                 </Row>
               ))}
             </Group>
@@ -656,7 +653,7 @@ function CardSheetBody(props: {
 
         {open && cardQuestionsOf(card).length > 0 ? (
           <Section label="Questions for you">
-            <Group className="p-3.5">
+            <Group className="p-4">
               <CardQuestions card={card} environmentId={environmentId} agentName={sessionAgent?.name} />
             </Group>
           </Section>
@@ -665,7 +662,7 @@ function CardSheetBody(props: {
         {/* A migration's tune checkpoint is answered in its panel, with the instructions editor. */}
         {open && card.checkpoint !== null && card.migration?.phase !== "tuning" ? (
           <Section label="Checkpoint">
-            <Group className="p-3.5">
+            <Group className="p-4">
               <CheckpointControls card={card} environmentId={environmentId} />
             </Group>
           </Section>
@@ -676,7 +673,7 @@ function CardSheetBody(props: {
               .filter((question) => question.kind === "refsChanged")
               .map((report) => (
                 <Section key={report.activityId} label="Refs changed outside this card">
-                  <Group className="p-3.5">
+                  <Group className="p-4">
                     <RefsChangedControls
                       cardId={card.id}
                       report={report}
@@ -736,8 +733,9 @@ function CardSheetBody(props: {
 
         {card.status === "triage" || card.status === "ready" ? (
           <Section label="Before it starts">
-            <Group className="p-3.5">
+            <Group className="p-4">
               <CardPreviewPanel
+                showReadOnly={card.waitReason?.code !== "delegateReadOnly"}
                 estimate={card.estimate}
                 agent={previewAgent}
                 hint={
@@ -790,7 +788,7 @@ function CardSheetBody(props: {
                     </SelectPopup>
                   </Select>
                   {card.status === "triage" ? (
-                    <span className="text-xs text-muted-foreground/55">
+                    <span className="text-xs text-tertiary-label">
                       {APPROVE_BEFORE_ASSIGN_TEXT}
                     </span>
                   ) : null}
@@ -812,6 +810,7 @@ function CardSheetBody(props: {
                     onChange={(event) => setMessage(event.target.value)}
                   />
                   <DisabledReason
+                    className="self-end"
                     reason={card.delegateAgentId === null ? "Assign an agent first." : null}
                   >
                     <ActionButton
@@ -834,7 +833,7 @@ function CardSheetBody(props: {
               <Group>
                 {card.relations.map((relation) => (
                   <Row key={`${relation.kind}:${relation.cardId}`}>
-                    <span className="shrink-0 text-xs text-muted-foreground/55">
+                    <span className="shrink-0 text-xs text-tertiary-label">
                       {CARD_RELATION_LABEL[relation.kind]}
                     </span>
                     <span className="min-w-0 flex-1 truncate">
@@ -842,7 +841,7 @@ function CardSheetBody(props: {
                     </span>
                     {editing ? (
                       <Button
-                        size="icon-xs"
+                        size="icon-sm"
                         variant="ghost-muted"
                         aria-label="Remove relation"
                         onClick={() =>
@@ -984,22 +983,21 @@ function CardSheetBody(props: {
           </Section>
         ) : null}
 
-        <div className="flex flex-col gap-2">
+        <Section label="Activity">
           <Group>
             <button
               type="button"
               aria-expanded={activityOpen}
-              className="flex min-h-[46px] cursor-pointer items-center gap-3 px-3.5 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+              className="flex min-h-[46px] cursor-pointer items-center gap-3 px-4 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
               onClick={() => setActivityOpen((current) => !current)}
             >
-              <span className="font-semibold text-muted-foreground">Activity</span>
-              <span className="tabular-nums text-xs text-muted-foreground/55">
-                {activities.length}
+              <span className="tabular-nums text-muted-foreground">
+                {activities.length} {activities.length === 1 ? "event" : "events"}
               </span>
               <ChevronRightIcon
                 aria-hidden
                 className={cn(
-                  "ms-auto size-3 text-muted-foreground/55 transition-transform duration-150 motion-reduce:transition-none",
+                  "ms-auto size-3 text-tertiary-label transition-transform duration-150 motion-reduce:transition-none",
                   activityOpen && "rotate-90",
                 )}
               />
@@ -1012,10 +1010,13 @@ function CardSheetBody(props: {
               error={activity.error}
             />
           ) : null}
-        </div>
+        </Section>
       </SheetPanel>
 
-      {card.status === "inReview" || card.status === "triage" ? (
+      {card.status === "inReview" ||
+      card.status === "triage" ||
+      card.status === "landed" ||
+      (open && card.paused !== null) ? (
         <div className="flex flex-col gap-2.5 bg-sidebar px-7 py-4 shadow-[inset_0_0.5px_var(--border)]">
           {requesting ? (
             <Textarea
@@ -1028,13 +1029,23 @@ function CardSheetBody(props: {
           ) : null}
           <div className="flex flex-wrap items-center gap-2.5">
             {branch !== null ? (
-              <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground/55">
+              <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-tertiary-label">
                 <BranchGlyph className="shrink-0" />
                 <span className="truncate">{branch}</span>
               </span>
             ) : null}
             <div className="ms-auto flex flex-wrap items-center gap-2.5">
-              {card.status === "triage" ? (
+              {card.status === "landed" ? (
+                <RevertControl card={card} cards={props.cards} environmentId={environmentId} />
+              ) : card.status !== "inReview" && card.status !== "triage" ? (
+                <ActionButton
+                  tone="primary"
+                  className={FOOTER_BUTTON}
+                  onClick={() => decideOn("card.resume", "The card was not resumed")}
+                >
+                  Resume
+                </ActionButton>
+              ) : card.status === "triage" ? (
                 <>
                   <ActionButton
                     className={FOOTER_BUTTON}
@@ -1182,12 +1193,9 @@ function OutcomeControls(props: {
 }) {
   const { card, environmentId } = props;
   const setOutcome = useAtomCommand(cardEnvironment.setOutcome);
-  const revert = useAtomCommand(cardEnvironment.revert);
   const [state, setState] = useState<CardOutcome["state"] | null>(card.outcome?.state ?? null);
   const [note, setNote] = useState("");
-  const [confirming, setConfirming] = useState(false);
   const [sending, setSending] = useState(false);
-  const refusal = revertRefusal(card, props.cards);
   const heuristic = card.outcome?.signals.find((signal) => signal.code !== "outcomeSetByPerson");
 
   let summary: ReactNode;
@@ -1235,6 +1243,7 @@ function OutcomeControls(props: {
           onChange={(event) => setNote(event.target.value)}
         />
         <DisabledReason
+          className="ms-auto"
           reason={
             state === null
               ? "Choose how it turned out."
@@ -1261,22 +1270,33 @@ function OutcomeControls(props: {
           </ActionButton>
         </DisabledReason>
       </Row>
-      {card.status === "landed" ? (
-        <Row>
-          <span className="text-muted-foreground">Undo this card on the base branch</span>
-          <Trail>
-            <DisabledReason reason={refusal}>
-              <ActionButton
-                tone="destructive"
-                disabled={refusal !== null || sending}
-                onClick={() => setConfirming(true)}
-              >
-                Revert…
-              </ActionButton>
-            </DisabledReason>
-          </Trail>
-        </Row>
-      ) : null}
+    </Group>
+  );
+}
+
+/** "Revert…" in a landed card's footer: confirms, then makes a new card that reverts its commit. */
+function RevertControl(props: {
+  readonly card: OrchestrationCardShell;
+  readonly cards: ReadonlyArray<OrchestrationCardShell>;
+  readonly environmentId: EnvironmentId;
+}) {
+  const { card, environmentId } = props;
+  const revert = useAtomCommand(cardEnvironment.revert);
+  const [confirming, setConfirming] = useState(false);
+  const [sending, setSending] = useState(false);
+  const refusal = revertRefusal(card, props.cards);
+  return (
+    <>
+      <DisabledReason reason={refusal}>
+        <ActionButton
+          tone="destructive"
+          className={FOOTER_BUTTON}
+          disabled={refusal !== null || sending}
+          onClick={() => setConfirming(true)}
+        >
+          Revert…
+        </ActionButton>
+      </DisabledReason>
       <AlertDialog open={confirming} onOpenChange={(next) => !sending && setConfirming(next)}>
         <AlertDialogPopup>
           <AlertDialogHeader>
@@ -1313,7 +1333,7 @@ function OutcomeControls(props: {
           </AlertDialogFooter>
         </AlertDialogPopup>
       </AlertDialog>
-    </Group>
+    </>
   );
 }
 
