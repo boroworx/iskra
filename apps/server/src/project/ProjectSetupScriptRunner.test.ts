@@ -90,6 +90,16 @@ const testLayer = (
     Layer.provide(settings),
   );
 
+describe("stripTerminalControl", () => {
+  it("removes color codes, cursor moves and hyperlinks, and keeps the text", () => {
+    expect(
+      ProjectSetupScriptRunner.stripTerminalControl(
+        "\x1b[32m✔ add sums\x1b[39m\n\x1b[2K\x1b[1Gdone \x1b]8;;https://x.test\x07link\x1b]8;;\x07",
+      ),
+    ).toBe("✔ add sums\ndone link");
+  });
+});
+
 describe("ProjectSetupScriptRunner", () => {
   it.effect("runs the inherited machine setup action in the checkout's worktree", () => {
     const open = vi.fn(() =>

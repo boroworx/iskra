@@ -41,6 +41,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import { ServerSecretStore } from "../auth/ServerSecretStore.ts";
+import { stripTerminalControl } from "../project/ProjectSetupScriptRunner.ts";
 import { ServerConfig } from "../config.ts";
 import { ProcessRunner } from "../processRunner.ts";
 import { forkParked } from "../serverActivation.ts";
@@ -882,8 +883,11 @@ const make = Effect.gen(function* () {
         exitCode: outcome.exitCode,
         timedOut: outcome.timedOut,
         durationMs,
+        // Color codes are stripped from what agents and people read; the log file keeps them.
         logTail: scrubSecrets(
-          `${Option.getOrElse(tail, () => "")}${outcome.error === "" ? "" : `\n${outcome.error}`}`,
+          stripTerminalControl(
+            `${Option.getOrElse(tail, () => "")}${outcome.error === "" ? "" : `\n${outcome.error}`}`,
+          ),
           input.secrets,
         )
           .trim()

@@ -132,7 +132,7 @@ function completionSentinelPattern(token: string): RegExp {
 }
 
 /** Removes ANSI escape sequences and cursor controls so lines can be shown as plain text. */
-function stripTerminalControl(text: string): string {
+export function stripTerminalControl(text: string): string {
   return (
     text
       .replace(
