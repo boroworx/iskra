@@ -2,6 +2,7 @@ import {
   CHANNEL_SYSTEM_AUTHOR_ID,
   CommandId,
   type CardId,
+  type CardRefChange,
   type OrchestrationEvent,
   type Reason,
   type ThreadId,
@@ -20,6 +21,7 @@ import * as TxRef from "effect/TxRef";
 
 import { ProcessRunner } from "../processRunner.ts";
 import { forkParked } from "../serverActivation.ts";
+import { REFS_CHANGED_OPTIONS } from "./cardRules.ts";
 import { runSessionChange } from "./RunReactor.ts";
 import * as OrchestrationEngine from "./Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts";
@@ -27,12 +29,7 @@ import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts"
 /** Ref name → object id, for `refs/heads` and `refs/tags`. */
 export type RefSnapshot = ReadonlyMap<string, string>;
 
-export interface RefChange {
-  readonly ref: string;
-  readonly kind: "moved" | "created" | "deleted";
-  readonly before: string | null;
-  readonly after: string | null;
-}
+export type RefChange = CardRefChange;
 
 export const REF_MOVED_OUTSIDE_CARD = "refMovedOutsideCard";
 
@@ -56,41 +53,34 @@ export const refChanges = (
       };
     });
 
-const listRefs = (refs: ReadonlyArray<string>) =>
-  refs.length === 1 ? refs[0]! : `${refs.slice(0, -1).join(", ")} and ${refs.at(-1)!}`;
+const short = (id: string | null) => id?.slice(0, 7) ?? "nothing";
 
-/** What the card says: who changed which refs, what Iskra put back, and each ref's ids for recovery. */
-export const refGuardMessage = (
-  agent: string,
-  changes: ReadonlyArray<RefChange>,
-  unrestored: ReadonlyArray<string>,
-): { readonly summary: string; readonly body: string } => {
-  const done = (["moved", "created", "deleted"] as const).flatMap((kind) => {
-    const refs = changes.filter((change) => change.kind === kind).map((change) => change.ref);
-    return refs.length === 0 ? [] : [`${kind} ${listRefs(refs)}`];
-  });
-  const restored =
-    unrestored.length === 0
-      ? `Iskra restored ${changes.length === 1 ? "it" : "them"}`
-      : `Iskra could not restore ${listRefs(unrestored)}`;
-  const summary = `${agent} ${listRefs(done)}; ${restored} and paused the card.`;
-  const short = (id: string | null) => id?.slice(0, 12) ?? "none";
-  const details = changes.map((change) => `- ${change.ref}: ${short(change.before)} → ${short(change.after)}`);
-  return { summary, body: [summary, "", ...details].join("\n") };
+/** What the card says. It doesn't accuse: the person may have made these changes themselves. */
+export const refGuardMessage = (agent: string, changes: ReadonlyArray<RefChange>): string => {
+  const described = changes.map((change) =>
+    change.kind === "moved"
+      ? `${change.ref} moved ${short(change.before)} → ${short(change.after)}`
+      : change.kind === "created"
+        ? `${change.ref} created at ${short(change.after)}`
+        : `${change.ref} deleted (was ${short(change.before)})`,
+  );
+  return `Refs outside this card changed during ${agent}'s turn: ${described.join(", ")}. If the agent did this, restore them; if you did, keep them.`;
 };
 
 /**
- * Guards the repository's shared refs while a card's agent works. A card worktree's sandboxed
- * shell can write the common `.git` (docs/findings/m1-claude-run-enforcement.md), so each card
- * run's turn snapshots `refs/heads` and `refs/tags` when it is requested and compares when it
- * settles or its session ends. A ref created, deleted or moved meanwhile, other than a card's own
- * branch, is put back (compare-and-swap, so a newer write is never clobbered), recorded on the card
- * and the card is paused. It detects and restores after the turn; it does not prevent the write.
+ * Watches the repository's shared refs while a card's agent works. A card worktree's sandboxed
+ * shell can write the common `.git` and the sandbox can't carve the card's own branch out of a ref
+ * deny (docs/findings/m1-claude-run-enforcement.md), so each card run's turn snapshots `refs/heads`
+ * and `refs/tags` when it is requested and compares when it settles or its session ends. A ref
+ * created, deleted or moved meanwhile, other than a card's own branch, is reported on the card as
+ * a refsChanged question and the card is paused. Nothing is put back automatically: the person may
+ * have committed in their own checkout meanwhile. `card.refs.restore` puts the named refs back
+ * (compare-and-swap, so a ref that changed again is skipped); `card.refs.keep` leaves them.
  *
  * Iskra's own writes to the repository's branches (a card's branch created or deleted, a landing's
- * fast-forward) go through `serverRefWrite`, which holds the same per-repository lock as the
- * snapshots and moves open turns' baselines to the ref's new value. Remote-tracking refs and
- * checkpoint refs are outside `refs/heads` and `refs/tags`, so pushes and checkpoints never count.
+ * fast-forward, a restore) hold the same per-repository lock as the snapshots and move open turns'
+ * baselines to the ref's new value. Remote-tracking refs and checkpoint refs are outside
+ * `refs/heads` and `refs/tags`, so pushes and checkpoints never count.
  */
 export class CardRefGuard extends Context.Service<
   CardRefGuard,
@@ -112,11 +102,18 @@ interface TurnWindow {
   readonly cardId: CardId;
   readonly root: string;
   readonly baseline: Map<string, string>;
+  readonly eventId: string;
 }
 
 type GuardRequest =
   | { readonly kind: "open"; readonly threadId: ThreadId; readonly eventId: string }
-  | { readonly kind: "close"; readonly threadId: ThreadId };
+  | { readonly kind: "close"; readonly threadId: ThreadId }
+  | {
+      readonly kind: "restore";
+      readonly cardId: CardId;
+      readonly reportId: string;
+      readonly changes: ReadonlyArray<RefChange>;
+    };
 
 const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngine.OrchestrationEngineService;
@@ -126,7 +123,7 @@ const make = Effect.gen(function* () {
 
   // Keyed by the repository's common git dir, so projects sharing a repository share a lock.
   // ponytail: in memory; a server restart mid-turn loses that turn's snapshot and it goes unchecked.
-  const windows = new Map<ThreadId, TurnWindow & { readonly eventId: string }>();
+  const windows = new Map<ThreadId, TurnWindow>();
   const locks = new Map<string, Semaphore.Semaphore>();
   const withRepoLock = (key: string) => {
     let lock = locks.get(key);
@@ -135,6 +132,15 @@ const make = Effect.gen(function* () {
       locks.set(key, lock);
     }
     return lock.withPermits(1);
+  };
+
+  /** Open turns in the repository accept Iskra's own write of `ref`. */
+  const acceptServerWrite = (key: string, ref: string, value: string | undefined) => {
+    for (const window of windows.values()) {
+      if (window.key !== key) continue;
+      if (value === undefined) window.baseline.delete(ref);
+      else window.baseline.set(ref, value);
+    }
   };
 
   const git = (root: string, args: ReadonlyArray<string>) =>
@@ -185,11 +191,7 @@ const make = Effect.gen(function* () {
               Effect.gen(function* () {
                 const after = Option.map(yield* snapshot(root), (refs) => refs.get(ref));
                 if (Option.isNone(before) || Option.isNone(after) || before.value === after.value) return;
-                for (const window of windows.values()) {
-                  if (window.key !== key.value) continue;
-                  if (after.value === undefined) window.baseline.delete(ref);
-                  else window.baseline.set(ref, after.value);
-                }
+                acceptServerWrite(key.value, ref, after.value);
               }),
             ),
           );
@@ -197,17 +199,58 @@ const make = Effect.gen(function* () {
       );
     });
 
+  const readCard = (cardId: CardId) =>
+    Effect.gen(function* () {
+      const model = yield* snapshotQuery.getCommandReadModel();
+      const card = (model.cards ?? []).find((candidate) => candidate.id === cardId);
+      const project = model.projects.find((candidate) => candidate.id === card?.projectId);
+      if (card === undefined || project === undefined) return undefined;
+      return { card, project, model };
+    });
+
   const readRunCard = (threadId: ThreadId) =>
     Effect.gen(function* () {
       const run = yield* snapshotQuery.getRunByThreadId(threadId);
       if (Option.isNone(run) || run.value.cardId === null) return undefined;
-      const model = yield* snapshotQuery.getCommandReadModel();
-      const cardId = run.value.cardId;
-      const card = (model.cards ?? []).find((candidate) => candidate.id === cardId);
-      const project = model.projects.find((candidate) => candidate.id === card?.projectId);
-      if (card === undefined || project === undefined) return undefined;
-      return { run: run.value, card, project, model };
+      const found = yield* readCard(run.value.cardId);
+      return found === undefined ? undefined : { ...found, run: run.value };
     });
+
+  const record = (
+    cardId: CardId,
+    activityId: string,
+    entry: { readonly kind: "error" | "message"; readonly body: string; readonly runThreadId: ThreadId | null },
+    report: { readonly reason: Reason; readonly changes: ReadonlyArray<RefChange> } | null,
+  ) =>
+    Effect.gen(function* () {
+      yield* engine.dispatch({
+        type: "card.activity.record",
+        commandId: CommandId.make(activityId),
+        activityId,
+        cardId,
+        kind: entry.kind,
+        author: { kind: "system", id: CHANNEL_SYSTEM_AUTHOR_ID },
+        body: entry.body,
+        runThreadId: entry.runThreadId,
+        deliverTo: null,
+        elicitation:
+          report === null
+            ? null
+            : {
+                question: "Restore these refs, or keep them?",
+                options: REFS_CHANGED_OPTIONS,
+                recommendedOptionId: null,
+                allowText: false,
+                kind: "refsChanged",
+              },
+        answers: null,
+        status: null,
+        evidenceId: null,
+        reason: report?.reason ?? null,
+        refChanges: report?.changes ?? null,
+        createdAt: yield* nowIso,
+      });
+    }).pipe(Effect.catch((error) => Effect.logWarning("card ref guard could not record", { error: error.message })));
 
   const open = Effect.fn("CardRefGuard.open")(function* (threadId: ThreadId, eventId: string) {
     const found = yield* readRunCard(threadId);
@@ -224,17 +267,6 @@ const make = Effect.gen(function* () {
     );
   });
 
-  /** Puts one ref back only if it still holds what the snapshot saw. */
-  const restore = (root: string, change: RefChange) =>
-    git(
-      root,
-      change.after === null
-        ? ["update-ref", "-m", "iskra: restore a ref moved outside its card", change.ref, change.before!, ""]
-        : change.before === null
-          ? ["update-ref", "-d", change.ref, change.after]
-          : ["update-ref", "-m", "iskra: restore a ref moved outside its card", change.ref, change.before, change.after],
-    ).pipe(Effect.map(Option.isSome));
-
   const close = Effect.fn("CardRefGuard.close")(function* (threadId: ThreadId) {
     const window = windows.get(threadId);
     if (window === undefined) return;
@@ -249,44 +281,25 @@ const make = Effect.gen(function* () {
           (found?.model.cards ?? []).flatMap((card) => (card.branch === null ? [] : [`refs/heads/${card.branch}`])),
         );
         const changes = refChanges(window.baseline, after.value, exclusions);
-        if (changes.length === 0) return undefined;
-        const unrestored: Array<string> = [];
-        for (const change of changes) {
-          if (!(yield* restore(window.root, change))) unrestored.push(change.ref);
-        }
-        return { changes, unrestored, found };
+        return changes.length === 0 ? undefined : { changes, found };
       }),
     );
     if (outcome === undefined) return;
-    const { changes, unrestored, found } = outcome;
+    const { changes, found } = outcome;
     const agentName = found?.model.agents?.find((agent) => agent.id === found.run.agentId)?.name;
-    const message = refGuardMessage(agentName === undefined ? "The card's agent" : `@${agentName}`, changes, unrestored);
-    const reason: Reason = { code: REF_MOVED_OUTSIDE_CARD, text: message.summary };
-    yield* Effect.logWarning("card agent changed refs outside its card", {
+    const text = refGuardMessage(agentName === undefined ? "the agent" : `@${agentName}`, changes);
+    const reason: Reason = { code: REF_MOVED_OUTSIDE_CARD, text };
+    yield* Effect.logWarning("refs outside a card changed during its agent's turn", {
       cardId: window.cardId,
       threadId,
       refs: changes.map((change) => change.ref),
-      unrestored,
     });
-    yield* engine
-      .dispatch({
-        type: "card.activity.record",
-        commandId: CommandId.make(`card-ref-guard:${window.eventId}`),
-        activityId: `card-ref-guard:${window.eventId}`,
-        cardId: window.cardId,
-        kind: "error",
-        author: { kind: "system", id: CHANNEL_SYSTEM_AUTHOR_ID },
-        body: message.body,
-        runThreadId: threadId,
-        deliverTo: null,
-        elicitation: null,
-        answers: null,
-        status: null,
-        evidenceId: null,
-        reason,
-        createdAt: yield* nowIso,
-      })
-      .pipe(Effect.catch((error) => Effect.logWarning("card ref guard could not record", { error: error.message })));
+    yield* record(
+      window.cardId,
+      `card-ref-guard:${window.eventId}`,
+      { kind: "error", body: text, runThreadId: threadId },
+      { reason, changes },
+    );
     if (found?.card.paused === null) {
       yield* engine
         .dispatch({
@@ -299,8 +312,61 @@ const make = Effect.gen(function* () {
     }
   });
 
+  /** Puts reported refs back for a person, each only if it still holds what the report saw. */
+  const restore = Effect.fn("CardRefGuard.restore")(function* (
+    cardId: CardId,
+    reportId: string,
+    changes: ReadonlyArray<RefChange>,
+  ) {
+    const found = yield* readCard(cardId);
+    const root = found?.project.workspaceRoot;
+    const key = root === undefined ? Option.none<string>() : yield* repoKey(root);
+    const lines =
+      root === undefined || Option.isNone(key)
+        ? ["Iskra couldn't open the card's repository, so nothing was restored."]
+        : yield* withRepoLock(key.value)(
+            Effect.gen(function* () {
+              const current = yield* snapshot(root);
+              const result: Array<string> = [];
+              for (const change of changes) {
+                const now = Option.isSome(current) ? (current.value.get(change.ref) ?? null) : undefined;
+                if (now !== change.after) {
+                  result.push(
+                    `Skipped ${change.ref}: it changed again after the report (now ${short(now ?? null)}), so it was left as it is.`,
+                  );
+                  continue;
+                }
+                const message = "iskra: a person restored a ref changed outside its card";
+                const written = yield* git(
+                  root,
+                  change.before === null
+                    ? ["update-ref", "-m", message, "-d", change.ref, change.after!]
+                    : ["update-ref", "-m", message, change.ref, change.before, change.after ?? ""],
+                );
+                if (Option.isNone(written)) {
+                  result.push(`Skipped ${change.ref}: it changed while restoring, so it was left as it is.`);
+                  continue;
+                }
+                acceptServerWrite(key.value, change.ref, change.before ?? undefined);
+                result.push(
+                  change.before === null
+                    ? `Deleted ${change.ref}.`
+                    : `Restored ${change.ref} to ${short(change.before)}.`,
+                );
+              }
+              return result;
+            }),
+          );
+    yield* record(cardId, `${reportId}:restored`, { kind: "message", body: lines.join("\n"), runThreadId: null }, null);
+  });
+
   const worker = yield* makeDrainableWorker((request: GuardRequest) =>
-    (request.kind === "open" ? open(request.threadId, request.eventId) : close(request.threadId)).pipe(
+    (request.kind === "open"
+      ? open(request.threadId, request.eventId)
+      : request.kind === "close"
+        ? close(request.threadId)
+        : restore(request.cardId, request.reportId, request.changes)
+    ).pipe(
       Effect.catchCause((cause) =>
         Cause.hasInterruptsOnly(cause)
           ? Effect.failCause(cause)
@@ -312,15 +378,28 @@ const make = Effect.gen(function* () {
   // The newest event sequence handed to the worker, so `drain` also covers events still in transit.
   const handled = yield* TxRef.make(0);
 
-  const processEvent = (event: OrchestrationEvent) => {
-    const request: GuardRequest | null =
-      event.type === "thread.turn-start-requested"
-        ? { kind: "open", threadId: event.payload.threadId, eventId: event.eventId }
-        : event.type === "thread.session-set" &&
-            (runSessionChange(event.payload.session) === "settled" ||
-              runSessionChange(event.payload.session) === "ended")
-          ? { kind: "close", threadId: event.payload.threadId }
+  const requestOf = (event: OrchestrationEvent): GuardRequest | null => {
+    switch (event.type) {
+      case "thread.turn-start-requested":
+        return { kind: "open", threadId: event.payload.threadId, eventId: event.eventId };
+      case "thread.session-set": {
+        const change = runSessionChange(event.payload.session);
+        return change === "settled" || change === "ended" ? { kind: "close", threadId: event.payload.threadId } : null;
+      }
+      case "card.activity-recorded": {
+        // Only the decider's answer to card.refs.restore is a person's restore with refs.
+        const { author, answers, refChanges: changes, cardId } = event.payload;
+        return author.kind === "human" && answers?.optionId === "restore" && changes
+          ? { kind: "restore", cardId, reportId: answers.questionId, changes }
           : null;
+      }
+      default:
+        return null;
+    }
+  };
+
+  const processEvent = (event: OrchestrationEvent) => {
+    const request = requestOf(event);
     return (request === null ? Effect.void : worker.enqueue(request)).pipe(
       Effect.andThen(TxRef.update(handled, (sequence) => Math.max(sequence, event.sequence))),
     );

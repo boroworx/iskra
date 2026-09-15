@@ -670,7 +670,11 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           yield* patchCard({ cardId }, patch);
         }
         for (const entry of cardActivitiesOf(event)) {
-          yield* projectionCardRepository.appendActivity({ ...entry, deliveryThreadId: null });
+          yield* projectionCardRepository.appendActivity({
+            ...entry,
+            refChanges: entry.refChanges ?? null,
+            deliveryThreadId: null,
+          });
         }
         switch (event.type) {
           case "card.evidence-recorded": {

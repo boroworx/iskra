@@ -25,6 +25,7 @@ import {
   CardLanding,
   CardPause,
   CardPremise,
+  CardRefChange,
   CardRelation,
   CardSpecState,
   CardStatus,
@@ -190,6 +191,7 @@ export const ProjectionCardActivity = Schema.Struct({
     Schema.fromJsonString(Schema.Struct({ from: CardStatus, to: CardStatus })),
   ),
   reason: Schema.NullOr(Schema.fromJsonString(Reason)),
+  refChanges: Schema.NullOr(Schema.fromJsonString(Schema.Array(CardRefChange))),
   deliveryThreadId: Schema.NullOr(ThreadId),
 });
 export type ProjectionCardActivity = typeof ProjectionCardActivity.Type;
@@ -209,6 +211,7 @@ export const PROJECTION_CARD_ACTIVITY_COLUMNS = `
   status_json AS "status",
   evidence_id AS "evidenceId",
   reason_json AS "reason",
+  ref_changes_json AS "refChanges",
   created_at AS "createdAt",
   delivery_thread_id AS "deliveryThreadId"
 `;

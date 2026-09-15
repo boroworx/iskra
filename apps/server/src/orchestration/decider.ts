@@ -71,6 +71,9 @@ import {
   cardActivity,
   CHECKPOINT_OPTIONS,
   NO_OPEN_QUESTION_REASON,
+  NO_OPEN_REF_REPORT_REASON,
+  NOT_REF_REPORT_REASON,
+  SYSTEM_REF_REPORT_REASON,
   NO_CRITERIA_REASON,
   OPEN_CHECKPOINT_REASON,
   PAUSED_REASON,
@@ -3497,6 +3500,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           return yield* refuse(command, refusal);
         }
       }
+      // A forged report could get a person to "restore" refs to ids an agent picked.
+      if (
+        command.author.kind !== "system" &&
+        (command.elicitation?.kind === "refsChanged" || (command.refChanges ?? null) !== null)
+      ) {
+        return yield* refuse(command, SYSTEM_REF_REPORT_REASON);
+      }
       return yield* planned(command, "card", card.id, command.createdAt, {
         type: "card.activity-recorded",
         payload: {
@@ -3513,6 +3523,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           status: null,
           evidenceId: command.evidenceId,
           reason: command.reason,
+          ...(command.refChanges ? { refChanges: command.refChanges } : {}),
           createdAt: command.createdAt,
         },
       });
@@ -3591,6 +3602,20 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           readModel,
         });
       }
+      // A report of changed refs is answered by restoring or keeping all of them.
+      if (question.kind === "refsChanged") {
+        if (command.optionId === null) {
+          return yield* refuse(command, ANSWER_OPTION_REASON);
+        }
+        const target = { commandId: command.commandId, cardId: command.cardId, activityId: command.activityId };
+        return yield* decideOrchestrationCommand({
+          command:
+            command.optionId === "restore"
+              ? { type: "card.refs.restore", ...target }
+              : { type: "card.refs.keep", ...target },
+          readModel,
+        });
+      }
       return yield* planned(command, "card", card.id, command.createdAt, {
         type: "card.activity-recorded",
         payload: {
@@ -3608,6 +3633,56 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           evidenceId: null,
           reason: null,
           createdAt: command.createdAt,
+        },
+      });
+    }
+
+    // A person decides about refs Iskra reported; CardRefGuard does the restoring.
+    case "card.refs.restore":
+    case "card.refs.keep": {
+      const card = yield* requireCard({ readModel, command, cardId: command.cardId });
+      const report = card.openElicitations.find((open) => open.activityId === command.activityId);
+      if (report === undefined) {
+        return yield* refuse(command, NO_OPEN_REF_REPORT_REASON);
+      }
+      if (report.kind !== "refsChanged") {
+        return yield* refuse(command, NOT_REF_REPORT_REASON);
+      }
+      const reported = report.refChanges ?? [];
+      const named = command.type === "card.refs.restore" ? command.refs : undefined;
+      if (named !== undefined) {
+        if (named.length === 0) {
+          return yield* refuse(command, "Choose at least one ref to restore.");
+        }
+        const unknown = named.filter((ref) => !reported.some((change) => change.ref === ref));
+        if (unknown.length > 0) {
+          return yield* refuse(command, `Not in this report: ${unknown.join(", ")}.`);
+        }
+      }
+      const restore = named === undefined ? reported : reported.filter((change) => named.includes(change.ref));
+      const optionId = command.type === "card.refs.restore" ? "restore" : "keep";
+      const occurredAt = yield* nowIso;
+      return yield* planned(command, "card", card.id, occurredAt, {
+        type: "card.activity-recorded",
+        payload: {
+          activityId: `${command.activityId}:${optionId}`,
+          cardId: card.id,
+          kind: "response",
+          author: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
+          body:
+            optionId === "restore"
+              ? `Restore ${restore.map((change) => change.ref).join(", ")}.`
+              : "Keep the changed refs.",
+          runThreadId: null,
+          deliverTo: null,
+          delivery: null,
+          elicitation: null,
+          answers: { questionId: command.activityId, optionId },
+          status: null,
+          evidenceId: null,
+          reason: null,
+          ...(optionId === "restore" ? { refChanges: restore } : {}),
+          createdAt: occurredAt,
         },
       });
     }

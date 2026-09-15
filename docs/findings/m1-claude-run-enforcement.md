@@ -95,19 +95,25 @@ commit. Worktrees under `~/.claude` still get a read-only shell (finding 5).
 Ref guard (`apps/server/src/orchestration/CardRefGuard.ts`): Iskra installs no hooks in the user's
 repository. Instead, each card run's turn snapshots `refs/heads` and `refs/tags` in the
 repository's common dir when the turn is requested, and compares when it settles or the session
-ends. A ref other than a card branch that was created, moved or deleted is put back with a
-compare-and-swap `update-ref`. The card gets an `error` activity (`refMovedOutsideCard`) listing
-each ref's old and new ids, and it is paused. This detects and restores after the turn; it does
-not prevent the write, and objects, `info/exclude` and `gc` are not covered.
+ends. A ref other than a card branch that was created, moved or deleted is reported, not put back:
+the card gets an `error` activity (`refMovedOutsideCard`) with each ref's old and new ids
+(`refChanges`) and a `refsChanged` question, and it is paused. A person answers with
+`card.refs.restore` (all refs, or the named ones, each put back with a compare-and-swap
+`update-ref`; a ref that changed again since the report is skipped and said so) or `card.refs.keep`,
+then resumes the card. Restoring was automatic at first, but a person committing in their own
+checkout during a card's turn is indistinguishable from the agent, and reverting that left their
+committed work showing as uncommitted. This detects after the turn; it does not prevent the write,
+and objects, `info/exclude` and `gc` are not covered.
 
 - Iskra's own branch writes (creating and deleting a card branch, landing's fast-forward of the
-  base) run under the same per-repository lock and move open turns' baselines.
+  base, a person's restore) run under the same per-repository lock and move open turns' baselines.
 - Pushes only touch `refs/remotes`, and checkpoints live under `refs/iskra`, so neither is compared.
 - Card branches are excluded because their own agents and landing's rebase move them. So a card's
   agent moving another card's branch goes unnoticed.
 - A person's own branch or tag changes in the same repository during a guarded turn are
-  indistinguishable from the agent's, and are reverted too. The activity keeps the ids for recovery.
-- Snapshots live in memory, so a turn that spans a server restart is not checked.
+  indistinguishable from the agent's, so they are reported too; the person keeps them.
+- Snapshots live in memory, so a turn that spans a server restart is not checked, and a restore
+  answered just before a restart may not run. The activity keeps the full ids for doing it by hand.
 
 ## Not verified
 

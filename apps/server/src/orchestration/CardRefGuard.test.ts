@@ -149,8 +149,10 @@ const makeWorld = Effect.fn("makeWorld")(function* (name: string) {
   yield* nextEvent("thread.message-sent", (event) => event.payload.threadId === started.payload.threadId);
   // The owner's first turn has been requested and its refs snapshotted.
   yield* guard.drain;
-  const model = yield* snapshotQuery.getCommandReadModel();
-  const worktree = (model.cards ?? []).find((card) => card.id === cardId)?.worktreePath ?? "";
+  const readCard = snapshotQuery
+    .getCommandReadModel()
+    .pipe(Effect.map((model) => (model.cards ?? []).find((card) => card.id === cardId)));
+  const worktree = (yield* readCard)?.worktreePath ?? "";
   expect(worktree).not.toBe("");
 
   /** The agent commits a file on the card's own branch and returns the new head. */
@@ -161,21 +163,51 @@ const makeWorld = Effect.fn("makeWorld")(function* (name: string) {
     return yield* gitIn(worktree, "rev-parse", "HEAD");
   });
 
+  /** The report's activity, once the turn settled and the guard recorded it and paused the card. */
+  const settleAndReport = Effect.gen(function* () {
+    yield* setSession(started.payload.threadId, "ready", null);
+    const flagged = yield* nextEvent(
+      "card.activity-recorded",
+      (event) => event.payload.reason?.code === CardRefGuard.REF_MOVED_OUTSIDE_CARD,
+    );
+    const paused = yield* nextEvent("card.paused", (event) => event.payload.cardId === cardId);
+    return { flagged, paused };
+  });
+
+  /** A person restores the report's refs; returns the guard's account of what it did. */
+  const restore = (activityId: string, refs?: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      yield* engine.dispatch({
+        type: "card.refs.restore",
+        commandId: CommandId.make(`cmd-restore-${activityId}`),
+        cardId,
+        activityId,
+        ...(refs === undefined ? {} : { refs }),
+      });
+      return yield* nextEvent(
+        "card.activity-recorded",
+        (event) => event.payload.activityId === `${activityId}:restored`,
+      );
+    });
+
   return {
     cardId,
     threadId: started.payload.threadId,
     worktree,
     git,
     gitIn,
-    nextEvent,
+    guard,
+    readCard,
     commitInWorktree,
     settle: setSession(started.payload.threadId, "ready", null),
+    settleAndReport,
+    restore,
     workspace: yield* CardWorkspace.CardWorkspace,
   };
 });
 
 it.layer(layer)("CardRefGuard", (it) => {
-  it.effect("restores a branch the agent moved and one it created, records why and pauses the card", () =>
+  it.effect("reports refs the agent changed and pauses the card without changing them; a person's restore puts them back", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const world = yield* makeWorld("rogue");
@@ -185,33 +217,63 @@ it.layer(layer)("CardRefGuard", (it) => {
         const head = yield* world.commitInWorktree("limits.txt");
         yield* world.gitIn(world.worktree, "update-ref", "refs/heads/main", head);
         yield* world.gitIn(world.worktree, "update-ref", "refs/heads/rogue", head);
-        yield* world.settle;
+        const { flagged, paused } = yield* world.settleAndReport;
 
-        const flagged = yield* world.nextEvent(
-          "card.activity-recorded",
-          (event) => event.payload.reason?.code === CardRefGuard.REF_MOVED_OUTSIDE_CARD,
-        );
-        const paused = yield* world.nextEvent("card.paused", (event) => event.payload.cardId === world.cardId);
-        expect(yield* world.git("rev-parse", "refs/heads/main")).toBe(main);
-        expect(yield* world.git("for-each-ref", "refs/heads/rogue")).toBe("");
-        // The card's own commit stays.
-        expect(yield* world.gitIn(world.worktree, "rev-parse", "HEAD")).toBe(head);
+        // Nothing moves until a person decides.
+        expect(yield* world.git("rev-parse", "refs/heads/main")).toBe(head);
+        expect(yield* world.git("rev-parse", "refs/heads/rogue")).toBe(head);
         expect(flagged.payload).toMatchObject({
           cardId: world.cardId,
           kind: "error",
           author: { kind: "system" },
           runThreadId: world.threadId,
+          elicitation: { kind: "refsChanged", options: [{ id: "restore" }, { id: "keep" }] },
+          refChanges: [
+            { ref: "refs/heads/main", kind: "moved", before: main, after: head },
+            { ref: "refs/heads/rogue", kind: "created", before: null, after: head },
+          ],
         });
-        expect(flagged.payload.body.split("\n")[0]).toBe(
-          "@builder moved refs/heads/main and created refs/heads/rogue; Iskra restored them and paused the card.",
+        expect(flagged.payload.body).toBe(
+          `Refs outside this card changed during @builder's turn: refs/heads/main moved ${main.slice(0, 7)} → ${head.slice(0, 7)}, refs/heads/rogue created at ${head.slice(0, 7)}. If the agent did this, restore them; if you did, keep them.`,
         );
-        expect(flagged.payload.body).toContain(`refs/heads/main: ${main.slice(0, 12)} → ${head.slice(0, 12)}`);
         expect(paused.payload).toMatchObject({ by: "system", reason: flagged.payload.reason });
+        expect((yield* world.readCard)?.openElicitations.map((open) => open.kind)).toEqual(["refsChanged"]);
+
+        const restored = yield* world.restore(flagged.payload.activityId);
+        expect(restored.payload.body).toBe(`Restored refs/heads/main to ${main.slice(0, 7)}.\nDeleted refs/heads/rogue.`);
+        expect(yield* world.git("rev-parse", "refs/heads/main")).toBe(main);
+        expect(yield* world.git("for-each-ref", "refs/heads/rogue")).toBe("");
+        // The card's own commit stays, the question is closed and resuming is left to the person.
+        expect(yield* world.gitIn(world.worktree, "rev-parse", "HEAD")).toBe(head);
+        expect(yield* world.readCard).toMatchObject({ openElicitations: [], paused: { by: "system" } });
       }),
     ),
   );
 
-  it.effect("leaves the card's own commits and Iskra's landing of the base alone", () =>
+  it.effect("skips a reported ref that changed again before the restore", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const world = yield* makeWorld("again");
+        const head = yield* world.commitInWorktree("limits.txt");
+        yield* world.gitIn(world.worktree, "update-ref", "refs/heads/main", head);
+        yield* world.gitIn(world.worktree, "tag", "rogue-tag");
+        const { flagged } = yield* world.settleAndReport;
+
+        // The person commits on main after the report.
+        const later = yield* world.commitInWorktree("later.txt");
+        yield* world.git("update-ref", "refs/heads/main", later);
+
+        const restored = yield* world.restore(flagged.payload.activityId);
+        expect(restored.payload.body).toBe(
+          `Skipped refs/heads/main: it changed again after the report (now ${later.slice(0, 7)}), so it was left as it is.\nDeleted refs/tags/rogue-tag.`,
+        );
+        expect(yield* world.git("rev-parse", "refs/heads/main")).toBe(later);
+        expect(yield* world.git("for-each-ref", "refs/tags")).toBe("");
+      }),
+    ),
+  );
+
+  it.effect("reports nothing for the card's own commits and Iskra's landing of the base", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const world = yield* makeWorld("landing");
@@ -223,19 +285,10 @@ it.layer(layer)("CardRefGuard", (it) => {
         const head = yield* world.gitIn(world.worktree, "rev-parse", "HEAD");
         expect(yield* world.git("rev-parse", "refs/heads/main")).toBe(head);
 
-        // A tag made in the same turn is the only change the guard reports.
-        yield* world.gitIn(world.worktree, "tag", "rogue-tag");
         yield* world.settle;
-
-        const flagged = yield* world.nextEvent(
-          "card.activity-recorded",
-          (event) => event.payload.reason?.code === CardRefGuard.REF_MOVED_OUTSIDE_CARD,
-        );
-        expect(flagged.payload.body.split("\n")[0]).toBe(
-          "@builder created refs/tags/rogue-tag; Iskra restored it and paused the card.",
-        );
+        yield* world.guard.drain;
+        expect(yield* world.readCard).toMatchObject({ paused: null, openElicitations: [] });
         expect(yield* world.git("rev-parse", "refs/heads/main")).toBe(head);
-        expect(yield* world.git("for-each-ref", "refs/tags")).toBe("");
       }),
     ),
   );

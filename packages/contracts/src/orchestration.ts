@@ -953,9 +953,26 @@ export const CardLanding = Schema.Struct({
 });
 export type CardLanding = typeof CardLanding.Type;
 
-/** What a question is for: the owner asking, a checkpoint, or a proposed change to the criteria. */
-export const ElicitationKind = Schema.Literals(["question", "checkpoint", "criteriaChange"]);
+/**
+ * What a question is for: the owner asking, a checkpoint, a proposed change to the criteria, or
+ * refs outside the card that changed during its agent's turn (answered by card.refs.restore/keep).
+ */
+export const ElicitationKind = Schema.Literals([
+  "question",
+  "checkpoint",
+  "criteriaChange",
+  "refsChanged",
+]);
 export type ElicitationKind = typeof ElicitationKind.Type;
+
+/** A branch or tag outside a card that changed during its agent's turn, with full object ids. */
+export const CardRefChange = Schema.Struct({
+  ref: TrimmedNonEmptyString,
+  kind: Schema.Literals(["moved", "created", "deleted"]),
+  before: Schema.NullOr(TrimmedNonEmptyString),
+  after: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type CardRefChange = typeof CardRefChange.Type;
 
 /** A question on a card nobody has answered yet: its activity, what it is for and its options. */
 export const CardOpenElicitation = Schema.Struct({
@@ -964,6 +981,8 @@ export const CardOpenElicitation = Schema.Struct({
   // Empty for a question answered in a person's own words only.
   optionIds: Schema.Array(TrimmedNonEmptyString),
   askedAt: IsoDateTime,
+  // Set on a refsChanged question: the refs a restore would put back.
+  refChanges: Schema.optional(Schema.Array(CardRefChange)),
 });
 export type CardOpenElicitation = typeof CardOpenElicitation.Type;
 
@@ -1186,6 +1205,8 @@ export const CardActivity = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
   reason: Schema.NullOr(Reason).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  // Refs outside the card that changed during a turn (the report), or the ones a person restores.
+  refChanges: Schema.optional(Schema.NullOr(Schema.Array(CardRefChange))),
   createdAt: IsoDateTime,
 });
 export type CardActivity = typeof CardActivity.Type;
@@ -2517,6 +2538,27 @@ const CardElicitationAnswerCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+/**
+ * A person putting back refs a refsChanged report lists (all, or the named ones). The server
+ * restores each with compare-and-swap and records which it skipped; resuming the card is separate.
+ */
+const CardRefsRestoreCommand = Schema.Struct({
+  type: Schema.Literal("card.refs.restore"),
+  commandId: CommandId,
+  cardId: CardId,
+  // The report's activity.
+  activityId: TrimmedNonEmptyString,
+  refs: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+});
+
+/** A person keeping the refs a refsChanged report lists, because they made those changes. */
+const CardRefsKeepCommand = Schema.Struct({
+  type: Schema.Literal("card.refs.keep"),
+  commandId: CommandId,
+  cardId: CardId,
+  activityId: TrimmedNonEmptyString,
+});
+
 /** A person accepting the hard scope flags on the card's latest evidence, so its merge can be approved. */
 const CardFlagsAcknowledgeCommand = Schema.Struct({
   type: Schema.Literal("card.flags.acknowledge"),
@@ -3287,6 +3329,8 @@ const IskraClientCommands = [
   CardCriteriaConfirmCommand,
   CardCheckpointResolveCommand,
   CardElicitationAnswerCommand,
+  CardRefsRestoreCommand,
+  CardRefsKeepCommand,
   CardFlagsAcknowledgeCommand,
   CardFixRoundsResetCommand,
   CardPauseCommand,

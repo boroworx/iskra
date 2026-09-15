@@ -23,12 +23,15 @@ import {
   NO_CHECKS_REASON,
   NO_CRITERIA_REASON,
   NO_OPEN_QUESTION_REASON,
+  NO_OPEN_REF_REPORT_REASON,
+  NOT_REF_REPORT_REASON,
   OPEN_CHECKPOINT_REASON,
   PAUSED_REASON,
   PLAN_CHILD_LANDING_REASON,
   PREMISE_REASON,
   REVIEW_EVIDENCE_REASON,
   SIDE_EFFECT_GUARD_REASON,
+  SYSTEM_REF_REPORT_REASON,
   UNACKNOWLEDGED_FLAGS_REASON,
   WORK_CRITERIA_REASON,
 } from "./cardRules.ts";
@@ -664,6 +667,131 @@ it.layer(NodeServices.layer)("decider card contract", (it) => {
         openElicitations: [],
         paused: { reason: { code: "checkpointStopped" } },
       });
+    }),
+  );
+
+  it.effect("a person restores or keeps the refs Iskra reported, once; only Iskra reports them", () =>
+    Effect.gen(function* () {
+      const changes = [
+        { ref: "refs/heads/main", kind: "moved", before: "a".repeat(40), after: "b".repeat(40) },
+        { ref: "refs/tags/x", kind: "created", before: null, after: "b".repeat(40) },
+      ] as const;
+      const report = (author: "system" | "agent"): OrchestrationCommand => ({
+        type: "card.activity.record",
+        commandId: nextCommandId(),
+        activityId: "refs-1",
+        cardId,
+        kind: "error",
+        author: author === "system" ? { kind: "system", id: "system" } : { kind: "agent", id: backend },
+        body: "Refs outside this card changed.",
+        runThreadId: null,
+        deliverTo: null,
+        elicitation: {
+          question: "Restore or keep?",
+          options: [
+            { id: "restore", label: "Restore" },
+            { id: "keep", label: "Keep" },
+          ],
+          recommendedOptionId: null,
+          allowText: false,
+          kind: "refsChanged",
+        },
+        answers: null,
+        status: null,
+        evidenceId: null,
+        reason: { code: "refMovedOutsideCard", text: "Refs changed." },
+        refChanges: changes,
+        createdAt: now,
+      });
+      const restore = (activityId: string, refs?: ReadonlyArray<string>): OrchestrationCommand => ({
+        type: "card.refs.restore",
+        commandId: nextCommandId(),
+        cardId,
+        activityId,
+        ...(refs === undefined ? {} : { refs }),
+      });
+      const keep = (activityId: string): OrchestrationCommand => ({
+        type: "card.refs.keep",
+        commandId: nextCommandId(),
+        cardId,
+        activityId,
+      });
+      expect(isClientCommand(restore("refs-1", ["refs/tags/x"]))).toBe(true);
+      expect(isClientCommand(keep("refs-1"))).toBe(true);
+      expect(isClientCommand(report("system"))).toBe(false);
+
+      const started = yield* applyCommands([
+        ...setup,
+        createCard(),
+        approveAndStart(cardId, criteria),
+        onCard("card.work.start"),
+      ]);
+      expect(yield* refusal(started, report("agent"))).toBe(SYSTEM_REF_REPORT_REASON);
+      const reported = yield* applyTo(started, [report("system")]);
+      expect(cardIn(reported)?.openElicitations).toEqual([
+        {
+          activityId: "refs-1",
+          kind: "refsChanged",
+          optionIds: ["restore", "keep"],
+          askedAt: now,
+          refChanges: changes,
+        },
+      ]);
+      expect(yield* refusal(reported, restore("refs-2"))).toBe(NO_OPEN_REF_REPORT_REASON);
+      expect(yield* refusal(reported, restore("refs-1", []))).toBe("Choose at least one ref to restore.");
+      expect(yield* refusal(reported, restore("refs-1", ["refs/heads/other"]))).toBe(
+        "Not in this report: refs/heads/other.",
+      );
+      expect(yield* decide(reported, restore("refs-1", ["refs/tags/x"]))).toMatchObject([
+        {
+          type: "card.activity-recorded",
+          payload: {
+            activityId: "refs-1:restore",
+            kind: "response",
+            author: { kind: "human" },
+            deliverTo: null,
+            answers: { questionId: "refs-1", optionId: "restore" },
+            refChanges: [changes[1]],
+          },
+        },
+      ]);
+      // Answering it as a question restores every ref.
+      expect(
+        yield* decide(reported, {
+          type: "card.elicitation.answer",
+          commandId: nextCommandId(),
+          cardId,
+          activityId: "refs-1",
+          optionId: "restore",
+          body: "Restore",
+          createdAt: now,
+        }),
+      ).toMatchObject([{ payload: { activityId: "refs-1:restore", refChanges: changes } }]);
+
+      const kept = yield* applyTo(reported, [keep("refs-1")]);
+      expect(cardIn(kept)?.openElicitations).toEqual([]);
+      expect(yield* refusal(kept, restore("refs-1"))).toBe(NO_OPEN_REF_REPORT_REASON);
+      expect(yield* refusal(kept, keep("refs-1"))).toBe(NO_OPEN_REF_REPORT_REASON);
+
+      const asked = yield* applyTo(kept, [
+        {
+          ...report("system"),
+          activityId: "question-9",
+          kind: "elicitation",
+          elicitation: {
+            question: "Which store?",
+            options: [
+              { id: "redis", label: "Redis" },
+              { id: "memory", label: "Memory" },
+            ],
+            recommendedOptionId: null,
+            allowText: true,
+            kind: "question",
+          },
+          refChanges: null,
+        } as OrchestrationCommand,
+      ]);
+      expect(yield* refusal(asked, keep("question-9"))).toBe(NOT_REF_REPORT_REASON);
     }),
   );
 

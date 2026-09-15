@@ -246,6 +246,7 @@ const makeProjectionCardRepository = Effect.gen(function* () {
           status_json,
           evidence_id,
           reason_json,
+          ref_changes_json,
           created_at
         )
         VALUES (
@@ -263,6 +264,7 @@ const makeProjectionCardRepository = Effect.gen(function* () {
           ${row.status},
           ${row.evidenceId},
           ${row.reason},
+          ${row.refChanges},
           ${row.createdAt}
         )
         ON CONFLICT (activity_id) DO NOTHING

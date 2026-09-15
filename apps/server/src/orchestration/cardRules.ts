@@ -80,6 +80,10 @@ export const landsByPullRequest = (project: OrchestrationProject): boolean => {
 };
 export const NO_OPEN_QUESTION_REASON =
   "This card has no open question with that id; it may already be answered.";
+export const NO_OPEN_REF_REPORT_REASON =
+  "This card has no open report of changed refs with that id; it may already be resolved.";
+export const NOT_REF_REPORT_REASON = "That question isn't a report of changed refs.";
+export const SYSTEM_REF_REPORT_REASON = "Only Iskra reports changed refs.";
 
 /** Why a set of acceptance criteria can't be used, or null. */
 export function criteriaRefusal(criteria: ReadonlyArray<{ readonly id: string }>): string | null {
@@ -503,7 +507,8 @@ export function withCardElicitations(
   open: OrchestrationCard["openElicitations"],
   activity: CardActivity,
 ): OrchestrationCard["openElicitations"] {
-  if (activity.kind === "elicitation") {
+  // A report of changed refs is an error entry that also asks: restore or keep.
+  if (activity.kind === "elicitation" || activity.elicitation?.kind === "refsChanged") {
     return [
       ...open.filter((question) => question.activityId !== activity.activityId),
       {
@@ -511,12 +516,19 @@ export function withCardElicitations(
         kind: activity.elicitation?.kind ?? "question",
         optionIds: activity.elicitation?.options.map((option) => option.id) ?? [],
         askedAt: activity.createdAt,
+        ...(activity.refChanges ? { refChanges: activity.refChanges } : {}),
       },
     ];
   }
   const { answers } = activity;
   return answers === null ? open : open.filter((question) => question.activityId !== answers.questionId);
 }
+
+/** The answers a report of changed refs offers; neither is recommended, only the person knows. */
+export const REFS_CHANGED_OPTIONS = [
+  { id: "restore", label: "Restore" },
+  { id: "keep", label: "Keep" },
+] as const;
 
 /** The answers a checkpoint offers, continue recommended. */
 export const CHECKPOINT_OPTIONS = [
