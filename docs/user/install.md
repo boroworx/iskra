@@ -52,7 +52,7 @@ or use a package manager:
 
 ### Windows Subsystem for Linux
 
-Choose a WSL distro in **Settings → Connections** to run agents and projects
+Choose a WSL distro in **Settings → Environments** to run agents and projects
 there. Install Node.js and provider CLIs inside that distro. Iskra installs its
 matching server runtime there automatically; the first launch after an app
 update can take longer.
@@ -86,7 +86,7 @@ before sharing.
 
 ## Providers
 
-Open **Settings → Providers** in the web or desktop app, select the environment,
+Open **Settings → Agents & Providers** in the web or desktop app, select the environment,
 and enable the provider you want. Installation, login, and configuration belong
 to that environment's machine, even when you connect from a phone or another
 computer.

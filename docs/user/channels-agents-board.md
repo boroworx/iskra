@@ -1,6 +1,6 @@
 # Channels, agents, and the board
 
-You talk to agents in channels. A channel's lead turns requests into cards on the board. Each card
+You ask for work in a project's Requests. Its lead turns requests into cards on the board. Each card
 gets an owner agent that works on it in its own session. You review the work, and Iskra lands it.
 
 ## What changed
@@ -20,42 +20,59 @@ palette. It creates a small sample app with a failing test, its checks, and thre
 you through reviewing its side-effect guard, approving and starting its card, watching it reach
 review, and approving the merge. Each step ticks off as it happens.
 
-## Channels
+## Requests
 
-Create a channel from **+** next to Channels in the sidebar, or with **New channel** in the command
-palette. Every agent in the project joins it.
+Every project has **Requests**, below **Board** in the sidebar. Ask for work there, or choose **Ask
+for something** on an empty board or in the command palette.
 
-Agents only reply when you mention them. Type `@` in the composer to pick one.
+The first time, Requests asks you to choose who turns requests into cards. Pick an agent with the
+lead role, or choose **Create a lead agent** to make one; the new agent dialog opens with the lead
+role filled in. Until a lead is chosen, you can't send a message in Requests. The mobile app shows
+Requests too, but the lead is chosen on a computer.
 
-### The lead
-
-A lead is optional. With one, a message that mentions nobody goes to the lead. If the request is too
-vague, the lead asks one question in the channel, usually with two or three answers and one it
-recommends. Pick one, or answer in your own words without mentioning anyone. Once the request is
-clear, the lead proposes a card with acceptance criteria, an estimate, and a suggested owner. The
-proposal appears under its reply with **Approve & start**, **Edit**, and **Drop**.
+A message that mentions nobody goes to the lead. If the request is too vague, the lead asks one
+question, usually with two or three answers and one it recommends. Pick one, or answer in your own
+words without mentioning anyone. Once the request is clear, the lead proposes a card with acceptance
+criteria, an estimate, and a suggested owner. The proposal appears under its reply with **Approve &
+start**, **Edit**, and **Drop**.
 
 **Approve & start** first shows what you are starting: the criteria to confirm or edit, and the
 lead's estimate of size, likely areas, and risks. If the lead thinks the work should be several
 cards, the preview says **Too big, split?** with its reasons. Starting confirms the criteria,
 approves the spec, and assigns the owner you picked. The card then joins the queue.
 
-The channel follows the card: Iskra notes when its owner starts work, asks you something, or sends
-it to review, and when it lands or is dropped. **Open card** under a note opens the card. These
-notes wake no agent.
+Requests follows the card: Iskra notes when its owner starts work, asks you something, or sends it
+to review, and when it lands or is dropped. **Open card** under a note opens the card. These notes
+wake no agent.
 
-Mention the lead by name when you want a normal reply instead. With no lead, a message that mentions
-nobody wakes nobody, and Iskra says so in the channel.
+Type `@` to mention an agent when you want a normal reply from it instead. Change or clear the lead
+in Requests' settings. Requests can't be archived or renamed; it's the project's built-in
+conversation.
+
+## Channels
+
+Most projects only need Requests. Create a channel when you want a separate topic with its own lead,
+or a room for several agents: choose **+** on the Requests row in the sidebar, or **New channel** in
+the command palette. Every agent in the project joins it.
+
+Agents only reply when you mention them. Type `@` in the composer to pick one.
+
+### The lead
+
+A channel's lead is optional. With one, it works like the lead in [Requests](#requests): a message
+that mentions nobody goes to it, and the cards it proposes leave their notes in the channel. With no
+lead, a message that mentions nobody wakes nobody, and Iskra says so in the channel.
 
 ### Channel settings
 
 Open settings from the gear in the channel header or on the channel's row in the sidebar. You can
-rename the channel, set its topic, add or remove members, and choose the lead. Any agent in the
-project can lead. On a narrow window, members and the lead are in settings, not beside the messages.
+rename the channel, set its topic, add or remove members, and choose the lead. Any agent with the
+lead role can lead. On a narrow window, members and the lead are in settings, not beside the
+messages.
 
 **Archive** removes a channel from the sidebar. Choose **Undo** on the notice to bring it back.
-Archived channels are listed under **Archived** in the Channels group, where **Unarchive** brings
-one back. If you open an archived channel's link later, its page offers **Unarchive**.
+Archived channels are listed under **Archived** in the sidebar, where **Unarchive** brings one back.
+If you open an archived channel's link later, its page offers **Unarchive**.
 
 Under an agent's reply, **Show work** opens the session behind it.
 
@@ -92,7 +109,7 @@ Roles say what an agent may be asked to do. Each piece of work is its own sessio
 one agent can work on a card, answer in two channels, and verify another card at once.
 
 - **Builder** works on cards.
-- **Lead** turns channel requests into cards.
+- **Lead** turns requests into cards, from Requests or a channel.
 - **Helper** answers a builder's question.
 - **Critic** critiques a card's spec or diff.
 - **Verifier** checks cards in review against their criteria.
@@ -315,8 +332,8 @@ services, or restore or keep changed refs and then resume the card. **Approve & 
 
 ## Project orchestration
 
-Choose the project in the Settings breadcrumb (see [settings](./project-settings.md)) to find its
-**Agent orchestration** section. It sets the base branch cards
+Open **Settings → Projects** and choose the project (see [settings](./project-settings.md)) to find
+its **Agent orchestration** section. It sets the base branch cards
 start from and land into, how cards land, the project's session cap, how many agent pull requests may
 wait for review, fix rounds, **Review without checks**, the [verifier](#verifier), and the sections
 below.
@@ -369,12 +386,12 @@ and always waits for a person to merge it. The same event never makes two cards.
 
 ### Budgets
 
-**Budgets** shows what the project spent this month, by agent, counting cards, channel leads, and
+**Budgets** shows what the project spent this month, by agent, counting cards, leads, and
 conversations. Set a monthly cap for the project and for each agent, and the budget new cards start
 with. At a cap, new work waits with **Budget reached**, messages to agents are refused with the reason,
 and Needs you links here to raise it. A turn that runs well past a cap is interrupted and its card
-paused. The whole machine's monthly budget across projects is under **Card runtime** in Connections
-settings. A new month starts from zero.
+paused. The whole machine's monthly budget across projects is under **Card runtime** in **Settings →
+Agents & Providers**. A new month starts from zero.
 
 ### Knowledge
 

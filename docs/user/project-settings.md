@@ -23,18 +23,18 @@ setting you are editing, the layers icon counts them and the chain lists each on
 click a project to jump to it, or **Reset all** to make those projects follow the environment
 again.
 
-Providers and diagnostics are per machine: they show one environment at a time, the primary
+Agents & Providers and Diagnostics are per machine: they show one environment at a time, the primary
 one until you pick another. Every other setting fans out to the selection.
 
 ## Defaults and inheritance
 
-General contains the model and workspace for new threads. Integrations controls agent browser
+Agents & Providers contains the model and workspace for new threads. Integrations controls agent browser
 access. Source Control contains automatic pull, the default pull request merge method and text
 generation. The same rows edit environment defaults or project overrides depending on the
 project crumb.
 
-The Project category, shown while a project is selected, holds the project's name, icon, actions,
-checkouts and removal. Actions belong to a project: editing them creates the project's own list
+Open **Settings → Projects** and choose a project for its name, icon, actions, checkouts and
+removal. Actions belong to a project: editing them creates the project's own list
 on each selected environment, and reset returns to the environment's shared list. A project's
 `iskra.json` actions can be imported there.
 
@@ -43,7 +43,7 @@ Browser access changes apply when an agent session next starts.
 
 ## Project icons
 
-Select the project and open Project to choose an icon, emoji, or image. The choice applies to
+Open the project in **Settings → Projects** to choose an icon, emoji, or image. The choice applies to
 every checkout in the project group and appears on connected clients. Choose **Automatic** to let
 Iskra detect an icon again.
 
