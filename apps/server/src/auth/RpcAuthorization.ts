@@ -46,6 +46,8 @@ export const RPC_REQUIRED_SCOPES = {
   [ORCHESTRATION_WS_METHODS.getProjectHoldout]: AuthOrchestrationOperateScope,
   [ORCHESTRATION_WS_METHODS.setProjectHoldout]: AuthOrchestrationOperateScope,
   [ORCHESTRATION_WS_METHODS.removeProjectHoldout]: AuthOrchestrationOperateScope,
+  // Writes a repository on the machine and registers it as a project.
+  [ORCHESTRATION_WS_METHODS.createSampleProject]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverProbe]: AuthOrchestrationReadScope,
   [WS_METHODS.serverGetConfig]: AuthOrchestrationReadScope,
   [WS_METHODS.serverRefreshProviders]: AuthOrchestrationOperateScope,

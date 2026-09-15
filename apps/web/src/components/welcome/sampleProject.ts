@@ -1,21 +1,16 @@
-import type { EnvironmentId, ProjectId } from "@iskra/contracts";
+import { request, type EnvironmentRpcInput } from "@iskra/client-runtime/rpc";
+import { createEnvironmentCommand } from "@iskra/client-runtime/state/runtime";
+import { ORCHESTRATION_WS_METHODS } from "@iskra/contracts";
 
-export type SampleProjectResult =
-  | { readonly _tag: "Success"; readonly projectId: ProjectId }
-  | { readonly _tag: "Failure"; readonly message: string };
-
-export const SAMPLE_PROJECT_UNAVAILABLE_TEXT =
-  "This server can't create the sample project yet. Update Iskra, or add a project of your own.";
+import { connectionAtomRuntime } from "~/connection/runtime";
 
 /**
  * Creates the bundled sample project (a tiny app with one failing test, its checks and agents, and
- * a seeded triage card) under `parentDir` on the environment.
- * ponytail: a stub until the server's project.sample.create RPC lands; swap the body for
- * `request(ORCHESTRATION_WS_METHODS.createSampleProject, ...)` then.
+ * a seeded triage card) in a new folder under `parentDir` on the environment. Succeeds with the
+ * project, its seeded card and the folder it was written to.
  */
-export async function createSampleProject(_input: {
-  readonly environmentId: EnvironmentId;
-  readonly parentDir: string;
-}): Promise<SampleProjectResult> {
-  return { _tag: "Failure", message: SAMPLE_PROJECT_UNAVAILABLE_TEXT };
-}
+export const createSampleProject = createEnvironmentCommand(connectionAtomRuntime, {
+  label: "environment-data:commands:project:create-sample",
+  execute: (input: EnvironmentRpcInput<typeof ORCHESTRATION_WS_METHODS.createSampleProject>) =>
+    request(ORCHESTRATION_WS_METHODS.createSampleProject, input),
+});

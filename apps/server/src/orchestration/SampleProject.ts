@@ -1,3 +1,5 @@
+import * as NodeOS from "node:os";
+
 import { CardId, CommandId, ProjectId } from "@iskra/contracts";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -33,11 +35,13 @@ export const createSampleProject = Effect.fn("createSampleProject")(function* (i
   const crypto = yield* Crypto.Crypto;
   const failWith = (message: string) => (cause: unknown) => new SampleProjectError({ message, cause });
 
-  if (!path.isAbsolute(input.parentDir)) {
+  // `~` is the home of the machine the project goes on, which is this server's.
+  const parentDir = input.parentDir.replace(/^~(?=$|[/\\])/, NodeOS.homedir());
+  if (!path.isAbsolute(parentDir)) {
     return yield* new SampleProjectError({ message: "Choose the folder by its full path." });
   }
   const parent = yield* fileSystem
-    .realPath(input.parentDir)
+    .realPath(parentDir)
     .pipe(Effect.mapError(failWith(`The folder ${input.parentDir} doesn't exist.`)));
   let root = path.join(parent, "iskra-sample");
   for (let copy = 2; yield* fileSystem.exists(root).pipe(Effect.orElseSucceed(() => true)); copy += 1) {

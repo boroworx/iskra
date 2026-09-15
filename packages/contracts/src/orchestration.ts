@@ -60,6 +60,7 @@ export const ORCHESTRATION_WS_METHODS = {
   getProjectHoldout: "project.holdouts.get",
   setProjectHoldout: "project.holdouts.set",
   removeProjectHoldout: "project.holdouts.remove",
+  createSampleProject: "project.sample.create",
 } as const;
 
 export const ProviderApprovalPolicy = Schema.Literals([
@@ -5667,6 +5668,14 @@ export const ProjectHoldoutRemoveInput = Schema.Struct({
   scenarioId: TrimmedNonEmptyString,
 });
 
+/** The first-run sample project, written under `parentDir` on the environment's machine. */
+export const ProjectSampleCreateInput = Schema.Struct({ parentDir: TrimmedNonEmptyString });
+export const ProjectSampleCreateResult = Schema.Struct({
+  projectId: ProjectId,
+  cardId: CardId,
+  workspaceRoot: TrimmedNonEmptyString,
+});
+
 export const OrchestrationImportAgentDefinitionsInput = Schema.Struct({
   projectId: ProjectId,
 });
@@ -5905,6 +5914,7 @@ export const OrchestrationRpcSchemas = {
   getProjectHoldout: { input: ProjectHoldoutGetInput, output: ProjectHoldoutGetResult },
   setProjectHoldout: { input: ProjectHoldoutSetInput, output: Schema.Struct({}) },
   removeProjectHoldout: { input: ProjectHoldoutRemoveInput, output: Schema.Struct({}) },
+  createSampleProject: { input: ProjectSampleCreateInput, output: ProjectSampleCreateResult },
 } as const;
 
 export class OrchestrationGetSnapshotError extends Schema.TaggedError<OrchestrationGetSnapshotError>()(

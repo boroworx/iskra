@@ -1,3 +1,7 @@
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@iskra/client-runtime/state/runtime";
 import { projectOrchestrationOf, type ProjectId } from "@iskra/contracts";
 import { Link } from "@tanstack/react-router";
 import { CheckIcon } from "lucide-react";
@@ -11,6 +15,7 @@ import {
 } from "~/logicalProject";
 import { useEnvironmentCards, useProjects } from "~/state/entities";
 import { usePrimaryEnvironmentId } from "~/state/environments";
+import { useAtomCommand } from "~/state/use-atom-command";
 import { SparkGlyph } from "../iskra/SparkGlyph";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -40,9 +45,11 @@ export function GuidedFirstRun() {
   const cards = useEnvironmentCards(environmentId);
   const grouping = useClientSettings(selectProjectGroupingSettings);
   const [projectId, setProjectId] = useState<string | null>(readStored);
-  const [parentDir, setParentDir] = useState("~/iskra-sample");
+  // The server makes an iskra-sample folder inside this one, which must exist.
+  const [parentDir, setParentDir] = useState("~");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const runCreateSample = useAtomCommand(createSampleProject, { reportFailure: false });
 
   const project = projects.find(
     (entry) => entry.environmentId === environmentId && entry.id === projectId,
@@ -68,15 +75,20 @@ export function GuidedFirstRun() {
     if (environmentId === null) return;
     setCreating(true);
     setError(null);
-    const result = await createSampleProject({ environmentId, parentDir: parentDir.trim() });
+    const result = await runCreateSample({ environmentId, input: { parentDir: parentDir.trim() } });
     setCreating(false);
     if (result._tag === "Failure") {
-      setError(result.message);
+      if (!isAtomCommandInterrupted(result)) {
+        const failure = squashAtomCommandFailure(result);
+        setError(
+          failure instanceof Error ? failure.message : "The sample project couldn't be created.",
+        );
+      }
       return;
     }
-    setProjectId(result.projectId);
+    setProjectId(result.value.projectId);
     try {
-      window.localStorage.setItem(STORAGE_KEY, result.projectId);
+      window.localStorage.setItem(STORAGE_KEY, result.value.projectId);
     } catch {
       // The guide still follows the project for this visit.
     }

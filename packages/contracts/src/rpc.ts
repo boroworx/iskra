@@ -1332,6 +1332,21 @@ const WsProjectRemoveHoldoutRpc = Rpc.make(ORCHESTRATION_WS_METHODS.removeProjec
   error: ProjectHoldoutErrors,
 });
 
+/** The first-run sample project couldn't be written, committed or registered. */
+export class ProjectSampleError extends Schema.TaggedError<ProjectSampleError>()(
+  "ProjectSampleError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
+const WsProjectCreateSampleRpc = Rpc.make(ORCHESTRATION_WS_METHODS.createSampleProject, {
+  payload: OrchestrationRpcSchemas.createSampleProject.input,
+  success: OrchestrationRpcSchemas.createSampleProject.output,
+  error: Schema.Union([ProjectSampleError, EnvironmentAuthorizationError]),
+});
+
 const WsOrchestrationSaveAgentDefinitionRpc = Rpc.make(
   ORCHESTRATION_WS_METHODS.saveAgentDefinition,
   {
@@ -1586,4 +1601,5 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectGetHoldoutRpc,
   WsProjectSetHoldoutRpc,
   WsProjectRemoveHoldoutRpc,
+  WsProjectCreateSampleRpc,
 );

@@ -41,6 +41,7 @@ import {
   OrchestrationGetSnapshotError,
   ProjectSecretError,
   ProjectHoldoutError,
+  ProjectSampleError,
   OrchestrationSearchThreadsError,
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
@@ -108,6 +109,8 @@ import * as AgentDefinitionSync from "./orchestration/AgentDefinitionSync.ts";
 import * as CardWorkspace from "./orchestration/CardWorkspace.ts";
 import { cardActivitiesOf } from "./orchestration/cardRules.ts";
 import * as HoldoutStore from "./orchestration/HoldoutStore.ts";
+import { createSampleProject } from "./orchestration/SampleProject.ts";
+import * as ProcessRunner from "./processRunner.ts";
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor.ts";
 import {
   observeRpcEffect as instrumentRpcEffect,
@@ -2590,6 +2593,20 @@ const makeWsRpcLayer = (
             withHoldouts(input.projectId, (store) =>
               store.remove(input.projectId, input.scenarioId),
             ).pipe(Effect.as({})),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.createSampleProject]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.createSampleProject,
+            createSampleProject(input).pipe(
+              Effect.provideService(AgentDefinitionSync.AgentDefinitionSync, agentDefinitionSync),
+              Effect.provideService(OrchestrationEngine.OrchestrationEngineService, orchestrationEngine),
+              Effect.provideService(Crypto.Crypto, crypto),
+              Effect.provide(ProcessRunner.layer),
+              Effect.mapError(
+                (error) => new ProjectSampleError({ message: error.message, cause: error.cause }),
+              ),
+            ),
             { "rpc.aggregate": "orchestration" },
           ),
         [ORCHESTRATION_WS_METHODS.getCardDiff]: (input) =>
