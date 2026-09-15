@@ -1,7 +1,4 @@
-import {
-  CommandId,
-  type ProviderRuntimeEvent,
-} from "@iskra/contracts";
+import { CommandId, type ProviderRuntimeEvent } from "@iskra/contracts";
 import { makeDrainableWorker } from "@iskra/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -16,6 +13,7 @@ import { ProviderService } from "../provider/Services/ProviderService.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as UsageService from "../usage/UsageService.ts";
 import { turnUsageTotals } from "./cardSpend.ts";
+import { budgetCardOf } from "./decider.ts";
 import * as OrchestrationEngine from "./Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts";
 
@@ -85,16 +83,14 @@ const make = Effect.gen(function* () {
       });
       return;
     }
-    // An attempt spends from its card's budget (invariant 13 over best-of-N).
-    const cards = (yield* snapshotQuery.getCommandReadModel()).cards ?? [];
-    const card = cards.find((candidate) => candidate.id === cardId);
+    // An attempt, sub-card, or plan or migration child spends from the budget the decider checks
+    // for it (invariant 13), so its parent's cap sees what its children cost.
+    const readModel = yield* snapshotQuery.getCommandReadModel();
+    const card = readModel.cards?.find((candidate) => candidate.id === cardId);
     yield* engine.dispatch({
       type: "card.spend.record",
       commandId: CommandId.make(`card-spend:${event.threadId}:${event.turnId}`),
-      cardId:
-        card !== undefined && card.attemptGroupId !== null && card.parentCardId !== null
-          ? card.parentCardId
-          : cardId,
+      cardId: card === undefined ? cardId : budgetCardOf(readModel, card).id,
       ...turn,
     });
   });
