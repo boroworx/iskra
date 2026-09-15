@@ -24,7 +24,11 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
+import { ProjectBudgetsSettings } from "./ProjectBudgetsSettings";
 import { ProjectHoldoutsSettings } from "./ProjectHoldoutsSettings";
+import { ProjectKnowledgeSettings } from "./ProjectKnowledgeSettings";
+import { ProjectTriggersSettings } from "./ProjectTriggersSettings";
+import { AUTO_MERGE_NEEDS_VERIFIER_TEXT } from "@iskra/client-runtime/cards";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 
 /** Publishing and billing APIs agent shells should never reach from a social-publishing product. */
@@ -69,6 +73,8 @@ interface PolicyForm {
   readonly reviewFixRounds: string;
   readonly checksWaived: boolean;
   readonly verifierOn: boolean;
+  readonly autoMergeOn: boolean;
+  readonly minSatisfaction: string;
   readonly egressMode: ProjectOrchestration["egress"]["mode"];
   readonly allow: string;
   readonly deny: string;
@@ -87,6 +93,8 @@ function formOf(policy: ProjectOrchestration): PolicyForm {
     reviewFixRounds: String(policy.reviewFixRounds),
     checksWaived: policy.checksWaived,
     verifierOn: policy.verifier.mode === "on",
+    autoMergeOn: policy.autoMerge.enabled,
+    minSatisfaction: String(Math.round(policy.autoMerge.minSatisfaction * 100)),
     egressMode: policy.egress.mode,
     allow: policy.egress.allow.join("\n"),
     deny: policy.egress.deny.join("\n"),
@@ -120,6 +128,11 @@ function policyOf(
   }
   if (typeof builderSubCardsMax !== "number")
     return { error: "Sub-cards is a whole number of at least 1." };
+  const minSatisfaction = wholeNumber(form.minSatisfaction, 0, undefined);
+  if (typeof minSatisfaction !== "number" || minSatisfaction > 100) {
+    return { error: "Hidden scenarios satisfied is a whole percent from 0 to 100." };
+  }
+  if (form.autoMergeOn && !form.verifierOn) return { error: AUTO_MERGE_NEEDS_VERIFIER_TEXT };
   const allow = lines(form.allow);
   const deny = lines(form.deny);
   const overlap = allow.find((domain) => deny.includes(domain));
@@ -135,6 +148,7 @@ function policyOf(
       reviewFixRounds,
       checksWaived: form.checksWaived,
       verifier: { mode: form.verifierOn ? "on" : "off" },
+      autoMerge: { enabled: form.autoMergeOn, minSatisfaction: minSatisfaction / 100 },
       egress: { mode: form.egressMode, allow, deny },
       exclusivePaths: lines(form.exclusivePaths).map((line) => {
         const [glob = "", afterRebase = ""] = line.split("=>").map((part) => part.trim());
@@ -331,6 +345,36 @@ function ProjectOrchestrationForm(props: {
           }
         />
         <SettingsRow
+          title="Auto-merge"
+          description={
+            form.verifierOn
+              ? "Cards land with no click once checks and evidence pass, the verifier passes their latest commit, and at least one hidden scenario ran and enough held. Flagged changes, and work a trigger started, still wait for you."
+              : `${AUTO_MERGE_NEEDS_VERIFIER_TEXT} Cards then land with no click once checks, evidence, the verifier and enough hidden scenarios pass.`
+          }
+          control={
+            <div className="flex items-center gap-2">
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                Scenarios held
+                <Input
+                  size="sm"
+                  className="w-14"
+                  aria-label="Hidden scenarios satisfied, percent"
+                  inputMode="numeric"
+                  disabled={!form.autoMergeOn}
+                  value={form.minSatisfaction}
+                  onChange={(event) => change("minSatisfaction", event.target.value)}
+                />
+                %
+              </label>
+              <Switch
+                aria-label="Auto-merge"
+                checked={form.autoMergeOn}
+                onCheckedChange={(checked) => change("autoMergeOn", checked)}
+              />
+            </div>
+          }
+        />
+        <SettingsRow
           title="Network for agent shells"
           description="None blocks every domain. An allowlist permits only the domains listed; denied domains are never reachable. With network on, credential helpers on this machine are reachable too."
           control={
@@ -443,6 +487,19 @@ function ProjectOrchestrationForm(props: {
         </div>
       </SettingsSection>
       <SideEffectGuard current={current} saving={saving} onSave={save} />
+      <ProjectBudgetsSettings
+        project={props.representative}
+        current={current}
+        saving={saving}
+        onSave={save}
+      />
+      <ProjectTriggersSettings
+        project={props.representative}
+        current={current}
+        saving={saving}
+        onSave={save}
+      />
+      <ProjectKnowledgeSettings project={props.representative} />
       <ProjectSecrets project={props.representative} />
       <ProjectHoldoutsSettings project={props.representative} />
     </>
@@ -734,6 +791,7 @@ function SecretValue(props: { readonly project: Project; readonly name: string }
 interface RuntimeForm {
   readonly heavyJobConcurrency: string;
   readonly environmentSessionCap: string;
+  readonly monthlyBudgetUsd: string;
   readonly load: string;
   readonly freeMem: string;
   readonly turboConcurrency: string;
@@ -772,6 +830,7 @@ function CardRuntimeForm(props: {
   const [form, setForm] = useState<RuntimeForm>(() => ({
     heavyJobConcurrency: String(current.heavyJobConcurrency),
     environmentSessionCap: optionalNumber(current.environmentSessionCap),
+    monthlyBudgetUsd: optionalNumber(current.monthlyBudgetUsd),
     load: String(current.admission.load),
     freeMem: String(current.admission.freeMem),
     turboConcurrency: optionalNumber(current.resourceProfile.turboConcurrency),
@@ -796,6 +855,8 @@ function CardRuntimeForm(props: {
   const turbo = wholeNumber(form.turboConcurrency, 1, null);
   const vitest = wholeNumber(form.vitestMaxWorkers, 1, null);
   const heap = wholeNumber(form.nodeMaxOldSpaceMb, 1, null);
+  const monthlyBudget =
+    form.monthlyBudgetUsd.trim().length === 0 ? null : Number(form.monthlyBudgetUsd);
   const load = Number(form.load);
   const freeMem = Number(form.freeMem);
   const blankOr = (text: string, value: number | null) =>
@@ -806,6 +867,7 @@ function CardRuntimeForm(props: {
     blankOr(form.turboConcurrency, turbo) &&
     blankOr(form.vitestMaxWorkers, vitest) &&
     blankOr(form.nodeMaxOldSpaceMb, heap) &&
+    (monthlyBudget === null || (Number.isFinite(monthlyBudget) && monthlyBudget > 0)) &&
     Number.isFinite(load) &&
     load > 0 &&
     Number.isFinite(freeMem) &&
@@ -817,6 +879,7 @@ function CardRuntimeForm(props: {
           ...current,
           heavyJobConcurrency: heavy,
           environmentSessionCap: sessions ?? null,
+          monthlyBudgetUsd: monthlyBudget,
           admission: { load, freeMem },
           resourceProfile: {
             turboConcurrency: turbo ?? null,
@@ -835,6 +898,7 @@ function CardRuntimeForm(props: {
       <div className="grid gap-3 px-4 py-3 sm:grid-cols-2">
         {field("heavyJobConcurrency", "Heavy jobs at once (checks, setup, evidence)")}
         {field("environmentSessionCap", "Agent sessions at once", "Derived")}
+        {field("monthlyBudgetUsd", "Monthly budget across projects ($)", "None")}
         {field("load", "Hold heavy jobs above load per core")}
         {field("freeMem", "Hold heavy jobs below free memory (0–1)")}
         {field("turboConcurrency", "Turbo concurrency", "Derived")}
@@ -853,7 +917,8 @@ function CardRuntimeForm(props: {
         </Button>
         {!valid ? (
           <span className="text-xs text-destructive-foreground">
-            Use whole numbers of at least 1, a load above 0 and free memory between 0 and 1.
+            Use whole numbers of at least 1, a budget above 0, a load above 0 and free memory
+            between 0 and 1.
           </span>
         ) : (
           <span className="text-xs text-muted-foreground">

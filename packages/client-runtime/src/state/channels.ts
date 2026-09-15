@@ -10,11 +10,14 @@ import type { Atom } from "effect/unstable/reactivity";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import {
   answerChannelElicitation,
+  approveProjectLesson,
   archiveChannel,
   createAgent,
   createChannel,
+  dismissProjectLesson,
   postAgentDm,
   postChannelMessage,
+  removeProjectLesson,
   sendAgentSessionMessage,
   unarchiveChannel,
   updateChannel,
@@ -165,6 +168,19 @@ export function createChannelEnvironmentAtoms<R, E>(
       label: "environment-data:commands:project:remove-holdout",
       execute: (input: EnvironmentRpcInput<typeof ORCHESTRATION_WS_METHODS.removeProjectHoldout>) =>
         request(ORCHESTRATION_WS_METHODS.removeProjectHoldout, input),
+    }),
+    /** A person deciding a lesson an agent proposed: only approved lessons reach briefs. */
+    approveLesson: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:project:approve-lesson",
+      execute: approveProjectLesson,
+    }),
+    dismissLesson: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:project:dismiss-lesson",
+      execute: dismissProjectLesson,
+    }),
+    removeLesson: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:project:remove-lesson",
+      execute: removeProjectLesson,
     }),
     importAgentDefinitions: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:agent:import-definitions",
