@@ -8,14 +8,24 @@ import {
   type CriterionState,
   type EvidenceItemView,
 } from "@iskra/client-runtime/card-review";
-import { hasUnacknowledgedHardFlags, openCheckpointActivityId } from "@iskra/client-runtime/cards";
+import {
+  OVERRIDE_REASON_REQUIRED_TEXT,
+  hasUnacknowledgedHardFlags,
+  openCheckpointActivityId,
+  overrideVerifierRefusal,
+  reasonLabel,
+  rerunVerifierRefusal,
+} from "@iskra/client-runtime/cards";
 import type { AtomCommandResult } from "@iskra/client-runtime/state/runtime";
 import {
   type AssetResource,
   type CardActivity,
   type CardCheckpointDecision,
   type CardEvidenceItem,
+  type CardVerdict,
+  type CardVerification,
   type EnvironmentId,
+  type OrchestrationAgentShell,
   type OrchestrationCardShell,
   type ProjectOrchestration,
 } from "@iskra/contracts";
@@ -23,12 +33,15 @@ import { memo, useMemo, useState } from "react";
 
 import { useAssetUrlState } from "~/assets/assetUrls";
 import { cn } from "~/lib/utils";
+import { deriveProviderInstanceEntries } from "~/providerInstances";
 import { cardEnvironment } from "~/state/cards";
 import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { useEnvironmentProviders } from "../channels/AgentModelPicker";
 import { toastCommandFailure } from "../toastCommandFailure";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
+import { DisabledReason } from "./DisabledReason";
 
 const refused = (title: string) => (result: AtomCommandResult<unknown, unknown>) =>
   toastCommandFailure(result, title, "The request was refused.");
@@ -59,6 +72,11 @@ export function CardReview(props: {
   } | null;
   /** The card's activity, where the agent's review request carries its risk claims. */
   readonly activities: ReadonlyArray<CardActivity>;
+  /** The card's latest verdict, from its subscription. */
+  readonly verdict: CardVerdict | null;
+  /** Whether a passing verifier is needed before the merge. */
+  readonly verificationRequired: boolean;
+  readonly agents: ReadonlyArray<OrchestrationAgentShell>;
   readonly environmentId: EnvironmentId;
 }) {
   const { card, environmentId } = props;
@@ -70,9 +88,15 @@ export function CardReview(props: {
     props.evidence !== null && summary !== null && props.evidence.evidenceId === summary.evidenceId
       ? props.evidence.items
       : NO_ITEMS;
+  // Likewise a verdict for an older commit judges code the card no longer has.
+  const verdict =
+    props.verdict !== null && summary !== null && props.verdict.headSha === summary.headSha
+      ? props.verdict
+      : null;
   const review = useMemo(
-    () => reviewByCriterion({ cardId: card.id, criteria: card.acceptance.criteria, items }),
-    [card.id, card.acceptance.criteria, items],
+    () =>
+      reviewByCriterion({ cardId: card.id, criteria: card.acceptance.criteria, items, verdict }),
+    [card.id, card.acceptance.criteria, items, verdict],
   );
 
   if (summary === null) {
@@ -109,6 +133,15 @@ export function CardReview(props: {
         </div>
       ) : null}
 
+      {props.verificationRequired ? (
+        <VerifierPanel
+          card={card}
+          verdict={verdict}
+          agents={props.agents}
+          environmentId={environmentId}
+        />
+      ) : null}
+
       {review.criteria.length === 0 ? (
         <p className="text-xs text-muted-foreground">
           This card has no acceptance criteria, so only its checks speak for it.
@@ -123,6 +156,12 @@ export function CardReview(props: {
                   {CRITERION_STATE_LABEL[entry.state]}
                 </span>
               </div>
+              {entry.verdict !== null &&
+              (entry.verdict.note.length > 0 || entry.verdict.evidence.length > 0) ? (
+                <p className="whitespace-pre-wrap break-words text-xs text-muted-foreground">
+                  {entry.verdict.note.length > 0 ? entry.verdict.note : entry.verdict.evidence}
+                </p>
+              ) : null}
               {entry.state === "needsYourCheck" ? (
                 <p className="text-xs text-muted-foreground">
                   Check this yourself; the evidence below only covers what automation can.
@@ -195,6 +234,162 @@ export function CardReview(props: {
   );
 }
 
+const VERIFICATION_TITLE: Record<CardVerification["state"], string> = {
+  off: "Waiting for the verifier",
+  pending: "Waiting for the verifier",
+  running: "Verifying…",
+  passed: "Verified",
+  failed: "The verifier found criteria not met",
+  overridden: "Verifier overridden",
+};
+
+/**
+ * The verifier's side of review: who checks the card and why that one, what it found beyond the
+ * criteria (diff concerns, hidden scenarios as counts only), and a rerun or a person's override.
+ */
+function VerifierPanel(props: {
+  readonly card: OrchestrationCardShell;
+  /** The verdict for the card's latest commit, if any. */
+  readonly verdict: CardVerdict | null;
+  readonly agents: ReadonlyArray<OrchestrationAgentShell>;
+  readonly environmentId: EnvironmentId;
+}) {
+  const { card, environmentId } = props;
+  const decide = useAtomCommand(cardEnvironment.decide);
+  const override = useAtomCommand(cardEnvironment.overrideVerifier);
+  const providers = useEnvironmentProviders(environmentId);
+  const [overriding, setOverriding] = useState(false);
+  const [reason, setReason] = useState("");
+  const [sending, setSending] = useState(false);
+  const { verification } = card;
+  const selection = verification.verifier;
+  const why = selection === null ? null : reasonLabel(selection.reason);
+  const provider =
+    selection === null
+      ? null
+      : (deriveProviderInstanceEntries(providers).find(
+          (entry) => entry.instanceId === selection.instanceId,
+        )?.displayName ?? selection.instanceId);
+  const verifierName =
+    selection === null
+      ? null
+      : (props.agents.find((agent) => agent.id === selection.agentId)?.name ?? "verifier");
+  const rerunRefusal = rerunVerifierRefusal(card);
+  const overrideRefusal = overrideVerifierRefusal(card, true);
+  const satisfaction = verification.satisfaction;
+  const judge = props.verdict?.diffJudge;
+  const trimmedReason = reason.trim();
+
+  const run = async (request: Promise<AtomCommandResult<unknown, unknown>>, failure: string) => {
+    setSending(true);
+    const result = await request;
+    setSending(false);
+    refused(failure)(result);
+    return result._tag === "Success";
+  };
+
+  return (
+    <section aria-label="Verifier" className="flex flex-col gap-1.5 text-xs">
+      <h4 className="text-sm font-medium">{VERIFICATION_TITLE[verification.state]}</h4>
+      {selection !== null && why !== null ? (
+        <DisabledReason reason={why.hint}>
+          <span className="text-muted-foreground">
+            @{verifierName} on {provider} · {selection.model} — {why.label}
+          </span>
+        </DisabledReason>
+      ) : null}
+      {verification.override !== null ? (
+        <p className="text-muted-foreground">You overrode it: {verification.override.reason}</p>
+      ) : null}
+      {satisfaction !== null && satisfaction.total > 0 ? (
+        <p className="tabular-nums">
+          Hidden scenarios {satisfaction.satisfied}/{satisfaction.total} satisfied
+        </p>
+      ) : null}
+      {judge !== undefined && (!judge.matchesCriteria || judge.concerns.length > 0) ? (
+        <div className="flex flex-col gap-0.5">
+          <p className={judge.matchesCriteria ? "text-muted-foreground" : "text-destructive-foreground"}>
+            {judge.matchesCriteria
+              ? "The diff does what the criteria ask, with concerns:"
+              : "The diff doesn't do what the criteria ask."}
+          </p>
+          {judge.concerns.length > 0 ? (
+            <ul className="list-disc ps-4">
+              {judge.concerns.map((concern) => (
+                <li key={concern} className="break-words">
+                  {concern}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+      <div className="flex flex-wrap gap-1.5">
+        <DisabledReason reason={rerunRefusal}>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={rerunRefusal !== null || sending}
+            onClick={() =>
+              void run(
+                decide({ environmentId, input: { type: "card.verifier.rerun", cardId: card.id } }),
+                "The verifier was not rerun",
+              )
+            }
+          >
+            Rerun verifier
+          </Button>
+        </DisabledReason>
+        {overrideRefusal === null && !overriding ? (
+          <Button size="sm" variant="ghost-muted" onClick={() => setOverriding(true)}>
+            Override…
+          </Button>
+        ) : null}
+      </div>
+      {overriding ? (
+        <div className="flex flex-col gap-1.5">
+          <Textarea
+            aria-label="Why you're overriding the verifier"
+            placeholder="Why this card may merge without the verifier passing"
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+          />
+          <div className="flex flex-wrap gap-1.5">
+            <DisabledReason reason={trimmedReason.length === 0 ? OVERRIDE_REASON_REQUIRED_TEXT : null}>
+              <Button
+                size="sm"
+                disabled={trimmedReason.length === 0 || sending}
+                onClick={async () => {
+                  const done = await run(
+                    override({ environmentId, input: { cardId: card.id, reason: trimmedReason } }),
+                    "The verifier was not overridden",
+                  );
+                  if (done) {
+                    setOverriding(false);
+                    setReason("");
+                  }
+                }}
+              >
+                Save override
+              </Button>
+            </DisabledReason>
+            <Button
+              size="sm"
+              variant="ghost-muted"
+              onClick={() => {
+                setOverriding(false);
+                setReason("");
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function EvidenceList(props: {
   readonly items: ReadonlyArray<EvidenceItemView>;
   readonly environmentId: EnvironmentId;
@@ -251,7 +446,7 @@ const EvidenceRow = memo(function EvidenceRow(props: {
       {state === "unavailable" && props.view.unavailableText !== null ? (
         <p className="text-muted-foreground">{props.view.unavailableText}</p>
       ) : null}
-      {item.kind === "check" && item.logTail.length > 0 ? (
+      {(item.kind === "check" || item.kind === "journey") && item.logTail.length > 0 ? (
         <details>
           <summary className="cursor-pointer text-muted-foreground">Output tail</summary>
           <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px]">

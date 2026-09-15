@@ -4,11 +4,17 @@ import {
   CARD_SESSION_LABEL,
   boardColumnOf,
   cardMoveActions,
+  cardVerificationRequired,
   isCardSnoozed,
   reasonLabel,
   reasonLine,
+  verifierMergeRefusal,
 } from "@iskra/client-runtime/cards";
-import type { AtomCommandResult } from "@iskra/client-runtime/state/runtime";
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+  type AtomCommandResult,
+} from "@iskra/client-runtime/state/runtime";
 import {
   CardRelationKind,
   MessageId,
@@ -46,8 +52,20 @@ import { DisabledReason } from "./DisabledReason";
 
 const HOUR_MS = 60 * 60_000;
 
-const refused = (title: string) => (result: AtomCommandResult<unknown, unknown>) =>
-  toastCommandFailure(result, title, "The request was refused.");
+/** The server's own sentence for assigning before approval; the picker says it before trying. */
+const APPROVE_BEFORE_ASSIGN_TEXT = "Approve the card before assigning an agent.";
+
+/** Toasts a refused command and hands its reason to `onRefused`, so the sheet says it in place. */
+const refusedWith =
+  (onRefused: (text: string) => void) =>
+  (title: string) =>
+  (result: AtomCommandResult<unknown, unknown>) => {
+    toastCommandFailure(result, title, "The request was refused.");
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
+      onRefused(`${title}. ${error instanceof Error ? error.message : "The request was refused."}`);
+    }
+  };
 
 function statusLabel(status: CardStatus): string {
   return status === "landed"
@@ -131,6 +149,9 @@ function CardSheetBody(props: {
   const setBudget = useAtomCommand(cardEnvironment.setBudget);
   const snooze = useAtomCommand(cardEnvironment.snooze);
   const unsnooze = useAtomCommand(cardEnvironment.unsnooze);
+  // A refusal also shows at the top of the sheet, where a toast can pass unseen behind it.
+  const [refusal, setRefusal] = useState<string | null>(null);
+  const refused = refusedWith(setRefusal);
 
   // The body only exists while the sheet is open, so the card's stream lives exactly that long.
   const activity = useEnvironmentQuery(
@@ -169,6 +190,9 @@ function CardSheetBody(props: {
   const snoozed = isCardSnoozed(card, props.now);
   const trimmedMessage = message.trim();
   const cap = Number(capUsd);
+  const builder = props.agents.find((agent) => agent.id === card.delegateAgentId);
+  const verificationRequired = cardVerificationRequired(card, policy, builder);
+  const mergeRefusal = verifierMergeRefusal(card, verificationRequired);
 
   const send = (kind: "message" | "review") => {
     const input = {
@@ -229,6 +253,22 @@ function CardSheetBody(props: {
         </p>
       </SheetHeader>
       <SheetPanel className="flex flex-col gap-5">
+        {refusal !== null ? (
+          <div
+            role="alert"
+            className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/8 px-3 py-2 text-xs text-destructive-foreground"
+          >
+            <p className="min-w-0 flex-1 break-words">{refusal}</p>
+            <Button
+              size="icon-sm"
+              variant="ghost-muted"
+              aria-label="Dismiss"
+              onClick={() => setRefusal(null)}
+            >
+              <XIcon />
+            </Button>
+          </div>
+        ) : null}
         <Section label="Move">
           {open && card.status !== "triage" ? (
             <div className="flex flex-wrap items-center gap-1.5">
@@ -262,7 +302,7 @@ function CardSheetBody(props: {
             <p className="text-xs text-muted-foreground">A landed card is finished.</p>
           ) : (
             <div className="flex flex-wrap gap-1.5">
-              {cardMoveActions(card.status).map((action) => (
+              {cardMoveActions(card.status, mergeRefusal).map((action) => (
                 <DisabledReason key={action.column} reason={action.reason}>
                   <Button
                     size="sm"
@@ -420,6 +460,9 @@ function CardSheetBody(props: {
               card={card}
               evidence={evidence}
               activities={activities}
+              verdict={activity.data?.verdict ?? null}
+              verificationRequired={verificationRequired}
+              agents={props.agents}
               environmentId={environmentId}
             />
           </Section>
@@ -461,6 +504,7 @@ function CardSheetBody(props: {
             <div className="flex flex-wrap items-center gap-1.5">
               <Select
                 value={card.delegateAgentId}
+                disabled={card.status === "triage"}
                 onValueChange={(value) => {
                   if (value !== null && value !== card.delegateAgentId) {
                     void assign({
@@ -497,6 +541,9 @@ function CardSheetBody(props: {
                 </Button>
               ) : null}
             </div>
+            {card.status === "triage" ? (
+              <p className="text-xs text-muted-foreground">{APPROVE_BEFORE_ASSIGN_TEXT}</p>
+            ) : null}
             <Textarea
               aria-label="Message to the card's agent"
               placeholder={

@@ -110,6 +110,26 @@ export function AttentionActions(props: {
                 Retry landing
               </Button>
             );
+          case "rerunVerifier":
+            return (
+              <Button
+                key={action}
+                size="sm"
+                variant="outline"
+                disabled={sending}
+                onClick={() =>
+                  void send(
+                    decide({
+                      environmentId,
+                      input: { type: "card.verifier.rerun", cardId: card.id },
+                    }),
+                    "The verifier was not rerun",
+                  )
+                }
+              >
+                Rerun verifier
+              </Button>
+            );
           case "openSettings":
             return project === undefined ? null : (
               <Button

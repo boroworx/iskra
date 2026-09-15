@@ -24,7 +24,11 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@iskra/client-runtime/state/runtime";
-import { openCheckpointActivityId } from "@iskra/client-runtime/cards";
+import {
+  openCheckpointActivityId,
+  overrideVerifierRefusal,
+  rerunVerifierRefusal,
+} from "@iskra/client-runtime/cards";
 import {
   type DesktopWslState,
   type EnvironmentId,
@@ -1215,6 +1219,48 @@ function OpenCommandPaletteDialog(props: {
                 );
               },
             });
+            if (card.status === "inReview" && card.verification.state !== "off") {
+              const open = async () => {
+                await navigate({
+                  to: "/board/$environmentId/$projectId",
+                  params: { environmentId: primaryEnvironmentId, projectId: card.projectId },
+                  search: { card: card.id },
+                });
+              };
+              if (rerunVerifierRefusal(card) === null) {
+                items.push({
+                  kind: "action",
+                  value: `card-verifier-rerun:${primaryEnvironmentId}:${card.id}`,
+                  searchTerms: [card.title, "rerun verifier verify again"],
+                  title: `Rerun verifier: ${card.title}`,
+                  description,
+                  icon,
+                  run: async () => {
+                    const result = await decideCard({
+                      environmentId: primaryEnvironmentId,
+                      input: { type: "card.verifier.rerun", cardId: card.id },
+                    });
+                    toastCommandFailure(
+                      result,
+                      "The verifier was not rerun",
+                      "The request was refused.",
+                    );
+                  },
+                });
+              }
+              // An override needs a reason, which the card's review asks for.
+              if (overrideVerifierRefusal(card, true) === null) {
+                items.push({
+                  kind: "action",
+                  value: `card-verifier-override:${primaryEnvironmentId}:${card.id}`,
+                  searchTerms: [card.title, "override verifier"],
+                  title: `Override verifier: ${card.title}`,
+                  description,
+                  icon,
+                  run: open,
+                });
+              }
+            }
             const checkpointActivityId = openCheckpointActivityId(card);
             if (checkpointActivityId !== null) {
               items.push({

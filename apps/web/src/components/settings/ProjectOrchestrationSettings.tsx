@@ -67,6 +67,7 @@ interface PolicyForm {
   readonly ciFixRounds: string;
   readonly reviewFixRounds: string;
   readonly checksWaived: boolean;
+  readonly verifierOn: boolean;
   readonly egressMode: ProjectOrchestration["egress"]["mode"];
   readonly allow: string;
   readonly deny: string;
@@ -84,6 +85,7 @@ function formOf(policy: ProjectOrchestration): PolicyForm {
     ciFixRounds: String(policy.ciFixRounds),
     reviewFixRounds: String(policy.reviewFixRounds),
     checksWaived: policy.checksWaived,
+    verifierOn: policy.verifier.mode === "on",
     egressMode: policy.egress.mode,
     allow: policy.egress.allow.join("\n"),
     deny: policy.egress.deny.join("\n"),
@@ -131,6 +133,7 @@ function policyOf(
       ciFixRounds,
       reviewFixRounds,
       checksWaived: form.checksWaived,
+      verifier: { mode: form.verifierOn ? "on" : "off" },
       egress: { mode: form.egressMode, allow, deny },
       exclusivePaths: lines(form.exclusivePaths).map((line) => {
         const [glob = "", afterRebase = ""] = line.split("=>").map((part) => part.trim());
@@ -312,6 +315,17 @@ function ProjectOrchestrationForm(props: {
               aria-label="Review without checks"
               checked={form.checksWaived}
               onCheckedChange={(checked) => change("checksWaived", checked)}
+            />
+          }
+        />
+        <SettingsRow
+          title="Verifier"
+          description="A second agent checks each card in review against its criteria before you can approve the merge. Iskra picks an agent with the verifier role on another provider when one can run, then another model, then the builder's own model in a fresh session. You can override a verdict with a reason."
+          control={
+            <Switch
+              aria-label="Verifier"
+              checked={form.verifierOn}
+              onCheckedChange={(checked) => change("verifierOn", checked)}
             />
           }
         />
