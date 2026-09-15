@@ -306,6 +306,30 @@ const make = Effect.gen(function* () {
         });
         return { cardId };
       }),
+    // A proposal only: a person approves it before any brief carries it.
+    propose_lesson: (input) =>
+      Effect.gen(function* () {
+        const session = yield* requireOwnerSession;
+        const card = yield* snapshots.getCardShellById(session.cardId).pipe(
+          Effect.mapError(failed),
+          Effect.flatMap(
+            Option.match({ onNone: () => new BoardSessionRequiredError({}), onSome: Effect.succeed }),
+          ),
+        );
+        const lessonId = `lesson-${yield* uuid}`;
+        yield* dispatch({
+          type: "card.lesson.propose",
+          commandId: yield* commandId("lesson", session.threadId),
+          projectId: card.projectId,
+          cardId: card.id,
+          lessonId,
+          kind: input.kind,
+          text: input.text,
+          paths: input.paths ?? [],
+          createdAt: yield* nowIso,
+        });
+        return { lessonId };
+      }),
     record_decision: (input) =>
       Effect.gen(function* () {
         const session = yield* requireOwnerSession;
