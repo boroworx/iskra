@@ -83,14 +83,20 @@ const plural = (count: number, one: string, many: string) => `${count} ${count =
 export function verifierFeedback(input: {
   readonly card: Pick<OrchestrationCard, "acceptance">;
   readonly verdict: Pick<CardVerdict, "criteria" | "diffJudge" | "scenarios">;
-  readonly scenarios: ReadonlyArray<Pick<HoldoutScenario, "scenarioId" | "title" | "body" | "command">>;
+  readonly scenarios: ReadonlyArray<
+    Pick<HoldoutScenario, "scenarioId" | "title" | "body" | "command">
+  >;
 }): { readonly headline: string; readonly body: string } {
   const failed = input.verdict.criteria.filter((criterion) => !criterion.pass);
   const hiddenFailed = input.verdict.scenarios.filter((scenario) => !scenario.satisfied).length;
   const headline = [
-    failed.length > 0 ? `The verifier found ${plural(failed.length, "criterion", "criteria")} not met` : null,
+    failed.length > 0
+      ? `The verifier found ${plural(failed.length, "criterion", "criteria")} not met`
+      : null,
     input.verdict.diffJudge.matchesCriteria ? null : "the diff doesn't do what the criteria ask",
-    hiddenFailed > 0 ? `${plural(hiddenFailed, "hidden scenario", "hidden scenarios")} failed` : null,
+    hiddenFailed > 0
+      ? `${plural(hiddenFailed, "hidden scenario", "hidden scenarios")} failed`
+      : null,
   ]
     .filter((part) => part !== null)
     .join("; ");
@@ -98,15 +104,22 @@ export function verifierFeedback(input: {
   const body = [
     `${headline.length > 0 ? headline : "The verifier didn't pass this commit"}.`,
     ...failed.map((criterion) => {
-      const text = input.card.acceptance.criteria.find((entry) => entry.id === criterion.criterionId)?.text;
+      const text = input.card.acceptance.criteria.find(
+        (entry) => entry.id === criterion.criterionId,
+      )?.text;
       return `- ${criterion.criterionId}${text === undefined ? "" : ` (${text})`}: ${clean(criterion.note)}`;
     }),
     ...input.verdict.diffJudge.concerns.map((concern) => `- Concern: ${clean(concern)}`),
     ...(hiddenFailed > 0
-      ? [`- ${plural(hiddenFailed, "hidden scenario", "hidden scenarios")} failed. They stay hidden; fix what the criteria and notes point at.`]
+      ? [
+          `- ${plural(hiddenFailed, "hidden scenario", "hidden scenarios")} failed. They stay hidden; fix what the criteria and notes point at.`,
+        ]
       : []),
   ].join("\n");
-  return { headline: headline.length > 0 ? headline : "The verifier didn't pass this commit", body };
+  return {
+    headline: headline.length > 0 ? headline : "The verifier didn't pass this commit",
+    body,
+  };
 }
 
 const make = Effect.gen(function* () {
@@ -333,11 +346,19 @@ const make = Effect.gen(function* () {
     );
   });
 
-  const verify = Effect.fn("CardVerifierReactor.verify")(function* (cardId: CardId, trigger: string) {
+  const verify = Effect.fn("CardVerifierReactor.verify")(function* (
+    cardId: CardId,
+    trigger: string,
+  ) {
     const model = yield* readModel();
     const card = model.cards?.find((candidate) => candidate.id === cardId);
     const project = model.projects.find((candidate) => candidate.id === card?.projectId);
-    if (card === undefined || project === undefined || card.status !== "inReview" || card.evidence === null) {
+    if (
+      card === undefined ||
+      project === undefined ||
+      card.status !== "inReview" ||
+      card.evidence === null
+    ) {
       return;
     }
     const agents = (model.agents ?? []).filter((agent) => agent.projectId === card.projectId);
@@ -418,7 +439,11 @@ const make = Effect.gen(function* () {
     yield* release(cardId);
     const model = yield* readModel();
     const card = model.cards?.find((candidate) => candidate.id === cardId);
-    if (card === undefined || card.status !== "inReview" || card.evidence?.headSha !== current.headSha) {
+    if (
+      card === undefined ||
+      card.status !== "inReview" ||
+      card.evidence?.headSha !== current.headSha
+    ) {
       return;
     }
     const agents = (model.agents ?? []).filter((agent) => agent.projectId === card.projectId);
@@ -496,7 +521,11 @@ const make = Effect.gen(function* () {
             : Effect.void;
       case "card.evidence-recorded":
       case "card.verifier-rerun-requested":
-        return worker.enqueue({ kind: "verify", cardId: event.payload.cardId, trigger: event.eventId });
+        return worker.enqueue({
+          kind: "verify",
+          cardId: event.payload.cardId,
+          trigger: event.eventId,
+        });
       case "card.verdict-recorded":
         return worker.enqueue({ kind: "verdict", verdict: event.payload.verdict });
       case "thread.session-set": {
