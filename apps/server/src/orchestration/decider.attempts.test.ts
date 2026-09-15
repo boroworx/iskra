@@ -160,7 +160,8 @@ it.layer(NodeServices.layer)("decider attempts", (it) => {
         },
       ]);
       const refused = yield* Effect.flip(applyTo(running, [startTurn(threadId)]));
-      expect(refused.message).toContain("raise the cap");
+      // An attempt spends from its parent card, so the refusal names the parent's cap.
+      expect(refused.message).toContain("raise the parent card's cap");
     }),
   );
 });
