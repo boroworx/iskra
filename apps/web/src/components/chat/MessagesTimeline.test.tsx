@@ -1111,7 +1111,7 @@ describe("MessagesTimeline", () => {
 
     expect(markup).not.toContain("Show full message");
     expect(markup).toContain('data-user-message-collapsible="false"');
-    expect(markup).toContain("rounded-2xl bg-message p-3");
+    expect(markup).toContain("grid-cols-[32px_minmax(0,1fr)]");
   });
 
   it("preserves arbitrary XML-like tags and comparisons in rendered user messages", async () => {
