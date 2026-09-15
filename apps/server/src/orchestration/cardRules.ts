@@ -876,6 +876,10 @@ export function withCardElicitations(
         recommendedOptionId: elicitation?.recommendedOptionId ?? null,
         allowText: elicitation?.allowText ?? true,
         ...(activity.refChanges ? { refChanges: activity.refChanges } : {}),
+        // Carried to the shell so applying the change writes data, not the body's prose.
+        ...(elicitation?.proposedCriteria
+          ? { proposedCriteria: elicitation.proposedCriteria }
+          : {}),
       },
     ];
   }
@@ -999,6 +1003,39 @@ export const CHECKPOINT_OPTIONS = [
   { id: "redirect", label: "Redirect" },
   { id: "stop", label: "Stop" },
 ] as const;
+
+/** What a proposed criteria change asks, and the answer that writes the proposal to the card. */
+export const CRITERIA_CHANGE_QUESTION = "Change the acceptance criteria to the proposed ones?";
+export const CRITERIA_CHANGE_APPLY = "apply";
+export const CRITERIA_CHANGE_OPTIONS = [
+  { id: CRITERIA_CHANGE_APPLY, label: "Apply them" },
+  { id: "keep", label: "Keep the current ones" },
+] as const;
+
+/** What applying a proposed change tells the agent, after the answer that asked for it. */
+export const CRITERIA_CHANGE_APPLIED = "The card's criteria are now the ones you proposed.";
+
+/** A proposal recorded before Iskra kept the criteria as data has nothing to apply. */
+export const LEGACY_CRITERIA_PROPOSAL_REASON =
+  "This proposal was made before Iskra kept the criteria it proposed, so there is nothing to apply. Write the criteria on the card yourself, or keep the current ones.";
+
+const sentence = (text: string) => (/[.!?]$/.test(text.trim()) ? text.trim() : `${text.trim()}.`);
+
+/**
+ * A person's answer as the agent reads it. An option's label alone ("Apply them") says nothing
+ * about what it answered, so the answer quotes its question wherever the card has one.
+ */
+export function elicitationAnswerBody(input: {
+  readonly question: string;
+  readonly body: string;
+  readonly applied?: boolean;
+}): string {
+  const quoted =
+    input.question.trim().length === 0
+      ? sentence(input.body)
+      : `Answering "${input.question.trim()}": ${sentence(input.body)}`;
+  return input.applied === true ? `${quoted} ${CRITERIA_CHANGE_APPLIED}` : quoted;
+}
 
 /** A card author as the activity stream names it: a channel's lead is an agent there. */
 export const activityAuthorOf = (author: CardAuthor): CardActivity["author"] => ({

@@ -23,7 +23,9 @@ import {
   VERIFIER_NOT_PASSED_REASON,
   WORK_CRITERIA_REASON,
   cardActivitiesOf,
+  CRITERIA_CHANGE_QUESTION,
   criteriaRefusal,
+  elicitationAnswerBody,
   elicitationRefusal,
   evidencePassed,
   fixRoundRefusal,
@@ -380,6 +382,27 @@ describe("card contract gates", () => {
       "two or three",
     );
     expect(elicitationRefusal({ options, recommendedOptionId: "c" })).toContain("recommended");
+  });
+
+  it("names the question in a person's answer, and says when applying it changed the criteria", () => {
+    expect(elicitationAnswerBody({ question: "Which store?", body: "Redis" })).toBe(
+      'Answering "Which store?": Redis.',
+    );
+    // The person's own words keep their punctuation.
+    expect(elicitationAnswerBody({ question: "Which store?", body: "Use Redis." })).toBe(
+      'Answering "Which store?": Use Redis.',
+    );
+    expect(
+      elicitationAnswerBody({
+        question: CRITERIA_CHANGE_QUESTION,
+        body: "Apply them",
+        applied: true,
+      }),
+    ).toBe(
+      'Answering "Change the acceptance criteria to the proposed ones?": Apply them. The card\'s criteria are now the ones you proposed.',
+    );
+    // A question with no words of its own leaves the answer to speak for itself.
+    expect(elicitationAnswerBody({ question: "", body: "Redis" })).toBe("Redis.");
   });
 
   it("maps legacy card messages, decisions and status moves into activities as migration 070 did", () => {

@@ -98,6 +98,16 @@ export function CardQuestion(props: {
   return (
     <View className="gap-2">
       {props.question.question.length > 0 ? <Body strong>{props.question.question}</Body> : null}
+      {props.question.proposedCriteria === undefined ? null : (
+        <View className="gap-1">
+          {props.question.proposedCriteria.map((criterion, index) => (
+            <Body key={criterion.id}>
+              {index + 1}. {criterion.text}
+              {criterion.verification === "manual" ? " (checked by a person)" : ""}
+            </Body>
+          ))}
+        </View>
+      )}
       <ElicitationOptions
         elicitation={props.question}
         disabled={sending}

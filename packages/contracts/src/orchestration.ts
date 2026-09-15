@@ -1328,6 +1328,8 @@ export const CardOpenElicitation = Schema.Struct({
   allowText: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   // Set on a refsChanged question: the refs a restore would put back.
   refChanges: Schema.optional(Schema.Array(CardRefChange)),
+  // Set on a criteriaChange question: the criteria applying it writes to the card.
+  proposedCriteria: Schema.optional(Schema.Array(CardCriterion)),
 });
 export type CardOpenElicitation = typeof CardOpenElicitation.Type;
 
@@ -1651,6 +1653,9 @@ export const Elicitation = Schema.Struct({
   allowText: Schema.Boolean,
   // What the question is for; one recorded before kinds were reads as a plain question.
   kind: ElicitationKind.pipe(Schema.withDecodingDefault(Effect.succeed("question" as const))),
+  // Set on a criteriaChange question: the criteria applying it writes to the card. Absent on the
+  // ones recorded before proposals were data, which are prose in the activity's body only.
+  proposedCriteria: Schema.optional(Schema.Array(CardCriterion)),
 });
 export type Elicitation = typeof Elicitation.Type;
 

@@ -462,6 +462,18 @@ describe("board toolkit handlers", () => {
           kind: "elicitation",
           reason: { code: "criteriaChange" },
           body: "Keys are shared across an account.\n\nProposed acceptance criteria:\n- Limits are per account.",
+          // The proposal is data, not only prose: applying it writes exactly these criteria.
+          elicitation: {
+            kind: "criteriaChange",
+            question: "Change the acceptance criteria to the proposed ones?",
+            options: [
+              { id: "apply", label: "Apply them" },
+              { id: "keep", label: "Keep the current ones" },
+            ],
+            proposedCriteria: [
+              { id: "c1", text: "Limits are per account.", verification: "automated" },
+            ],
+          },
         },
       ]);
     }),

@@ -355,6 +355,18 @@ export function CardQuestion(props: {
           <span className="min-w-0 whitespace-pre-wrap break-words">{props.question.question}</span>
         </p>
       ) : null}
+      {props.question.proposedCriteria === undefined ? null : (
+        <ol className="flex min-w-0 list-decimal flex-col gap-1 ps-5 text-[13px]">
+          {props.question.proposedCriteria.map((criterion) => (
+            <li key={criterion.id} className="min-w-0 break-words">
+              {criterion.text}
+              {criterion.verification === "manual" ? (
+                <span className="text-muted-foreground"> (checked by a person)</span>
+              ) : null}
+            </li>
+          ))}
+        </ol>
+      )}
       <ElicitationOptions
         elicitation={props.question}
         disabled={sending}

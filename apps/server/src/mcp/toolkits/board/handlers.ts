@@ -22,7 +22,11 @@ import {
   runChecksJob,
   runChecksRequestBody,
 } from "../../../orchestration/CardEvidence.ts";
-import { BUILDER_ONLY_ASSIST_REASON } from "../../../orchestration/cardRules.ts";
+import {
+  BUILDER_ONLY_ASSIST_REASON,
+  CRITERIA_CHANGE_OPTIONS,
+  CRITERIA_CHANGE_QUESTION,
+} from "../../../orchestration/cardRules.ts";
 import * as CardWorkspace from "../../../orchestration/CardWorkspace.ts";
 import * as HostAdmission from "../../../orchestration/HostAdmission.ts";
 import * as OrchestrationEngine from "../../../orchestration/Services/OrchestrationEngine.ts";
@@ -486,14 +490,13 @@ const make = Effect.gen(function* () {
             )
             .join("\n")}`,
           elicitation: {
-            question: "Change the acceptance criteria to the proposed ones?",
-            options: [
-              { id: "apply", label: "Apply them" },
-              { id: "keep", label: "Keep the current ones" },
-            ],
+            question: CRITERIA_CHANGE_QUESTION,
+            options: CRITERIA_CHANGE_OPTIONS,
             recommendedOptionId: null,
             allowText: true,
             kind: "criteriaChange",
+            // The proposal as data: applying it writes exactly these to the card.
+            proposedCriteria: criteria,
           },
           reason: { code: "criteriaChange", text: input.reason },
         });

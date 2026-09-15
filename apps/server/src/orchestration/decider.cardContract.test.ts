@@ -38,6 +38,9 @@ import {
   VERIFY_LATEST_COMMIT_REASON,
   NO_CHECKS_REASON,
   NO_ATTENTION_REASON,
+  CRITERIA_CHANGE_OPTIONS,
+  CRITERIA_CHANGE_QUESTION,
+  LEGACY_CRITERIA_PROPOSAL_REASON,
   NO_CRITERIA_REASON,
   NO_OPEN_QUESTION_REASON,
   NOT_DISMISSABLE_REASON,
@@ -985,6 +988,8 @@ it.layer(NodeServices.layer)("decider card contract", (it) => {
             author: { kind: "human" },
             deliverTo: "builder",
             delivery: "pending",
+            // The agent is told what it answered, not a bare "Redis".
+            body: 'Answering "Which store?": Redis.',
             answers: { questionId: "question-1", optionId: "redis" },
           },
         },
@@ -1029,6 +1034,108 @@ it.layer(NodeServices.layer)("decider card contract", (it) => {
         openElicitations: [],
         paused: { reason: { code: "checkpointStopped" } },
       });
+    }),
+  );
+
+  it.effect("applying a proposed criteria change writes it to the card; keeping it changes nothing", () =>
+    Effect.gen(function* () {
+      const proposed = [{ id: "c1", text: "Limits are per account.", verification: "manual" }] as const;
+      const propose = (
+        activityId: string,
+        proposedCriteria?: ReadonlyArray<{
+          readonly id: string;
+          readonly text: string;
+          readonly verification: "automated" | "manual";
+        }>,
+      ): OrchestrationCommand => ({
+        type: "card.activity.record",
+        commandId: nextCommandId(),
+        activityId,
+        cardId,
+        kind: "elicitation",
+        author: { kind: "agent", id: backend },
+        body: "Keys are shared across an account.",
+        runThreadId: null,
+        deliverTo: null,
+        elicitation: {
+          question: CRITERIA_CHANGE_QUESTION,
+          options: CRITERIA_CHANGE_OPTIONS,
+          recommendedOptionId: null,
+          allowText: true,
+          kind: "criteriaChange",
+          ...(proposedCriteria === undefined ? {} : { proposedCriteria }),
+        },
+        answers: null,
+        status: null,
+        evidenceId: null,
+        reason: { code: "criteriaChange", text: "Keys are shared across an account." },
+        createdAt: now,
+      });
+      const answer = (activityId: string, optionId: string, body: string): OrchestrationCommand => ({
+        type: "card.elicitation.answer",
+        commandId: nextCommandId(),
+        cardId,
+        activityId,
+        optionId,
+        body,
+        createdAt: now,
+      });
+
+      const asked = yield* applyCommands([
+        ...setup,
+        ...cardInProgress(),
+        propose("criteria-change-1", proposed),
+      ]);
+      // The proposal reaches the card shell as data, not only as prose in the question's body.
+      expect(cardIn(asked)?.openElicitations).toMatchObject([
+        { activityId: "criteria-change-1", kind: "criteriaChange", proposedCriteria: proposed },
+      ]);
+
+      // Applying it sets the criteria and answers as one decision, in that order.
+      expect(yield* decide(asked, answer("criteria-change-1", "apply", "Apply them"))).toMatchObject([
+        { type: "card.acceptance-set", payload: { acceptance: { criteria: proposed, state: "confirmed" } } },
+        {
+          type: "card.activity-recorded",
+          payload: {
+            activityId: "criteria-change-1:answer",
+            kind: "response",
+            deliverTo: "builder",
+            delivery: "pending",
+            answers: { questionId: "criteria-change-1", optionId: "apply" },
+            body: 'Answering "Change the acceptance criteria to the proposed ones?": Apply them. The card\'s criteria are now the ones you proposed.',
+          },
+        },
+      ]);
+      const applied = yield* applyTo(asked, [answer("criteria-change-1", "apply", "Apply them")]);
+      expect(cardIn(applied)).toMatchObject({
+        acceptance: { criteria: proposed },
+        openElicitations: [],
+      });
+
+      // Keeping the current ones resolves the question and leaves the criteria alone.
+      const kept = yield* applyTo(asked, [answer("criteria-change-1", "keep", "Keep the current ones")]);
+      expect(cardIn(kept)).toMatchObject({ acceptance: { criteria }, openElicitations: [] });
+
+      // Criteria the rules refuse take neither half: the question stays open and nothing is written.
+      const broken = yield* applyTo(asked, [
+        propose("criteria-change-2", [
+          { id: "c1", text: "One.", verification: "automated" },
+          { id: "c1", text: "Two.", verification: "automated" },
+        ]),
+      ]);
+      expect(yield* refusal(broken, answer("criteria-change-2", "apply", "Apply them"))).toContain(
+        "its own id",
+      );
+      expect(cardIn(broken)?.openElicitations.map((open) => open.activityId)).toContain(
+        "criteria-change-2",
+      );
+      expect(cardIn(broken)?.acceptance.criteria).toMatchObject(criteria);
+
+      // A proposal recorded before the criteria were data has nothing to apply.
+      const legacy = yield* applyTo(asked, [propose("criteria-change-3")]);
+      expect(yield* refusal(legacy, answer("criteria-change-3", "apply", "Apply them"))).toBe(
+        LEGACY_CRITERIA_PROPOSAL_REASON,
+      );
     }),
   );
 

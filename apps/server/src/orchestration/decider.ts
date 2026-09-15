@@ -77,6 +77,9 @@ import {
   cardActivity,
   EVIDENCE_CAPTURE_CODE,
   CHECKPOINT_OPTIONS,
+  CRITERIA_CHANGE_APPLY,
+  LEGACY_CRITERIA_PROPOSAL_REASON,
+  elicitationAnswerBody,
   NO_OPEN_QUESTION_REASON,
   NO_OPEN_REF_REPORT_REASON,
   NOT_REF_REPORT_REASON,
@@ -4077,14 +4080,40 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           readModel,
         });
       }
-      return yield* planned(command, "card", card.id, command.createdAt, {
+      // Applying a proposed criteria change writes the proposal to the card. The criteria and the
+      // answer are planned together, so neither half happens on its own: a refusal from the
+      // criteria rules (a landed card, criteria that break them) refuses the answer with it.
+      const applying =
+        question.kind === "criteriaChange" && command.optionId === CRITERIA_CHANGE_APPLY;
+      const proposed = question.proposedCriteria ?? [];
+      if (applying && proposed.length === 0) {
+        return yield* refuse(command, LEGACY_CRITERIA_PROPOSAL_REASON);
+      }
+      const applied = applying
+        ? yield* decideOrchestrationCommand({
+            readModel,
+            command: {
+              type: "card.criteria.set",
+              commandId: command.commandId,
+              cardId: command.cardId,
+              criteria: proposed,
+            },
+          })
+        : [];
+      const answered = yield* planned(command, "card", card.id, command.createdAt, {
         type: "card.activity-recorded",
         payload: {
           activityId: `${command.activityId}:answer`,
           cardId: card.id,
           kind: "response",
           author: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
-          body: command.body,
+          // Named with the question it answers: an option's label alone ("Apply them") left the
+          // agent asking a person what it referred to.
+          body: elicitationAnswerBody({
+            question: question.question,
+            body: command.body,
+            applied: applying,
+          }),
           runThreadId: null,
           // A plan card's questions come from its coordinator, whatever their kind.
           deliverTo: question.kind === "plan" || card.kind === "plan" ? "coordinator" : "builder",
@@ -4097,6 +4126,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           createdAt: command.createdAt,
         },
       });
+      return applying ? [...(Array.isArray(applied) ? applied : [applied]), answered] : answered;
     }
 
     // A person decides about refs Iskra reported; CardRefGuard does the restoring.
