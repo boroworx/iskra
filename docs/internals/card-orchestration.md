@@ -1,8 +1,10 @@
 # Card orchestration
 
 Decisions and traps behind cards running on their own. The user-facing flow is in
-[channels, agents, and the board](../user/channels-agents-board.md); the acceptance test that
-drives it end to end is [cardFlow.integration.test.ts](../../apps/server/integration/cardFlow.integration.test.ts).
+[channels, agents, and the board](../user/channels-agents-board.md); the acceptance tests that
+drive it end to end are [cardFlow.integration.test.ts](../../apps/server/integration/cardFlow.integration.test.ts)
+and, for verifiers, hidden scenarios and agent instances,
+[cardVerifier.integration.test.ts](../../apps/server/integration/cardVerifier.integration.test.ts).
 
 ## Where policy lives
 
@@ -18,8 +20,10 @@ enforce it.
 Consequences:
 
 - `exclusivePaths` is class A, so a builder can't turn off its own landing serialization.
-- The decider can't see the environment session cap. Channel wakes honor only a project's
-  `sessionCap`, while the scheduler enforces both.
+- The decider can't see the environment session cap. It refuses a channel wake only at a project's
+  `sessionCap`; [RunReactor.ts](../../apps/server/src/orchestration/RunReactor.ts) keeps a wake past
+  the machine's cap pending until a session ends (or the minute tick), and the scheduler enforces
+  both for cards.
 
 ## Slots
 
@@ -33,6 +37,72 @@ loses nothing.
 The scheduler only picks cards. `card.session.start` re-checks every gate in the decider (plan
 gate, one writer, pause, side-effect guard, project cap). Its in-flight and backoff state is in
 memory, and a restart simply plans again.
+
+## Agent instances
+
+Every wake is its own run of the agent (`decideWake` in [wakeRouting.ts](../../apps/server/src/orchestration/wakeRouting.ts)):
+a message joins the agent's live run only in the same channel or DM, and anywhere else starts another
+instance. This replaced M1's one live context per agent, which refused wakes from a second channel and
+queued DMs, so an agent at work in one place was unreachable everywhere else. Nothing is keyed on the
+agent id alone: each run has its own thread credential, and tools bind to the run.
+
+With no per-agent limit, the machine's session cap is what bounds concurrent runs. The wait is in
+memory and said once in the channel; after a restart the still-pending messages wake the agent on the
+next message or run end. `queued` deliveries from before instances are woken at startup, and the
+status stays in the contract only so old events decode.
+
+## Verifier
+
+When a project's verifier is on, or the builder's blueprint always verifies, a card entering review
+is checked by a second agent before approveMerge, plan-child landing or auto-merge can pass
+(`verificationRefusal` in [cardRules.ts](../../apps/server/src/orchestration/cardRules.ts)). Verdicts
+are pinned to the commit under review; a verdict for an older commit is refused.
+
+Selection order ([verifierSelection.ts](../../apps/server/src/orchestration/verifierSelection.ts)):
+the builder template's `verifyWith`, then a verifier-role agent on a different provider that is ready
+and can enforce a verifier run (OpenCode first), then the builder's template on another model of its
+provider, then the builder's own model. Codex is never chosen. Each step records its reason code, so
+review can say why this verifier is the one checking.
+
+Independence is structural, not a prompt:
+
+- The verifier works in a detached snapshot worktree at the commit, with its own port block and
+  services ([CardWorkspace.ts](../../apps/server/src/orchestration/CardWorkspace.ts) `snapshot`). It
+  can't move the card's branch, and the builder's running services never answer for it.
+- The brief ([verifierBrief.ts](../../apps/server/src/orchestration/verifierBrief.ts)) carries the
+  criteria, spec, evidence, diff and hidden scenarios, never the owner's decisions, plan, messages,
+  critiques, transcript or risk claims.
+- A verifier run reads. A verifier-role template may add a shell, which its provider must then
+  enforce, so an OpenCode verifier never gets one.
+
+A verifier that ends without a verdict is started once more, then the card asks a person. Rerun is
+refused only while a live verifier run exists, and selection never refuses a running verification, so
+a verifier that died can't lock its card.
+
+## Hidden scenarios
+
+Scenarios live in one file per project under the server's state directory
+([HoldoutStore.ts](../../apps/server/src/orchestration/HoldoutStore.ts), mode 0600), never in the
+repository, where any builder could read them, and never as events, which reach every client. People
+edit them over write-scoped RPCs; the list returns titles only. Command scenarios run on the server in
+the verifier's snapshot, through admission, with only `PATH`, `HOME` and the snapshot's ports.
+
+What keeps them from the builder:
+
+- Builders can't read the store: Claude runs deny reads of the Iskra home, OpenCode runs deny
+  `external_directory` and have no shell, and Codex runs are refused.
+- A failed verdict reaches the builder as criterion notes and a count of failed scenarios. Notes and
+  concerns pass through `redactHoldouts` before they are recorded, which catches quotes but not a
+  paraphrase.
+- The verifier run's stored context shows `[hidden scenario <id>]` in place of each scenario, because
+  the context inspector renders stored contexts. Verdict rows keep scenario ids only.
+
+The honest limit: the scenario text does reach the local event log, in the verifier's own hidden
+thread. Its first `thread.turn.start` is the provider input, so the thread's user message stores the
+full brief, and a person opening that thread sees it (people wrote the scenarios). Anyone who can read
+the environment's database can read them. Keeping the turn input out of band would close this; it is
+not done. The acceptance test pins exactly this boundary: every other event, card activity, stream
+item and verdict row is checked clean.
 
 ## Evidence is pinned to a commit
 
@@ -59,8 +129,20 @@ locks in `CardWorkspace` guard worktree mutation only.
 
 ## Sandbox limits
 
-- Only Claude runs card sessions in M1; `ProviderService` refuses providers that can't enforce the
-  run's limits. See [m1-claude-run-enforcement.md](../findings/m1-claude-run-enforcement.md).
+- `ProviderService` refuses a run before its adapter starts when the provider can't enforce the run's
+  limits (`runRefusal` in [runEnforcement.ts](../../apps/server/src/provider/runEnforcement.ts));
+  providers not in the table are refused. The client copy in
+  [runEnforcementView.ts](../../packages/client-runtime/src/runEnforcementView.ts) must say the same.
+
+  | Provider | Runs                                                             | Why                                                                                                                                                                                                                                                                                                                                                              |
+  | -------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | Claude   | read, write, shell, network, with the project's egress allowlist | OS sandbox plus permission rules. See [m1-claude-run-enforcement.md](../findings/m1-claude-run-enforcement.md).                                                                                                                                                                                                                                                  |
+  | OpenCode | read, and read with write                                        | No OS sandbox, so a shell or network can't be confined. Each run gets its own `opencode serve` with a temporary config home, project config disabled, deny-by-default permission rules, only Iskra's MCP server, asks auto-rejected, no resume; an external server is refused. See [m2-opencode-run-enforcement.md](../findings/m2-opencode-run-enforcement.md). |
+  | Codex    | none                                                             | The sandbox and home are built but refused until the gated real-binary test passes on a machine with Codex. See [m2-codex-run-enforcement.md](../findings/m2-codex-run-enforcement.md).                                                                                                                                                                          |
+
+- OpenCode resolves a session's directory to its real path. A worktree reached through a symlink
+  (macOS `/var` is `/private/var`) reads as external, and the run is denied its own files. It fails
+  closed; give card worktrees real paths.
 - The Claude sandbox refuses writes under `~/.claude`. A card worktree below it gets a read-only
   shell, so run a dev server with an Iskra home outside `~/.claude`. Tests make their repositories
   in the OS temp dir.
@@ -81,3 +163,5 @@ locks in `CardWorkspace` guard worktree mutation only.
   nothing. Judge a typecheck by its exit code, or strip the escapes first.
 - Reactor tests share one engine per `it.layer`. Command ids must be unique per dispatch:
   a repeated id replays its receipt, and the second event never happens.
+- The same holds in reactors: ids derived from only a card and a commit replay on a second pass at that
+  commit. Verifier runs are keyed on the event that asked for them, so a rerun starts a new run.
