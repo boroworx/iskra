@@ -64,7 +64,7 @@ import { AgentAvatar } from "../iskra/AgentAvatar";
 import { RoundDots, SpendBar } from "../iskra/Marks";
 import { StatusPill } from "../iskra/StatusPill";
 import { CardActivityTimeline } from "./CardActivityTimeline";
-import { AttentionActions, RefsChangedControls } from "./CardAttention";
+import { AccessRequestDetails, AttentionActions, RefsChangedControls } from "./CardAttention";
 import { CardCriteria, CardPreviewPanel, CardQuestions, cardQuestionsOf } from "./CardContract";
 import { CardLandingPanel, CardReview, CheckpointControls } from "./CardReviewPanel";
 import { Button } from "../ui/button";
@@ -641,7 +641,11 @@ function CardSheetBody(props: {
                   <span className="text-xs text-tertiary-label">
                     {reasonLabel({ code: item.code, text: item.text }).label}
                   </span>
-                  <p className="whitespace-pre-wrap break-words">{item.text}</p>
+                  {item.code === "accessRequest" ? (
+                    <AccessRequestDetails item={item} agentName={sessionAgent?.name} />
+                  ) : (
+                    <p className="whitespace-pre-wrap break-words">{item.text}</p>
+                  )}
                   <div className="flex justify-end">
                     <AttentionActions card={card} item={item} environmentId={environmentId} onCard />
                   </div>

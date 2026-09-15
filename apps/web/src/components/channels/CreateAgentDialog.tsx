@@ -35,6 +35,7 @@ import {
 } from "./AgentModelPicker";
 import {
   CapabilityFields,
+  NetworkReachNote,
   NO_ROLES_TEXT,
   RoleFields,
   orderedCapabilities,
@@ -244,6 +245,11 @@ export function CreateAgentDialog(props: {
             <div className="flex flex-col gap-1.5 [&>p]:px-4">
               <CapabilityFields value={capabilities} onChange={setCapabilities} />
               <AgentRunNote driver={run.driver} refusal={run.refusal} />
+              <NetworkReachNote
+                environmentId={environmentId}
+                projectId={projectId}
+                capabilities={capabilities}
+              />
             </div>
           </form>
         </DialogPanel>

@@ -51,6 +51,7 @@ export function AttentionActions(props: {
   const { card, item, environmentId } = props;
   const forward = useAtomCommand(cardEnvironment.forwardComment);
   const dismiss = useAtomCommand(cardEnvironment.dismissAttention);
+  const allow = useAtomCommand(cardEnvironment.allowAccess);
   const decide = useAtomCommand(cardEnvironment.decide);
   const projects = useProjects();
   const grouping = useClientSettings(selectProjectGroupingSettings);
@@ -83,6 +84,19 @@ export function AttentionActions(props: {
                 }
               >
                 Forward to the agent
+              </ActionButton>
+            );
+          case "allowAccess":
+            return (
+              <ActionButton
+                key={action}
+                tone="primary"
+                disabled={sending}
+                onClick={() =>
+                  void send(allow({ environmentId, input }), "Access was not allowed")
+                }
+              >
+                Allow for this project
               </ActionButton>
             );
           case "dismiss":
@@ -210,6 +224,33 @@ export function AttentionActions(props: {
             );
         }
       })}
+    </div>
+  );
+}
+
+/** An access request: who needs which domains, as chips, and the agent's reason. */
+export function AccessRequestDetails(props: {
+  readonly item: CardAttention;
+  readonly agentName?: string | undefined;
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <p className="flex flex-wrap items-center gap-1.5 text-[13px]">
+        <span>
+          {props.agentName === undefined ? "Its agent" : `@${props.agentName}`} needs access to
+        </span>
+        {(props.item.domains ?? []).map((domain) => (
+          <code
+            key={domain}
+            className="rounded-full bg-muted px-2 py-0.5 font-mono text-xs text-foreground"
+          >
+            {domain}
+          </code>
+        ))}
+      </p>
+      <p className="line-clamp-4 whitespace-pre-wrap break-words text-[13px] text-muted-foreground">
+        {props.item.text}
+      </p>
     </div>
   );
 }

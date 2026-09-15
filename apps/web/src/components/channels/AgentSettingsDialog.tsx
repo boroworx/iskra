@@ -9,11 +9,19 @@ import {
   type ModelSelection,
   type ProjectId,
   type RunCapability,
+  projectOrchestrationOf,
 } from "@iskra/contracts";
+import { Link } from "@tanstack/react-router";
 import { useId, useState } from "react";
 
 import { requestConfirmDialog } from "~/confirmDialog";
+import { useClientSettings } from "~/hooks/useSettings";
+import {
+  deriveLogicalProjectKeyFromSettings,
+  selectProjectGroupingSettings,
+} from "~/logicalProject";
 import { channelEnvironment } from "~/state/channels";
+import { useProjects } from "~/state/entities";
 import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { toastCommandFailure } from "../toastCommandFailure";
@@ -83,6 +91,42 @@ export function CapabilityFields(props: {
         ))}
       </SheetGroup>
     </fieldset>
+  );
+}
+
+/**
+ * Network reaches only the project's allowed domains, so with none it reaches nothing; says so, and
+ * where to add some, while the capability is on.
+ */
+export function NetworkReachNote(props: {
+  readonly environmentId: EnvironmentId;
+  readonly projectId: ProjectId;
+  readonly capabilities: ReadonlyArray<RunCapability>;
+  readonly onNavigate?: () => void;
+}) {
+  const projects = useProjects();
+  const grouping = useClientSettings(selectProjectGroupingSettings);
+  const project = projects.find(
+    (entry) => entry.environmentId === props.environmentId && entry.id === props.projectId,
+  );
+  if (project === undefined || !props.capabilities.includes("network")) return null;
+  const { egress } = projectOrchestrationOf(project);
+  if (egress.mode === "allowlist" && egress.allow.length > 0) return null;
+  return (
+    <p className="text-xs text-muted-foreground">
+      This project allows no domains yet, so network reaches nothing. Agents can request access, or
+      add domains in{" "}
+      <Link
+        to="/settings/projects"
+        search={{ project: deriveLogicalProjectKeyFromSettings(project, grouping) }}
+        hash="project-orchestration"
+        className="text-primary hover:underline"
+        {...(props.onNavigate === undefined ? {} : { onClick: props.onNavigate })}
+      >
+        Settings → Projects → {project.title} → Network for agent shells
+      </Link>
+      .
+    </p>
   );
 }
 
@@ -544,6 +588,12 @@ function AgentSettingsForm(props: {
                 disabled={props.archived}
               />
               <AgentRunNote driver={run.driver} refusal={run.refusal} />
+              <NetworkReachNote
+                environmentId={props.environmentId}
+                projectId={props.projectId}
+                capabilities={capabilities}
+                onNavigate={props.onClose}
+              />
             </div>
             {roles.includes("builder") ? (
               <>

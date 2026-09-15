@@ -49,7 +49,7 @@ import { useEnvironmentAgents, useEnvironmentCards, useProjects } from "~/state/
 import { usePrimaryEnvironmentId } from "~/state/environments";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { ApproveAndStart } from "../channels/CardProposal";
-import { AttentionActions, RefsChangedControls } from "./CardAttention";
+import { AccessRequestDetails, AttentionActions, RefsChangedControls } from "./CardAttention";
 import { CardQuestion } from "./CardContract";
 import { CheckpointControls } from "./CardReviewPanel";
 import { agentListEntries, type AgentEntry } from "../channels/channels.logic";
@@ -564,7 +564,16 @@ export function NeedsYouView() {
                               {item.reason}
                             </p>
                           ) : null}
-                          {attention !== undefined ? (
+                          {attention?.code === "accessRequest" ? (
+                            <AccessRequestDetails
+                              item={attention}
+                              agentName={
+                                itemCard?.delegateAgentId == null
+                                  ? undefined
+                                  : agentNameById.get(itemCard.delegateAgentId)
+                              }
+                            />
+                          ) : attention !== undefined ? (
                             <p className="line-clamp-2 whitespace-pre-wrap break-words text-[13px] text-muted-foreground">
                               {attention.text}
                             </p>
