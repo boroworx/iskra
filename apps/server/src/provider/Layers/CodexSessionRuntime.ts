@@ -10,6 +10,7 @@ import {
   type ProviderEvent,
   type ProviderInteractionMode,
   type ProviderRequestKind,
+  type ProviderRunRestrictions,
   type ProviderSession,
   type ProviderTurnStartResult,
   type ProviderUserInputAnswers,
@@ -24,7 +25,9 @@ import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -178,6 +181,8 @@ export interface CodexSessionRuntimeOptions {
   readonly model?: string;
   readonly serviceTier?: CodexServiceTier | undefined;
   readonly resumeCursor?: CodexResumeCursor;
+  /** Set for an Iskra run: a fixed sandbox, no approvals, and never resumed. */
+  readonly run?: ProviderRunRestrictions;
   readonly appServerArgs?: ReadonlyArray<string>;
   /** Capabilities the session's `iskra` MCP credential grants; drives the prompt blocks. */
   readonly mcpCapabilities?: ReadonlySet<string>;
@@ -542,13 +547,62 @@ function runtimeModeToThreadConfig(input: RuntimeMode): {
   }
 }
 
+/**
+ * A run's thread never asks for approval; Codex's OS sandbox is its ceiling, read-only unless
+ * the run may write. Evidence: docs/findings/m2-codex-run-enforcement.md.
+ */
+export function runThreadConfig(
+  run: ProviderRunRestrictions,
+): ReturnType<typeof runtimeModeToThreadConfig> {
+  return {
+    approvalPolicy: "never",
+    sandbox: run.capabilities.includes("write") ? "workspace-write" : "read-only",
+    approvalsReviewer: "user",
+  };
+}
+
+/** A run's turns write only inside its directory, and never reach the network. */
+export function runTurnSandboxPolicy(
+  run: ProviderRunRestrictions,
+  cwd: string,
+): EffectCodexSchema.V2TurnStartParams__SandboxPolicy {
+  return run.capabilities.includes("write")
+    ? { type: "workspaceWrite", writableRoots: [cwd], networkAccess: false }
+    : { type: "readOnly", networkAccess: false };
+}
+
+/**
+ * A run's CODEX_HOME: a copy of the account's auth.json and an empty config.toml, so none of the
+ * user's config, MCP servers, profiles or sessions load; Iskra's MCP server is still added with
+ * `-c`. Removed when the caller's scope closes.
+ */
+export const prepareCodexRunHome = Effect.fn("prepareCodexRunHome")(function* (
+  sourceHome: string | undefined,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const auth = path.join(expandHomePath(sourceHome ?? "~/.codex"), "auth.json");
+  const runHome = yield* fileSystem.makeTempDirectoryScoped({ prefix: "iskra-codex-run-" });
+  if (yield* fileSystem.exists(auth)) {
+    yield* fileSystem.copyFile(auth, path.join(runHome, "auth.json"));
+  }
+  yield* fileSystem.writeFileString(
+    path.join(runHome, "config.toml"),
+    "# Generated for an Iskra run: no MCP servers or profiles.\n",
+  );
+  return runHome;
+});
+
 function buildThreadStartParams(input: {
   readonly cwd: string;
   readonly runtimeMode: RuntimeMode;
   readonly model: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
+  readonly run?: ProviderRunRestrictions;
 }): EffectCodexSchema.V2ThreadStartParams {
-  const config = runtimeModeToThreadConfig(input.runtimeMode);
+  const config = input.run
+    ? runThreadConfig(input.run)
+    : runtimeModeToThreadConfig(input.runtimeMode);
   return {
     cwd: input.cwd,
     approvalPolicy: config.approvalPolicy,
@@ -619,6 +673,8 @@ export function buildTurnStartParams(input: {
   readonly interactionMode?: ProviderInteractionMode;
   /** Defaults to true so callers that predate the agent-access gate are unchanged. */
   readonly browserToolsAvailable?: boolean | IskraToolAvailability;
+  /** A run's restrictions and directory replace the runtime mode's approval and sandbox. */
+  readonly run?: { readonly restrictions: ProviderRunRestrictions; readonly cwd: string };
 }): Effect.Effect<
   CodexTurnStartParamsWithCollaborationMode,
   CodexErrors.CodexAppServerProtocolParseError
@@ -634,7 +690,9 @@ export function buildTurnStartParams(input: {
     turnInput.push(attachment);
   }
 
-  const config = runtimeModeToThreadConfig(input.runtimeMode);
+  const config = input.run
+    ? runThreadConfig(input.run.restrictions)
+    : runtimeModeToThreadConfig(input.runtimeMode);
   const collaborationMode = buildCodexCollaborationMode({
     ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
     ...(input.model ? { model: input.model } : {}),
@@ -647,7 +705,9 @@ export function buildTurnStartParams(input: {
     input: turnInput,
     approvalPolicy: config.approvalPolicy,
     approvalsReviewer: config.approvalsReviewer,
-    sandboxPolicy: runtimeModeToTurnSandboxPolicy(input.runtimeMode),
+    sandboxPolicy: input.run
+      ? runTurnSandboxPolicy(input.run.restrictions, input.run.cwd)
+      : runtimeModeToTurnSandboxPolicy(input.runtimeMode),
     ...(input.model ? { model: input.model } : {}),
     ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
     ...(input.effort ? { effort: input.effort } : {}),
@@ -724,11 +784,14 @@ export const openCodexThread = (input: {
   readonly requestedModel: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
   readonly resumeThreadId: string | undefined;
+  readonly run?: ProviderRunRestrictions;
 }): Effect.Effect<typeof CodexThreadResumeMetadata.Type, CodexErrors.CodexAppServerError> => {
-  const resumeThreadId = input.resumeThreadId;
+  // A run is rebuilt from its context on every wake, so it never sends thread/resume.
+  const resumeThreadId = input.run ? undefined : input.resumeThreadId;
   const startParams = buildThreadStartParams({
     cwd: input.cwd,
     runtimeMode: input.runtimeMode,
+    ...(input.run ? { run: input.run } : {}),
     model: input.requestedModel,
     serviceTier: input.serviceTier,
   });
@@ -2377,6 +2440,7 @@ export const makeCodexSessionRuntime = (
         requestedModel,
         serviceTier: options.serviceTier,
         resumeThreadId: readResumeCursorThreadId(options.resumeCursor),
+        ...(options.run ? { run: options.run } : {}),
       });
 
       const providerThreadId = opened.thread.id;
@@ -2449,6 +2513,7 @@ export const makeCodexSessionRuntime = (
           const params = yield* buildTurnStartParams({
             threadId: providerThreadId,
             runtimeMode: options.runtimeMode,
+            ...(options.run ? { run: { restrictions: options.run, cwd: options.cwd } } : {}),
             ...(input.input ? { prompt: input.input } : {}),
             ...(input.attachments ? { attachments: input.attachments } : {}),
             ...(normalizedModel ? { model: normalizedModel } : {}),

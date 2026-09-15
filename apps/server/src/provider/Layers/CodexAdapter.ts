@@ -37,6 +37,7 @@ import * as Crypto from "effect/Crypto";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
@@ -65,12 +66,14 @@ import {
   CodexSessionRuntimeThreadIdMissingError,
   describeMcpElicitation,
   makeCodexSessionRuntime,
+  prepareCodexRunHome,
   type CodexSessionRuntimeError,
   type CodexSessionRuntimeOptions,
   type CodexSessionRuntimeShape,
 } from "./CodexSessionRuntime.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import { resolveCodexLaunchArgs } from "./codexLaunchArgs.ts";
+import { codexRunEnvNames, runEnvironment } from "../runEnforcement.ts";
 import {
   type CodexRateLimitSnapshot,
   codexRateLimitsToUpdate,
@@ -2219,6 +2222,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
 ) {
   const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make("codex");
   const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const crypto = yield* Crypto.Crypto;
   const serverConfig = yield* Effect.service(ServerConfig);
@@ -2245,6 +2249,16 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           });
         }
 
+        // Codex's network switch is all-or-nothing, so a run that needs any network is refused.
+        const run = input.run;
+        if (run && (run.capabilities.includes("network") || run.egress?.mode === "allowlist")) {
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "startSession",
+            issue: `Agent runs on 'codex' can't enforce ${run.egress?.mode === "allowlist" ? "an egress allowlist" : "network"}; choose a provider that can.`,
+          });
+        }
+
         const existing = sessions.get(input.threadId);
         if (existing && !existing.stopped) {
           yield* Effect.suspend(() => stopSessionInternal(existing));
@@ -2255,15 +2269,49 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? getCodexServiceTierOptionValue(input.modelSelection)
             : undefined;
         const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
+        const sessionScope = yield* Scope.make("sequential");
+        let sessionScopeTransferred = false;
+        yield* Effect.addFinalizer(() =>
+          sessionScopeTransferred ? Effect.void : Scope.close(sessionScope, Exit.void),
+        );
+        // A run gets a generated CODEX_HOME, the environment allowlist, and no launch args or
+        // resume, so nothing from the user's Codex setup widens it.
+        const runHome = run
+          ? yield* prepareCodexRunHome(
+              codexConfig.homePath || (options?.environment ?? process.env).CODEX_HOME,
+            ).pipe(
+              Effect.provideService(Scope.Scope, sessionScope),
+              Effect.provideService(FileSystem.FileSystem, fileSystem),
+              Effect.provideService(Path.Path, path),
+              Effect.mapError(
+                (cause) =>
+                  new ProviderAdapterProcessError({
+                    provider: PROVIDER,
+                    threadId: input.threadId,
+                    detail: `Couldn't prepare the run's Codex home: ${cause.message}`,
+                    cause,
+                  }),
+              ),
+            )
+          : undefined;
+        const environment = run
+          ? runEnvironment(options?.environment ?? process.env, codexRunEnvNames())
+          : options?.environment;
         const runtimeInput: CodexSessionRuntimeOptions = {
           threadId: input.threadId,
           providerInstanceId: boundInstanceId,
           cwd: input.cwd ?? process.cwd(),
           binaryPath: codexConfig.binaryPath,
-          launchArgs: resolveCodexLaunchArgs(codexConfig.launchArgs, options?.environment),
-          ...(options?.environment ? { environment: options.environment } : {}),
-          ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
-          ...(isCodexResumeCursorSchema(input.resumeCursor)
+          ...(run
+            ? { run }
+            : { launchArgs: resolveCodexLaunchArgs(codexConfig.launchArgs, options?.environment) }),
+          ...(environment ? { environment } : {}),
+          ...(runHome
+            ? { homePath: runHome }
+            : codexConfig.homePath
+              ? { homePath: codexConfig.homePath }
+              : {}),
+          ...(!run && isCodexResumeCursorSchema(input.resumeCursor)
             ? { resumeCursor: input.resumeCursor }
             : {}),
           runtimeMode: input.runtimeMode,
@@ -2275,7 +2323,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? {
                 environment: {
                   ...McpProviderSession.withAgentDeviceEnvironment(
-                    options?.environment ?? process.env,
+                    environment ?? process.env,
                     mcpSession,
                   ),
                   ISKRA_MCP_BEARER_TOKEN: mcpSession.authorizationHeader.replace(/^Bearer\s+/, ""),
@@ -2297,11 +2345,6 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         // after the stop and often sparse, so keep the session's merged view of
         // it and read it when a turn fails on the limit.
         let rateLimits: CodexRateLimitSnapshot | undefined;
-        const sessionScope = yield* Scope.make("sequential");
-        let sessionScopeTransferred = false;
-        yield* Effect.addFinalizer(() =>
-          sessionScopeTransferred ? Effect.void : Scope.close(sessionScope, Exit.void),
-        );
         const createRuntime = options?.makeRuntime ?? makeCodexSessionRuntime;
         const runtime = yield* createRuntime(runtimeInput).pipe(
           Effect.provideService(Scope.Scope, sessionScope),

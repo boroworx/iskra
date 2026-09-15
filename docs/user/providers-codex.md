@@ -49,6 +49,12 @@ reported accounts, refresh provider status, and confirm the second instance has
 its own shadow path and login. A shadow-home conflict usually means the directory
 contains a copied Codex setup. Use a fresh shadow directory and sign in again.
 
+## Agent runs
+
+Agents on the board and in channels can't use Codex models yet. Iskra hasn't verified that Codex
+keeps an agent inside its limits, so it refuses those runs; choose a Claude or OpenCode model for
+the agent.
+
 ## Answer questions while Codex works
 
 Codex can ask a question and keep working. Answer it in the thread's question

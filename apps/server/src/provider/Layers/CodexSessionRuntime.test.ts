@@ -18,10 +18,101 @@ import {
   isRecoverableThreadResumeError,
   makeMemoryConsolidationNotificationFilter,
   openCodexThread,
+  prepareCodexRunHome,
   readCodexThread,
   rollbackCodexThread,
   toMcpElicitationResponse,
 } from "./CodexSessionRuntime.ts";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
+
+describe("Codex runs", () => {
+  const readRun = { systemPrompt: "Probe run.", capabilities: ["read" as const] };
+
+  it.effect("start a fresh read-only thread that never asks, even with a resume cursor", () =>
+    Effect.gen(function* () {
+      const calls: Array<unknown> = [];
+      yield* openCodexThread({
+        client: {
+          request: (method, payload) => {
+            calls.push({ method, payload });
+            return Effect.succeed(makeThreadOpenResponse("fresh-thread"));
+          },
+          raw: { request: () => Effect.die("A run must never resume a thread") },
+        },
+        threadId: ThreadId.make("thread-run"),
+        runtimeMode: "full-access",
+        cwd: "/tmp/project",
+        requestedModel: undefined,
+        serviceTier: undefined,
+        resumeThreadId: "saved-thread",
+        run: readRun,
+      });
+
+      NodeAssert.deepStrictEqual(calls, [
+        {
+          method: "thread/start",
+          payload: {
+            cwd: "/tmp/project",
+            approvalPolicy: "never",
+            sandbox: "read-only",
+            approvalsReviewer: "user",
+          },
+        },
+      ]);
+    }),
+  );
+
+  it.effect("let a write run's turns write only in its directory, with no network", () =>
+    Effect.gen(function* () {
+      const params = yield* buildTurnStartParams({
+        threadId: "provider-thread",
+        runtimeMode: "full-access",
+        prompt: "go",
+        run: {
+          restrictions: { ...readRun, capabilities: ["read", "write"] },
+          cwd: "/tmp/project",
+        },
+      });
+
+      NodeAssert.equal(params.approvalPolicy, "never");
+      NodeAssert.deepStrictEqual(params.sandboxPolicy, {
+        type: "workspaceWrite",
+        writableRoots: ["/tmp/project"],
+        networkAccess: false,
+      });
+    }),
+  );
+
+  it.effect("generate a run home holding only the account's auth and an empty config", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const userHome = yield* fileSystem.makeTempDirectoryScoped();
+      yield* fileSystem.writeFileString(path.join(userHome, "auth.json"), '{"token":"t"}');
+      yield* fileSystem.writeFileString(
+        path.join(userHome, "config.toml"),
+        '[mcp_servers.decoy]\nurl = "http://127.0.0.1:1"\n',
+      );
+
+      const runHome = yield* prepareCodexRunHome(userHome);
+
+      NodeAssert.deepStrictEqual((yield* fileSystem.readDirectory(runHome)).toSorted(), [
+        "auth.json",
+        "config.toml",
+      ]);
+      NodeAssert.equal(
+        yield* fileSystem.readFileString(path.join(runHome, "auth.json")),
+        '{"token":"t"}',
+      );
+      NodeAssert.doesNotMatch(
+        yield* fileSystem.readFileString(path.join(runHome, "config.toml")),
+        /mcp_servers/,
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});
 const isCodexAppServerRequestError = Schema.is(CodexErrors.CodexAppServerRequestError);
 
 describe("Codex thread history", () => {
