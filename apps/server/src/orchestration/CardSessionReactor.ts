@@ -212,6 +212,7 @@ const make = Effect.gen(function* () {
       ),
       activities: yield* cards.listActivities({ cardId: card.id, limit: 200 }),
       baseBranch,
+      wiki: model.projects.find((candidate) => candidate.id === card.projectId)?.wiki ?? [],
     });
     for (const command of cardRunStartCommands({
       key,
