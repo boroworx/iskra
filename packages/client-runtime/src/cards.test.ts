@@ -207,7 +207,11 @@ describe("verifier refusals", () => {
     recordedAt: at(1),
   });
   const reviewed = (state: OrchestrationCard["verification"]["state"], headSha = "abc") =>
-    card("v", { status: "inReview", verification: verification(state), evidence: evidence(headSha) });
+    card("v", {
+      status: "inReview",
+      verification: verification(state),
+      evidence: evidence(headSha),
+    });
   const off = { verifier: { mode: "off" as const } };
   const on = { verifier: { mode: "on" as const } };
 
@@ -347,15 +351,19 @@ describe("cardBadges", () => {
       ),
     ).toEqual([["Stuck", true]]);
     // Only unfinished cards say they have no criteria, triage included; finished ones never.
-    expect(labels(shell({ status: "triage", acceptance: LEGACY_CARD_CONTRACT.acceptance }))).toEqual(
-      [["No acceptance criteria", false]],
-    );
+    expect(
+      labels(shell({ status: "triage", acceptance: LEGACY_CARD_CONTRACT.acceptance })),
+    ).toEqual([["No acceptance criteria", false]]);
     expect(labels(shell({ ...base, status: "landed" }))).toEqual([]);
     expect(
       labels(
         shell({
           ...base,
-          paused: { reason: { code: "pausedByPerson", text: "Paused." }, by: "human", pausedAt: at(1) },
+          paused: {
+            reason: { code: "pausedByPerson", text: "Paused." },
+            by: "human",
+            pausedAt: at(1),
+          },
         }),
       ),
     ).toEqual([["Paused", false]]);
@@ -446,7 +454,11 @@ describe("needsYouItems before work starts", () => {
         card("proposal", { ...unowned, status: "triage" }),
         card("held", {
           ...unowned,
-          paused: { reason: { code: "pausedByPerson", text: "Paused." }, by: "human", pausedAt: at(1) },
+          paused: {
+            reason: { code: "pausedByPerson", text: "Paused." },
+            by: "human",
+            pausedAt: at(1),
+          },
         }),
       ]),
     ).toEqual([
@@ -628,7 +640,10 @@ describe("needsYouItems on the card contract", () => {
           status: "inProgress",
           openElicitations: [
             openQuestion("k9", "checkpoint", at(7)),
-            openQuestion("q1", "question", at(8), { question: "Which store?", optionIds: ["a", "b"] }),
+            openQuestion("q1", "question", at(8), {
+              question: "Which store?",
+              optionIds: ["a", "b"],
+            }),
             openQuestion("q2", "question", at(9), { question: "Per key?" }),
           ],
         }),
@@ -646,7 +661,9 @@ describe("needsYouItems on the card contract", () => {
         }),
         card("linear", {
           status: "ready",
-          openElicitations: [openQuestion("ask", "question", at(9), { question: "Which criteria?" })],
+          openElicitations: [
+            openQuestion("ask", "question", at(9), { question: "Which criteria?" }),
+          ],
           attention: [
             {
               activityId: "ask",
@@ -700,9 +717,9 @@ describe("needsYouItems on the card contract", () => {
       // Asking for criteria shows once, as its attention item.
       ["attention", "linear", "Which criteria?"],
     ]);
-    expect(
-      needsYouLabel(items.find((item) => item.cardId === "moved-ref")!),
-    ).toBe("Refs changed outside this card");
+    expect(needsYouLabel(items.find((item) => item.cardId === "moved-ref")!)).toBe(
+      "Refs changed outside this card",
+    );
     expect(items.find((item) => item.cardId === "refs")).toMatchObject({
       activityId: "refs-1",
       snoozable: false,
@@ -833,7 +850,10 @@ describe("elicitationAnswer", () => {
 
   it("finds a checkpoint's question by its kind, not by assuming its id", () => {
     const shell = {
-      openElicitations: [openQuestion("q2", "question", at(1)), openQuestion("k1", "checkpoint", at(1))],
+      openElicitations: [
+        openQuestion("q2", "question", at(1)),
+        openQuestion("k1", "checkpoint", at(1)),
+      ],
     };
     expect(openCheckpointActivityId(shell)).toBe("k1");
     expect(openCheckpointActivityId({ openElicitations: [] })).toBeNull();
@@ -894,7 +914,11 @@ describe("needsYouItems for plans, lessons, outcomes, reverts and budgets", () =
         },
       ],
     };
-    const attention = (activityId: string, code: "outcomeFlawed" | "revertConflict", minute: number) => ({
+    const attention = (
+      activityId: string,
+      code: "outcomeFlawed" | "revertConflict",
+      minute: number,
+    ) => ({
       activityId,
       code,
       text: code,
@@ -934,11 +958,19 @@ describe("needsYouItems for plans, lessons, outcomes, reverts and budgets", () =
         }),
         card("capped-1", {
           specState: "approved",
-          waitReason: { code: "budgetCap", text: "This project reached its $5 monthly budget.", since: at(5) },
+          waitReason: {
+            code: "budgetCap",
+            text: "This project reached its $5 monthly budget.",
+            since: at(5),
+          },
         }),
         card("capped-2", {
           specState: "approved",
-          waitReason: { code: "budgetCap", text: "This project reached its $5 monthly budget.", since: at(7) },
+          waitReason: {
+            code: "budgetCap",
+            text: "This project reached its $5 monthly budget.",
+            since: at(7),
+          },
         }),
       ],
       sessions: [],
@@ -946,17 +978,23 @@ describe("needsYouItems for plans, lessons, outcomes, reverts and budgets", () =
       now: Date.parse(at(10)),
     });
 
-    expect(items.map((item) => [item.kind, item.cardId, item.activityId ?? item.lessonId])).toEqual([
-      ["planApproval", "plan", "plan-q"],
-      ["sliceCheckpoint", "slice", null],
-      ["outcomeFlawed", "landed", "flawed-a"],
-      ["revertConflict", "revert", "conflict-a"],
-      ["budgetCap", "capped-1", null],
-      ["lessonProposed", "landed", "lesson-1"],
-    ]);
+    expect(items.map((item) => [item.kind, item.cardId, item.activityId ?? item.lessonId])).toEqual(
+      [
+        ["planApproval", "plan", "plan-q"],
+        ["sliceCheckpoint", "slice", null],
+        ["outcomeFlawed", "landed", "flawed-a"],
+        ["revertConflict", "revert", "conflict-a"],
+        ["budgetCap", "capped-1", null],
+        ["lessonProposed", "landed", "lesson-1"],
+      ],
+    );
     expect(needsYouLabel(items[2]!)).toBe("It turned out flawed; add a hidden scenario");
     // A budget wait is a person's, so it isn't listed as waiting on Iskra too.
-    expect(cardWaitItems([card("capped-1", { waitReason: { code: "budgetCap", text: "x", since: at(5) } })])).toEqual([]);
+    expect(
+      cardWaitItems([
+        card("capped-1", { waitReason: { code: "budgetCap", text: "x", since: at(5) } }),
+      ]),
+    ).toEqual([]);
   });
 });
 

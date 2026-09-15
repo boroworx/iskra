@@ -13,10 +13,14 @@ import {
   deriveLogicalProjectKeyFromSettings,
   selectProjectGroupingSettings,
 } from "~/logicalProject";
+import { randomUUID } from "~/lib/utils";
 import { cardEnvironment } from "~/state/cards";
+import { channelEnvironment } from "~/state/channels";
 import { useProjects } from "~/state/entities";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { toastCommandFailure } from "../toastCommandFailure";
+import { Input } from "../ui/input";
+import { Textarea } from "../ui/textarea";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -38,7 +42,7 @@ const refused = (title: string) => (result: AtomCommandResult<unknown, unknown>)
  * `onCard` leaves out the link to the card when its sheet is already open.
  */
 export function AttentionActions(props: {
-  readonly card: Pick<OrchestrationCardShell, "id" | "projectId">;
+  readonly card: Pick<OrchestrationCardShell, "id" | "projectId" | "title" | "acceptance">;
   readonly item: CardAttention;
   readonly environmentId: EnvironmentId;
   readonly onCard?: boolean;
@@ -102,7 +106,10 @@ export function AttentionActions(props: {
                 disabled={sending}
                 onClick={() =>
                   void send(
-                    decide({ environmentId, input: { type: "card.merge.approve", cardId: card.id } }),
+                    decide({
+                      environmentId,
+                      input: { type: "card.merge.approve", cardId: card.id },
+                    }),
                     "The landing was not retried",
                   )
                 }
@@ -167,6 +174,33 @@ export function AttentionActions(props: {
                 Project settings
               </Button>
             );
+          case "addHoldout":
+            return project === undefined ? null : (
+              <AddHoldoutButton
+                key={action}
+                card={card}
+                item={item}
+                environmentId={environmentId}
+                projectId={project.id}
+              />
+            );
+          case "assignAgent":
+            return props.onCard ? null : (
+              <Button
+                key={action}
+                size="sm"
+                variant="outline"
+                render={
+                  <Link
+                    to="/board/$environmentId/$projectId"
+                    params={{ environmentId, projectId: card.projectId }}
+                    search={{ card: card.id, focus: "agent" }}
+                  />
+                }
+              >
+                Assign an agent
+              </Button>
+            );
           case "addCriteria":
             return props.onCard ? null : (
               <Button
@@ -187,6 +221,95 @@ export function AttentionActions(props: {
         }
       })}
     </div>
+  );
+}
+
+/**
+ * Add hidden scenario for a card that turned out flawed: a described scenario prefilled from the
+ * card's criteria, saved to the project's hidden scenarios. Saving also sets the item aside.
+ */
+function AddHoldoutButton(props: {
+  readonly card: Pick<OrchestrationCardShell, "id" | "title" | "acceptance">;
+  readonly item: CardAttention;
+  readonly environmentId: EnvironmentId;
+  readonly projectId: OrchestrationCardShell["projectId"];
+}) {
+  const setHoldout = useAtomCommand(channelEnvironment.setProjectHoldout, { reportFailure: false });
+  const dismiss = useAtomCommand(cardEnvironment.dismissAttention);
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState(`${props.card.title} stays fixed`);
+  const [body, setBody] = useState(() =>
+    props.card.acceptance.criteria.map((criterion) => `- ${criterion.text}`).join("\n"),
+  );
+  const [saving, setSaving] = useState(false);
+  const ready = title.trim().length > 0 && body.trim().length > 0;
+
+  const save = async () => {
+    setSaving(true);
+    const result = await setHoldout({
+      environmentId: props.environmentId,
+      input: {
+        projectId: props.projectId,
+        scenario: {
+          scenarioId: randomUUID(),
+          title: title.trim(),
+          kind: "text",
+          body,
+          command: null,
+          timeoutMinutes: 5,
+        },
+      },
+    });
+    toastCommandFailure(result, "The hidden scenario was not saved", "The request was refused.");
+    if (result._tag === "Success") {
+      refused("It was not set aside")(
+        await dismiss({
+          environmentId: props.environmentId,
+          input: { cardId: props.card.id, activityId: props.item.activityId },
+        }),
+      );
+      setOpen(false);
+    }
+    setSaving(false);
+  };
+
+  return (
+    <>
+      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+        Add hidden scenario
+      </Button>
+      <AlertDialog open={open} onOpenChange={(next) => !saving && setOpen(next)}>
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Add a hidden scenario</AlertDialogTitle>
+            <AlertDialogDescription>
+              Only the verifier sees it, so future cards are checked for what this one got wrong. It
+              starts from this card's criteria; say what went wrong.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="flex flex-col gap-2 px-6 pb-2">
+            <Input
+              aria-label="Scenario title"
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+            />
+            <Textarea
+              aria-label="What to check"
+              value={body}
+              onChange={(event) => setBody(event.target.value)}
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogClose disabled={saving} render={<Button variant="outline" />}>
+              Cancel
+            </AlertDialogClose>
+            <Button disabled={saving || !ready} onClick={() => void save()}>
+              Save scenario
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
+    </>
   );
 }
 
@@ -258,7 +381,9 @@ export function RefsChangedControls(props: {
           disabled={sending}
           onClick={async () => {
             setSending(true);
-            refused("The refs were not kept")(await keep({ environmentId: props.environmentId, input }));
+            refused("The refs were not kept")(
+              await keep({ environmentId: props.environmentId, input }),
+            );
             setSending(false);
           }}
         >
@@ -268,10 +393,13 @@ export function RefsChangedControls(props: {
       <AlertDialog open={confirming} onOpenChange={(open) => !sending && setConfirming(open)}>
         <AlertDialogPopup>
           <AlertDialogHeader>
-            <AlertDialogTitle>Restore {everyRef ? "these refs" : `${chosen.size} refs`}?</AlertDialogTitle>
+            <AlertDialogTitle>
+              Restore {everyRef ? "these refs" : `${chosen.size} refs`}?
+            </AlertDialogTitle>
             <AlertDialogDescription>
               Each goes back to where it was before the agent's turn; a ref that changed again since
-              is left alone and reported.{everyRef ? "" : " The unticked refs are kept as they are."}
+              is left alone and reported.
+              {everyRef ? "" : " The unticked refs are kept as they are."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -286,7 +414,12 @@ export function RefsChangedControls(props: {
                   environmentId: props.environmentId,
                   input: everyRef
                     ? input
-                    : { ...input, refs: refs.filter((change) => chosen.has(change.ref)).map((change) => change.ref) },
+                    : {
+                        ...input,
+                        refs: refs
+                          .filter((change) => chosen.has(change.ref))
+                          .map((change) => change.ref),
+                      },
                 });
                 setSending(false);
                 setConfirming(false);

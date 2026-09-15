@@ -53,11 +53,13 @@ export function undoCommandOf(command: UndoableCommand): UndoCommand | null {
 }
 
 /** What an Undo toast says was done. */
-export const UNDOABLE_LABEL: Record<Exclude<UndoableCommand["type"], "project.knowledge.dismiss">, string> =
-  {
-    "card.pause": "Card paused",
-    "card.abandon": "Card abandoned",
-    "card.unapprove": "Card sent back to triage",
-    "card.snooze": "Card snoozed",
-    "card.relation.add": "Relation added",
-  };
+export const UNDOABLE_LABEL: Record<
+  Exclude<UndoableCommand["type"], "project.knowledge.dismiss">,
+  string
+> = {
+  "card.pause": "Card paused",
+  "card.abandon": "Card abandoned",
+  "card.unapprove": "Card sent back to triage",
+  "card.snooze": "Card snoozed",
+  "card.relation.add": "Relation added",
+};

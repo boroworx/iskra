@@ -1,9 +1,10 @@
+import { metricsLine, templateMetrics } from "@iskra/client-runtime/metrics";
 import { AgentId, type EnvironmentId, type OrchestrationCardShell } from "@iskra/contracts";
 import { Link } from "@tanstack/react-router";
-import { useId, useState } from "react";
+import { useId, useMemo, useState } from "react";
 
 import { cardEnvironment } from "~/state/cards";
-import { useEnvironmentAgents } from "~/state/entities";
+import { useEnvironmentAgents, useEnvironmentCards } from "~/state/entities";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { CardPreviewPanel, CriteriaEditor, savedCriteria } from "../cards/CardContract";
 import { DisabledReason } from "../cards/DisabledReason";
@@ -176,6 +177,18 @@ function ApproveAndStartDialog(props: {
   const formId = useId();
   const confirmed = savedCriteria(criteria);
   const owner = agentShells.find((agent) => agent.id === ownerId) ?? null;
+  const cards = useEnvironmentCards(props.environmentId);
+  const [openedAt] = useState(() => Date.now());
+  const ownerMetrics = useMemo(
+    () =>
+      owner === null
+        ? undefined
+        : templateMetrics(
+            cards.filter((entry) => entry.projectId === owner.projectId),
+            openedAt,
+          ).get(owner.id),
+    [cards, owner, openedAt],
+  );
   const blocked =
     ownerId === null
       ? "Choose an owner first."
@@ -249,7 +262,11 @@ function ApproveAndStartDialog(props: {
             </section>
             <section className="flex flex-col gap-1.5" aria-label="Preview">
               <h3 className="text-xs font-medium text-muted-foreground">Before it starts</h3>
-              <CardPreviewPanel estimate={card.estimate} agent={owner} />
+              <CardPreviewPanel
+                estimate={card.estimate}
+                agent={owner}
+                hint={owner === null ? null : metricsLine(owner.name, ownerMetrics)}
+              />
             </section>
           </form>
         </DialogPanel>

@@ -1,4 +1,5 @@
 import { cardOwnerSessions, needsYouItems } from "@iskra/client-runtime/cards";
+import { metricsLine, templateMetrics } from "@iskra/client-runtime/metrics";
 import type { EnvironmentProject } from "@iskra/client-runtime/state/models";
 import {
   MessageId,
@@ -178,9 +179,13 @@ export function AgentView(props: {
                 </h2>
                 <ul className="flex flex-col">
                   {live.map((instance) => (
-                    <li key={instance.threadId} className="flex min-w-0 items-baseline gap-2 text-sm">
+                    <li
+                      key={instance.threadId}
+                      className="flex min-w-0 items-baseline gap-2 text-sm"
+                    >
                       <span className="min-w-0 truncate">
-                        {instance.doing} <span className="text-muted-foreground">{instance.where}</span>
+                        {instance.doing}{" "}
+                        <span className="text-muted-foreground">{instance.where}</span>
                       </span>
                       <time
                         dateTime={instance.since}
@@ -206,8 +211,8 @@ export function AgentView(props: {
               ) : (
                 <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
                   <p className="text-sm text-muted-foreground">
-                    Message @{agent.name}. It can read the project but not change it; changes need
-                    a card.
+                    Message @{agent.name}. It can read the project but not change it; changes need a
+                    card.
                   </p>
                 </div>
               )
@@ -336,10 +341,15 @@ function AgentStats(props: {
     projects: props.projects,
     now,
   }).length;
+  // The same record the pre-start preview shows as a routing hint, over the last 30 days.
+  const recent = templateMetrics(own, now).get(props.agent.id);
   return (
     <span className="hidden truncate text-xs tabular-nums text-muted-foreground sm:inline">
       ${(props.agent.spentUsd ?? 0).toFixed(2)} spent · {landed} landed · {returns} sent back ·{" "}
       {waiting} waiting on you
+      {recent === undefined
+        ? ""
+        : ` · last 30 days: ${metricsLine(props.agent.name, recent).replace(`@${props.agent.name}: `, "")}`}
     </span>
   );
 }

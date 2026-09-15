@@ -1,6 +1,7 @@
 import { CARD_PRIORITIES, CARD_PRIORITY_LABEL } from "@iskra/client-runtime/cards";
 import {
   CardId,
+  type CardKind,
   type CardPriority,
   type ChannelId,
   type EnvironmentId,
@@ -26,8 +27,22 @@ import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Textarea } from "../ui/textarea";
 import { toastCommandFailure } from "../toastCommandFailure";
+import { DisabledReason } from "./DisabledReason";
 
 const NO_CHANNEL = "none";
+
+const KIND_LABEL: Record<CardKind, string> = {
+  task: "Task",
+  plan: "Plan",
+  migration: "Migration",
+};
+
+const KIND_HINT: Record<CardKind, string> = {
+  task: "It starts in Triage. Approve it, then assign an agent to start the work.",
+  plan: "It starts in Triage. Once approved with a coordinator, the coordinator proposes child cards for you to approve.",
+  migration:
+    "It starts in Triage. Once approved, a script lists the items, a few are tried first, and you tune the instructions before the rest are swept.",
+};
 
 /** A person's new card, straight to Triage; `onCreated` gets its id so the board can open it. */
 export function NewCardDialog(props: {
@@ -51,12 +66,21 @@ export function NewCardDialog(props: {
   const [spec, setSpec] = useState("");
   const [channelId, setChannelId] = useState<string>(NO_CHANNEL);
   const [priority, setPriority] = useState<CardPriority>(0);
+  const [kind, setKind] = useState<CardKind>("task");
+  const [enumerateCommand, setEnumerateCommand] = useState("");
+  const [instructions, setInstructions] = useState("");
   const [creating, setCreating] = useState(false);
   const formId = useId();
   const trimmedTitle = title.trim();
+  const blocked =
+    trimmedTitle.length === 0
+      ? "Give the card a title."
+      : kind === "migration" && enumerateCommand.trim().length === 0
+        ? "A migration needs the command that lists its items."
+        : null;
 
   const submit = async () => {
-    if (trimmedTitle.length === 0 || creating) {
+    if (blocked !== null || creating) {
       return;
     }
     setCreating(true);
@@ -70,6 +94,10 @@ export function NewCardDialog(props: {
         spec,
         tags: [],
         channelId: channelId === NO_CHANNEL ? null : (channelId as ChannelId),
+        ...(kind === "task" ? {} : { kind }),
+        ...(kind === "migration"
+          ? { migration: { enumerateCommand: enumerateCommand.trim(), instructions } }
+          : {}),
       },
     });
     if (result._tag === "Success" && priority !== 0) {
@@ -88,6 +116,9 @@ export function NewCardDialog(props: {
     setSpec("");
     setChannelId(NO_CHANNEL);
     setPriority(0);
+    setKind("task");
+    setEnumerateCommand("");
+    setInstructions("");
     props.onOpenChange(false);
     props.onCreated(cardId);
   };
@@ -97,9 +128,7 @@ export function NewCardDialog(props: {
       <DialogPopup className="max-w-lg">
         <DialogHeader>
           <DialogTitle>New card</DialogTitle>
-          <DialogDescription>
-            It starts in Triage. Approve it, then assign an agent to start the work.
-          </DialogDescription>
+          <DialogDescription>{KIND_HINT[kind]}</DialogDescription>
         </DialogHeader>
         <DialogPanel>
           <form
@@ -123,7 +152,42 @@ export function NewCardDialog(props: {
               value={spec}
               onChange={(event) => setSpec(event.target.value)}
             />
+            {kind === "migration" ? (
+              <>
+                <Input
+                  aria-label="Command that lists the items"
+                  placeholder="Command that prints one item per line, such as git ls-files 'src/**/*.test.js'"
+                  value={enumerateCommand}
+                  onChange={(event) => setEnumerateCommand(event.target.value)}
+                />
+                <Textarea
+                  aria-label="Instructions for each item"
+                  placeholder="What to do to each item"
+                  value={instructions}
+                  onChange={(event) => setInstructions(event.target.value)}
+                />
+              </>
+            ) : null}
             <div className="flex flex-wrap gap-2">
+              <Select
+                value={kind}
+                onValueChange={(value) => {
+                  if (value === "task" || value === "plan" || value === "migration") setKind(value);
+                }}
+              >
+                <SelectTrigger aria-label="Kind" className="w-auto min-w-32">
+                  <SelectValue>
+                    {(value: CardKind | null) => KIND_LABEL[value ?? "task"]}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup>
+                  {(Object.keys(KIND_LABEL) as CardKind[]).map((entry) => (
+                    <SelectItem key={entry} value={entry}>
+                      {KIND_LABEL[entry]}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
               <Select
                 value={channelId}
                 onValueChange={(value) => setChannelId(value ?? NO_CHANNEL)}
@@ -172,9 +236,11 @@ export function NewCardDialog(props: {
           <Button type="button" variant="outline" onClick={() => props.onOpenChange(false)}>
             Cancel
           </Button>
-          <Button type="submit" form={formId} disabled={trimmedTitle.length === 0 || creating}>
-            Create card
-          </Button>
+          <DisabledReason reason={trimmedTitle.length === 0 ? null : blocked}>
+            <Button type="submit" form={formId} disabled={blocked !== null || creating}>
+              Create card
+            </Button>
+          </DisabledReason>
         </DialogFooter>
       </DialogPopup>
     </Dialog>

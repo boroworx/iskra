@@ -46,7 +46,10 @@ type ChildCard = Pick<
   | "relations"
 >;
 
-function childState(card: ChildCard | undefined, cards: ReadonlyMap<CardId, ChildCard>): PlanChildState {
+function childState(
+  card: ChildCard | undefined,
+  cards: ReadonlyMap<CardId, ChildCard>,
+): PlanChildState {
   if (card === undefined) return "proposed";
   switch (card.status) {
     case "landed":

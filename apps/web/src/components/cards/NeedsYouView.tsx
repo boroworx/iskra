@@ -7,7 +7,12 @@ import {
   waitingLabel,
 } from "@iskra/client-runtime/cards";
 import type { AtomCommandResult } from "@iskra/client-runtime/state/runtime";
-import { DEFAULT_CARD_BUDGET_USD, type CardId, type EnvironmentId } from "@iskra/contracts";
+import {
+  DEFAULT_CARD_BUDGET_USD,
+  type CardId,
+  type EnvironmentId,
+  type ProjectId,
+} from "@iskra/contracts";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
@@ -17,6 +22,8 @@ import {
   selectProjectGroupingSettings,
 } from "~/logicalProject";
 import { cardEnvironment } from "~/state/cards";
+import { channelEnvironment } from "~/state/channels";
+import { useUndoToast } from "./useUndoToast";
 import { useEnvironmentAgents, useEnvironmentCards, useProjects } from "~/state/entities";
 import { usePrimaryEnvironmentId } from "~/state/environments";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -51,6 +58,9 @@ export function NeedsYouView() {
   const unsnooze = useAtomCommand(cardEnvironment.unsnooze);
   const decide = useAtomCommand(cardEnvironment.decide);
   const setBudget = useAtomCommand(cardEnvironment.setBudget);
+  const approveLesson = useAtomCommand(channelEnvironment.approveLesson);
+  const dismissLesson = useAtomCommand(channelEnvironment.dismissLesson);
+  const undoToast = useUndoToast();
   // Waiting times read in minutes, so a minute's tick keeps them honest without animating.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -100,9 +110,21 @@ export function NeedsYouView() {
 
   const snoozeCard = (id: CardId, snoozedUntil: string | null) => {
     if (environmentId !== null) {
-      void snooze({ environmentId, input: { cardId: id, snoozedUntil } }).then(
-        refused("The card was not snoozed"),
-      );
+      void snooze({ environmentId, input: { cardId: id, snoozedUntil } }).then((result) => {
+        refused("The card was not snoozed")(result);
+        if (result._tag === "Success")
+          undoToast(environmentId, { type: "card.snooze", cardId: id });
+      });
+    }
+  };
+  const decideLesson = (
+    command: typeof approveLesson,
+    projectId: ProjectId,
+    lessonId: string,
+    failure: string,
+  ) => {
+    if (environmentId !== null) {
+      void command({ environmentId, input: { projectId, lessonId } }).then(refused(failure));
     }
   };
   const decideOn = (
@@ -164,7 +186,14 @@ export function NeedsYouView() {
                       <span className="truncate text-xs text-muted-foreground">
                         {needsYouLabel(item)} · {projectTitle(item.projectId)}
                       </span>
-                      {item.reason !== null && item.kind !== "checkpoint" && item.activityId === null ? (
+                      {item.kind === "lessonProposed" && item.reason !== null ? (
+                        <p className="line-clamp-4 whitespace-pre-wrap break-words text-xs">
+                          {item.reason}
+                        </p>
+                      ) : item.reason !== null &&
+                        item.kind !== "checkpoint" &&
+                        item.kind !== "sliceCheckpoint" &&
+                        item.activityId === null ? (
                         <p className="line-clamp-2 text-xs text-muted-foreground">
                           Why: {item.reason}
                         </p>
@@ -190,7 +219,7 @@ export function NeedsYouView() {
                           {proposalReasoningOf(item.cardId)}
                         </p>
                       ) : null}
-                      {item.kind === "checkpoint" &&
+                      {(item.kind === "checkpoint" || item.kind === "sliceCheckpoint") &&
                       environmentId !== null &&
                       itemCard !== undefined ? (
                         <div className="mt-1.5">
@@ -316,6 +345,63 @@ export function NeedsYouView() {
                       </Button>
                     ) : item.kind === "sideEffectGuard" ? (
                       <GuardLink search={orchestrationSettingsSearch(item.projectId)} />
+                    ) : item.kind === "lessonProposed" && item.lessonId !== null ? (
+                      <div className="flex shrink-0 gap-1">
+                        {actionButton("Approve lesson", () =>
+                          decideLesson(
+                            approveLesson,
+                            item.projectId,
+                            item.lessonId!,
+                            "The lesson was not approved",
+                          ),
+                        )}
+                        {actionButton("Dismiss", () =>
+                          decideLesson(
+                            dismissLesson,
+                            item.projectId,
+                            item.lessonId!,
+                            "The lesson was not dismissed",
+                          ),
+                        )}
+                      </div>
+                    ) : item.kind === "planApproval" && environmentId !== null ? (
+                      <Button
+                        size="sm"
+                        variant="ghost-muted"
+                        render={
+                          <Link
+                            to="/board/$environmentId/$projectId"
+                            params={{ environmentId, projectId: item.projectId }}
+                            search={{ card: item.cardId }}
+                          />
+                        }
+                      >
+                        Review the plan
+                      </Button>
+                    ) : item.kind === "budgetCap" ? (
+                      item.code === "environmentBudgetCap" ? (
+                        <Button
+                          size="sm"
+                          variant="ghost-muted"
+                          render={<Link to="/settings/connections" hash="card-runtime" />}
+                        >
+                          Raise the machine budget
+                        </Button>
+                      ) : orchestrationSettingsSearch(item.projectId) === null ? null : (
+                        <Button
+                          size="sm"
+                          variant="ghost-muted"
+                          render={
+                            <Link
+                              to="/settings/projects"
+                              search={orchestrationSettingsSearch(item.projectId)!}
+                              hash="project-budgets"
+                            />
+                          }
+                        >
+                          Raise the budget
+                        </Button>
+                      )
                     ) : item.kind === "unpricedModel" ? (
                       // Refusing is the standing state here; the card sheet takes an acceptance back.
                       actionButton("Run uncapped", () =>

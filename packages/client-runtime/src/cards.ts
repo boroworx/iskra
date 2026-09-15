@@ -144,7 +144,14 @@ export function cardMoveActions(
     const decision = cardDropDecision(status, column, mergeRefusal);
     // A merge held back by its verifier keeps its label, disabled with the reason.
     if (decision.kind === "refuse" && column === "landing" && status === "inReview") {
-      return [{ column, label: CARD_DECISION_LABEL["card.merge.approve"], type: null, reason: decision.reason }];
+      return [
+        {
+          column,
+          label: CARD_DECISION_LABEL["card.merge.approve"],
+          type: null,
+          reason: decision.reason,
+        },
+      ];
     }
     if (decision.kind === "none") {
       return [];
@@ -476,7 +483,8 @@ export const RESTORE_NEEDS_STOPPED_TEXT =
   "Restore needs the card's agent stopped; pause the card first.";
 export const AUTO_MERGE_NEEDS_VERIFIER_TEXT =
   "Turn on the verifier before auto-merge; it merges only verified work.";
-export const TRIGGER_WORK_WAITS_TEXT = "Work started by a trigger always waits for a person to merge.";
+export const TRIGGER_WORK_WAITS_TEXT =
+  "Work started by a trigger always waits for a person to merge.";
 
 /** Why a card can't be reverted now, or null (mirrors the decider). */
 export function revertRefusal(
@@ -549,8 +557,7 @@ export function verifierMergeRefusal(
 
 /** Why the verifier can't be overridden now (a reason is checked apart, as the form types it). */
 export function overrideVerifierRefusal(card: VerificationFacts, required: boolean): string | null {
-  const state =
-    card.verification.state === "off" && required ? "pending" : card.verification.state;
+  const state = card.verification.state === "off" && required ? "pending" : card.verification.state;
   return state === "failed" || state === "pending" ? null : OVERRIDE_STATE_TEXT;
 }
 
@@ -632,7 +639,8 @@ export function cardBadges(
   if (open && card.paused !== null) {
     const known = Object.hasOwn(REASON_LABEL, card.paused.reason.code);
     badges.push({
-      label: known && card.paused.by === "system" ? reasonLabel(card.paused.reason).label : "Paused",
+      label:
+        known && card.paused.by === "system" ? reasonLabel(card.paused.reason).label : "Paused",
       hint: `${card.paused.reason.text} Resume it from the card.`,
       alarming: card.paused.by === "system",
     });

@@ -29,7 +29,9 @@ describe("planSlices", () => {
 
   it("groups a proposed plan's children by slice, with dependencies by title", () => {
     const slices = planSlices(planId, plan, []);
-    expect(slices.map((slice) => [slice.slice, slice.children.map((view) => view.child.key)])).toEqual([
+    expect(
+      slices.map((slice) => [slice.slice, slice.children.map((view) => view.child.key)]),
+    ).toEqual([
       [1, ["c1", "c2"]],
       [2, ["c3"]],
     ]);
@@ -43,7 +45,9 @@ describe("planSlices", () => {
 
   it("follows each child's card once approved: landed, blocked by an open card, held", () => {
     const c1 = childCard("c1", { status: "landed" });
-    const c2 = childCard("c2", { relations: [{ kind: "blockedBy", cardId: CardId.make("card-c4") }] });
+    const c2 = childCard("c2", {
+      relations: [{ kind: "blockedBy", cardId: CardId.make("card-c4") }],
+    });
     const c4 = childCard("c4", { parentCardId: null, planKey: null, status: "inProgress" });
     const c3 = childCard("c3", { heldByCheckpoint: true });
     const slices = planSlices(planId, plan, [c1, c2, c3, c4]);

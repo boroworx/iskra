@@ -28,6 +28,7 @@ import {
   openCheckpointActivityId,
   overrideVerifierRefusal,
   rerunVerifierRefusal,
+  revertRefusal,
 } from "@iskra/client-runtime/cards";
 import {
   type DesktopWslState,
@@ -1171,6 +1172,7 @@ function OpenCommandPaletteDialog(props: {
   const primaryCards = useEnvironmentCards(primaryEnvironmentId);
   const decideCard = useAtomCommand(cardEnvironment.decide);
   const answerCardElicitation = useAtomCommand(cardEnvironment.answerElicitation);
+  const approveCardPlan = useAtomCommand(cardEnvironment.approvePlan);
   // Each open card also offers pause or resume, and continuing an open checkpoint.
   const cardItems = useMemo(
     (): CommandPaletteActionItem[] =>
@@ -1196,8 +1198,45 @@ function OpenCommandPaletteDialog(props: {
                 },
               },
             ];
+            const openCard = async () => {
+              await navigate({
+                to: "/board/$environmentId/$projectId",
+                params: { environmentId: primaryEnvironmentId, projectId: card.projectId },
+                search: { card: card.id },
+              });
+            };
+            if (card.status === "landed" && revertRefusal(card, primaryCards) === null) {
+              // A revert asks for confirmation, which the card's sheet shows.
+              items.push({
+                kind: "action",
+                value: `card-revert:${primaryEnvironmentId}:${card.id}`,
+                searchTerms: [card.title, "revert card undo landed"],
+                title: `Revert: ${card.title}`,
+                description,
+                icon,
+                run: openCard,
+              });
+            }
             if (card.status === "landed" || card.status === "abandoned") {
               return items;
+            }
+            const plan = card.plan;
+            if (card.kind === "plan" && plan?.state === "proposed") {
+              items.push({
+                kind: "action",
+                value: `card-plan-approve:${primaryEnvironmentId}:${card.id}`,
+                searchTerms: [card.title, "approve plan"],
+                title: `Approve plan: ${card.title}`,
+                description,
+                icon,
+                run: async () => {
+                  const result = await approveCardPlan({
+                    environmentId: primaryEnvironmentId,
+                    input: { cardId: card.id, revision: plan.revision },
+                  });
+                  toastCommandFailure(result, "The plan was not approved", "The request was refused.");
+                },
+              });
             }
             const paused = card.paused !== null;
             items.push({
@@ -1292,6 +1331,7 @@ function OpenCommandPaletteDialog(props: {
           }),
     [
       answerCardElicitation,
+      approveCardPlan,
       decideCard,
       navigate,
       primaryCards,
@@ -1618,6 +1658,16 @@ function OpenCommandPaletteDialog(props: {
     shortcutCommand: "needsYou.open",
     run: async () => {
       await navigate({ to: "/needs-you" });
+    },
+  });
+  actionItems.push({
+    kind: "action",
+    value: "action:guided-first-run",
+    searchTerms: ["guided first run", "tutorial", "sample project", "get started"],
+    title: "Guided first run",
+    icon: <StickyNoteIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate({ to: "/welcome", search: { guide: true } });
     },
   });
 

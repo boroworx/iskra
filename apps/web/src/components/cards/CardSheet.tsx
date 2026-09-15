@@ -8,6 +8,8 @@ import {
   isCardSnoozed,
   reasonLabel,
   reasonLine,
+  restoreRefusal,
+  revertRefusal,
   verifierMergeRefusal,
 } from "@iskra/client-runtime/cards";
 import {
@@ -22,7 +24,8 @@ import {
   type CardEvidenceItem,
   type AgentId,
   type CardActivity,
-  type CardId,
+  CardId,
+  type CardOutcome,
   type CardStatus,
   type EnvironmentId,
   type OrchestrationAgentShell,
@@ -34,11 +37,25 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { randomUUID } from "~/lib/utils";
 import { cardEnvironment } from "~/state/cards";
-import { useProjects } from "~/state/entities";
+import { useProjects, useThread } from "~/state/entities";
+import { scopeThreadRef } from "@iskra/client-runtime/environment";
+import { metricsLine, templateMetrics } from "@iskra/client-runtime/metrics";
 import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
-import { cardSparkState, cardStatusPill } from "@iskra/client-runtime/card-face";
+import { cardSparkState, cardStatusPill, outcomePill } from "@iskra/client-runtime/card-face";
 import { ApproveAndStart } from "../channels/CardProposal";
+import { MigrationPanel } from "./MigrationPanel";
+import { PlanReview } from "./PlanReview";
+import { useUndoToast } from "./useUndoToast";
+import {
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogPopup,
+  AlertDialogTitle,
+} from "../ui/alert-dialog";
 import { AgentAvatar } from "../iskra/AgentAvatar";
 import { RoundDots, SpendBar } from "../iskra/Marks";
 import { StatusPill } from "../iskra/StatusPill";
@@ -186,8 +203,22 @@ function CardSheetBody(props: {
     [props.cards],
   );
   const open = card.status !== "landed" && card.status !== "abandoned";
+  const undoToast = useUndoToast();
   const decideOn = (type: Parameters<typeof decide>[0]["input"]["type"], failure: string) =>
-    void decide({ environmentId, input: { type, cardId: card.id } }).then(refused(failure));
+    void decide({ environmentId, input: { type, cardId: card.id } }).then((result) => {
+      refused(failure)(result);
+      if (
+        result._tag === "Success" &&
+        (type === "card.pause" || type === "card.abandon" || type === "card.unapprove")
+      ) {
+        undoToast(environmentId, { type, cardId: card.id });
+      }
+    });
+  const afterSnooze = (result: AtomCommandResult<unknown, unknown>) => {
+    refused("The card was not snoozed")(result);
+    if (result._tag === "Success")
+      undoToast(environmentId, { type: "card.snooze", cardId: card.id });
+  };
   const sessionAgentId = card.ownerSession?.agentId ?? card.delegateAgentId;
   const sessionAgent = props.agents.find((agent) => agent.id === sessionAgentId);
   const edited = title.trim() !== card.title || spec !== card.spec;
@@ -197,6 +228,10 @@ function CardSheetBody(props: {
   const builder = props.agents.find((agent) => agent.id === card.delegateAgentId);
   const verificationRequired = cardVerificationRequired(card, policy, builder);
   const mergeRefusal = verifierMergeRefusal(card, verificationRequired);
+  const outcome = outcomePill(card.outcome);
+  const previewAgent =
+    props.agents.find((agent) => agent.id === (card.delegateAgentId ?? card.suggestedAgentId)) ??
+    null;
 
   const send = (kind: "message" | "review") => {
     const input = {
@@ -215,8 +250,10 @@ function CardSheetBody(props: {
   return (
     <>
       <SheetHeader>
-        <div className="flex items-center pe-8">
+        <div className="flex flex-wrap items-center gap-1.5 pe-8">
           <StatusPill {...cardStatusPill(card)} />
+          {outcome !== null ? <StatusPill {...outcome} /> : null}
+          {card.unattended ? <StatusPill label="Draft PR" tone="gray" /> : null}
         </div>
         <SheetTitle className="pe-8 text-[22px] font-bold leading-tight tracking-[-0.015em]">
           {card.title}
@@ -269,6 +306,9 @@ function CardSheetBody(props: {
             >
               · Open @{sessionAgent.name}
             </Link>
+          ) : null}
+          {card.revertsCardId !== null ? (
+            <span>· Reverts {cardById.get(card.revertsCardId)?.title ?? "a landed card"}</span>
           ) : null}
           {card.status === "ready" || card.attemptGroupId !== null ? (
             <Link
@@ -326,6 +366,9 @@ function CardSheetBody(props: {
                 </DisabledReason>
               ) : null}
             </div>
+          ) : null}
+          {open && card.paused !== null && card.ownerSession !== null ? (
+            <RestoreControl card={card} environmentId={environmentId} />
           ) : null}
           {card.status === "landed" ? (
             <p className="text-xs text-muted-foreground">A landed card is finished.</p>
@@ -434,6 +477,18 @@ function CardSheetBody(props: {
           ) : null}
         </Section>
 
+        {card.kind === "plan" && card.plan !== null ? (
+          <Section label="Plan">
+            <PlanReview card={card} cards={props.cards} environmentId={environmentId} />
+          </Section>
+        ) : null}
+
+        {card.kind === "migration" && card.migration !== null ? (
+          <Section label="Migration">
+            <MigrationPanel card={card} environmentId={environmentId} />
+          </Section>
+        ) : null}
+
         {open && card.attention.length > 0 ? (
           <Section label="Waiting on you">
             <ol className="flex flex-col gap-3">
@@ -452,7 +507,8 @@ function CardSheetBody(props: {
 
         {open ? <CardQuestionsSection card={card} environmentId={environmentId} /> : null}
 
-        {open && card.checkpoint !== null ? (
+        {/* A migration's tune checkpoint is answered in its panel, with the instructions editor. */}
+        {open && card.checkpoint !== null && card.migration?.phase !== "tuning" ? (
           <Section label="Checkpoint">
             <CheckpointControls card={card} environmentId={environmentId} />
           </Section>
@@ -508,6 +564,12 @@ function CardSheetBody(props: {
           </Section>
         ) : null}
 
+        {!open ? (
+          <Section label="Outcome">
+            <OutcomeControls card={card} cards={props.cards} environmentId={environmentId} />
+          </Section>
+        ) : null}
+
         <div ref={criteriaSection} className="contents">
           <Section label="Acceptance criteria">
             <CardCriteria card={card} environmentId={environmentId} />
@@ -518,10 +580,14 @@ function CardSheetBody(props: {
           <Section label="Before it starts">
             <CardPreviewPanel
               estimate={card.estimate}
-              agent={
-                props.agents.find(
-                  (agent) => agent.id === (card.delegateAgentId ?? card.suggestedAgentId),
-                ) ?? null
+              agent={previewAgent}
+              hint={
+                previewAgent === null
+                  ? null
+                  : metricsLine(
+                      previewAgent.name,
+                      templateMetrics(props.cards, props.now).get(previewAgent.id),
+                    )
               }
             />
           </Section>
@@ -529,85 +595,85 @@ function CardSheetBody(props: {
 
         {open ? (
           <div ref={agentSection} className="contents">
-          <Section label="Agent">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <Select
-                value={card.delegateAgentId}
-                disabled={card.status === "triage"}
-                onValueChange={(value) => {
-                  if (value !== null && value !== card.delegateAgentId) {
-                    void assign({
-                      environmentId,
-                      input: { cardId: card.id, agentId: value as AgentId },
-                    }).then(refused("The agent was not assigned"));
-                  }
-                }}
-              >
-                <SelectTrigger aria-label="Agent" className="w-auto min-w-40">
-                  <SelectValue>
-                    {(value: string | null) =>
-                      value === null
-                        ? "No agent"
-                        : `@${props.agents.find((agent) => agent.id === value)?.name ?? "archived agent"}`
+            <Section label="Agent">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Select
+                  value={card.delegateAgentId}
+                  disabled={card.status === "triage"}
+                  onValueChange={(value) => {
+                    if (value !== null && value !== card.delegateAgentId) {
+                      void assign({
+                        environmentId,
+                        input: { cardId: card.id, agentId: value as AgentId },
+                      }).then(refused("The agent was not assigned"));
                     }
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup>
-                  {props.agents.map((agent) => (
-                    <SelectItem key={agent.id} value={agent.id}>
-                      @{agent.name}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-              {card.delegateAgentId !== null ? (
-                <Button
-                  size="sm"
-                  variant="ghost-muted"
-                  onClick={() => decideOn("card.unassign", "The agent was not unassigned")}
+                  }}
                 >
-                  Unassign
-                </Button>
+                  <SelectTrigger aria-label="Agent" className="w-auto min-w-40">
+                    <SelectValue>
+                      {(value: string | null) =>
+                        value === null
+                          ? "No agent"
+                          : `@${props.agents.find((agent) => agent.id === value)?.name ?? "archived agent"}`
+                      }
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup>
+                    {props.agents.map((agent) => (
+                      <SelectItem key={agent.id} value={agent.id}>
+                        @{agent.name}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+                {card.delegateAgentId !== null ? (
+                  <Button
+                    size="sm"
+                    variant="ghost-muted"
+                    onClick={() => decideOn("card.unassign", "The agent was not unassigned")}
+                  >
+                    Unassign
+                  </Button>
+                ) : null}
+              </div>
+              {card.status === "triage" ? (
+                <p className="text-xs text-muted-foreground">{APPROVE_BEFORE_ASSIGN_TEXT}</p>
               ) : null}
-            </div>
-            {card.status === "triage" ? (
-              <p className="text-xs text-muted-foreground">{APPROVE_BEFORE_ASSIGN_TEXT}</p>
-            ) : null}
-            <Textarea
-              aria-label="Message to the card's agent"
-              placeholder={
-                card.status === "inReview"
-                  ? "A message, or what to change before it lands"
-                  : "A message to the card's agent"
-              }
-              value={message}
-              onChange={(event) => setMessage(event.target.value)}
-            />
-            <div className="flex flex-wrap gap-1.5">
-              <DisabledReason
-                reason={card.delegateAgentId === null ? "Assign an agent first." : null}
-              >
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={card.delegateAgentId === null || trimmedMessage.length === 0}
-                  onClick={() => send("message")}
+              <Textarea
+                aria-label="Message to the card's agent"
+                placeholder={
+                  card.status === "inReview"
+                    ? "A message, or what to change before it lands"
+                    : "A message to the card's agent"
+                }
+                value={message}
+                onChange={(event) => setMessage(event.target.value)}
+              />
+              <div className="flex flex-wrap gap-1.5">
+                <DisabledReason
+                  reason={card.delegateAgentId === null ? "Assign an agent first." : null}
                 >
-                  Send to agent
-                </Button>
-              </DisabledReason>
-              {card.status === "inReview" ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={trimmedMessage.length === 0}
-                  onClick={() => send("review")}
-                >
-                  Request changes
-                </Button>
-              ) : null}
-            </div>
-          </Section>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={card.delegateAgentId === null || trimmedMessage.length === 0}
+                    onClick={() => send("message")}
+                  >
+                    Send to agent
+                  </Button>
+                </DisabledReason>
+                {card.status === "inReview" ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={trimmedMessage.length === 0}
+                    onClick={() => send("review")}
+                  >
+                    Request changes
+                  </Button>
+                ) : null}
+              </div>
+            </Section>
           </div>
         ) : null}
 
@@ -691,10 +757,13 @@ function CardSheetBody(props: {
               disabled={relationCardId === null}
               onClick={() => {
                 if (relationCardId === null) return;
-                void addRelation({
-                  environmentId,
-                  input: { cardId: card.id, kind: relationKind, otherCardId: relationCardId },
-                }).then(refused("The relation was not added"));
+                const input = { cardId: card.id, kind: relationKind, otherCardId: relationCardId };
+                void addRelation({ environmentId, input }).then((result) => {
+                  refused("The relation was not added")(result);
+                  if (result._tag === "Success") {
+                    undoToast(environmentId, { type: "card.relation.add", ...input });
+                  }
+                });
                 setRelationCardId(null);
               }}
             >
@@ -788,7 +857,7 @@ function CardSheetBody(props: {
                           cardId: card.id,
                           snoozedUntil: new Date(Date.now() + HOUR_MS).toISOString(),
                         },
-                      }).then(refused("The card was not snoozed"))
+                      }).then(afterSnooze)
                     }
                   >
                     Snooze 1 hour
@@ -800,7 +869,7 @@ function CardSheetBody(props: {
                       void snooze({
                         environmentId,
                         input: { cardId: card.id, snoozedUntil: null },
-                      }).then(refused("The card was not snoozed"))
+                      }).then(afterSnooze)
                     }
                   >
                     Snooze until it changes
@@ -820,6 +889,202 @@ function CardSheetBody(props: {
         </Section>
       </SheetPanel>
     </>
+  );
+}
+
+/**
+ * "Restore to before turn n" on a paused card: puts its worktree back to an owner checkpoint. The
+ * owner thread's checkpoints load only while this shows, which is only for a paused card's sheet.
+ */
+function RestoreControl(props: {
+  readonly card: OrchestrationCardShell;
+  readonly environmentId: EnvironmentId;
+}) {
+  const { card, environmentId } = props;
+  const threadId = card.ownerSession?.threadId ?? null;
+  const thread = useThread(threadId === null ? null : scopeThreadRef(environmentId, threadId));
+  const restore = useAtomCommand(cardEnvironment.restoreCheckpoint);
+  const [turn, setTurn] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const turns = (thread?.checkpoints ?? [])
+    .map((checkpoint) => checkpoint.checkpointTurnCount)
+    .filter((count) => count > 0);
+  if (turns.length === 0) return null;
+  const refusal = restoreRefusal(card);
+  const chosen = turn ?? String(turns.at(-1));
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <Select value={chosen} onValueChange={(value) => setTurn(value)}>
+        <SelectTrigger aria-label="Turn to restore before" className="w-auto min-w-36">
+          <SelectValue>{(value: string | null) => `Before turn ${value ?? chosen}`}</SelectValue>
+        </SelectTrigger>
+        <SelectPopup>
+          {turns.map((count) => (
+            <SelectItem key={count} value={String(count)}>
+              Before turn {count}
+            </SelectItem>
+          ))}
+        </SelectPopup>
+      </Select>
+      <DisabledReason reason={refusal}>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={refusal !== null || sending}
+          onClick={async () => {
+            setSending(true);
+            const result = await restore({
+              environmentId,
+              input: { cardId: card.id, turnCount: Number(chosen) - 1 },
+            });
+            setSending(false);
+            toastCommandFailure(
+              result,
+              "The worktree was not restored",
+              "The request was refused.",
+            );
+          }}
+        >
+          Restore
+        </Button>
+      </DisabledReason>
+    </div>
+  );
+}
+
+const OUTCOME_LABEL: Record<CardOutcome["state"], string> = {
+  success: "Success",
+  flawed: "Flawed",
+  blocked: "Blocked",
+  manual: "Manual",
+};
+
+/**
+ * How a finished card turned out: Iskra decides it a week after landing (a blocked card at once),
+ * and a person can set it with a note. A landed card can also be reverted, which makes a new card.
+ */
+function OutcomeControls(props: {
+  readonly card: OrchestrationCardShell;
+  readonly cards: ReadonlyArray<OrchestrationCardShell>;
+  readonly environmentId: EnvironmentId;
+}) {
+  const { card, environmentId } = props;
+  const setOutcome = useAtomCommand(cardEnvironment.setOutcome);
+  const revert = useAtomCommand(cardEnvironment.revert);
+  const [state, setState] = useState<CardOutcome["state"]>(card.outcome?.state ?? "success");
+  const [note, setNote] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const [sending, setSending] = useState(false);
+  const refusal = revertRefusal(card, props.cards);
+  const heuristic = card.outcome?.signals.find((signal) => signal.code !== "outcomeSetByPerson");
+
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-xs text-muted-foreground">
+        {card.outcome === null
+          ? card.status === "landed"
+            ? "Iskra decides how it turned out a week after it landed."
+            : "No outcome yet."
+          : `${OUTCOME_LABEL[card.outcome.state]}${heuristic !== undefined ? ` · ${heuristic.text} (a heuristic)` : ""}`}
+      </p>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Select
+          value={state}
+          onValueChange={(value) => {
+            if (value !== null) setState(value);
+          }}
+        >
+          <SelectTrigger aria-label="Outcome" className="w-auto min-w-28">
+            <SelectValue>
+              {(value: CardOutcome["state"] | null) => OUTCOME_LABEL[value ?? "success"]}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectPopup>
+            {(Object.keys(OUTCOME_LABEL) as CardOutcome["state"][]).map((entry) => (
+              <SelectItem key={entry} value={entry}>
+                {OUTCOME_LABEL[entry]}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+        <Input
+          aria-label="Why"
+          placeholder="Why"
+          className="min-w-0 flex-1"
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+        />
+        <DisabledReason reason={note.trim().length === 0 ? "Say why you're setting it." : null}>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={sending || note.trim().length === 0}
+            onClick={async () => {
+              setSending(true);
+              const result = await setOutcome({
+                environmentId,
+                input: { cardId: card.id, outcome: state, note: note.trim() },
+              });
+              setSending(false);
+              toastCommandFailure(result, "The outcome was not set", "The request was refused.");
+              if (result._tag === "Success") setNote("");
+            }}
+          >
+            Set outcome
+          </Button>
+        </DisabledReason>
+      </div>
+      {card.status === "landed" ? (
+        <DisabledReason reason={refusal}>
+          <Button
+            size="sm"
+            variant="destructive-outline"
+            className="self-start"
+            disabled={refusal !== null || sending}
+            onClick={() => setConfirming(true)}
+          >
+            Revert…
+          </Button>
+        </DisabledReason>
+      ) : null}
+      <AlertDialog open={confirming} onOpenChange={(next) => !sending && setConfirming(next)}>
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Revert {card.title}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Iskra makes a new card that reverts this card's commit on the base branch, runs the
+              checks, and sends it to review. Nothing lands until you approve its merge.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose disabled={sending} render={<Button variant="outline" />}>
+              Cancel
+            </AlertDialogClose>
+            <Button
+              variant="destructive"
+              disabled={sending}
+              onClick={async () => {
+                setSending(true);
+                const result = await revert({
+                  environmentId,
+                  input: { cardId: card.id, revertCardId: CardId.make(randomUUID()) },
+                });
+                setSending(false);
+                setConfirming(false);
+                toastCommandFailure(
+                  result,
+                  "The card was not reverted",
+                  "The request was refused.",
+                );
+              }}
+            >
+              Revert
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
+    </div>
   );
 }
 

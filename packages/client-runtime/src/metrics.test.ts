@@ -33,7 +33,11 @@ describe("templateMetrics", () => {
           outcome: { state: "flawed", decidedAt: daysAgo(0), signals: [] },
           verification: { ...CARD_VERIFICATION_OFF, state: "overridden" },
         }),
-        card({ status: "abandoned", spentUsd: 1, outcome: { state: "blocked", decidedAt: daysAgo(0), signals: [] } }),
+        card({
+          status: "abandoned",
+          spentUsd: 1,
+          outcome: { state: "blocked", decidedAt: daysAgo(0), signals: [] },
+        }),
         card({ verification: { ...CARD_VERIFICATION_OFF, state: "passed" } }),
         // Not counted: still open, outside the window, an attempt, or nobody's.
         card({ status: "inReview" }),
@@ -55,7 +59,9 @@ describe("templateMetrics", () => {
       roundsPerCard: 0.5,
       verifierFailureRate: 0.5,
     });
-    expect(metricsLine("builder", metrics)).toBe("@builder: 3/4 merged, 1 flawed, $2.67 per merged card");
+    expect(metricsLine("builder", metrics)).toBe(
+      "@builder: 3/4 merged, 1 flawed, $2.67 per merged card",
+    );
   });
 
   it("has no cost per merged card before one lands, and no verifier rate without a verifier", () => {
@@ -63,6 +69,8 @@ describe("templateMetrics", () => {
     expect(metrics?.costPerMergedUsd).toBeNull();
     expect(metrics?.verifierFailureRate).toBeNull();
     expect(metricsLine("builder", metrics)).toBe("@builder: 0/1 merged");
-    expect(metricsLine("builder", undefined)).toBe("@builder: no finished cards in the last 30 days");
+    expect(metricsLine("builder", undefined)).toBe(
+      "@builder: no finished cards in the last 30 days",
+    );
   });
 });

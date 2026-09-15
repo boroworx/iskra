@@ -132,8 +132,12 @@ export function CriteriaEditor(props: {
 export function CardPreviewPanel(props: {
   readonly estimate: CardEstimate | null;
   readonly agent: Pick<OrchestrationAgentShell, "name" | "modelSelection" | "capabilities"> | null;
+  /** The agent's track record on this project, as a routing hint. */
+  readonly hint?: string | null;
 }) {
   const preview = cardPreview(props);
+  const hint =
+    props.hint == null ? null : <p className="text-xs text-muted-foreground">{props.hint}</p>;
   // A warning, not a refusal: the card waits in the queue until the agent can write.
   const readOnly = delegateReadOnlyWarning(props.agent);
   const readOnlyWarning =
@@ -143,15 +147,19 @@ export function CardPreviewPanel(props: {
       <div className="flex flex-col gap-1">
         <p className="text-xs text-muted-foreground">
           No estimate for this card.{" "}
-          {props.agent === null ? "" : `@${props.agent.name} on ${props.agent.modelSelection.model}.`}
+          {props.agent === null
+            ? ""
+            : `@${props.agent.name} on ${props.agent.modelSelection.model}.`}
         </p>
         {readOnlyWarning}
+        {hint}
       </div>
     );
   }
   return (
     <div className="flex flex-col gap-1.5 rounded-md border border-border px-3 py-2 text-xs">
       {readOnlyWarning}
+      {hint}
       <p className="text-muted-foreground">The lead's estimate</p>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
         <dt className="text-muted-foreground">Size</dt>

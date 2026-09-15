@@ -48,6 +48,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { searchableSetting } from "../settings/settingsSearch";
 import { SidebarInset } from "../ui/sidebar";
 import { toastManager } from "../ui/toast";
+import { useUndoToast } from "./useUndoToast";
 import { Tooltip, TooltipCreateHandle, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastCommandFailure } from "../toastCommandFailure";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
@@ -111,6 +112,7 @@ export function BoardView(props: {
   const allCards = useEnvironmentCards(props.environmentId);
   const agents = useEnvironmentAgents(props.environmentId);
   const decide = useAtomCommand(cardEnvironment.decide);
+  const undoToast = useUndoToast();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   // Read once for the Snoozed badge; a card's own changes re-render its face.
   const [now] = useState(() => Date.now());
@@ -163,6 +165,12 @@ export function BoardView(props: {
       input: { type: decision.type, cardId: card.id },
     });
     toastCommandFailure(result, "The card stays where it was", "The decision was refused.");
+    if (
+      result._tag === "Success" &&
+      (decision.type === "card.abandon" || decision.type === "card.unapprove")
+    ) {
+      undoToast(props.environmentId, { type: decision.type, cardId: card.id });
+    }
   };
 
   return (
@@ -271,10 +279,7 @@ function BoardColumnView(props: {
     <section
       ref={setNodeRef}
       aria-label={BOARD_COLUMN_LABEL[props.column]}
-      className={cn(
-        "flex w-72 shrink-0 flex-col gap-2.5 rounded-xl p-1",
-        isOver && "bg-muted",
-      )}
+      className={cn("flex w-72 shrink-0 flex-col gap-2.5 rounded-xl p-1", isOver && "bg-muted")}
     >
       <h2 className="flex h-7 items-baseline gap-1.5 px-1 text-[13px] font-semibold">
         {BOARD_COLUMN_LABEL[props.column]}
