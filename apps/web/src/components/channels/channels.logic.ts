@@ -13,7 +13,7 @@ import type {
   ProjectId,
   ThreadId,
 } from "@iskra/contracts";
-import { DEFAULT_AGENT_ROLES } from "@iskra/contracts";
+import { DEFAULT_AGENT_ROLES, REQUESTS_CHANNEL_NAME, requestsChannelId } from "@iskra/contracts";
 
 export interface ChannelListEntry {
   readonly id: ChannelId;
@@ -63,6 +63,29 @@ export function channelListEntries(
     .filter((channel) => channel.projectId === projectId && channel.kind === "channel")
     .map((channel) => ({ id: channel.id, name: channel.name }))
     .toSorted(byName);
+}
+
+const REQUESTS_ID_PREFIX = "requests:";
+
+/** The project a Requests id names (`requests:<projectId>`), or null for any other channel id. */
+export function requestsProjectId(channelId: string): ProjectId | null {
+  return channelId.startsWith(REQUESTS_ID_PREFIX) && channelId.length > REQUESTS_ID_PREFIX.length
+    ? (channelId.slice(REQUESTS_ID_PREFIX.length) as ProjectId)
+    : null;
+}
+
+/** A project's Requests conversation, or null until a person first sets its lead. */
+export function projectRequestsChannel(
+  channels: ReadonlyArray<OrchestrationChannelShell>,
+  projectId: ProjectId,
+): OrchestrationChannelShell | null {
+  const id = requestsChannelId(projectId);
+  return channels.find((channel) => channel.id === id) ?? null;
+}
+
+/** How a channel is named in lists and headers: Requests is never a #name. */
+export function channelTitle(channel: Pick<OrchestrationChannelShell, "kind" | "name">): string {
+  return channel.kind === "requests" ? REQUESTS_CHANNEL_NAME : `#${channel.name}`;
 }
 
 const byName = (left: { readonly name: string }, right: { readonly name: string }) =>
@@ -160,7 +183,7 @@ export function sessionWhere(
   if (channel === undefined) {
     return "a channel";
   }
-  return channel.kind === "dm" ? "this DM" : `#${channel.name}`;
+  return channel.kind === "dm" ? "this DM" : channelTitle(channel);
 }
 
 /** An agent's active DM channel, once its first direct message has opened one. */

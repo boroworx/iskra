@@ -68,7 +68,8 @@ export function CreateChannelDialog(props: {
         <DialogHeader>
           <DialogTitle>New channel</DialogTitle>
           <DialogDescription>
-            Every agent in this project joins it. Agents only reply when you mention them.
+            A separate topic with its own lead, or a room for several agents. Most projects only
+            need Requests.
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>

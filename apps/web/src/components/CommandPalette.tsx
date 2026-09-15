@@ -40,6 +40,7 @@ import {
   type SourceControlProviderKind,
   type SourceControlRepositoryInfo,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
+  requestsChannelId,
   resolveEnvironmentMachineKind,
 } from "@iskra/contracts";
 import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
@@ -134,8 +135,13 @@ import { buildThreadRouteParams, resolveThreadRouteTarget } from "../threadRoute
 import { useAvailableSettingsSearchItems } from "./settings/useAvailableSettingsSearchItems";
 import { cardEnvironment } from "../state/cards";
 import { toastCommandFailure } from "./toastCommandFailure";
-import { channelListEntries } from "./channels/channels.logic";
-import { openCreateDialog, useRouteProject } from "./channels/IskraCreateDialogs";
+import { channelListEntries, channelTitle } from "./channels/channels.logic";
+import {
+  openCreateDialog,
+  useProjectRailMemory,
+  useRouteProject,
+} from "./channels/IskraCreateDialogs";
+import { projectKey, railClickTarget } from "./projectRail.logic";
 import {
   applyWslEnvironmentConfiguration,
   parseWslUncPath,
@@ -1055,26 +1061,23 @@ function OpenCommandPaletteDialog(props: {
     [browseNavigation],
   );
 
-  // A project opens on its first channel; without one it opens on its board, as the project rail does.
+  // A project opens on its remembered channel while that is active, else its Requests, as the project picker does.
+  const [railMemory] = useProjectRailMemory();
   const openProjectFromSearch = useCallback(
     async (project: (typeof projects)[number]) => {
-      const channel =
+      const channelId = railClickTarget(
         project.environmentId === primaryEnvironmentId
-          ? channelListEntries(primaryChannels, project.id)[0]
-          : undefined;
-      if (channel === undefined) {
-        await navigate({
-          to: "/board/$environmentId/$projectId",
-          params: { environmentId: project.environmentId, projectId: project.id },
-        });
-        return;
-      }
+          ? channelListEntries(primaryChannels, project.id).map((entry) => entry.id)
+          : [],
+        railMemory.lastChannelByProject[projectKey(project)],
+        requestsChannelId(project.id),
+      );
       await navigate({
         to: "/channels/$environmentId/$channelId",
-        params: { environmentId: project.environmentId, channelId: channel.id },
+        params: { environmentId: project.environmentId, channelId },
       });
     },
-    [navigate, primaryChannels, primaryEnvironmentId],
+    [navigate, primaryChannels, primaryEnvironmentId, railMemory.lastChannelByProject],
   );
 
   const projectSearchItems = useMemo(
@@ -1150,14 +1153,23 @@ function OpenCommandPaletteDialog(props: {
       primaryEnvironmentId === null
         ? []
         : primaryChannels
-            .filter((channel) => channel.kind === "channel")
+            // Channels and each project's Requests; DMs are reached through their agent.
+            .filter((channel) => channel.kind !== "dm")
             .map((channel) => ({
               kind: "action",
               value: `channel:${primaryEnvironmentId}:${channel.id}`,
-              searchTerms: [channel.name, `#${channel.name}`],
-              title: `#${channel.name}`,
+              searchTerms:
+                channel.kind === "requests"
+                  ? ["requests", "ask"]
+                  : [channel.name, `#${channel.name}`],
+              title: channelTitle(channel),
               description: projectTitleById.get(channel.projectId),
-              icon: <HashIcon className={ITEM_ICON_CLASS} />,
+              icon:
+                channel.kind === "requests" ? (
+                  <MessageSquareIcon className={ITEM_ICON_CLASS} />
+                ) : (
+                  <HashIcon className={ITEM_ICON_CLASS} />
+                ),
               run: async () => {
                 await navigate({
                   to: "/channels/$environmentId/$channelId",
@@ -1234,7 +1246,11 @@ function OpenCommandPaletteDialog(props: {
                     environmentId: primaryEnvironmentId,
                     input: { cardId: card.id, revision: plan.revision },
                   });
-                  toastCommandFailure(result, "The plan was not approved", "The request was refused.");
+                  toastCommandFailure(
+                    result,
+                    "The plan was not approved",
+                    "The request was refused.",
+                  );
                 },
               });
             }
@@ -1703,10 +1719,27 @@ function OpenCommandPaletteDialog(props: {
       },
       {
         kind: "action",
+        value: "action:ask",
+        searchTerms: ["ask for something", "requests", "request"],
+        title: "Ask for something",
+        description: routeProject.title,
+        icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
+        run: async () => {
+          await navigate({
+            to: "/channels/$environmentId/$channelId",
+            params: {
+              environmentId: routeProject.environmentId,
+              channelId: requestsChannelId(routeProject.id),
+            },
+          });
+        },
+      },
+      {
+        kind: "action",
         value: "action:new-channel",
         searchTerms: ["new channel", "create channel"],
         title: "New channel",
-        description: routeProject.title,
+        description: "A separate topic with its own lead, or a room for several agents",
         icon: <HashIcon className={ITEM_ICON_CLASS} />,
         shortcutCommand: "channel.new",
         run: async () => {
@@ -2049,10 +2082,10 @@ function OpenCommandPaletteDialog(props: {
         return;
       }
 
-      // A new project has no channels yet, so it opens on its board, as the project rail would.
+      // A new project has no channels yet, so it opens on its Requests, as the project picker would.
       await navigate({
-        to: "/board/$environmentId/$projectId",
-        params: { environmentId: input.environmentId, projectId },
+        to: "/channels/$environmentId/$channelId",
+        params: { environmentId: input.environmentId, channelId: requestsChannelId(projectId) },
       });
       setOpen(false);
     },

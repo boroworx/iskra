@@ -37,6 +37,10 @@ describe("routeProjectId", () => {
 
   it("is unresolved while the named entity has not loaded", () => {
     expect(routeProjectId({ ...lists, params: { channelId: "ch-new" } })).toBeNull();
+  });
+
+  it("reads the project from a Requests id before that Requests exists", () => {
+    expect(routeProjectId({ ...lists, params: { channelId: "requests:a" } })).toBe("a");
     expect(routeProjectId({ ...lists, params: {} })).toBeNull();
   });
 });
@@ -118,12 +122,13 @@ describe("rememberRailRoute", () => {
 });
 
 describe("railClickTarget", () => {
-  it("reopens the project's last channel, else its first, else its board", () => {
+  it("reopens the project's last channel while it is active, else its Requests", () => {
     const channels = [ch("one"), ch("two")];
-    expect(railClickTarget(channels, "two")).toEqual({ kind: "channel", channelId: "two" });
-    expect(railClickTarget(channels, "archived")).toEqual({ kind: "channel", channelId: "one" });
-    expect(railClickTarget(channels, undefined)).toEqual({ kind: "channel", channelId: "one" });
-    expect(railClickTarget([], "two")).toEqual({ kind: "board" });
+    const requests = ch("requests:a");
+    expect(railClickTarget(channels, "two", requests)).toBe("two");
+    expect(railClickTarget(channels, "archived", requests)).toBe(requests);
+    expect(railClickTarget(channels, undefined, requests)).toBe(requests);
+    expect(railClickTarget([], "requests:a", requests)).toBe(requests);
   });
 });
 

@@ -33,7 +33,8 @@ import {
   type DragEndEvent,
 } from "@dnd-kit/core";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { EllipsisIcon, PlusIcon } from "lucide-react";
+import { requestsChannelId } from "@iskra/contracts";
+import { EllipsisIcon, MessageSquareIcon, PlusIcon } from "lucide-react";
 import { memo, useCallback, useMemo, useState } from "react";
 
 import { useClientSettings } from "~/hooks/useSettings";
@@ -257,10 +258,26 @@ export function BoardView(props: {
               title="No cards yet"
               body="A card is one piece of work on its own branch."
               actions={
-                <Button onClick={() => setNewCardOpen(true)}>
-                  <PlusIcon strokeWidth={2.6} />
-                  New card
-                </Button>
+                <>
+                  <Button variant="secondary" onClick={() => setNewCardOpen(true)}>
+                    <PlusIcon strokeWidth={2.6} />
+                    New card
+                  </Button>
+                  <Button
+                    render={
+                      <Link
+                        to="/channels/$environmentId/$channelId"
+                        params={{
+                          environmentId: props.environmentId,
+                          channelId: requestsChannelId(props.projectId),
+                        }}
+                      />
+                    }
+                  >
+                    <MessageSquareIcon />
+                    Ask for something
+                  </Button>
+                </>
               }
             />
           </main>

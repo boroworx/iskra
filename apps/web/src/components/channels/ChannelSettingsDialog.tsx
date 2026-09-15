@@ -19,7 +19,7 @@ import {
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
-import { agentListEntries, leadCandidates, toChannelName } from "./channels.logic";
+import { agentListEntries, channelTitle, leadCandidates, toChannelName } from "./channels.logic";
 import { AgentAvatar } from "../iskra/AgentAvatar";
 import { PresenceBadge } from "./ChannelView";
 import { SHEET_INPUT_CLASS, SheetGroup, SheetRow } from "./SheetList";
@@ -76,9 +76,12 @@ function ChannelSettingsForm(props: {
   const [busy, setBusy] = useState(false);
   const formId = useId();
   const channelName = toChannelName(name);
+  // Requests is the project's built-in conversation: it keeps its name and can't be archived.
+  const isRequests = channel.kind === "requests";
+  const nameMissing = !isRequests && channelName.length === 0;
 
   const save = async () => {
-    if (channelName.length === 0 || busy) {
+    if (nameMissing || busy) {
       return;
     }
     setBusy(true);
@@ -86,7 +89,7 @@ function ChannelSettingsForm(props: {
       environmentId,
       input: {
         channelId: channel.id,
-        name: channelName,
+        ...(isRequests ? {} : { name: channelName }),
         topic: topic.trim(),
         memberAgentIds: [...memberIds],
         leadAgentId: leadId,
@@ -132,7 +135,7 @@ function ChannelSettingsForm(props: {
   return (
     <>
       <DialogHeader>
-        <DialogTitle>#{channel.name}</DialogTitle>
+        <DialogTitle>{channelTitle(channel)}</DialogTitle>
         <DialogDescription>Agents here reply when you @mention them.</DialogDescription>
       </DialogHeader>
       <DialogPanel>
@@ -145,14 +148,16 @@ function ChannelSettingsForm(props: {
           }}
         >
           <SheetGroup>
-            <SheetRow as="label" label="Name">
-              <Input
-                unstyled
-                className={SHEET_INPUT_CLASS}
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-              />
-            </SheetRow>
+            {isRequests ? null : (
+              <SheetRow as="label" label="Name">
+                <Input
+                  unstyled
+                  className={SHEET_INPUT_CLASS}
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                />
+              </SheetRow>
+            )}
             <SheetRow as="label" label="Topic">
               <Input
                 unstyled
@@ -223,19 +228,21 @@ function ChannelSettingsForm(props: {
         </form>
       </DialogPanel>
       <DialogFooter variant="bare">
-        <Button
-          type="button"
-          variant="ghost"
-          className="text-destructive-foreground sm:mr-auto"
-          disabled={busy}
-          onClick={() => void archiveChannel()}
-        >
-          Archive
-        </Button>
+        {isRequests ? null : (
+          <Button
+            type="button"
+            variant="ghost"
+            className="text-destructive-foreground sm:mr-auto"
+            disabled={busy}
+            onClick={() => void archiveChannel()}
+          >
+            Archive
+          </Button>
+        )}
         <Button type="button" variant="outline" onClick={props.onClose}>
           Cancel
         </Button>
-        <Button type="submit" form={formId} disabled={channelName.length === 0 || busy}>
+        <Button type="submit" form={formId} disabled={nameMissing || busy}>
           Save
         </Button>
       </DialogFooter>

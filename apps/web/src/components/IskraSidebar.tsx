@@ -1,11 +1,18 @@
 import type { EnvironmentProject } from "@iskra/client-runtime/state/models";
-import type { AgentId, ChannelId, EnvironmentId, ProjectId } from "@iskra/contracts";
+import {
+  requestsChannelId,
+  type AgentId,
+  type ChannelId,
+  type EnvironmentId,
+  type ProjectId,
+} from "@iskra/contracts";
 import { Link, useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import {
   ArchiveIcon,
   CheckIcon,
   ChevronsUpDownIcon,
   LayoutGridIcon,
+  MessageSquareIcon,
   PlusIcon,
   SettingsIcon,
 } from "lucide-react";
@@ -32,7 +39,9 @@ import {
   channelListEntries,
   presenceLabel,
   presenceSpark,
+  projectRequestsChannel,
 } from "./channels/channels.logic";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { AgentSettingsDialog, useAgentDefinitions } from "./channels/AgentSettingsDialog";
 import { ChannelSettingsDialog } from "./channels/ChannelSettingsDialog";
 import { CreateAgentDialog } from "./channels/CreateAgentDialog";
@@ -144,16 +153,15 @@ export default function IskraSidebar() {
     const channels = appAtomRegistry.get(
       environmentAgentChannels.environmentChannelsAtom(environmentId),
     );
-    const target = railClickTarget(
+    const channelId = railClickTarget(
       channelListEntries(channels, projectId).map((entry) => entry.id),
       memory.lastChannelByProject[projectKey(project)],
+      requestsChannelId(projectId),
     );
-    void (target.kind === "channel"
-      ? navigate({
-          to: "/channels/$environmentId/$channelId",
-          params: { environmentId, channelId: target.channelId },
-        })
-      : navigate({ to: "/board/$environmentId/$projectId", params: { environmentId, projectId } }));
+    void navigate({
+      to: "/channels/$environmentId/$channelId",
+      params: { environmentId, channelId },
+    });
   };
   const selectedIndex = projects.findIndex((project) => projectKey(project) === selectedKey);
 
@@ -187,7 +195,10 @@ export default function IskraSidebar() {
                 <span className="truncate text-[13px] font-semibold">{selected.title}</span>
               </>
             )}
-            <ChevronsUpDownIcon aria-hidden className="ml-auto size-3 shrink-0 text-tertiary-label" />
+            <ChevronsUpDownIcon
+              aria-hidden
+              className="ml-auto size-3 shrink-0 text-tertiary-label"
+            />
           </MenuTrigger>
           <MenuPopup align="start" className="w-(--anchor-width) min-w-56">
             {projects.length > 0 ? (
@@ -200,7 +211,10 @@ export default function IskraSidebar() {
                       <ProjectTile initials={initials[index] ?? ""} className="size-5 text-[9px]" />
                       <span className="min-w-0 flex-1 truncate">{project.title}</span>
                       {key === selectedKey ? (
-                        <CheckIcon aria-label="Current project" className="size-3.5 text-foreground" />
+                        <CheckIcon
+                          aria-label="Current project"
+                          className="size-3.5 text-foreground"
+                        />
                       ) : null}
                     </MenuItem>
                   );
@@ -268,48 +282,105 @@ const ProjectChannels = memo(function ProjectChannels(props: {
   const [settingsAgentId, setSettingsAgentId] = useState<AgentId | null>(null);
   const [settingsChannelId, setSettingsChannelId] = useState<ChannelId | null>(null);
   const settingsChannel = channels.find((channel) => channel.id === settingsChannelId) ?? null;
+  const requestsId = requestsChannelId(projectId);
+  // The Requests row sparks like an agent row while its lead works or waits on you.
+  const requestsLead = useMemo(() => {
+    const leadId = projectRequestsChannel(channels, projectId)?.leadAgentId ?? null;
+    return leadId === null ? null : (agents.find((agent) => agent.id === leadId) ?? null);
+  }, [agents, channels, projectId]);
+  const archivedChannels = useArchivedChannels(environmentId, projectId, channelEntries.length);
 
   return (
     <>
-      <SidebarListGroup
-        label="Channels"
-        addLabel="New channel"
-        onAdd={() => setOpenDialog("channel")}
-        isEmpty={channelEntries.length === 0}
-      >
-        {channelEntries.map((entry) => (
-          <SidebarMenuItem key={entry.id}>
-            <SidebarMenuButton
-              className={ROW}
-              isActive={entry.id === props.activeChannelId}
+      <SidebarMenu className="mt-0.5 gap-0.5">
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            className={ROW}
+            isActive={props.activeChannelId === requestsId}
+            render={
+              <Link
+                to="/channels/$environmentId/$channelId"
+                params={{ environmentId, channelId: requestsId }}
+              />
+            }
+          >
+            <MessageSquareIcon className="text-info-foreground!" />
+            <span className="truncate">Requests</span>
+            {requestsLead === null || requestsLead.presence === "idle" ? null : (
+              <>
+                <span className="sr-only">{presenceLabel(requestsLead.presence)}</span>
+                <SparkGlyph
+                  state={presenceSpark(requestsLead.presence)}
+                  size={12}
+                  className="mr-1 ml-auto group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0"
+                />
+              </>
+            )}
+          </SidebarMenuButton>
+          <Tooltip>
+            <TooltipTrigger
               render={
-                <Link
-                  to="/channels/$environmentId/$channelId"
-                  params={{ environmentId, channelId: entry.id }}
+                <button
+                  type="button"
+                  aria-label="New channel"
+                  onClick={() => setOpenDialog("channel")}
+                  className={ROW_ACTION}
                 />
               }
             >
-              <span aria-hidden className="w-4 shrink-0 text-center font-semibold text-info-foreground">
-                #
-              </span>
-              <span className="truncate">{entry.name}</span>
-            </SidebarMenuButton>
-            <button
-              type="button"
-              aria-label={`#${entry.name} settings`}
-              onClick={() => setSettingsChannelId(entry.id)}
-              className={ROW_ACTION}
-            >
-              <SettingsIcon />
-            </button>
-          </SidebarMenuItem>
-        ))}
-        <ArchivedChannels
-          environmentId={environmentId}
-          projectId={projectId}
-          activeCount={channelEntries.length}
-        />
-      </SidebarListGroup>
+              <PlusIcon />
+            </TooltipTrigger>
+            <TooltipPopup className="max-w-60">
+              New channel — a separate topic with its own lead, or a room for several agents
+            </TooltipPopup>
+          </Tooltip>
+        </SidebarMenuItem>
+      </SidebarMenu>
+      {/* Most projects only need Requests: the section shows once a channel exists, or an archived one waits. */}
+      {channelEntries.length === 0 && archivedChannels.archived.length === 0 ? null : (
+        <SidebarListGroup
+          label="Channels"
+          addLabel="New channel"
+          onAdd={() => setOpenDialog("channel")}
+          isEmpty={channelEntries.length === 0}
+        >
+          {channelEntries.map((entry) => (
+            <SidebarMenuItem key={entry.id}>
+              <SidebarMenuButton
+                className={ROW}
+                isActive={entry.id === props.activeChannelId}
+                render={
+                  <Link
+                    to="/channels/$environmentId/$channelId"
+                    params={{ environmentId, channelId: entry.id }}
+                  />
+                }
+              >
+                <span
+                  aria-hidden
+                  className="w-4 shrink-0 text-center font-semibold text-info-foreground"
+                >
+                  #
+                </span>
+                <span className="truncate">{entry.name}</span>
+              </SidebarMenuButton>
+              <button
+                type="button"
+                aria-label={`#${entry.name} settings`}
+                onClick={() => setSettingsChannelId(entry.id)}
+                className={ROW_ACTION}
+              >
+                <SettingsIcon />
+              </button>
+            </SidebarMenuItem>
+          ))}
+          <ArchivedChannels
+            environmentId={environmentId}
+            archived={archivedChannels.archived}
+            refresh={archivedChannels.refresh}
+          />
+        </SidebarListGroup>
+      )}
       <SidebarListGroup
         label="Agents"
         addLabel="New agent"
@@ -416,34 +487,41 @@ function ArchivedToggle(props: {
   );
 }
 
+/** A project's archived channels, refetched when its active count changes, since the list does not stream. */
+function useArchivedChannels(
+  environmentId: EnvironmentId,
+  projectId: ProjectId,
+  activeCount: number,
+) {
+  const archivedChannels = useEnvironmentQuery(
+    channelEnvironment.archivedChannels({ environmentId, input: { projectId } }),
+  );
+  const refresh = archivedChannels.refresh;
+  const seenCount = useRef(activeCount);
+  useEffect(() => {
+    if (seenCount.current !== activeCount) {
+      seenCount.current = activeCount;
+      refresh();
+    }
+  }, [activeCount, refresh]);
+  return { archived: archivedChannels.data?.channels ?? NO_ARCHIVED_CHANNELS, refresh };
+}
+
+const NO_ARCHIVED_CHANNELS: ReadonlyArray<{ readonly id: ChannelId; readonly name: string }> = [];
+
 /**
  * A project's archived channels, collapsed under its channels, so an archive is
  * never a one-way door: each row unarchives its channel and opens it.
  */
 function ArchivedChannels(props: {
   readonly environmentId: EnvironmentId;
-  readonly projectId: ProjectId;
-  readonly activeCount: number;
+  readonly archived: ReadonlyArray<{ readonly id: ChannelId; readonly name: string }>;
+  readonly refresh: () => void;
 }) {
-  const archivedChannels = useEnvironmentQuery(
-    channelEnvironment.archivedChannels({
-      environmentId: props.environmentId,
-      input: { projectId: props.projectId },
-    }),
-  );
   const unarchive = useAtomCommand(channelEnvironment.unarchive);
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  // The list does not stream: refetch when a channel is archived or unarchived.
-  const refresh = archivedChannels.refresh;
-  const seenCount = useRef(props.activeCount);
-  useEffect(() => {
-    if (seenCount.current !== props.activeCount) {
-      seenCount.current = props.activeCount;
-      refresh();
-    }
-  }, [props.activeCount, refresh]);
-  const archived = archivedChannels.data?.channels ?? [];
+  const { archived, refresh } = props;
   if (archived.length === 0) {
     return null;
   }

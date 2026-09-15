@@ -57,7 +57,14 @@ export function CreateAgentDialog(props: {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly project: EnvironmentProject;
+  /** Prefills the form, e.g. a lead for Requests. */
+  readonly initialName?: string;
+  readonly initialRoles?: ReadonlyArray<AgentRole>;
+  /** Replaces opening the new agent's DM. */
+  readonly onCreated?: (agentId: AgentId) => void;
 }) {
+  const initialName = props.initialName ?? "";
+  const initialRoles = props.initialRoles ?? DEFAULT_AGENT_ROLES;
   const { environmentId, id: projectId } = props.project;
   const providers = useEnvironmentProviders(environmentId);
   const channels = useEnvironmentChannels(environmentId);
@@ -65,7 +72,7 @@ export function CreateAgentDialog(props: {
   const importAgentDefinitions = useAtomCommand(channelEnvironment.importAgentDefinitions);
   const updateChannel = useAtomCommand(channelEnvironment.update);
   const navigate = useNavigate();
-  const [name, setName] = useState("");
+  const [name, setName] = useState(initialName);
   const [role, setRole] = useState("");
   const [busy, setBusy] = useState(false);
   const formId = useId();
@@ -73,7 +80,7 @@ export function CreateAgentDialog(props: {
   const [chosenModel, setChosenModel] = useState<ModelSelection | null>(null);
   const [capabilities, setCapabilities] =
     useState<ReadonlyArray<RunCapability>>(NEW_AGENT_CAPABILITIES);
-  const [roles, setRoles] = useState<ReadonlyArray<AgentRole>>(DEFAULT_AGENT_ROLES);
+  const [roles, setRoles] = useState<ReadonlyArray<AgentRole>>(initialRoles);
   const modelSelection =
     chosenModel ?? resolveAgentModelSelection(providers, props.project.defaultModelSelection);
   const run = useAgentRunRefusal(environmentId, modelSelection, capabilities);
@@ -88,7 +95,8 @@ export function CreateAgentDialog(props: {
 
   const joinChannels = async (agentIds: ReadonlyArray<AgentId>) => {
     for (const channel of channels) {
-      if (channel.projectId !== projectId || channel.kind !== "channel") {
+      // Channels and Requests; a DM stays one agent's.
+      if (channel.projectId !== projectId || channel.kind === "dm") {
         continue;
       }
       await updateChannel({
@@ -126,13 +134,17 @@ export function CreateAgentDialog(props: {
     const { agentId } = saved.value;
     await joinChannels([agentId]);
     setBusy(false);
-    setName("");
+    setName(initialName);
     setRole("");
     setChosenModel(null);
     setCapabilities(NEW_AGENT_CAPABILITIES);
-    setRoles(DEFAULT_AGENT_ROLES);
+    setRoles(initialRoles);
     props.onOpenChange(false);
-    void navigate({ to: "/agents/$environmentId/$agentId", params: { environmentId, agentId } });
+    if (props.onCreated === undefined) {
+      void navigate({ to: "/agents/$environmentId/$agentId", params: { environmentId, agentId } });
+    } else {
+      props.onCreated(agentId);
+    }
   };
 
   const importAgents = async () => {

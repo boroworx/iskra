@@ -1,6 +1,8 @@
 import type { ChannelId, EnvironmentId, ProjectId } from "@iskra/contracts";
 import * as Schema from "effect/Schema";
 
+import { requestsProjectId } from "./channels/channels.logic";
+
 interface ProjectRef {
   readonly environmentId: EnvironmentId;
   readonly id: ProjectId;
@@ -39,7 +41,11 @@ export function routeProjectId(input: {
   const { params } = input;
   if (params.projectId !== undefined) return params.projectId as ProjectId;
   if (params.channelId !== undefined) {
-    return input.channels.find((channel) => channel.id === params.channelId)?.projectId ?? null;
+    // Requests names its project in its id, so it resolves before it exists.
+    return (
+      input.channels.find((channel) => channel.id === params.channelId)?.projectId ??
+      requestsProjectId(params.channelId)
+    );
   }
   if (params.agentId !== undefined) {
     return input.agents.find((agent) => agent.id === params.agentId)?.projectId ?? null;
@@ -132,13 +138,13 @@ export function projectRailInitials(titles: ReadonlyArray<string>): ReadonlyArra
   });
 }
 
-/** Where a rail click goes: the project's last channel if it still exists, else its first, else its board. */
+/** Where opening a project goes: its last channel if that is still active, else its Requests. */
 export function railClickTarget(
   channelIds: ReadonlyArray<ChannelId>,
   lastChannelId: string | undefined,
-): { readonly kind: "channel"; readonly channelId: ChannelId } | { readonly kind: "board" } {
-  const channelId = channelIds.find((id) => id === lastChannelId) ?? channelIds[0];
-  return channelId === undefined ? { kind: "board" } : { kind: "channel", channelId };
+  requestsId: ChannelId,
+): ChannelId {
+  return channelIds.find((id) => id === lastChannelId) ?? requestsId;
 }
 
 /** Projects with the remembered one moved first, so landing reopens it before the most recently active. */

@@ -1,6 +1,7 @@
 import {
   AgentId,
   MessageId,
+  REQUESTS_CHANNEL_NAME,
   type ThreadId,
   type ChannelId,
   type EnvironmentId,
@@ -49,9 +50,11 @@ import {
   presenceLabel,
   presenceSpark,
   proposalAnchors,
+  requestsProjectId,
   type AgentEntry,
   type ChannelMessageRow,
 } from "./channels.logic";
+import { RequestsLeadSetup } from "./RequestsLeadSetup";
 import { ChannelQuestion } from "../cards/CardContract";
 import { CardProposal } from "./CardProposal";
 import { ChannelSettingsDialog } from "./ChannelSettingsDialog";
@@ -67,12 +70,16 @@ export function ChannelView(props: {
   const cards = useEnvironmentCards(props.environmentId);
   const projects = useProjects();
   const channel = channels.find((entry) => entry.id === props.channelId) ?? null;
+  // Requests names its project in its id, so its page shows before a lead creates it.
+  const projectId = channel?.projectId ?? requestsProjectId(props.channelId);
   const project =
-    channel === null
+    projectId === null
       ? null
       : (projects.find(
-          (entry) => entry.environmentId === props.environmentId && entry.id === channel.projectId,
+          (entry) => entry.environmentId === props.environmentId && entry.id === projectId,
         ) ?? null);
+  const isRequests = channel === null ? project !== null : channel.kind === "requests";
+  const needsLead = isRequests && (channel === null || channel.leadAgentId === null);
   const messages = useEnvironmentQuery(
     channelEnvironment.messages({
       environmentId: props.environmentId,
@@ -84,7 +91,6 @@ export function ChannelView(props: {
     [channel, agents],
   );
   // Any active agent of the project can be mentioned or lead, member or not.
-  const projectId = channel?.projectId ?? null;
   const projectAgents = useMemo(
     () => (projectId === null ? [] : agentListEntries(agents, projectId)),
     [agents, projectId],
@@ -94,7 +100,7 @@ export function ChannelView(props: {
     () => ({ channelId: props.channelId, cards, agents: projectAgents }),
     [props.channelId, cards, projectAgents],
   );
-  const title = channel?.name ?? "";
+  const title = isRequests ? REQUESTS_CHANNEL_NAME : (channel?.name ?? "");
   const postMessage = useAtomCommand(channelEnvironment.postMessage);
   const unarchive = useAtomCommand(channelEnvironment.unarchive);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -103,18 +109,20 @@ export function ChannelView(props: {
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <WorkspacePageHeader>
-          {channel === null ? null : (
+          {channel === null && !isRequests ? null : (
             <div className="flex min-w-0 flex-1 items-center gap-1.5">
-              <span aria-hidden className="text-[15px] font-semibold text-muted-foreground/75">
-                #
-              </span>
+              {isRequests ? null : (
+                <span aria-hidden className="text-[15px] font-semibold text-muted-foreground/75">
+                  #
+                </span>
+              )}
               <h1 className="truncate text-[15px] font-semibold">{title}</h1>
-              {channel.topic.length > 0 ? (
+              {channel !== null && channel.topic.length > 0 ? (
                 <span className="ml-1.5 hidden truncate text-[13px] text-muted-foreground/55 sm:inline">
                   {channel.topic}
                 </span>
               ) : null}
-              {channel.kind === "channel" ? (
+              {channel !== null && channel.kind !== "dm" ? (
                 <>
                   {/* Below xl the members panel is hidden so the chat keeps its reading width: its members and lead live in settings. */}
                   <Button
@@ -147,7 +155,7 @@ export function ChannelView(props: {
             channel={channel}
           />
         ) : null}
-        {channel === null ? (
+        {channel === null && !isRequests ? (
           channels.length > 0 ? (
             // Archived channels leave the shell, so the page is where one comes back.
             <div className="flex flex-wrap items-center gap-3 px-5 py-4">
@@ -171,6 +179,11 @@ export function ChannelView(props: {
         ) : (
           <div className="flex min-h-0 flex-1">
             <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+              {needsLead && project !== null ? (
+                <PageColumn className="shrink-0 pt-7">
+                  <RequestsLeadSetup project={project} channel={channel} agents={agents} />
+                </PageColumn>
+              ) : null}
               <Timeline
                 messages={messages.data ?? EMPTY_MESSAGES}
                 error={messages.error}
@@ -182,7 +195,15 @@ export function ChannelView(props: {
               />
               <MessageComposer
                 key={props.channelId}
-                placeholder={`Message #${title}`}
+                placeholder={
+                  !isRequests
+                    ? `Message #${title}`
+                    : projectAgents.length > 0
+                      ? "Ask for something, or @mention an agent"
+                      : "Ask for something…"
+                }
+                // Without a lead a request would wake nobody; the setup row says so.
+                disabled={needsLead}
                 mentionAgents={projectAgents}
                 onSend={async (body) => {
                   const result = await postMessage({
@@ -197,7 +218,7 @@ export function ChannelView(props: {
                 }}
               />
             </main>
-            {channel.kind === "channel" ? (
+            {channel !== null && channel.kind !== "dm" ? (
               <ChannelMemberList
                 members={members}
                 leadOptions={projectAgents}

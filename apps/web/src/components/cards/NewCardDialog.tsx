@@ -5,6 +5,7 @@ import {
   type CardPriority,
   type ChannelId,
   type EnvironmentId,
+  type OrchestrationChannelShell,
   type ProjectId,
 } from "@iskra/contracts";
 import { useId, useMemo, useState } from "react";
@@ -26,11 +27,25 @@ import {
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Textarea } from "../ui/textarea";
-import { SHEET_INPUT_CLASS, SHEET_TEXTAREA_CLASS, SheetGroup, SheetRow } from "../channels/SheetList";
+import { channelTitle } from "../channels/channels.logic";
+import {
+  SHEET_INPUT_CLASS,
+  SHEET_TEXTAREA_CLASS,
+  SheetGroup,
+  SheetRow,
+} from "../channels/SheetList";
 import { toastCommandFailure } from "../toastCommandFailure";
 import { DisabledReason } from "./DisabledReason";
 
 const NO_CHANNEL = "none";
+
+const channelTitleById = (
+  channels: ReadonlyArray<Pick<OrchestrationChannelShell, "id" | "kind" | "name">>,
+  id: string,
+) => {
+  const channel = channels.find((entry) => entry.id === id);
+  return channel === undefined ? "" : channelTitle(channel);
+};
 
 const KIND_LABEL: Record<CardKind, string> = {
   task: "Task",
@@ -58,9 +73,12 @@ export function NewCardDialog(props: {
   const allChannels = useEnvironmentChannels(props.environmentId);
   const channels = useMemo(
     () =>
-      allChannels.filter(
-        (channel) => channel.projectId === props.projectId && channel.kind === "channel",
-      ),
+      // The project's Requests first, then its channels; DMs take no cards.
+      allChannels
+        .filter((channel) => channel.projectId === props.projectId && channel.kind !== "dm")
+        .toSorted(
+          (left, right) => Number(right.kind === "requests") - Number(left.kind === "requests"),
+        ),
     [allChannels, props.projectId],
   );
   const [title, setTitle] = useState("");
@@ -188,7 +206,8 @@ export function NewCardDialog(props: {
                 <Select
                   value={kind}
                   onValueChange={(value) => {
-                    if (value === "task" || value === "plan" || value === "migration") setKind(value);
+                    if (value === "task" || value === "plan" || value === "migration")
+                      setKind(value);
                   }}
                 >
                   <SelectTrigger aria-label="Kind" variant="ghost" className="w-auto min-w-0">
@@ -215,7 +234,7 @@ export function NewCardDialog(props: {
                       {(value: string | null) =>
                         value === null || value === NO_CHANNEL
                           ? "No channel"
-                          : `#${channels.find((channel) => channel.id === value)?.name ?? ""}`
+                          : channelTitleById(channels, value)
                       }
                     </SelectValue>
                   </SelectTrigger>
@@ -223,7 +242,7 @@ export function NewCardDialog(props: {
                     <SelectItem value={NO_CHANNEL}>No channel</SelectItem>
                     {channels.map((channel) => (
                       <SelectItem key={channel.id} value={channel.id}>
-                        #{channel.name}
+                        {channelTitle(channel)}
                       </SelectItem>
                     ))}
                   </SelectPopup>

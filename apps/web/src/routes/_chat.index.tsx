@@ -1,15 +1,17 @@
-import type { EnvironmentProject } from "@iskra/client-runtime/state/models";
+import { requestsChannelId } from "@iskra/contracts";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { LinkIcon, PlusIcon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
 import { isElectron } from "../env";
-import { agentListEntries } from "../components/channels/channels.logic";
-import { CreateAgentDialog } from "../components/channels/CreateAgentDialog";
-import { CreateChannelDialog } from "../components/channels/CreateChannelDialog";
+import { channelListEntries } from "../components/channels/channels.logic";
 import { useProjectRailMemory } from "../components/channels/IskraCreateDialogs";
-import { projectKey, withStoredProjectFirst } from "../components/projectRail.logic";
+import {
+  projectKey,
+  railClickTarget,
+  withStoredProjectFirst,
+} from "../components/projectRail.logic";
 import { NoProjectsHero } from "../components/NoProjectsHero";
 import { sortScopedProjectsForSidebar } from "../components/Sidebar.logic";
 import { Button } from "../components/ui/button";
@@ -18,7 +20,6 @@ import { SidebarInset } from "../components/ui/sidebar";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import {
   useAllEnvironmentShellsBootstrapped,
-  useEnvironmentAgents,
   useEnvironmentChannels,
   useProjects,
   useThreadShells,
@@ -39,9 +40,8 @@ function ChatIndexRouteView() {
 }
 
 /**
- * Landing on the index route opens a channel: the first one in the most
- * recently active project that has any. Without channels it points at the
- * sidebar, where agents and channels are created; without projects it shows
+ * Landing on the index route opens the last opened, else most recently active, project: its
+ * remembered channel while that is still active, else its Requests. Without projects it shows
  * the add-project hero.
  */
 function IndexChannelLanding() {
@@ -54,7 +54,6 @@ function IndexChannelLanding() {
 
   const [railMemory] = useProjectRailMemory();
 
-  // The project last opened comes first, then the most recently active.
   const sortedProjects = useMemo(
     () =>
       bootstrapped
@@ -65,24 +64,18 @@ function IndexChannelLanding() {
         : [],
     [bootstrapped, projects, railMemory.lastProjectKey, threads],
   );
-  const landingProject = sortedProjects.find(
-    (project) =>
-      project.environmentId === primaryEnvironmentId &&
-      primaryChannels.some((channel) => channel.projectId === project.id),
-  );
-  const landingProjectChannels = primaryChannels.filter(
-    (channel) => channel.projectId === landingProject?.id,
-  );
-  const lastChannelId =
-    landingProject === undefined
-      ? undefined
-      : railMemory.lastChannelByProject[projectKey(landingProject)];
-  const landingChannel =
-    landingProjectChannels.find((channel) => channel.id === lastChannelId) ??
-    landingProjectChannels.find((channel) => channel.kind === "channel") ??
-    landingProjectChannels[0];
+  const landingProject =
+    sortedProjects.find((project) => project.environmentId === primaryEnvironmentId) ??
+    sortedProjects[0];
   const landingEnvironmentId = landingProject?.environmentId ?? null;
-  const landingChannelId = landingChannel?.id ?? null;
+  const landingChannelId =
+    landingProject === undefined
+      ? null
+      : railClickTarget(
+          channelListEntries(primaryChannels, landingProject.id).map((entry) => entry.id),
+          railMemory.lastChannelByProject[projectKey(landingProject)],
+          requestsChannelId(landingProject.id),
+        );
 
   useEffect(() => {
     if (landingEnvironmentId === null || landingChannelId === null) {
@@ -98,59 +91,9 @@ function IndexChannelLanding() {
   if (!bootstrapped || landingChannelId !== null) {
     return null;
   }
-  const setupProject =
-    sortedProjects.find((project) => project.environmentId === primaryEnvironmentId) ??
-    sortedProjects[0];
-  if (setupProject === undefined) {
-    // First-run routing to the welcome wizard happens in FirstRunGate at the
-    // root, before this route ever renders.
-    return <NoProjectsHero />;
-  }
-  return <NoChannelsLanding project={setupProject} />;
-}
-
-/** A project with no channel yet: how work moves through Iskra, and the two things to create first. */
-function NoChannelsLanding(props: { readonly project: EnvironmentProject }) {
-  const { environmentId, id: projectId } = props.project;
-  const agents = useEnvironmentAgents(environmentId);
-  const memberAgentIds = useMemo(
-    () => agentListEntries(agents, projectId).map((agent) => agent.id),
-    [agents, projectId],
-  );
-  const [openDialog, setOpenDialog] = useState<"channel" | "agent" | null>(null);
-  return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
-      <WorkspacePageHeader electron={isElectron} />
-      <EmptyState
-        title="No channels yet"
-        body="Talk to agents in a channel; its lead turns requests into cards."
-        actions={
-          <>
-            <Button variant="secondary" onClick={() => setOpenDialog("agent")}>
-              <PlusIcon />
-              New agent
-            </Button>
-            <Button onClick={() => setOpenDialog("channel")}>
-              <PlusIcon />
-              New channel
-            </Button>
-          </>
-        }
-      />
-      <CreateAgentDialog
-        open={openDialog === "agent"}
-        onOpenChange={(open) => setOpenDialog(open ? "agent" : null)}
-        project={props.project}
-      />
-      <CreateChannelDialog
-        open={openDialog === "channel"}
-        onOpenChange={(open) => setOpenDialog(open ? "channel" : null)}
-        environmentId={environmentId}
-        projectId={projectId}
-        memberAgentIds={memberAgentIds}
-      />
-    </SidebarInset>
-  );
+  // First-run routing to the welcome wizard happens in FirstRunGate at the
+  // root, before this route ever renders.
+  return <NoProjectsHero />;
 }
 
 export const Route = createFileRoute("/_chat/")({

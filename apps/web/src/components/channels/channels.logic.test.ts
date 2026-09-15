@@ -25,6 +25,9 @@ import {
   cardProposalStatus,
   channelListEntries,
   channelMemberEntries,
+  channelTitle,
+  projectRequestsChannel,
+  requestsProjectId,
   channelMessageRows,
   deliveryNotes,
   leadCandidates,
@@ -183,6 +186,40 @@ describe("channelListEntries", () => {
     );
 
     expect(entries.map((entry) => entry.name)).toEqual(["api", "general"]);
+  });
+
+  it("leaves out the project's Requests, which has its own row", () => {
+    const entries = channelListEntries(
+      [
+        channel("general", "general"),
+        channel("requests:project-1", "Requests", { kind: "requests" }),
+      ],
+      projectId,
+    );
+    expect(entries.map((entry) => entry.name)).toEqual(["general"]);
+  });
+});
+
+describe("Requests", () => {
+  it("reads the project from a Requests id and nothing else", () => {
+    expect(requestsProjectId("requests:project-1")).toBe("project-1");
+    expect(requestsProjectId("requests:")).toBeNull();
+    expect(requestsProjectId("general")).toBeNull();
+  });
+
+  it("finds a project's Requests once it exists", () => {
+    const requests = channel("requests:project-1", "Requests", { kind: "requests" });
+    const others = [
+      channel("general", "general"),
+      channel("requests:project-2", "Requests", { kind: "requests", projectId: otherProjectId }),
+    ];
+    expect(projectRequestsChannel(others, projectId)).toBeNull();
+    expect(projectRequestsChannel([...others, requests], projectId)).toBe(requests);
+  });
+
+  it("titles Requests without a hash and channels with one", () => {
+    expect(channelTitle({ kind: "requests", name: "Requests" })).toBe("Requests");
+    expect(channelTitle({ kind: "channel", name: "general" })).toBe("#general");
   });
 });
 
