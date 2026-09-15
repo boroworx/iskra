@@ -3,15 +3,7 @@
 import { Spinner } from "~/components/ui/spinner";
 
 import { Toast } from "@base-ui/react/toast";
-import {
-  useEffect,
-  useMemo,
-  useState,
-  type CSSProperties,
-  type ComponentPropsWithoutRef,
-  type KeyboardEvent,
-  type ReactNode,
-} from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type ComponentPropsWithoutRef, type KeyboardEvent, type ReactNode, useRef } from "react";
 import { useParams } from "@tanstack/react-router";
 import { type ScopedThreadRef, type ThreadId } from "@iskra/contracts";
 import {
@@ -104,7 +96,7 @@ function errorDescriptionClampClass(type: unknown, description: unknown): string
 /** Dismiss-only: circular control overlapping the card corner (iOS notification–style). */
 const toastCornerDismissClass = "absolute z-20 -top-1.5 -right-1.5";
 const toastCornerOrbClass = cn(
-  "inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full border border-border/60 bg-popover/92 text-muted-foreground shadow-sm outline-none backdrop-blur-sm",
+  "inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full border border-border/60 bg-popover text-muted-foreground shadow-sm outline-none",
   "transition-[color,background-color,box-shadow] hover:bg-popover hover:text-foreground",
   "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
 );
@@ -388,7 +380,7 @@ function ToastBodyContent({
               {...props}
               className={className}
               key={id}
-              size="xs"
+              size="sm"
               type="button"
               variant={secondaryActionVariant}
             />
@@ -397,14 +389,14 @@ function ToastBodyContent({
             <Button
               {...secondaryActionRest}
               className={secondaryActionClassName}
-              size="xs"
+              size="sm"
               type="button"
               variant={secondaryActionVariant}
             />
           ) : null}
           {hasVisibleToastAction(actionProps) ? (
             <Toast.Action
-              className={cn(buttonVariants({ size: "xs", variant: actionVariant }), "shrink-0")}
+              className={cn(buttonVariants({ size: "sm", variant: actionVariant }), "shrink-0")}
               data-slot="toast-action"
             >
               {actionProps?.children}
@@ -454,10 +446,17 @@ function useActiveThreadRefFromRoute(): ScopedThreadRef | null {
 function ThreadToastVisibleAutoDismiss({
   toastId,
   dismissAfterVisibleMs,
+  onClose,
 }: {
   toastId: ToastId;
   dismissAfterVisibleMs: number | undefined;
+  /** Runs when the toast times out, as its dismiss button does, so a prompt that timed out stays dismissed. */
+  onClose: (() => void) | undefined;
 }) {
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
   useEffect(() => {
     if (!dismissAfterVisibleMs || dismissAfterVisibleMs <= 0) return;
     if (typeof window === "undefined" || typeof document === "undefined") return;
@@ -477,6 +476,7 @@ function ThreadToastVisibleAutoDismiss({
       if (closed) return;
       closed = true;
       threadToastVisibleTimeoutRemainingMs.delete(toastId);
+      onCloseRef.current?.();
       toastManager.close(toastId);
     };
 
@@ -529,7 +529,7 @@ function ThreadToastVisibleAutoDismiss({
   return null;
 }
 
-function ToastProvider({ children, position = "top-right", ...props }: ToastProviderProps) {
+function ToastProvider({ children, position = "bottom-right", ...props }: ToastProviderProps) {
   return (
     <Toast.Provider toastManager={toastManager} {...props}>
       {children}
@@ -560,10 +560,10 @@ function Toasts({ position }: { position: ToastPosition }) {
     <Toast.Portal data-slot="toast-portal">
       <Toast.Viewport
         className={cn(
-          "fixed z-100 mx-auto flex w-[calc(100%-var(--toast-inset)*2)] max-w-90 [--toast-header-offset:var(--workspace-topbar-height)] [--toast-inset:--spacing(4)] sm:[--toast-inset:--spacing(8)]",
+          "fixed z-100 mx-auto flex w-[calc(100%-var(--toast-inset)*2)] max-w-80 [--toast-bottom-offset:--spacing(15)] [--toast-header-offset:var(--workspace-topbar-height)] [--toast-inset:--spacing(4)]",
           // Vertical positioning
           "data-[position*=top]:top-[calc(var(--toast-inset)+var(--toast-header-offset))]",
-          "data-[position*=bottom]:bottom-(--toast-inset)",
+          "data-[position*=bottom]:bottom-[calc(var(--toast-inset)+var(--toast-bottom-offset))]",
           // Horizontal positioning
           "data-[position*=left]:left-(--toast-inset)",
           "data-[position*=right]:right-(--toast-inset)",
@@ -588,7 +588,7 @@ function Toasts({ position }: { position: ToastPosition }) {
           return (
             <Toast.Root
               className={cn(
-                "dropdown-glass absolute z-[calc(9999-var(--toast-index))] w-full overflow-visible select-none rounded-lg text-popover-foreground shadow-xl shadow-black/25 [transition:transform_.5s_cubic-bezier(.22,1,.36,1),opacity_.5s,height_.15s]",
+                "dropdown-glass absolute z-[calc(9999-var(--toast-index))] w-full overflow-visible select-none rounded-[10px] text-popover-foreground shadow-[0_10px_32px_-8px_rgb(0_0_0/24%)] dark:shadow-[0_12px_36px_-8px_rgb(0_0_0/56%)] [transition:transform_.5s_cubic-bezier(.22,1,.36,1),opacity_.5s,height_.15s]",
                 // Base positioning using data-position
                 "data-[position*=right]:right-0 data-[position*=right]:left-auto",
                 "data-[position*=left]:right-auto data-[position*=left]:left-0",
@@ -659,6 +659,7 @@ function Toasts({ position }: { position: ToastPosition }) {
             >
               <ThreadToastVisibleAutoDismiss
                 dismissAfterVisibleMs={toast.data?.dismissAfterVisibleMs}
+                onClose={toast.data?.onClose}
                 toastId={toast.id}
               />
               <div className={toastCornerDismissClass}>
@@ -678,7 +679,7 @@ function Toasts({ position }: { position: ToastPosition }) {
                 className={cn(
                   // `overflow-x: clip` avoids the CSS quirk where pairing `hidden` + `y: visible`
                   // forces `y` to `auto`. Expandable detail panels can extend below without being cut off.
-                  "pointer-events-auto min-h-0 overflow-y-visible pl-3.5 text-sm transition-opacity duration-250 [overflow-x:clip] data-expanded:opacity-100",
+                  "pointer-events-auto min-h-0 overflow-y-visible pl-3.5 text-[13px] transition-opacity duration-250 [overflow-x:clip] data-expanded:opacity-100",
                   stackedActionLayout
                     ? "flex flex-col gap-2 py-2.5 pr-3.5"
                     : cn("py-3", "flex items-center justify-between gap-1.5", inlineContentEndPad),
@@ -740,8 +741,8 @@ function AnchoredToasts() {
               >
                 <Toast.Root
                   className={cn(
-                    "dropdown-glass relative overflow-visible text-balance text-popover-foreground text-xs shadow-xl shadow-black/25 transition-[scale,opacity] data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0",
-                    tooltipStyle ? "rounded-md" : "rounded-lg",
+                    "dropdown-glass relative overflow-visible text-balance text-popover-foreground text-xs shadow-[0_10px_32px_-8px_rgb(0_0_0/24%)] dark:shadow-[0_12px_36px_-8px_rgb(0_0_0/56%)] transition-[scale,opacity] data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0",
+                    tooltipStyle ? "rounded-md" : "rounded-[10px]",
                   )}
                   data-slot="toast-popup"
                   toast={toast}
@@ -771,7 +772,7 @@ function AnchoredToasts() {
                       </div>
                       <Toast.Content
                         className={cn(
-                          "pointer-events-auto min-h-0 overflow-y-visible pl-3.5 text-sm [overflow-x:clip]",
+                          "pointer-events-auto min-h-0 overflow-y-visible pl-3.5 text-[13px] [overflow-x:clip]",
                           stackedActionLayout
                             ? "flex flex-col gap-2 py-2.5 pr-3.5"
                             : cn(

@@ -282,7 +282,7 @@ export function ProviderUpdatePrimaryNotification() {
                 children: "Settings",
                 onClick: openSettings,
               },
-        actionVariant: "outline",
+        actionVariant: "default",
         data: {
           leadingIcon:
             updateProviders.length === 1 ? (
@@ -297,7 +297,7 @@ export function ProviderUpdatePrimaryNotification() {
                   children: "Settings",
                   onClick: openSettings,
                 },
-                secondaryActionVariant: "outline" as const,
+                secondaryActionVariant: "secondary" as const,
               }
             : {}),
         },

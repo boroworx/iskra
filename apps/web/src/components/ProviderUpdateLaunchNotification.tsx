@@ -185,7 +185,7 @@ function ProviderUpdateEnvironmentsNotification() {
           children: "Settings",
           onClick: openProviderSettings,
         },
-        actionVariant: "outline",
+        actionVariant: "secondary",
         data: { ...promptData, dismissAfterVisibleMs: PROVIDER_UPDATE_PROMPT_VISIBLE_MS },
       }),
     );
