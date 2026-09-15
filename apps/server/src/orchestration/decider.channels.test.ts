@@ -416,6 +416,44 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
       }),
   );
 
+  it.effect("makes only an agent with the lead role a channel's new lead", () =>
+    Effect.gen(function* () {
+      const builderOnly = AgentId.make("agent-builder-only");
+      const base = [...setup, createAgent(builderOnly, { roles: ["builder"] })];
+      const refusal = "@builder-only can't lead a channel; give it the lead role first.";
+      const updateLead = (leadAgentId: AgentId): OrchestrationCommand => ({
+        type: "channel.update",
+        commandId: nextCommandId(),
+        channelId: ChannelId.make("triage"),
+        name: "triage-renamed",
+        leadAgentId,
+      });
+
+      const created = yield* Effect.flip(
+        applyCommands([...base, createChannel("triage", "channel", [backend], builderOnly)]),
+      );
+      expect(created.message).toContain(refusal);
+
+      const changed = yield* Effect.flip(
+        applyCommands([
+          ...base,
+          createChannel("triage", "channel", [backend], backend),
+          updateLead(builderOnly),
+        ]),
+      );
+      expect(changed.message).toContain(refusal);
+
+      // A lead that lost the role stays, so saving the channel isn't refused.
+      const kept = yield* applyCommands([
+        ...base,
+        createChannel("triage", "channel", [backend], backend),
+        { type: "agent.update", commandId: nextCommandId(), agentId: backend, roles: ["builder"] },
+        updateLead(backend),
+      ]);
+      expect(kept.channels).toMatchObject([{ name: "triage-renamed", leadAgentId: backend }]);
+    }),
+  );
+
   it.effect("opens an agent's DM on the first direct message and posts later ones there", () =>
     Effect.gen(function* () {
       const dmPost = (agentId: AgentId, messageId: string): OrchestrationCommand => ({

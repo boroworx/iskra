@@ -106,6 +106,14 @@ export const roleRefusal = (
     ? null
     : `@${agent.name} can't act as a ${role}; choose an agent whose roles include it.`;
 
+/** Why an agent can't be made a channel's lead, or null. */
+export const channelLeadRoleRefusal = (
+  agent: Pick<OrchestrationAgent, "name" | "roles">,
+): string | null =>
+  agent.roles.includes("lead")
+    ? null
+    : `@${agent.name} can't lead a channel; give it the lead role first.`;
+
 /** Helper and critic runs one card may have open at once. */
 export const MAX_OPEN_ASSIST_RUNS = 2;
 export const OPEN_ASSIST_RUNS_REASON = `This card already has ${MAX_OPEN_ASSIST_RUNS} helper or critic runs open; wait for one to answer.`;

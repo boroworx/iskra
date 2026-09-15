@@ -108,6 +108,7 @@ import {
   VERIFY_LATEST_COMMIT_REASON,
   BUILDER_ONLY_ASSIST_REASON,
   openAssistRunsRefusal,
+  channelLeadRoleRefusal,
   roleRefusal,
   verdictPassed,
   verdictRefusal,
@@ -126,21 +127,27 @@ const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
 type ReadModelChannel = NonNullable<OrchestrationReadModel["channels"]>[number];
 
-/** Why an agent cannot lead a channel, or null: a lead is any active agent of the project. */
+/**
+ * Why an agent cannot lead a channel, or null: a lead is an active agent of the project with the
+ * lead role. The role is checked only for a new lead, so saving a channel whose lead lost the role
+ * isn't refused.
+ */
 function channelLeadProblem(input: {
   readonly readModel: OrchestrationReadModel;
   readonly projectId: ReadModelChannel["projectId"];
   readonly kind: ReadModelChannel["kind"];
   readonly leadAgentId: ReadModelChannel["leadAgentId"];
+  readonly currentLeadAgentId: ReadModelChannel["leadAgentId"];
 }): string | null {
   if (input.leadAgentId === null) return null;
   if (input.kind !== "channel") return "Only a channel can have a lead, not a DM.";
   const agent = (input.readModel.agents ?? []).find(
     (candidate) => candidate.id === input.leadAgentId,
   );
-  return agent === undefined || agent.projectId !== input.projectId || agent.archivedAt !== null
-    ? "A channel's lead must be an active agent of its project."
-    : null;
+  if (agent === undefined || agent.projectId !== input.projectId || agent.archivedAt !== null) {
+    return "A channel's lead must be an active agent of its project.";
+  }
+  return input.leadAgentId === input.currentLeadAgentId ? null : channelLeadRoleRefusal(agent);
 }
 
 /** Where a wake's message goes, as its request records it: into a live run, or a new one. */
@@ -4289,6 +4296,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         projectId: command.projectId,
         kind: command.kind,
         leadAgentId: command.leadAgentId ?? null,
+        currentLeadAgentId: null,
       });
       if (createLeadProblem !== null) {
         return yield* refuse(command, createLeadProblem);
@@ -4329,6 +4337,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           projectId: channel.projectId,
           kind: channel.kind,
           leadAgentId: command.leadAgentId,
+          currentLeadAgentId: channel.leadAgentId,
         });
         if (updateLeadProblem !== null) {
           return yield* refuse(command, updateLeadProblem);
