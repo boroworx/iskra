@@ -248,7 +248,18 @@ export function NeedsYouView() {
                 className="mt-7 flex flex-col gap-2 first:mt-0"
               >
                 <h2 className="px-4 text-[13px] font-semibold text-muted-foreground">
-                  {projectTitle(projectId) || "Other project"}
+                  {/* The heading opens the project's board, which also selects it in the sidebar. */}
+                  {environmentId === null ? (
+                    projectTitle(projectId) || "Other project"
+                  ) : (
+                    <Link
+                      to="/board/$environmentId/$projectId"
+                      params={{ environmentId, projectId }}
+                      className="rounded-sm outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      {projectTitle(projectId) || "Other project"}
+                    </Link>
+                  )}
                 </h2>
                 <ol className="flex flex-col gap-2.5">
                   {groupItems.map((item) => {
