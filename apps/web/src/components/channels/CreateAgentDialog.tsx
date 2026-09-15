@@ -212,10 +212,10 @@ export function CreateAgentDialog(props: {
               )}
             </SheetGroup>
             {modelSelection === null ? (
-              <p className="px-3 text-sm text-destructive-foreground">{NO_PROVIDER_TEXT}</p>
+              <p className="px-4 text-sm text-destructive-foreground">{NO_PROVIDER_TEXT}</p>
             ) : null}
             <SheetGroup title="Role">
-              <div className="px-3 py-2 focus-within:bg-accent/40">
+              <div className="px-4 py-2 focus-within:bg-accent/40">
                 <Textarea
                   unstyled
                   aria-label="Role"
@@ -229,7 +229,7 @@ export function CreateAgentDialog(props: {
               </div>
             </SheetGroup>
             <RoleFields value={roles} onChange={setRoles} />
-            <div className="flex flex-col gap-1.5 [&>p]:px-3">
+            <div className="flex flex-col gap-1.5 [&>p]:px-4">
               <CapabilityFields value={capabilities} onChange={setCapabilities} />
               <AgentRunNote driver={run.driver} refusal={run.refusal} />
             </div>

@@ -319,7 +319,7 @@ function TimelineLoadEarlierHeader({
 }) {
   return (
     <div className={fade ? "pt-[var(--workspace-titlebar-scroll-fade-height)]" : "pt-3 sm:pt-4"}>
-      <div className="mx-auto w-full max-w-3xl pb-2">
+      <div className="mx-auto w-full max-w-[720px] pb-2">
         <button
           type="button"
           onClick={onLoadEarlier}
@@ -970,7 +970,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   // from TimelineRowCtx, which propagates through LegendList's memo.
   const renderItem = useCallback(
     ({ item }: { item: MessagesTimelineRow }) => (
-      <div className="mx-auto w-full min-w-0 max-w-3xl overflow-x-clip" data-timeline-root="true">
+      <div
+        className="mx-auto w-full min-w-0 max-w-[720px] overflow-x-clip"
+        data-timeline-root="true"
+      >
         <TimelineRowContent row={item} />
       </div>
     ),
@@ -1037,7 +1040,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             onScroll={handleScroll}
             onItemSizeChanged={reportContentOverflow}
             className={cn(
-              "scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 [overflow-anchor:none] sm:px-5",
+              "scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-6 [overflow-anchor:none]",
               topFadeEnabled && "topbar-scroll-fade",
             )}
             ListHeaderComponent={
@@ -1479,7 +1482,7 @@ function ContextCompactionTimelineRow({
     <div
       role="separator"
       aria-label={row.label}
-      className="mx-auto flex w-full max-w-3xl items-center gap-3 py-1 text-muted-foreground text-xs"
+      className="mx-auto flex w-full max-w-[720px] items-center gap-3 py-1 text-muted-foreground text-xs"
     >
       <span className="h-px flex-1 bg-border/70" />
       <span className="flex shrink-0 items-center gap-1.5">

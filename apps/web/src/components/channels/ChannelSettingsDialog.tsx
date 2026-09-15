@@ -189,7 +189,7 @@ function ChannelSettingsForm(props: {
             <legend className="sr-only">Members</legend>
             <SheetGroup title="Members">
               {projectAgents.length === 0 ? (
-                <p className="flex min-h-11 items-center px-3 text-[13px] text-muted-foreground">
+                <p className="flex min-h-11 items-center px-4 text-[13px] text-muted-foreground">
                   This project has no agents yet.
                 </p>
               ) : (
@@ -225,8 +225,8 @@ function ChannelSettingsForm(props: {
       <DialogFooter variant="bare">
         <Button
           type="button"
-          variant="destructive-outline"
-          className="sm:mr-auto"
+          variant="ghost"
+          className="text-destructive-foreground sm:mr-auto"
           disabled={busy}
           onClick={() => void archiveChannel()}
         >

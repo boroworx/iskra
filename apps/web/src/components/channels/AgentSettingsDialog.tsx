@@ -218,7 +218,7 @@ function BlueprintFields(props: {
           onChange={(value) => set("uiCapture", value)}
           disabled={disabled}
         />
-        <label className="flex flex-col gap-1 px-3 py-2 text-[13px] focus-within:bg-accent/40">
+        <label className="flex flex-col gap-1 px-4 py-2 text-[13px] focus-within:bg-accent/40">
           <span>UI paths to screenshot, one per line</span>
           <Textarea
             unstyled
@@ -524,7 +524,7 @@ function AgentSettingsForm(props: {
               </SheetRow>
             </SheetGroup>
             <SheetGroup title="Role">
-              <label className="block px-3 py-2 focus-within:bg-accent/40">
+              <label className="block px-4 py-2 focus-within:bg-accent/40">
                 <span className="sr-only">Role</span>
                 <Textarea
                   unstyled
@@ -537,7 +537,7 @@ function AgentSettingsForm(props: {
               </label>
             </SheetGroup>
             <RoleFields value={roles} onChange={setRoles} disabled={props.archived} />
-            <div className="flex flex-col gap-1.5 [&>p]:px-3">
+            <div className="flex flex-col gap-1.5 [&>p]:px-4">
               <CapabilityFields
                 value={capabilities}
                 onChange={setCapabilities}
@@ -572,8 +572,8 @@ function AgentSettingsForm(props: {
           <>
             <Button
               type="button"
-              variant="destructive-outline"
-              className="sm:mr-auto"
+              variant="ghost"
+              className="text-destructive-foreground sm:mr-auto"
               disabled={busy}
               onClick={() => void archive()}
             >

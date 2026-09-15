@@ -34,6 +34,7 @@ import {
   mentionCandidates,
   mentionQueryAt,
   proposalAnchors,
+  groupRunOutput,
   runOutputItems,
   presenceDotClassName,
   presenceLabel,
@@ -139,13 +140,30 @@ describe("cardProposalStatus", () => {
 
 describe("cardNoteOf", () => {
   it("reads the card from a progress note's id, and only from Iskra's notes", () => {
-    const note = message("event-1:card-progress:card-page", "system", "system", "2026-01-01T10:00:00.000Z");
-    const question = message("event-2:card-question:card-page", "system", "system", "2026-01-01T10:00:00.000Z");
-    const typed = message("event-3:card-progress:card-page", "human", "human", "2026-01-01T10:00:00.000Z");
+    const note = message(
+      "event-1:card-progress:card-page",
+      "system",
+      "system",
+      "2026-01-01T10:00:00.000Z",
+    );
+    const question = message(
+      "event-2:card-question:card-page",
+      "system",
+      "system",
+      "2026-01-01T10:00:00.000Z",
+    );
+    const typed = message(
+      "event-3:card-progress:card-page",
+      "human",
+      "human",
+      "2026-01-01T10:00:00.000Z",
+    );
     expect(cardNoteOf(note)).toEqual({ cardId: "card-page", question: false });
     expect(cardNoteOf(question)).toEqual({ cardId: "card-page", question: true });
     expect(cardNoteOf(typed)).toBeNull();
-    expect(cardNoteOf(message("ask:system:nobody", "system", "system", "2026-01-01T10:00:00.000Z"))).toBeNull();
+    expect(
+      cardNoteOf(message("ask:system:nobody", "system", "system", "2026-01-01T10:00:00.000Z")),
+    ).toBeNull();
   });
 });
 
@@ -235,7 +253,10 @@ describe("leadCandidates", () => {
 });
 
 describe("dmTargets", () => {
-  const run = (threadId: string, overrides: Partial<OrchestrationAgentRun>): OrchestrationAgentRun => ({
+  const run = (
+    threadId: string,
+    overrides: Partial<OrchestrationAgentRun>,
+  ): OrchestrationAgentRun => ({
     threadId: ThreadId.make(threadId),
     role: "conversation",
     channelId: null,
@@ -246,7 +267,13 @@ describe("dmTargets", () => {
     context: {
       agent: { id: AgentId.make("agent-backend"), name: "backend", rolePrompt: "" },
       role: "owner",
-      card: { id: CardId.make("card-limits"), title: "Rate limiting", spec: "", branch: null, baseBranch: "main" },
+      card: {
+        id: CardId.make("card-limits"),
+        title: "Rate limiting",
+        spec: "",
+        branch: null,
+        baseBranch: "main",
+      },
       decisions: [],
       diff: "",
       diffTruncated: false,
@@ -372,6 +399,23 @@ describe("channelMessageRows", () => {
       ["backend", true],
       ["Iskra", true],
     ]);
+  });
+});
+
+describe("groupRunOutput", () => {
+  it("folds each stretch of work between replies into one group and keeps replies whole", () => {
+    const step = (id: string) => ({ id, text: id, addressedToUser: false });
+    const said = (id: string) => ({ id, text: id, addressedToUser: true });
+    expect(
+      groupRunOutput([step("a"), step("b"), said("hi"), step("c"), said("done"), step("d")]),
+    ).toEqual([
+      { kind: "steps", id: "a", items: [step("a"), step("b")] },
+      { kind: "said", item: said("hi") },
+      { kind: "steps", id: "c", items: [step("c")] },
+      { kind: "said", item: said("done") },
+      { kind: "steps", id: "d", items: [step("d")] },
+    ]);
+    expect(groupRunOutput([])).toEqual([]);
   });
 });
 

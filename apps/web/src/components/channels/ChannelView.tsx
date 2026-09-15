@@ -35,6 +35,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { AgentAvatar } from "../iskra/AgentAvatar";
 import { EventLine } from "../iskra/EventLine";
+import { EmptyState, PageColumn } from "../iskra/Page";
 import { SparkGlyph } from "../iskra/SparkGlyph";
 import {
   agentListEntries,
@@ -115,11 +116,11 @@ export function ChannelView(props: {
               ) : null}
               {channel.kind === "channel" ? (
                 <>
-                  {/* Below lg the members panel is hidden: its members and lead live in settings. */}
+                  {/* Below xl the members panel is hidden so the chat keeps its reading width: its members and lead live in settings. */}
                   <Button
                     size="compact"
                     variant="ghost-muted"
-                    className="ml-auto lg:hidden"
+                    className="ml-auto xl:hidden"
                     onClick={() => setSettingsOpen(true)}
                   >
                     {members.length} {members.length === 1 ? "member" : "members"}
@@ -127,7 +128,7 @@ export function ChannelView(props: {
                   <Button
                     size="icon-sm"
                     variant="ghost-muted"
-                    className="lg:ml-auto"
+                    className="xl:ml-auto"
                     aria-label="Channel settings"
                     onClick={() => setSettingsOpen(true)}
                   >
@@ -272,27 +273,39 @@ export const Timeline = memo(function Timeline(props: TimelineSource) {
       ),
     [proposals],
   );
+  // Iskra notes each step of a card; only the newest note per card links to it.
+  const linkedCardNotes = useMemo(() => {
+    const newest = new Map<string, string>();
+    for (const row of rows) {
+      const note = cardNoteOf(row.message);
+      if (note !== null) newest.set(note.cardId, row.message.id);
+    }
+    return new Set(newest.values());
+  }, [rows]);
   // Keep the newest message in view as messages arrive.
   const scrollRef = useStickToNewest(rows.at(-1)?.message.id);
 
   return (
-    <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 pt-7 pb-4 sm:px-8">
-      {props.error !== null ? <p className="text-sm text-destructive">{props.error}</p> : null}
-      <ol className="flex max-w-[716px] flex-col">
-        {rows.map((row) => (
-          <MessageRow
-            key={row.message.id}
-            row={row}
-            agents={props.agents}
-            channels={props.channels}
-            cwd={props.cwd}
-            environmentId={props.environmentId}
-            proposals={anchors.get(row.message.id)}
-            proposalAgents={proposals?.agents ?? NO_AGENTS}
-            cardById={cardById}
-          />
-        ))}
-      </ol>
+    <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto pt-7 pb-4">
+      <PageColumn>
+        {props.error !== null ? <p className="text-sm text-destructive">{props.error}</p> : null}
+        <ol className="flex flex-col">
+          {rows.map((row) => (
+            <MessageRow
+              key={row.message.id}
+              row={row}
+              agents={props.agents}
+              channels={props.channels}
+              cwd={props.cwd}
+              environmentId={props.environmentId}
+              proposals={anchors.get(row.message.id)}
+              proposalAgents={proposals?.agents ?? NO_AGENTS}
+              cardById={cardById}
+              linksCard={linkedCardNotes.has(row.message.id)}
+            />
+          ))}
+        </ol>
+      </PageColumn>
     </div>
   );
 });
@@ -306,6 +319,8 @@ function MessageRow(props: {
   readonly proposals: ReadonlyArray<OrchestrationCardShell> | undefined;
   readonly proposalAgents: ReadonlyArray<AgentEntry>;
   readonly cardById: ReadonlyMap<string, OrchestrationCardShell>;
+  /** Whether this is the newest note on its card, the one that links to it. */
+  readonly linksCard: boolean;
 }) {
   const { message, authorName, showHeader } = props.row;
   const notes = message.authorKind === "human" ? deliveryNotes(message, props.agents) : [];
@@ -315,15 +330,22 @@ function MessageRow(props: {
     return (
       <li className="mt-4 flex min-w-0 flex-col first:mt-0">
         <EventLine spark={note === null ? "idle" : note.question ? "needsYou" : "working"}>
-          <span className="whitespace-pre-wrap break-words">{message.body}</span>
-          <time dateTime={message.createdAt} className="tabular-nums">
-            · {messageTimeFormat.format(new Date(message.createdAt))}
-          </time>
-          <CardNoteLink
-            message={message}
-            cardById={props.cardById}
-            environmentId={props.environmentId}
-          />
+          {/* One text run beside the spark: only the body wraps, the time and link stay together. */}
+          <span className="max-w-[calc(100%-18px)] min-w-0 break-words whitespace-pre-wrap">
+            {message.body}{" "}
+            <span className="whitespace-nowrap">
+              <time dateTime={message.createdAt} className="tabular-nums">
+                · {messageTimeFormat.format(new Date(message.createdAt))}
+              </time>
+              {note !== null && (note.question || props.linksCard) ? (
+                <CardNoteLink
+                  message={message}
+                  cardById={props.cardById}
+                  environmentId={props.environmentId}
+                />
+              ) : null}
+            </span>
+          </span>
         </EventLine>
       </li>
     );
@@ -417,7 +439,7 @@ function CardNoteLink(props: {
       to="/board/$environmentId/$projectId"
       params={{ environmentId: props.environmentId, projectId: card.projectId }}
       search={{ card: card.id }}
-      className="font-medium text-info-foreground hover:underline"
+      className="ms-1.5 font-medium text-info-foreground hover:underline"
     >
       {note.question ? "Answer on the card" : "Open card"}
     </Link>
@@ -564,7 +586,7 @@ export function MessageComposer(props: {
 
   return (
     <form
-      className="relative shrink-0 px-5 pt-4 pb-6 sm:px-8"
+      className="shrink-0 pt-4 pb-6"
       onSubmit={(event) => {
         event.preventDefault();
         void send();
@@ -576,123 +598,125 @@ export function MessageComposer(props: {
         }
       }}
     >
-      {menuOpen ? (
-        <ul
-          id={listboxId}
-          role="listbox"
-          aria-label="Mention an agent"
-          className="dropdown-glass absolute bottom-full left-5 z-10 -mb-2 flex w-60 sm:left-8 flex-col rounded-lg p-1 text-popover-foreground shadow-[0_16px_40px_-18px_rgb(0_0_0/55%)] dark:shadow-[0_18px_44px_-18px_rgb(0_0_0/80%)]"
-        >
-          {candidates.map((agent, index) => (
-            <li
-              key={agent.id}
-              role="option"
-              aria-selected={index === activeIndex}
-              // Keep focus in the editor: pick on mouse down, before it blurs.
-              onMouseDown={(event) => {
-                event.preventDefault();
-                pickMention(agent);
-              }}
-              onMouseEnter={() => setHighlighted(index)}
-              className={cn(
-                "flex h-8 cursor-default items-center gap-2 rounded-md px-2 text-sm",
-                index === activeIndex && "bg-accent text-accent-foreground",
-              )}
-            >
-              <span className="truncate">@{agent.name}</span>
-              <PresenceBadge presence={agent.presence} className="ml-auto" />
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      <div
-        className={cn(
-          "flex max-w-[716px] items-end gap-2.5 rounded-[19px] bg-[rgb(120_120_128/12%)] py-1.5 pr-1.5 pl-2.5 shadow-[inset_0_0_0_0.5px_rgb(0_0_0/8%)] transition-shadow focus-within:shadow-[inset_0_0_0_1px_var(--ring)] dark:bg-[rgb(120_120_128/16%)] dark:shadow-[inset_0_0_0_0.5px_rgb(255_255_255/8%)]",
-          mentionAgents === undefined && "pl-4",
-        )}
-      >
-        {mentionAgents !== undefined ? (
-          <button
-            type="button"
+      <PageColumn className="relative">
+        {menuOpen ? (
+          <ul
+            id={listboxId}
+            role="listbox"
             aria-label="Mention an agent"
-            disabled={disabled}
-            // Keep the editor's selection: act on mouse down, before it blurs.
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={startMention}
-            className="-ml-1 flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground/75 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+            className="dropdown-glass absolute bottom-full left-6 z-10 mb-2 flex w-60 flex-col rounded-lg p-1 text-popover-foreground shadow-[0_16px_40px_-18px_rgb(0_0_0/55%)] dark:shadow-[0_18px_44px_-18px_rgb(0_0_0/80%)]"
           >
-            <svg aria-hidden width="20" height="20" viewBox="0 0 24 24">
-              <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.6" />
-              <path
-                d="M12 8v8M8 12h8"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-              />
-            </svg>
-          </button>
+            {candidates.map((agent, index) => (
+              <li
+                key={agent.id}
+                role="option"
+                aria-selected={index === activeIndex}
+                // Keep focus in the editor: pick on mouse down, before it blurs.
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  pickMention(agent);
+                }}
+                onMouseEnter={() => setHighlighted(index)}
+                className={cn(
+                  "flex h-8 cursor-default items-center gap-2 rounded-md px-2 text-sm",
+                  index === activeIndex && "bg-accent text-accent-foreground",
+                )}
+              >
+                <span className="truncate">@{agent.name}</span>
+                <PresenceBadge presence={agent.presence} className="ml-auto" />
+              </li>
+            ))}
+          </ul>
         ) : null}
-        <ComposerPromptEditor
-          editorRef={editorRef}
-          value={body}
-          cursor={cursor}
-          contextRecords={EMPTY_COMPOSER_CONTEXT_RECORDS}
-          skills={EMPTY_SKILLS}
-          disabled={disabled}
-          placeholder={props.placeholder}
-          containerClassName="min-w-0 flex-1 self-center [font-size:14px]"
-          className="max-h-50 min-h-[26px] py-[3px] leading-5"
-          placeholderClassName="py-[3px] leading-5 text-placeholder/60"
-          onChange={(nextValue, nextCursor, expandedCursor, adjacentToMention) => {
-            setBody(nextValue);
-            setCursor(nextCursor);
-            setTextCursor(expandedCursor);
-            setInMentionChip(adjacentToMention);
-            setHighlighted(0);
-          }}
-          onCommandKeyDown={(key, event) => {
-            if (menuOpen) {
-              if (key === "ArrowDown" || key === "ArrowUp") {
-                const step = key === "ArrowDown" ? 1 : -1;
-                setHighlighted((activeIndex + step + candidates.length) % candidates.length);
-                return true;
-              }
-              const picked = candidates[activeIndex];
-              if (picked !== undefined) {
-                pickMention(picked);
-                return true;
-              }
-            }
-            if (key !== "Enter" || event.shiftKey) {
-              return false;
-            }
-            void send();
-            return true;
-          }}
-          onPaste={noop}
-        />
-        <button
-          type="submit"
-          aria-label={sending ? "Sending" : "Send message"}
-          disabled={sending || disabled || trimmed.length === 0}
-          className="flex size-[26px] shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:bg-[rgb(120_120_128/40%)] disabled:text-background"
-        >
-          {sending ? (
-            <Spinner className="size-3.5" aria-hidden="true" />
-          ) : (
-            <svg aria-hidden width="26" height="26" viewBox="0 0 24 24">
-              <path
-                d="M12 16.5V8m-3.8 3.6L12 7.8l3.8 3.8"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
+        <div
+          className={cn(
+            "flex items-end gap-2.5 rounded-[19px] bg-[rgb(120_120_128/12%)] py-1.5 pr-1.5 pl-2.5 shadow-[inset_0_0_0_0.5px_rgb(0_0_0/8%)] transition-shadow focus-within:shadow-[inset_0_0_0_1px_var(--ring)] dark:bg-[rgb(120_120_128/16%)] dark:shadow-[inset_0_0_0_0.5px_rgb(255_255_255/8%)]",
+            mentionAgents === undefined && "pl-4",
           )}
-        </button>
-      </div>
+        >
+          {mentionAgents !== undefined ? (
+            <button
+              type="button"
+              aria-label="Mention an agent"
+              disabled={disabled}
+              // Keep the editor's selection: act on mouse down, before it blurs.
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={startMention}
+              className="-ml-1 flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground/75 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+            >
+              <svg aria-hidden width="20" height="20" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                <path
+                  d="M12 8v8M8 12h8"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+          ) : null}
+          <ComposerPromptEditor
+            editorRef={editorRef}
+            value={body}
+            cursor={cursor}
+            contextRecords={EMPTY_COMPOSER_CONTEXT_RECORDS}
+            skills={EMPTY_SKILLS}
+            disabled={disabled}
+            placeholder={props.placeholder}
+            containerClassName="min-w-0 flex-1 self-center [font-size:14px]"
+            className="max-h-50 min-h-[26px] py-[3px] leading-5"
+            placeholderClassName="py-[3px] leading-5 text-placeholder/60"
+            onChange={(nextValue, nextCursor, expandedCursor, adjacentToMention) => {
+              setBody(nextValue);
+              setCursor(nextCursor);
+              setTextCursor(expandedCursor);
+              setInMentionChip(adjacentToMention);
+              setHighlighted(0);
+            }}
+            onCommandKeyDown={(key, event) => {
+              if (menuOpen) {
+                if (key === "ArrowDown" || key === "ArrowUp") {
+                  const step = key === "ArrowDown" ? 1 : -1;
+                  setHighlighted((activeIndex + step + candidates.length) % candidates.length);
+                  return true;
+                }
+                const picked = candidates[activeIndex];
+                if (picked !== undefined) {
+                  pickMention(picked);
+                  return true;
+                }
+              }
+              if (key !== "Enter" || event.shiftKey) {
+                return false;
+              }
+              void send();
+              return true;
+            }}
+            onPaste={noop}
+          />
+          <button
+            type="submit"
+            aria-label={sending ? "Sending" : "Send message"}
+            disabled={sending || disabled || trimmed.length === 0}
+            className="flex size-[26px] shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:bg-[rgb(120_120_128/40%)] disabled:text-background"
+          >
+            {sending ? (
+              <Spinner className="size-3.5" aria-hidden="true" />
+            ) : (
+              <svg aria-hidden width="26" height="26" viewBox="0 0 24 24">
+                <path
+                  d="M12 16.5V8m-3.8 3.6L12 7.8l3.8 3.8"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            )}
+          </button>
+        </div>
+      </PageColumn>
     </form>
   );
 }
@@ -719,7 +743,7 @@ const ChannelMemberList = memo(function ChannelMemberList(props: {
   return (
     <aside
       aria-label="Members"
-      className="hidden w-[260px] shrink-0 flex-col overflow-y-auto bg-sidebar px-3 py-5 shadow-[inset_0.5px_0_var(--border)] lg:flex"
+      className="hidden w-[260px] shrink-0 flex-col overflow-y-auto bg-sidebar px-3 py-5 shadow-[inset_0.5px_0_var(--border)] xl:flex"
     >
       <div className="flex items-center gap-1 px-2 pb-1.5">
         <h2 className={INSPECTOR_HEAD}>Lead</h2>
@@ -821,7 +845,7 @@ const ChannelMemberList = memo(function ChannelMemberList(props: {
   );
 });
 
-const INSPECTOR_HEAD = "text-[11px] font-semibold text-muted-foreground/55";
+const INSPECTOR_HEAD = "text-[13px] font-semibold text-muted-foreground";
 
 /** Static presence dot and label: no continuously repainting animation. */
 export function PresenceBadge(props: {

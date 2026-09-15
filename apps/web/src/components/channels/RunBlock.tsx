@@ -32,7 +32,9 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { runOutputItems, sessionWhere } from "./channels.logic";
+import { ChevronRightIcon } from "lucide-react";
+
+import { groupRunOutput, runOutputItems, sessionWhere, type RunOutputItem } from "./channels.logic";
 
 /** A short explanation on hover or focus; the element alone when there is none. */
 function Hint(props: { readonly text: string | undefined; readonly children: ReactElement }) {
@@ -114,7 +116,10 @@ export const RunBlock = memo(function RunBlock(props: {
     [props.environmentId, props.run.threadId],
   );
   const thread = useThreadDetail(threadRef);
-  const items = useMemo(() => (thread === null ? [] : runOutputItems(thread)), [thread]);
+  const groups = useMemo(
+    () => (thread === null ? [] : groupRunOutput(runOutputItems(thread))),
+    [thread],
+  );
   const pending = useMemo(
     () => (thread === null ? null : derivePendingRequests(thread.activities)),
     [thread],
@@ -143,28 +148,28 @@ export const RunBlock = memo(function RunBlock(props: {
   return (
     <section
       aria-label={heading}
-      className="min-w-0 rounded-xl bg-card px-3.5 py-2.5 shadow-[0_0_0_0.5px_rgb(0_0_0/8%)] dark:shadow-[0_0_0_0.5px_rgb(255_255_255/7%)]"
+      className="min-w-0 rounded-[14px] bg-card p-4 shadow-[0_0_0_0.5px_rgb(0_0_0/8%)] dark:shadow-[0_0_0_0.5px_rgb(255_255_255/7%)]"
     >
-      <header className="flex min-h-7 items-center gap-2 text-xs">
+      <header className="-my-1 flex min-h-7 items-center gap-2 text-[13px]">
         <Hint text={ROLE_HINT[props.run.role]}>
           <span className="truncate font-semibold">{heading}</span>
         </Hint>
         <time
           dateTime={props.run.startedAt}
-          className="shrink-0 text-[11px] tabular-nums text-muted-foreground/55"
+          className="shrink-0 text-[11px] tabular-nums text-tertiary-label"
         >
           {runTimeFormat.format(new Date(props.run.startedAt))}
         </time>
         <Hint text={SESSION_STATE_HINT[state]}>
           <StatusPill label={SESSION_STATE_LABEL[state]} tone={SESSION_STATE_TONE[state]} />
         </Hint>
-        <span className="-mr-1.5 ml-auto flex shrink-0 items-center">
+        <span className="-mr-2 ml-auto flex shrink-0 items-center">
           {stoppable ? (
             <Hint text="End this session. A new message or assignment starts a fresh one.">
               <Button
                 size="xs"
-                variant="ghost-muted"
-                className="h-7 sm:h-7"
+                variant="ghost"
+                className={RUN_ACTION}
                 disabled={stopping}
                 onClick={() => void stop()}
               >
@@ -181,8 +186,8 @@ export const RunBlock = memo(function RunBlock(props: {
           >
             <Button
               size="xs"
-              variant="ghost-muted"
-              className="h-7 sm:h-7"
+              variant="ghost"
+              className={RUN_ACTION}
               onClick={() => setInspecting(true)}
             >
               {isCardSession ? "Handoff brief" : "Context"}
@@ -190,17 +195,23 @@ export const RunBlock = memo(function RunBlock(props: {
           </Hint>
         </span>
       </header>
-      <ol className="mt-1 flex flex-col gap-1">
-        {items.map((item) => (
-          <li key={item.id} className="min-w-0">
-            {item.addressedToUser ? (
-              <ChatMarkdown text={item.text} cwd={props.cwd} environmentId={props.environmentId} />
-            ) : (
-              <p className="truncate text-xs text-muted-foreground/70">{item.text}</p>
-            )}
-          </li>
-        ))}
-      </ol>
+      {groups.length > 0 ? (
+        <ol className="mt-2 flex flex-col gap-1">
+          {groups.map((group) => (
+            <li key={group.kind === "said" ? group.item.id : group.id} className="min-w-0">
+              {group.kind === "said" ? (
+                <ChatMarkdown
+                  text={group.item.text}
+                  cwd={props.cwd}
+                  environmentId={props.environmentId}
+                />
+              ) : (
+                <RunSteps items={group.items} />
+              )}
+            </li>
+          ))}
+        </ol>
+      ) : null}
       {pending?.userInputs
         .filter((request) => request.dismissible)
         .map((request) => (
@@ -220,6 +231,43 @@ export const RunBlock = memo(function RunBlock(props: {
     </section>
   );
 });
+
+const RUN_ACTION =
+  "h-7 px-2 text-[13px] font-medium text-info-foreground sm:h-7 sm:text-[13px] [:hover,[data-pressed]]:bg-transparent [:hover,[data-pressed]]:underline";
+
+/** A stretch of the session's work: one line when it is a single step, else a count that opens the list. */
+function RunSteps(props: { readonly items: ReadonlyArray<RunOutputItem> }) {
+  const [open, setOpen] = useState(false);
+  const [only] = props.items;
+  if (props.items.length === 1 && only !== undefined) {
+    return <p className="truncate text-xs text-muted-foreground">{only.text}</p>;
+  }
+  return (
+    <div className="flex min-w-0 flex-col">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        className="-ml-1 inline-flex h-7 items-center gap-1 self-start rounded-md px-1 text-xs font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {props.items.length} steps
+        <ChevronRightIcon
+          aria-hidden
+          className={cn("size-3.5 transition-transform duration-150", open && "rotate-90")}
+        />
+      </button>
+      {open ? (
+        <ul className="flex flex-col gap-0.5 pb-1">
+          {props.items.map((item) => (
+            <li key={item.id} className="truncate text-xs text-muted-foreground">
+              {item.text}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
 
 /** A question the session asked by message; the answer becomes its next message. */
 function RunQuestion(props: {
@@ -317,10 +365,10 @@ function RunContextDialog(props: {
           />
           <ContextText title="First message" text={props.run.rendered.firstMessage} />
           <details className="group">
-            <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+            <summary className="cursor-pointer text-[13px] font-semibold text-muted-foreground">
               Raw data these were built from
             </summary>
-            <pre className="mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-muted/40 p-3 font-mono text-xs">
+            <pre className="mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-[10px] bg-muted p-3 font-mono text-xs">
               {JSON.stringify(props.run.context, null, 2)}
             </pre>
           </details>
@@ -333,8 +381,8 @@ function RunContextDialog(props: {
 function ContextText(props: { readonly title: string; readonly text: string }) {
   return (
     <section className="space-y-1.5">
-      <h3 className="text-xs font-medium text-muted-foreground">{props.title}</h3>
-      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-muted/40 p-3 font-mono text-xs">
+      <h3 className="text-[13px] font-semibold text-muted-foreground">{props.title}</h3>
+      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-[10px] bg-muted p-3 font-mono text-xs">
         {props.text}
       </pre>
     </section>

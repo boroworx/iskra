@@ -12,13 +12,13 @@ export function SheetGroup(props: {
   return (
     <section className={cn("flex flex-col gap-1.5", props.className)}>
       {props.title === undefined ? null : (
-        <h3 className="px-3 text-xs font-medium text-muted-foreground">{props.title}</h3>
+        <h3 className="px-4 text-[13px] font-semibold text-muted-foreground">{props.title}</h3>
       )}
       <div className="flex flex-col overflow-hidden rounded-[10px] bg-muted [&>*+*]:shadow-[inset_0_0.5px_var(--border)]">
         {props.children}
       </div>
       {props.footer === undefined ? null : (
-        <div className="px-3 text-xs text-muted-foreground">{props.footer}</div>
+        <div className="px-4 text-xs text-muted-foreground">{props.footer}</div>
       )}
     </section>
   );
@@ -39,7 +39,7 @@ export function SheetRow(props: {
   return (
     <Row
       className={cn(
-        "flex min-h-11 items-center gap-3 px-3 py-1.5 text-[13px] focus-within:bg-accent/40",
+        "flex min-h-11 items-center gap-3 px-4 py-1.5 text-[13px] focus-within:bg-accent/40",
         props.className,
       )}
     >
@@ -61,4 +61,4 @@ export const SHEET_INPUT_CLASS = "min-w-0 flex-1 text-[13px] [&_input]:text-righ
 
 /** The class for an unstyled textarea that fills a group on its own. */
 export const SHEET_TEXTAREA_CLASS =
-  "block w-full text-[13px] [&_textarea]:min-h-12 [&_textarea]:px-0 [&_textarea]:py-0.5";
+  "block w-full text-[13px] [&_textarea]:min-h-12 [&_textarea]:resize-none [&_textarea]:px-0 [&_textarea]:py-0.5";

@@ -88,7 +88,8 @@ export function CardProposal(props: {
       <h3 className="-mt-1 text-[17px] font-semibold leading-snug tracking-[-0.01em] break-words">
         {card.title}
       </h3>
-      {card.acceptance.criteria.length > 0 ? (
+      {/* Open rings are the to-do list while it is proposed; once started, the card sheet shows each verdict. */}
+      {status === null && card.acceptance.criteria.length > 0 ? (
         <ul aria-label="Acceptance criteria" className="flex flex-col gap-2.5">
           {card.acceptance.criteria.map((criterion) => (
             <li key={criterion.id} className="flex items-start gap-2.5 text-[13px] leading-[18px]">
@@ -282,7 +283,7 @@ function ApproveAndStartDialog(props: {
               </p>
             ) : null}
             <section className="flex flex-col gap-1.5" aria-label="Owner">
-              <h3 className="text-xs font-medium text-muted-foreground">Owner</h3>
+              <h3 className="text-[13px] font-semibold text-muted-foreground">Owner</h3>
               <Select
                 value={ownerId ?? NO_OWNER}
                 onValueChange={(value) =>
@@ -307,11 +308,13 @@ function ApproveAndStartDialog(props: {
               </Select>
             </section>
             <section className="flex flex-col gap-1.5" aria-label="Acceptance criteria">
-              <h3 className="text-xs font-medium text-muted-foreground">Acceptance criteria</h3>
+              <h3 className="text-[13px] font-semibold text-muted-foreground">
+                Acceptance criteria
+              </h3>
               <CriteriaEditor criteria={criteria} onChange={setCriteria} />
             </section>
             <section className="flex flex-col gap-1.5" aria-label="Preview">
-              <h3 className="text-xs font-medium text-muted-foreground">Before it starts</h3>
+              <h3 className="text-[13px] font-semibold text-muted-foreground">Before it starts</h3>
               <CardPreviewPanel
                 estimate={card.estimate}
                 agent={owner}

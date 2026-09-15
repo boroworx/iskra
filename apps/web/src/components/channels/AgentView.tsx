@@ -24,8 +24,10 @@ import {
 import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { AgentAvatar } from "../iskra/AgentAvatar";
+import { EmptyState, PageColumn } from "../iskra/Page";
 import { SparkGlyph } from "../iskra/SparkGlyph";
 import { Button } from "../ui/button";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { SidebarInset } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
@@ -39,6 +41,8 @@ import { agentDmChannel, dmTargets, liveInstances, presenceSpark } from "./chann
 import { RunBlock } from "./RunBlock";
 
 const EMPTY_MESSAGES: ReadonlyArray<OrchestrationChannelMessage> = [];
+/** The "Write to" picker's value for the DM, which has no session thread. */
+const DM_TARGET = "dm";
 const sinceFormat = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
 
 /**
@@ -119,18 +123,11 @@ export function AgentView(props: {
                 spark={agent.presence === "idle" ? undefined : presenceSpark(agent.presence)}
               />
               <h1 className="truncate text-[15px] font-semibold">{agent.name}</h1>
-              <AgentStats
-                agent={agent}
-                cards={cards}
-                projects={projects.filter(
-                  (project) => project.environmentId === props.environmentId,
-                )}
-              />
-              <div className="ml-auto flex shrink-0 items-center gap-2">
+              <div className="ml-auto flex shrink-0 items-center gap-1">
                 <div
                   role="group"
                   aria-label="View"
-                  className="flex items-center rounded-lg bg-secondary p-0.5"
+                  className="mr-1 flex h-7 items-center rounded-lg bg-secondary p-0.5"
                 >
                   {(["messages", "sessions"] as const).map((entry) => (
                     <button
@@ -139,7 +136,7 @@ export function AgentView(props: {
                       aria-pressed={view === entry}
                       onClick={() => setView(entry)}
                       className={cn(
-                        "h-7 rounded-md px-3 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        "h-6 rounded-md px-3 text-[13px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring",
                         view === entry
                           ? "bg-card text-foreground shadow-[0_0_0_0.5px_rgb(0_0_0/6%),0_1px_2px_rgb(0_0_0/12%)] dark:bg-[rgb(120_120_128/36%)]"
                           : "text-muted-foreground hover:text-foreground",
@@ -149,6 +146,13 @@ export function AgentView(props: {
                     </button>
                   ))}
                 </div>
+                <AgentStats
+                  agent={agent}
+                  cards={cards}
+                  projects={projects.filter(
+                    (project) => project.environmentId === props.environmentId,
+                  )}
+                />
                 <Button
                   size="icon-sm"
                   variant="ghost-muted"
@@ -184,31 +188,33 @@ export function AgentView(props: {
             {live.length > 0 ? (
               <section
                 aria-label="Live now"
-                className="flex max-h-32 shrink-0 flex-col overflow-y-auto border-b border-border px-5 py-2.5 sm:px-8"
+                className="max-h-32 shrink-0 overflow-y-auto py-2.5 shadow-[inset_0_-0.5px_var(--border)]"
               >
-                <h2 className="pb-1 text-[11px] font-semibold text-muted-foreground/55">
-                  Live now <span className="tabular-nums">{live.length}</span>
-                </h2>
-                <ul className="flex max-w-[716px] flex-col">
-                  {live.map((instance) => (
-                    <li
-                      key={instance.threadId}
-                      className="flex h-7 min-w-0 items-center gap-2 text-[13px]"
-                    >
-                      <SparkGlyph state="working" size={12} />
-                      <span className="min-w-0 truncate">
-                        {instance.doing}{" "}
-                        <span className="text-muted-foreground">{instance.where}</span>
-                      </span>
-                      <time
-                        dateTime={instance.since}
-                        className="ms-auto shrink-0 text-[11px] tabular-nums text-muted-foreground/55"
+                <PageColumn>
+                  <h2 className="pb-1 text-[13px] font-semibold text-muted-foreground">
+                    Live now <span className="tabular-nums">{live.length}</span>
+                  </h2>
+                  <ul className="flex flex-col">
+                    {live.map((instance) => (
+                      <li
+                        key={instance.threadId}
+                        className="flex h-7 min-w-0 items-center gap-2 text-[13px]"
                       >
-                        since {sinceFormat.format(new Date(instance.since))}
-                      </time>
-                    </li>
-                  ))}
-                </ul>
+                        <SparkGlyph state="working" size={12} />
+                        <span className="min-w-0 truncate">
+                          {instance.doing}{" "}
+                          <span className="text-muted-foreground">{instance.where}</span>
+                        </span>
+                        <time
+                          dateTime={instance.since}
+                          className="ms-auto shrink-0 text-[11px] tabular-nums text-muted-foreground/55"
+                        >
+                          since {sinceFormat.format(new Date(instance.since))}
+                        </time>
+                      </li>
+                    ))}
+                  </ul>
+                </PageColumn>
               </section>
             ) : null}
             {view === "messages" ? (
@@ -222,61 +228,73 @@ export function AgentView(props: {
                   environmentId={props.environmentId}
                 />
               ) : (
-                <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 overflow-y-auto px-5 py-4 text-center">
-                  <AgentAvatar name={agent.name} size="xl" />
-                  <p className="mt-1 text-[15px] font-semibold">Message @{agent.name}</p>
-                  <p className="max-w-80 text-[13px] text-muted-foreground">
-                    It can read the project but not change it; changes need a card.
-                  </p>
-                </div>
+                <EmptyState
+                  icon={<AgentAvatar name={agent.name} size="lg" />}
+                  title={`Message @${agent.name}`}
+                  body="It can read the project but not change it; changes need a card."
+                />
               )
+            ) : runs.error === null && runs.data !== null && sessions.length === 0 ? (
+              <EmptyState
+                title="No sessions yet"
+                body={`Message @${agent.name}, mention it in a channel or assign it a card.`}
+              />
             ) : (
-              <div
-                ref={scrollRef}
-                className="min-h-0 flex-1 overflow-y-auto px-5 pt-7 pb-4 sm:px-8"
-              >
-                {runs.error !== null ? (
-                  <p className="text-sm text-destructive">{runs.error}</p>
-                ) : null}
-                {runs.data !== null && sessions.length === 0 ? (
-                  <p className="text-[13px] text-muted-foreground">
-                    @{agent.name} has no sessions yet. Message it, mention it in a channel or assign
-                    it a card.
-                  </p>
-                ) : null}
-                <ol className="flex max-w-[716px] flex-col gap-4">
-                  {sessions.map((run) => (
-                    <li key={run.threadId} className="min-w-0">
-                      <RunBlock
-                        run={run}
-                        channels={channels}
-                        cwd={project?.workspaceRoot}
-                        environmentId={props.environmentId}
-                      />
-                    </li>
-                  ))}
-                </ol>
+              <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto pt-7 pb-4">
+                <PageColumn>
+                  {runs.error !== null ? (
+                    <p className="text-sm text-destructive">{runs.error}</p>
+                  ) : null}
+                  <ol className="flex flex-col gap-2.5">
+                    {sessions.map((run) => (
+                      <li key={run.threadId} className="min-w-0">
+                        <RunBlock
+                          run={run}
+                          channels={channels}
+                          cwd={project?.workspaceRoot}
+                          environmentId={props.environmentId}
+                        />
+                      </li>
+                    ))}
+                  </ol>
+                </PageColumn>
               </div>
             )}
             {targets.length > 1 ? (
-              <label className="-mb-2 flex shrink-0 items-center gap-2 px-5 pt-2 text-xs text-muted-foreground sm:px-8">
-                Write to
-                <select
-                  className="h-7 min-w-0 rounded-lg border-0 bg-secondary px-2 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  value={target?.threadId ?? ""}
-                  onChange={(event) =>
+              <PageColumn className="-mb-2 flex shrink-0 items-center gap-2 pt-2 text-[13px] text-muted-foreground">
+                <span aria-hidden>Write to</span>
+                <Select
+                  value={target?.threadId ?? DM_TARGET}
+                  onValueChange={(value) =>
                     setChosenThreadId(
-                      event.target.value === "" ? null : (event.target.value as ThreadId),
+                      value === null || value === DM_TARGET ? null : (value as ThreadId),
                     )
                   }
                 >
-                  {targets.map((entry) => (
-                    <option key={entry.threadId ?? ""} value={entry.threadId ?? ""}>
-                      {entry.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  <SelectTrigger
+                    size="sm"
+                    aria-label="Write to"
+                    className="w-auto max-w-72 min-w-0"
+                  >
+                    <SelectValue>
+                      {(value: string | null) =>
+                        targets.find((entry) => (entry.threadId ?? DM_TARGET) === value)?.label ??
+                        ""
+                      }
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup>
+                    {targets.map((entry) => (
+                      <SelectItem
+                        key={entry.threadId ?? DM_TARGET}
+                        value={entry.threadId ?? DM_TARGET}
+                      >
+                        {entry.label}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+              </PageColumn>
             ) : null}
             <MessageComposer
               key={props.agentId}

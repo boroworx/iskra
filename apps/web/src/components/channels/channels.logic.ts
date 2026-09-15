@@ -322,6 +322,31 @@ export function runOutputItems(thread: {
     .map(({ id, text, addressedToUser }) => ({ id, text, addressedToUser }));
 }
 
+export type RunOutputGroup =
+  | { readonly kind: "said"; readonly item: RunOutputItem }
+  | { readonly kind: "steps"; readonly id: string; readonly items: ReadonlyArray<RunOutputItem> };
+
+/** A session's output with each stretch of work between two things it said folded into one group. */
+export function groupRunOutput(items: ReadonlyArray<RunOutputItem>): ReadonlyArray<RunOutputGroup> {
+  const groups: Array<RunOutputGroup> = [];
+  let steps: Array<RunOutputItem> = [];
+  const flush = () => {
+    const [first] = steps;
+    if (first !== undefined) groups.push({ kind: "steps", id: first.id, items: steps });
+    steps = [];
+  };
+  for (const item of items) {
+    if (item.addressedToUser) {
+      flush();
+      groups.push({ kind: "said", item });
+    } else {
+      steps.push(item);
+    }
+  }
+  flush();
+  return groups;
+}
+
 export interface DeliveryNote {
   readonly agentId: AgentId;
   readonly text: string;
