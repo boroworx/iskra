@@ -36,6 +36,7 @@ export type CriterionState =
   | "pending"
   | "unavailable"
   | "needsYourCheck"
+  | "coveredByChecks"
   | "noEvidence";
 
 export interface CriterionReview {
@@ -50,6 +51,7 @@ export const CRITERION_STATE_LABEL: Record<CriterionState, string> = {
   pending: "Waiting for CI",
   unavailable: "Not captured",
   needsYourCheck: "Needs your check",
+  coveredByChecks: "Covered by passing checks",
   noEvidence: "No evidence",
 };
 
@@ -132,13 +134,23 @@ export function reviewByCriterion(input: {
 } {
   const known = new Set(input.criteria.map((criterion) => criterion.id));
   const views = input.items.map((item) => evidenceItemView(item, input.cardId));
+  const general = views.filter(
+    (view) => view.item.criterionId === null || !known.has(view.item.criterionId),
+  );
+  // ponytail: until a verifier judges each criterion, passing project checks stand in for an
+  // automated criterion with no evidence of its own; per-criterion verdicts replace this.
+  const generalChecks = general.filter((view) => view.item.kind === "check");
+  const checksPassed =
+    generalChecks.length > 0 && generalChecks.every((view) => view.state === "passed");
   const criteria = input.criteria.map((criterion): CriterionReview => {
     const items = views.filter((view) => view.item.criterionId === criterion.id);
     const state: CriterionState =
       criterion.verification === "manual"
         ? "needsYourCheck"
         : items.length === 0
-          ? "noEvidence"
+          ? checksPassed
+            ? "coveredByChecks"
+            : "noEvidence"
           : items.some((view) => view.state === "failed")
             ? "failed"
             : items.some((view) => view.state === "pending")
@@ -148,9 +160,6 @@ export function reviewByCriterion(input: {
                 : "passed";
     return { criterion, state, items };
   });
-  const general = views.filter(
-    (view) => view.item.criterionId === null || !known.has(view.item.criterionId),
-  );
   return { criteria, general };
 }
 

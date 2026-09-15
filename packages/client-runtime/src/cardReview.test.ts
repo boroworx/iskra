@@ -59,7 +59,8 @@ describe("reviewByCriterion", () => {
       ["login", "failed", 2],
       ["screen", "unavailable", 1],
       ["ios", "needsYourCheck", 1],
-      ["empty", "noEvidence", 0],
+      // The project checks it isn't tied to all passed, so they stand in for it.
+      ["empty", "coveredByChecks", 0],
     ]);
     expect(review.criteria[1]?.items[0]?.unavailableText).toBe(
       "No desktop client was connected to capture the preview",
@@ -68,6 +69,28 @@ describe("reviewByCriterion", () => {
       ["typecheck", "passed"],
       ["orphan", "passed"],
     ]);
+  });
+
+  it("says an automated criterion has no evidence unless every project check passed", () => {
+    const state = (items: Parameters<typeof reviewByCriterion>[0]["items"]) =>
+      reviewByCriterion({
+        cardId,
+        criteria: [{ id: "sums", text: "npm test passes", verification: "automated" }],
+        items,
+      }).criteria[0]?.state;
+    expect(state([item("tests")])).toBe("coveredByChecks");
+    expect(state([item("tests"), item("lint", { exitCode: 1 })])).toBe("noEvidence");
+    expect(
+      state([
+        item("tests"),
+        item("ci", {
+          source: "ci",
+          exitCode: null,
+          unavailable: { code: "pendingCi", text: "Waiting for CI." },
+        }),
+      ]),
+    ).toBe("noEvidence");
+    expect(state([])).toBe("noEvidence");
   });
 
   it("serves captured media by its absolute path, and gives logs and relative paths no link", () => {

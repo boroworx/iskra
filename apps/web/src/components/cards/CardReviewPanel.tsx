@@ -34,6 +34,7 @@ const refused = (title: string) => (result: AtomCommandResult<unknown, unknown>)
   toastCommandFailure(result, title, "The request was refused.");
 
 const NO_ITEMS: ReadonlyArray<CardEvidenceItem> = [];
+const CHECKS_ANCHOR = "card-review-checks";
 
 const STATE_CLASS: Record<CriterionState, string> = {
   passed: "text-success-foreground",
@@ -41,6 +42,7 @@ const STATE_CLASS: Record<CriterionState, string> = {
   pending: "text-muted-foreground",
   unavailable: "text-warning-foreground",
   needsYourCheck: "text-warning-foreground",
+  coveredByChecks: "text-success-foreground",
   noEvidence: "text-muted-foreground",
 };
 
@@ -126,6 +128,15 @@ export function CardReview(props: {
                   Check this yourself; the evidence below only covers what automation can.
                 </p>
               ) : null}
+              {entry.state === "coveredByChecks" ? (
+                <p className="text-xs text-muted-foreground">
+                  Nothing was captured for it alone, and the project's{" "}
+                  <a href={`#${CHECKS_ANCHOR}`} className="underline underline-offset-2">
+                    checks
+                  </a>{" "}
+                  passed.
+                </p>
+              ) : null}
               {entry.items.length > 0 ? (
                 <EvidenceList items={entry.items} environmentId={environmentId} />
               ) : null}
@@ -135,7 +146,7 @@ export function CardReview(props: {
       )}
 
       {review.general.length > 0 ? (
-        <div className="flex flex-col gap-1">
+        <div id={CHECKS_ANCHOR} className="flex flex-col gap-1">
           <h4 className="text-xs font-medium text-muted-foreground">Checks</h4>
           <EvidenceList items={review.general} environmentId={environmentId} />
         </div>
