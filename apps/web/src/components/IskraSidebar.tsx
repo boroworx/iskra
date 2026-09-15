@@ -45,10 +45,16 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 /** The cross-project Needs you list, with how many items wait. */
 function NeedsYouEntry() {
-  const cards = useEnvironmentCards(usePrimaryEnvironmentId());
+  const environmentId = usePrimaryEnvironmentId();
+  const cards = useEnvironmentCards(environmentId);
+  const allProjects = useProjects();
+  const projects = useMemo(
+    () => allProjects.filter((project) => project.environmentId === environmentId),
+    [allProjects, environmentId],
+  );
   // Read once: the count follows card changes, and a snooze ending shows on the next one.
   const [now] = useState(() => Date.now());
-  const count = needsYouItems({ cards, sessions: cardOwnerSessions(cards), now }).length;
+  const count = needsYouItems({ cards, sessions: cardOwnerSessions(cards), projects, now }).length;
   return (
     <SidebarMenu className="px-2 pt-2">
       <SidebarMenuItem>

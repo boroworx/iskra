@@ -1,9 +1,9 @@
 import {
-  NEEDS_YOU_LABEL,
   cardWaitItems,
   cardOwnerSessions,
   isCardSnoozed,
   needsYouItems,
+  needsYouLabel,
   waitingLabel,
 } from "@iskra/client-runtime/cards";
 import type { AtomCommandResult } from "@iskra/client-runtime/state/runtime";
@@ -21,7 +21,6 @@ import { useEnvironmentAgents, useEnvironmentCards, useProjects } from "~/state/
 import { usePrimaryEnvironmentId } from "~/state/environments";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { ApproveAndStart } from "../channels/CardProposal";
-import { SubscribedCardQuestions } from "./CardContract";
 import { CheckpointControls } from "./CardReviewPanel";
 import { agentListEntries, type AgentEntry } from "../channels/channels.logic";
 import { Button } from "../ui/button";
@@ -145,7 +144,7 @@ export function NeedsYouView() {
                         {item.title}
                       </CardLink>
                       <span className="truncate text-xs text-muted-foreground">
-                        {NEEDS_YOU_LABEL[item.kind]} · {projectTitle(item.projectId)}
+                        {needsYouLabel(item)} · {projectTitle(item.projectId)}
                       </span>
                       {item.reason !== null && item.kind !== "checkpoint" ? (
                         <p className="line-clamp-2 text-xs text-muted-foreground">
@@ -164,17 +163,27 @@ export function NeedsYouView() {
                           <CheckpointControls card={itemCard} environmentId={environmentId} />
                         </div>
                       ) : null}
-                      {item.kind === "awaitingInput" &&
-                      environmentId !== null &&
-                      itemCard !== undefined ? (
-                        <div className="mt-1.5">
-                          <SubscribedCardQuestions card={itemCard} environmentId={environmentId} />
-                        </div>
-                      ) : null}
                     </div>
                     <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
                       waiting {waitingLabel(item.since, now)}
                     </span>
+                    {(item.kind === "awaitingInput" || item.kind === "criteriaChange") &&
+                    environmentId !== null ? (
+                      // The question's words stream with the card, so it is answered on the card.
+                      <Button
+                        size="sm"
+                        variant="ghost-muted"
+                        render={
+                          <Link
+                            to="/board/$environmentId/$projectId"
+                            params={{ environmentId, projectId: item.projectId }}
+                            search={{ card: item.cardId }}
+                          />
+                        }
+                      >
+                        Answer
+                      </Button>
+                    ) : null}
                     {item.kind === "triage" ? (
                       <div className="flex shrink-0 flex-wrap items-center gap-1">
                         {environmentId === null || itemCard === undefined ? null : (

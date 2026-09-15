@@ -24,6 +24,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@iskra/client-runtime/state/runtime";
+import { openCheckpointActivityId } from "@iskra/client-runtime/cards";
 import {
   type DesktopWslState,
   type EnvironmentId,
@@ -1162,7 +1163,7 @@ function OpenCommandPaletteDialog(props: {
   // A card opens its sheet on its project's board.
   const primaryCards = useEnvironmentCards(primaryEnvironmentId);
   const decideCard = useAtomCommand(cardEnvironment.decide);
-  const resolveCardCheckpoint = useAtomCommand(cardEnvironment.resolveCheckpoint);
+  const answerCardElicitation = useAtomCommand(cardEnvironment.answerElicitation);
   // Each open card also offers pause or resume, and continuing an open checkpoint.
   const cardItems = useMemo(
     (): CommandPaletteActionItem[] =>
@@ -1211,7 +1212,8 @@ function OpenCommandPaletteDialog(props: {
                 );
               },
             });
-            if (card.checkpoint !== null) {
+            const checkpointActivityId = openCheckpointActivityId(card);
+            if (checkpointActivityId !== null) {
               items.push({
                 kind: "action",
                 value: `card-checkpoint:${primaryEnvironmentId}:${card.id}`,
@@ -1220,9 +1222,14 @@ function OpenCommandPaletteDialog(props: {
                 description,
                 icon,
                 run: async () => {
-                  const result = await resolveCardCheckpoint({
+                  const result = await answerCardElicitation({
                     environmentId: primaryEnvironmentId,
-                    input: { cardId: card.id, decision: "continue" },
+                    input: {
+                      cardId: card.id,
+                      activityId: checkpointActivityId,
+                      optionId: "continue",
+                      body: "Continue",
+                    },
                   });
                   toastCommandFailure(
                     result,
@@ -1235,12 +1242,12 @@ function OpenCommandPaletteDialog(props: {
             return items;
           }),
     [
+      answerCardElicitation,
       decideCard,
       navigate,
       primaryCards,
       primaryEnvironmentId,
       projectTitleById,
-      resolveCardCheckpoint,
     ],
   );
 

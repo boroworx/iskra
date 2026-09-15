@@ -5,7 +5,8 @@ import {
   boardColumnOf,
   cardMoveActions,
   isCardSnoozed,
-  waitReasonLabel,
+  reasonLabel,
+  reasonLine,
 } from "@iskra/client-runtime/cards";
 import type { AtomCommandResult } from "@iskra/client-runtime/state/runtime";
 import {
@@ -210,15 +211,17 @@ function CardSheetBody(props: {
                 {card.paused === null ? "Pause" : "Resume"}
               </Button>
               {card.paused !== null ? (
-                <span className="text-xs text-muted-foreground">
-                  Paused: {card.paused.reason.text}
-                </span>
+                <DisabledReason reason={reasonLabel(card.paused.reason).hint}>
+                  <span className="text-xs text-muted-foreground">
+                    Paused · {reasonLine(card.paused.reason)}
+                  </span>
+                </DisabledReason>
               ) : card.waitReason !== null ? (
-                <span className="text-xs text-muted-foreground">
-                  {waitReasonLabel(card.waitReason) === card.waitReason.text
-                    ? card.waitReason.text
-                    : `${waitReasonLabel(card.waitReason)}: ${card.waitReason.text}`}
-                </span>
+                <DisabledReason reason={reasonLabel(card.waitReason).hint}>
+                  <span className="text-xs text-muted-foreground">
+                    {reasonLine(card.waitReason)}
+                  </span>
+                </DisabledReason>
               ) : null}
             </div>
           ) : null}
@@ -667,9 +670,9 @@ function CardSheetBody(props: {
 const NO_ACTIVITIES: ReadonlyArray<CardActivity> = [];
 const NO_EVIDENCE_ITEMS: ReadonlyArray<CardEvidenceItem> = [];
 
-/** The agent's open questions, titled only when there are some. */
+/** The card's open questions, titled only when there are some besides a checkpoint's. */
 function CardQuestionsSection(props: Parameters<typeof CardQuestions>[0]) {
-  const hasQuestion = props.activities.some((activity) => activity.kind === "elicitation");
+  const hasQuestion = props.card.openElicitations.some((open) => open.kind !== "checkpoint");
   return hasQuestion ? (
     <Section label="Questions for you">
       <CardQuestions {...props} />

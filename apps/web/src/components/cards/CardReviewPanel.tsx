@@ -8,7 +8,11 @@ import {
   type CriterionState,
   type EvidenceItemView,
 } from "@iskra/client-runtime/card-review";
-import { forwardedCommentMessage, hasUnacknowledgedHardFlags } from "@iskra/client-runtime/cards";
+import {
+  forwardedCommentMessage,
+  hasUnacknowledgedHardFlags,
+  openCheckpointActivityId,
+} from "@iskra/client-runtime/cards";
 import type { AtomCommandResult } from "@iskra/client-runtime/state/runtime";
 import {
   MessageId,
@@ -417,30 +421,38 @@ export function CardLandingPanel(props: {
   );
 }
 
+const CHECKPOINT_ANSWER: Record<CardCheckpointDecision, string> = {
+  continue: "Continue",
+  redirect: "Redirect",
+  stop: "Stop",
+};
+
 /**
- * The owner's checkpoint: what it tried and asks, answered by continuing, redirecting with a note,
- * or stopping, which pauses the card.
+ * The owner's checkpoint: what it tried and asks, answered on its open question by continuing,
+ * redirecting with a note, or stopping, which pauses the card.
  */
 export function CheckpointControls(props: {
-  readonly card: Pick<OrchestrationCardShell, "id" | "checkpoint">;
+  readonly card: Pick<OrchestrationCardShell, "id" | "checkpoint" | "openElicitations">;
   readonly environmentId: EnvironmentId;
 }) {
-  const resolve = useAtomCommand(cardEnvironment.resolveCheckpoint);
+  const answer = useAtomCommand(cardEnvironment.answerElicitation);
   const [note, setNote] = useState("");
   const [redirecting, setRedirecting] = useState(false);
   const [sending, setSending] = useState(false);
   const checkpoint = props.card.checkpoint;
-  if (checkpoint === null) return null;
+  const activityId = openCheckpointActivityId(props.card);
+  if (checkpoint === null || activityId === null) return null;
 
   const send = async (decision: CardCheckpointDecision) => {
     const trimmed = note.trim();
     setSending(true);
-    const result = await resolve({
+    const result = await answer({
       environmentId: props.environmentId,
       input: {
         cardId: props.card.id,
-        decision,
-        ...(trimmed.length > 0 ? { note: trimmed } : {}),
+        activityId,
+        optionId: decision,
+        body: trimmed.length > 0 ? trimmed : CHECKPOINT_ANSWER[decision],
       },
     });
     setSending(false);

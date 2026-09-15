@@ -1,9 +1,5 @@
 import { cardPreview } from "@iskra/client-runtime/card-preview";
-import {
-  cardAnswerMessage,
-  elicitationAnswer,
-  openCardElicitations,
-} from "@iskra/client-runtime/cards";
+import { elicitationAnswer, openCardQuestions } from "@iskra/client-runtime/cards";
 import {
   MessageId,
   type CardActivity,
@@ -21,15 +17,12 @@ import { useMemo, useState } from "react";
 import { randomUUID } from "~/lib/utils";
 import { cardEnvironment } from "~/state/cards";
 import { channelEnvironment } from "~/state/channels";
-import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { toastCommandFailure } from "../toastCommandFailure";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { DisabledReason } from "./DisabledReason";
-
-const NO_ACTIVITIES: ReadonlyArray<CardActivity> = [];
 
 const VERIFICATION_LABEL: Record<CardCriterion["verification"], string> = {
   automated: "Checked by evidence",
@@ -299,24 +292,19 @@ export function ChannelQuestion(props: {
 }
 
 /**
- * The card agent's open questions with one-click answers. There is no card answer command yet, so
- * an answer goes to the agent as a message quoting its question, which also closes the question.
- * The checkpoint's own question is answered by the checkpoint controls instead.
+ * The card's open questions with one-click answers: the agent's own and proposed criteria changes.
+ * A checkpoint's question is answered by the checkpoint controls instead.
  */
 export function CardQuestions(props: {
-  readonly card: Pick<OrchestrationCardShell, "id" | "checkpoint">;
+  readonly card: Pick<OrchestrationCardShell, "id" | "openElicitations">;
   readonly activities: ReadonlyArray<CardActivity>;
   readonly environmentId: EnvironmentId;
 }) {
-  const postMessage = useAtomCommand(cardEnvironment.postMessage);
+  const answer = useAtomCommand(cardEnvironment.answerElicitation);
   const [sending, setSending] = useState(false);
-  const checkpointId = props.card.checkpoint?.checkpointId ?? null;
   const questions = useMemo(
-    () =>
-      openCardElicitations(props.activities).filter(
-        (question) => question.activityId !== checkpointId,
-      ),
-    [props.activities, checkpointId],
+    () => openCardQuestions(props.card, props.activities, QUESTION_KINDS),
+    [props.card, props.activities],
   );
   if (questions.length === 0) return null;
   return (
@@ -331,12 +319,13 @@ export function CardQuestions(props: {
             disabled={sending}
             onAnswer={async (choice) => {
               setSending(true);
-              const result = await postMessage({
+              const result = await answer({
                 environmentId: props.environmentId,
                 input: {
                   cardId: props.card.id,
-                  messageId: MessageId.make(randomUUID()),
-                  body: cardAnswerMessage(question.elicitation.question, choice.body),
+                  activityId: question.activityId,
+                  optionId: choice.optionId,
+                  body: choice.body,
                 },
               });
               setSending(false);
@@ -349,25 +338,7 @@ export function CardQuestions(props: {
   );
 }
 
-/** A card's open questions where no card sheet is open, such as Needs you: subscribes while shown. */
-export function SubscribedCardQuestions(props: {
-  readonly card: Pick<OrchestrationCardShell, "id" | "checkpoint">;
-  readonly environmentId: EnvironmentId;
-}) {
-  const activity = useEnvironmentQuery(
-    cardEnvironment.activity({
-      environmentId: props.environmentId,
-      input: { cardId: props.card.id },
-    }),
-  );
-  return (
-    <CardQuestions
-      card={props.card}
-      activities={activity.data?.activities ?? NO_ACTIVITIES}
-      environmentId={props.environmentId}
-    />
-  );
-}
+const QUESTION_KINDS = ["question", "criteriaChange"] as const;
 
 const sameCriteria = (left: ReadonlyArray<CardCriterion>, right: ReadonlyArray<CardCriterion>) =>
   JSON.stringify(left) === JSON.stringify(right);

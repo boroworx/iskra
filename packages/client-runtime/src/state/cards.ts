@@ -6,6 +6,7 @@ import type { EnvironmentRegistry } from "../connection/registry.ts";
 import {
   acknowledgeCardFlags,
   addCardRelation,
+  answerCardElicitation,
   approveAndStartCard,
   assignCard,
   commentOnCardReview,
@@ -13,7 +14,6 @@ import {
   decideCard,
   postCardMessage,
   removeCardRelation,
-  resolveCardCheckpoint,
   setCardBudget,
   setCardCriteria,
   setProjectOrchestration,
@@ -35,9 +35,9 @@ export function createCardEnvironmentAtoms<R, E>(
       label: "environment-data:commands:card:set-criteria",
       execute: setCardCriteria,
     }),
-    resolveCheckpoint: createEnvironmentCommand(runtime, {
-      label: "environment-data:commands:card:resolve-checkpoint",
-      execute: resolveCardCheckpoint,
+    answerElicitation: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:card:answer-elicitation",
+      execute: answerCardElicitation,
     }),
     acknowledgeFlags: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:card:acknowledge-flags",

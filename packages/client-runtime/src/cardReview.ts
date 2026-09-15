@@ -160,17 +160,14 @@ export function ciSummary(items: ReadonlyArray<CardEvidenceItem>): {
 }
 
 /**
- * Pull request comments from people who aren't trusted on the repository: recorded on the card but
- * delivered to no one, so they wait for a person to forward them to the agent.
+ * Pull request comments from people who aren't trusted on the repository: the server marks their
+ * author untrusted and delivers them to no one, so they wait for a person to forward them.
  */
 export function untrustedComments(
   activities: ReadonlyArray<CardActivity>,
 ): ReadonlyArray<CardActivity> {
   return activities.filter(
-    (activity) =>
-      activity.kind === "message" &&
-      activity.author.kind === "github" &&
-      activity.deliverTo === null,
+    (activity) => activity.author.trusted === false && activity.deliverTo === null,
   );
 }
 

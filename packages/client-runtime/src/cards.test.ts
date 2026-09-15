@@ -12,7 +12,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   BOARD_COLUMNS,
-  cardAnswerMessage,
+  REASON_LABEL,
   cardBadges,
   cardDropDecision,
   cardMoveActions,
@@ -20,8 +20,10 @@ import {
   elicitationAnswer,
   isCardSnoozed,
   needsYouItems,
-  openCardElicitations,
-  waitReasonLabel,
+  needsYouLabel,
+  openCardQuestions,
+  openCheckpointActivityId,
+  reasonLabel,
   waitingLabel,
 } from "./cards.ts";
 
@@ -211,7 +213,20 @@ describe("cardBadges", () => {
           },
         }),
       ),
-    ).toEqual([["Paused", true]]);
+    ).toEqual([["Stuck", true]]);
+    // Only unfinished cards say they have no criteria, triage included; finished ones never.
+    expect(labels(shell({ status: "triage", acceptance: LEGACY_CARD_CONTRACT.acceptance }))).toEqual(
+      [["No acceptance criteria", false]],
+    );
+    expect(labels(shell({ ...base, status: "landed" }))).toEqual([]);
+    expect(
+      labels(
+        shell({
+          ...base,
+          paused: { reason: { code: "pausedByPerson", text: "Paused." }, by: "human", pausedAt: at(1) },
+        }),
+      ),
+    ).toEqual([["Paused", false]]);
   });
 });
 
@@ -371,10 +386,23 @@ describe("needsYouItems on the card contract", () => {
           delegateAgentId: AgentId.make("builder"),
           updatedAt: at(6),
         }),
-        card("comment", {
-          status: "inReview",
-          waitReason: { code: "untrustedComment", text: "@stranger commented.", since: at(7) },
+        card("moved-ref", {
+          status: "inProgress",
+          paused: {
+            reason: { code: "refMovedOutsideCard", text: "It moved main." },
+            by: "system",
+            pausedAt: at(7),
+          },
         }),
+        card("asked", {
+          status: "inProgress",
+          openElicitations: [
+            { activityId: "k9", kind: "checkpoint", optionIds: [], askedAt: at(7) },
+            { activityId: "q1", kind: "question", optionIds: ["a", "b"], askedAt: at(8) },
+            { activityId: "q2", kind: "question", optionIds: [], askedAt: at(9) },
+          ],
+        }),
+        card("ci", { ...review, evidence: evidence({ pendingCi: ["build"] }) }),
         card("capacity", {
           status: "inProgress",
           waitReason: { code: "waitingForCapacity", text: "Load is high.", since: at(8) },
@@ -406,34 +434,104 @@ describe("needsYouItems on the card contract", () => {
         "unguarded",
         "Agents don't start work until someone checks this project's scheduled jobs and outbound APIs in project settings.",
       ],
-      ["untrustedComment", "comment", "@stranger commented."],
+      ["paused", "moved-ref", "It moved main."],
+      // One item per card however many questions are open, from the oldest; a checkpoint's is not one.
+      ["awaitingInput", "asked", null],
     ]);
+    expect(
+      needsYouLabel(items.find((item) => item.cardId === "moved-ref")!),
+    ).toBe("Moved a branch outside its card");
+    expect(items.find((item) => item.cardId === "asked")!.since).toBe(at(8));
     expect(
       cardWaitItems([
         card("capacity", {
           status: "inProgress",
           waitReason: { code: "waitingForCapacity", text: "Load is high.", since: at(8) },
         }),
-      ]).map((item) => [item.label, item.reason]),
-    ).toEqual([["Waiting for machine capacity", "Load is high."]]);
+        card("ci", { ...review, evidence: evidence({ pendingCi: ["build"] }) }),
+      ]).map((item) => [item.cardId, item.label, item.reason]),
+    ).toEqual([
+      ["ci", "Waiting for CI", "No result yet from build."],
+      ["capacity", "Waiting for machine capacity", "Load is high."],
+    ]);
   });
 });
 
-describe("waitReasonLabel", () => {
+describe("reasonLabel", () => {
+  // Every code the server emits (m1-followups: L2, L4 and integration); a new one belongs here.
+  const EMITTED_CODES = [
+    // waits
+    "waitingForCapacity",
+    "waitingForSlot",
+    "reviewCapacity",
+    "waitingForMemory",
+    "blocked",
+    "startFailed",
+    // pauses
+    "sessionFailed",
+    "stuck",
+    "awaitingInput",
+    "wallClock",
+    "budgetBreaker",
+    "fixRoundsExhausted",
+    "checkpointStopped",
+    "pausedByPerson",
+    "refMovedOutsideCard",
+    // watchdog errors
+    "stalled",
+    "repeatedAction",
+    "errorLoop",
+    "idleInProgress",
+    "checksHung",
+    "memoryPressure",
+    // evidence not captured
+    "noPreviewHost",
+    "noRunScript",
+    "previewFailed",
+    "previewUrlRefused",
+    "pendingCi",
+    // needs you
+    "checksMissing",
+    "untrustedComment",
+    "landingBlocked",
+    "pullRequestOpenFailed",
+    "pullRequestClosed",
+    "criteriaMissing",
+    "ciChecksNeedPullRequest",
+    // builder feedback and activities
+    "checksFailed",
+    "ciFailed",
+    "rebaseConflict",
+    "reviewRefused",
+    "reviewComment",
+    "exclusivePathChanged",
+    "overlap",
+    "noWorktree",
+    "reviewRequested",
+    "runChecksRequested",
+    "runChecksResult",
+    "mergedOnHost",
+  ];
+
+  it("gives every emitted code a short label and a tooltip", () => {
+    const missing = EMITTED_CODES.filter(
+      (code) => !Object.hasOwn(REASON_LABEL, code) || REASON_LABEL[code]!.hint.length === 0,
+    );
+    expect(missing).toEqual([]);
+  });
+
   it("names the known codes and falls back to the server's own words", () => {
-    expect(waitReasonLabel({ code: "waitingForCapacity", text: "x" })).toBe(
+    expect(reasonLabel({ code: "waitingForCapacity", text: "x" }).label).toBe(
       "Waiting for machine capacity",
     );
-    expect(waitReasonLabel({ code: "reviewCapacity", text: "x" })).toBe(
-      "Waiting for agent pull requests to be reviewed",
+    expect(reasonLabel({ code: "refMovedOutsideCard", text: "x" }).label).toBe(
+      "Moved a branch outside its card",
     );
-    expect(waitReasonLabel({ code: "waitingForSlot", text: "x" })).toBe(
-      "Waiting for a session slot",
-    );
-    expect(waitReasonLabel({ code: "somethingNew", text: "Waiting on the moon." })).toBe(
-      "Waiting on the moon.",
-    );
-    expect(waitReasonLabel({ code: "constructor", text: "Not a label." })).toBe("Not a label.");
+    expect(reasonLabel({ code: "somethingNew", text: "Waiting on the moon." })).toEqual({
+      label: "Waiting on the moon.",
+      hint: "Waiting on the moon.",
+    });
+    expect(reasonLabel({ code: "constructor", text: "Not a label." }).label).toBe("Not a label.");
   });
 });
 
@@ -458,10 +556,9 @@ describe("elicitationAnswer", () => {
     expect(elicitationAnswer(question, { optionId: "other" })).toBeNull();
     expect(elicitationAnswer(question, { text: "   " })).toBeNull();
     expect(elicitationAnswer({ ...question, allowText: false }, { text: "both" })).toBeNull();
-    expect(cardAnswerMessage("Keep it?\nOr not?", "Keep")).toBe("> Keep it?\n> Or not?\n\nKeep");
   });
 
-  it("lists the questions nobody answered", () => {
+  it("lists the open questions the card's shell names, with their words from the activity", () => {
     const base = {
       cardId: CardId.make("c"),
       author: { kind: "agent" as const, id: "builder" },
@@ -480,33 +577,34 @@ describe("elicitationAnswer", () => {
       recommendedOptionId: "keep",
       kind: "question" as const,
     };
-    const open = openCardElicitations([
-      { ...base, activityId: "q1", kind: "elicitation", elicitation, answers: null },
-      { ...base, activityId: "q2", kind: "elicitation", elicitation, answers: null },
+    const activities = [
+      { ...base, activityId: "q1", kind: "elicitation" as const, elicitation, answers: null },
+      { ...base, activityId: "q2", kind: "elicitation" as const, elicitation, answers: null },
       {
         ...base,
-        activityId: "r1",
-        kind: "response",
-        elicitation: null,
-        answers: { questionId: "q1", optionId: "keep" },
-      },
-    ]);
-    expect(open.map((entry) => entry.activityId)).toEqual(["q2"]);
-
-    // A person's later message answers every question asked before it, as on the card before options.
-    const replied = openCardElicitations([
-      { ...base, activityId: "q1", kind: "elicitation", elicitation, answers: null },
-      {
-        ...base,
-        activityId: "m1",
-        kind: "message",
-        author: { kind: "human", id: "human" },
-        elicitation: null,
+        activityId: "k1",
+        kind: "elicitation" as const,
+        elicitation: { ...elicitation, kind: "checkpoint" as const },
         answers: null,
       },
-      { ...base, activityId: "q2", kind: "elicitation", elicitation, answers: null },
-    ]);
-    expect(replied.map((entry) => entry.activityId)).toEqual(["q2"]);
+    ];
+    const shell = {
+      openElicitations: [
+        { activityId: "k1", kind: "checkpoint" as const, optionIds: [], askedAt: at(1) },
+        { activityId: "q2", kind: "question" as const, optionIds: [], askedAt: at(1) },
+        // Not streamed in yet: left out until its activity arrives.
+        { activityId: "q3", kind: "criteriaChange" as const, optionIds: [], askedAt: at(2) },
+      ],
+    };
+    // q1 is answered: the shell no longer lists it, whatever the activities hold.
+    expect(
+      openCardQuestions(shell, activities, ["question", "criteriaChange"]).map(
+        (entry) => entry.activityId,
+      ),
+    ).toEqual(["q2"]);
+    // The checkpoint is found by its kind, not by assuming its id.
+    expect(openCheckpointActivityId(shell)).toBe("k1");
+    expect(openCheckpointActivityId({ openElicitations: [] })).toBeNull();
   });
 });
 

@@ -114,7 +114,13 @@ export function AgentView(props: {
               <AtSignIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
               <h1 className="truncate text-sm font-semibold">{agent.name}</h1>
               <PresenceBadge presence={agent.presence} />
-              <AgentStats agent={agent} cards={cards} />
+              <AgentStats
+                agent={agent}
+                cards={cards}
+                projects={projects.filter(
+                  (project) => project.environmentId === props.environmentId,
+                )}
+              />
               <div className="ml-auto flex shrink-0 items-center gap-1">
                 <Button
                   size="sm"
@@ -295,12 +301,19 @@ function ArchivedAgentUnarchive(props: {
 function AgentStats(props: {
   readonly agent: OrchestrationAgentShell;
   readonly cards: ReadonlyArray<OrchestrationCardShell>;
+  /** The environment's projects, so an unacknowledged side-effect guard counts as waiting. */
+  readonly projects: ReadonlyArray<EnvironmentProject>;
 }) {
   const [now] = useState(() => Date.now());
   const own = props.cards.filter((card) => card.delegateAgentId === props.agent.id);
   const landed = own.filter((card) => card.status === "landed").length;
   const returns = own.reduce((total, card) => total + card.reviewReturns, 0);
-  const waiting = needsYouItems({ cards: own, sessions: cardOwnerSessions(own), now }).length;
+  const waiting = needsYouItems({
+    cards: own,
+    sessions: cardOwnerSessions(own),
+    projects: props.projects,
+    now,
+  }).length;
   return (
     <span className="hidden truncate text-xs tabular-nums text-muted-foreground sm:inline">
       ${(props.agent.spentUsd ?? 0).toFixed(2)} spent · {landed} landed · {returns} sent back ·{" "}

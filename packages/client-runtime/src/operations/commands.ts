@@ -198,10 +198,11 @@ export const addCardRelation = command("addCardRelation", "card.relation.add");
 export const removeCardRelation = command("removeCardRelation", "card.relation.remove");
 /** A person's acceptance criteria: a draft in triage, confirmed once the card is approved. */
 export const setCardCriteria = command("setCardCriteria", "card.criteria.set");
-/** A person's answer to the owner's checkpoint: continue, redirect with a note, or stop. */
-export const resolveCardCheckpoint = command("resolveCardCheckpoint", "card.checkpoint.resolve");
 export const acknowledgeCardFlags = command("acknowledgeCardFlags", "card.flags.acknowledge");
-/** A person answering a card's open question (the owner's, a checkpoint or a criteria change). */
+/**
+ * A person answering a card's open question: the owner's, a checkpoint (option ids continue,
+ * redirect or stop; the body is the note) or a criteria change.
+ */
 export const answerCardElicitation = timestampedCommand(
   "answerCardElicitation",
   "card.elicitation.answer",
