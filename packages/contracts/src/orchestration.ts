@@ -1304,6 +1304,8 @@ export const CardAttentionCode = Schema.Literals([
   "previewDown",
   "outcomeFlawed",
   "revertConflict",
+  // Domains a card's work needs that the project's network list doesn't allow.
+  "accessRequest",
 ]);
 export type CardAttentionCode = typeof CardAttentionCode.Type;
 
@@ -1322,6 +1324,8 @@ export const CardAttentionAction = Schema.Literals([
   // Opens project settings with a hidden scenario prefilled from the card's criteria.
   "addHoldout",
   "assignAgent",
+  // Adds an access request's domains to the project's network list (`card.access.allow`).
+  "allowAccess",
 ]);
 export type CardAttentionAction = typeof CardAttentionAction.Type;
 
@@ -1333,6 +1337,8 @@ export const CardAttention = Schema.Struct({
   text: Schema.String,
   createdAt: IsoDateTime,
   actions: Schema.Array(CardAttentionAction),
+  // Set on an access request: the domains it asks for.
+  domains: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
 });
 export type CardAttention = typeof CardAttention.Type;
 
@@ -1680,6 +1686,8 @@ export const CardActivity = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
   reason: Schema.NullOr(Reason).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  // Set on an access request: the domains it asks for.
+  domains: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   // Refs outside the card that changed during a turn (the report), or the ones a person restores.
   refChanges: Schema.optional(Schema.NullOr(Schema.Array(CardRefChange))),
   createdAt: IsoDateTime,
@@ -3256,6 +3264,36 @@ const CardAttentionDismissCommand = Schema.Struct({
   activityId: TrimmedNonEmptyString,
 });
 
+/** A domain as the agent sandbox names it: a hostname, without scheme, port, path or wildcard. */
+export const AccessDomain = TrimmedNonEmptyString.check(
+  Schema.isPattern(/^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i),
+);
+
+/**
+ * Domains a card's work needs that the project's network list doesn't allow, raised as an attention
+ * item for a person. Any caller may raise one: the owner through request_access, or Iskra when the
+ * sandbox blocks a domain (`source`). It resolves through `card.access.allow` or a dismissal.
+ */
+const CardAccessRequestCommand = Schema.Struct({
+  type: Schema.Literal("card.access.request"),
+  commandId: CommandId,
+  cardId: CardId,
+  activityId: TrimmedNonEmptyString,
+  source: Schema.Literals(["agent", "sandbox"]),
+  domains: Schema.Array(AccessDomain).check(Schema.isMinLength(1), Schema.isMaxLength(10)),
+  reason: TrimmedNonEmptyString,
+  runThreadId: Schema.NullOr(ThreadId),
+  createdAt: IsoDateTime,
+});
+
+/** A person allowing an access request's domains for the card's project, which wakes its owner. */
+const CardAccessAllowCommand = Schema.Struct({
+  type: Schema.Literal("card.access.allow"),
+  commandId: CommandId,
+  cardId: CardId,
+  activityId: TrimmedNonEmptyString,
+});
+
 /** A person accepting the hard scope flags on the card's latest evidence, so its merge can be approved. */
 const CardFlagsAcknowledgeCommand = Schema.Struct({
   type: Schema.Literal("card.flags.acknowledge"),
@@ -4242,6 +4280,7 @@ const IskraClientCommands = [
   CardRefsKeepCommand,
   CardCommentForwardCommand,
   CardAttentionDismissCommand,
+  CardAccessAllowCommand,
   CardVerifierOverrideCommand,
   CardVerifierRerunCommand,
   CardServicesRestartCommand,
@@ -4458,6 +4497,7 @@ const InternalOrchestrationCommand = Schema.Union([
   CardLessonProposeCommand,
   CardOutcomeRecordCommand,
   CardActivityRecordCommand,
+  CardAccessRequestCommand,
   CardHelpRequestCommand,
   CardCritiqueRequestCommand,
   CardVerifierSelectCommand,

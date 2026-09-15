@@ -136,6 +136,8 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "card.refs.keep":
     case "card.comment.forward":
     case "card.attention.dismiss":
+    case "card.access.request":
+    case "card.access.allow":
     case "card.help.request":
     case "card.critique.request":
     case "card.verifier.select":

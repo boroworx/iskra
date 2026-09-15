@@ -1,4 +1,5 @@
 import {
+  AccessDomain,
   CardId,
   ChannelId,
   DEFAULT_AGENT_BLUEPRINT,
@@ -20,6 +21,7 @@ import * as Schema from "effect/Schema";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 
 import {
+  accessAlreadyAllowedReason,
   ALREADY_ANSWERED_REASON,
   ANSWER_OPTION_REASON,
   AUTO_MERGE_OFF_REASON,
@@ -1097,6 +1099,101 @@ it.layer(NodeServices.layer)("decider card contract", (it) => {
       expect(cardIn(blocked)?.attention.map((item) => item.code)).toEqual(["landingBlocked"]);
       const retried = yield* applyTo(blocked, [onCard("card.merge.approve")]);
       expect(cardIn(retried)?.attention).toEqual([]);
+    }),
+  );
+
+  it.effect("an access request waits on a person, who allows it for the project or refuses it; either wakes the owner", () =>
+    Effect.gen(function* () {
+      const request = (activityId: string, domains: ReadonlyArray<string>): OrchestrationCommand => ({
+        type: "card.access.request",
+        commandId: nextCommandId(),
+        cardId,
+        activityId,
+        source: "agent",
+        domains,
+        reason: "gh needs the GitHub API.",
+        runThreadId: null,
+        createdAt: now,
+      });
+      const allow = (activityId: string): OrchestrationCommand => ({
+        type: "card.access.allow",
+        commandId: nextCommandId(),
+        cardId,
+        activityId,
+      });
+      expect(isClientCommand(allow("access-1"))).toBe(true);
+      // Only the server raises one: the owner's tool, or Iskra itself.
+      expect(isClientCommand(request("access-1", ["github.com"]))).toBe(false);
+      expect(Schema.is(AccessDomain)("api.github.com")).toBe(true);
+      expect(Schema.is(AccessDomain)("https://github.com/x")).toBe(false);
+
+      const started = yield* applyCommands([
+        ...setup,
+        createCard(),
+        approveAndStart(cardId, criteria),
+        onCard("card.work.start"),
+        setPolicy({ egress: { mode: "allowlist", allow: ["registry.npmjs.org"], deny: ["github.com"] } }),
+      ]);
+      const asked = yield* applyTo(started, [
+        request("access-1", ["API.github.com", "github.com", "registry.npmjs.org"]),
+      ]);
+      // What the project already allows is left out; what a person denied is said.
+      expect(cardIn(asked)?.attention).toEqual([
+        {
+          activityId: "access-1",
+          code: "accessRequest",
+          text: "gh needs the GitHub API.\n\nA person denied github.com in this project's network settings.",
+          createdAt: now,
+          actions: ["allowAccess", "dismiss"],
+          domains: ["api.github.com", "github.com"],
+        },
+      ]);
+      expect(yield* refusal(asked, request("access-2", ["registry.npmjs.org"]))).toBe(
+        accessAlreadyAllowedReason(["registry.npmjs.org"]),
+      );
+      expect(yield* refusal(asked, allow("access-9"))).toBe(NO_ATTENTION_REASON);
+
+      expect(yield* decide(asked, allow("access-1"))).toMatchObject([
+        { type: "project.orchestration-set", aggregateKind: "project" },
+        {
+          type: "card.activity-recorded",
+          payload: {
+            activityId: "access-1:allowed",
+            deliverTo: "builder",
+            delivery: "pending",
+            answers: { questionId: "access-1", optionId: "allow" },
+            body: "A person allowed api.github.com and github.com for this project; continue.",
+          },
+        },
+      ]);
+      const allowed = yield* applyTo(asked, [allow("access-1")]);
+      expect(allowed.projects.find((project) => project.id === projectId)?.orchestration?.egress).toEqual({
+        mode: "allowlist",
+        allow: ["registry.npmjs.org", "api.github.com", "github.com"],
+        deny: [],
+      });
+      expect(cardIn(allowed)?.attention).toEqual([]);
+      expect(yield* refusal(allowed, allow("access-1"))).toBe(NO_ATTENTION_REASON);
+
+      // Refused: the item resolves, the list stays as it was and the owner hears why.
+      const again = yield* applyTo(allowed, [request("access-3", ["uploads.github.com"])]);
+      expect(
+        yield* decide(again, onAttention("card.attention.dismiss", "access-3")),
+      ).toMatchObject([
+        {
+          type: "card.activity-recorded",
+          payload: {
+            deliverTo: "builder",
+            delivery: "pending",
+            body: expect.stringContaining("A person refused access to uploads.github.com."),
+          },
+        },
+      ]);
+      const refused = yield* applyTo(again, [onAttention("card.attention.dismiss", "access-3")]);
+      expect(cardIn(refused)?.attention).toEqual([]);
+      expect(
+        refused.projects.find((project) => project.id === projectId)?.orchestration?.egress.allow,
+      ).toEqual(["registry.npmjs.org", "api.github.com", "github.com"]);
     }),
   );
 

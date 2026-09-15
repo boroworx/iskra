@@ -1,4 +1,5 @@
 import {
+  AccessDomain,
   CardCritiqueFocus,
   CardEstimate,
   CardPremise,
@@ -207,7 +208,7 @@ const RequestCheckpointTool = Tool.make("request_checkpoint", {
 
 const AskOwnerTool = Tool.make("ask_owner", {
   description:
-    "Ask the person who requested the card a question you cannot answer from the spec, criteria, decisions or code. Offer two or three answers and recommend one when you can. This returns at once; the answer arrives later as your next message, so end your turn after asking.",
+    "Ask the person who requested the card a question you cannot answer from the spec, criteria, decisions or code. Offer two or three answers and recommend one when you can. Never ask them to run commands, fetch data or do the work for you, and never offer answers that pretend to change settings; when the sandbox blocks a domain, call request_access instead. This returns at once; the answer arrives later as your next message, so end your turn after asking.",
   parameters: Schema.Struct({
     question: TrimmedNonEmptyString,
     options: Schema.optional(AnswerOptions),
@@ -220,6 +221,26 @@ const AskOwnerTool = Tool.make("ask_owner", {
   dependencies,
 })
   .annotate(Tool.Title, "Ask the owner")
+  .annotateMerge(boardToolAnnotations);
+
+const RequestAccessTool = Tool.make("request_access", {
+  description:
+    "Ask a person to let this project's agent shells reach domains the sandbox blocks, such as github.com for gh or registry.npmjs.org for installs. Name exactly the hostnames you need and why. A person allows them for the project or refuses; the answer arrives as your next message, so end your turn after asking. Never ask a person to run the command for you instead.",
+  parameters: Schema.Struct({
+    domains: Schema.Array(AccessDomain)
+      .check(Schema.isMinLength(1), Schema.isMaxLength(10))
+      .annotate({
+        description: "One to ten hostnames, such as api.github.com: no scheme, port, path or wildcard.",
+      }),
+    reason: TrimmedNonEmptyString.annotate({
+      description: "What you need them for, in a sentence a person can judge.",
+    }),
+  }),
+  success: Schema.Struct({ requestId: Schema.String }),
+  failure: BoardToolError,
+  dependencies,
+})
+  .annotate(Tool.Title, "Request network access")
   .annotateMerge(boardToolAnnotations);
 
 const ProposeCriteriaChangeTool = Tool.make("propose_criteria_change", {
@@ -360,6 +381,7 @@ export const BoardToolkit = Toolkit.make(
   RequestReviewTool,
   RequestCheckpointTool,
   AskOwnerTool,
+  RequestAccessTool,
   ProposeCriteriaChangeTool,
   RequestHelpTool,
   RequestCritiqueTool,
@@ -380,6 +402,7 @@ export const BOARD_CLAUDE_TOOL_NAMES = claudeToolNames([
   "request_review",
   "request_checkpoint",
   "ask_owner",
+  "request_access",
   "propose_criteria_change",
   "request_help",
   "request_critique",

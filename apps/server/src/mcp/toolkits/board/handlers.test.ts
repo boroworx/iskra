@@ -208,6 +208,7 @@ describe("board toolkit handlers", () => {
       "request_review",
       "request_checkpoint",
       "ask_owner",
+      "request_access",
       "propose_criteria_change",
       "request_help",
       "request_critique",
@@ -406,6 +407,34 @@ describe("board toolkit handlers", () => {
           },
         },
       ]);
+    }),
+  );
+
+  it.effect("requests network access on its card as the session's agent, never another card", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      const { requestId } = yield* harness.call("request_access", {
+        domains: ["api.github.com", "github.com"],
+        reason: "gh needs the GitHub API to open the pull request.",
+      });
+      expect(yield* Ref.get(harness.commands)).toMatchObject([
+        {
+          type: "card.access.request",
+          cardId: CARD_ID,
+          activityId: requestId,
+          source: "agent",
+          domains: ["api.github.com", "github.com"],
+          reason: "gh needs the GitHub API to open the pull request.",
+          runThreadId: THREAD_ID,
+        },
+      ]);
+
+      const helper = yield* makeHarness({ run: ownerRun("helper") });
+      expect(
+        yield* helper
+          .call("request_access", { domains: ["github.com"], reason: "Nope." })
+          .pipe(Effect.flip),
+      ).toMatchObject({ _tag: "BoardSessionRequiredError" });
     }),
   );
 

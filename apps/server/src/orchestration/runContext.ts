@@ -150,6 +150,7 @@ export function renderRunContext(payload: RunContextPayload): RenderedRunContext
           "If the request is too vague to act on, or the work you would propose wouldn't get the requester to their goal, call ask_clarification with one short question, two or three answers and the one you recommend, then end your turn without replying. Propose nothing yet.",
           'Otherwise, for each distinct piece of work it asks for, call propose_triage_card once with a short title, a plain-language spec, your reasoning, two to five acceptance criteria a person can observe (mark ones only a person can check, such as mobile behavior, manual), an estimate with a split when it is too big for one card, the premise, the ids of open cards it likely duplicates, and as suggestedAgent the channel member best suited to own it. Then reply with one short line, such as "Proposed a card below."',
           "If the message asks for no work, answer it in a sentence or two.",
+          "Never ask the user to run commands, fetch data or do the work for you; propose a card for work instead.",
         ]),
     payload.agent.rolePrompt.trim(),
     section("Channel topic", payload.channel.topic),

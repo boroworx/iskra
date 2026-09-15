@@ -7,6 +7,7 @@ import {
   ProviderDriverKind,
   type ProjectId,
   projectOrchestrationOf,
+  type ProjectOrchestration,
   type OrchestrationSession,
   ThreadId,
   type ProviderSession,
@@ -359,6 +360,9 @@ const make = Effect.gen(function* () {
     );
 
   const threadModelSelections = new Map<string, ModelSelection>();
+  // The network list each run session started with; a changed list restarts it on its next turn,
+  // since a provider applies its sandbox only when a session starts.
+  const threadRunEgress = new Map<string, ProjectOrchestration["egress"]>();
   const compactingThreadIds = new Set<ThreadId>();
   type QueuedTurnStart = Extract<ProviderIntentEvent, { type: "thread.turn-start-requested" }>;
   // Turn starts received while a thread compacts, replayed in order once its session is restored.
@@ -814,6 +818,7 @@ const make = Effect.gen(function* () {
           .pipe(Effect.forkDetach)
       : Effect.void;
 
+    const runEgress = run && project ? projectOrchestrationOf(project).egress : undefined;
     const startProviderSession = (input?: {
       readonly resumeCursor?: unknown;
       readonly provider?: ProviderDriverKind;
@@ -843,7 +848,14 @@ const make = Effect.gen(function* () {
             : {}),
           runtimeMode: desiredRuntimeMode,
         })
-        .pipe(Effect.tap(() => refreshWorkspaceSnapshot));
+        .pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              if (runEgress !== undefined) threadRunEgress.set(threadId, runEgress);
+            }),
+          ),
+          Effect.tap(() => refreshWorkspaceSnapshot),
+        );
 
     const bindSessionToThread = (session: ProviderSession) =>
       Effect.gen(function* () {
@@ -893,13 +905,18 @@ const make = Effect.gen(function* () {
         preferredProvider === "claudeAgent" &&
         requestedModelSelection !== undefined &&
         !Equal.equals(previousModelSelection, requestedModelSelection);
+      const egressChanged =
+        runEgress !== undefined &&
+        threadRunEgress.has(threadId) &&
+        !Equal.equals(threadRunEgress.get(threadId), runEgress);
 
       if (
         !runtimeModeChanged &&
         !cwdChanged &&
         !instanceChanged &&
         !shouldRestartForModelChange &&
-        !shouldRestartForModelSelectionChange
+        !shouldRestartForModelSelectionChange &&
+        !egressChanged
       ) {
         yield* refreshWorkspaceSnapshot;
         return existingSessionThreadId;
@@ -925,6 +942,7 @@ const make = Effect.gen(function* () {
         instanceChanged,
         shouldRestartForModelChange,
         shouldRestartForModelSelectionChange,
+        egressChanged,
         hasResumeCursor: resumeCursor !== undefined,
       });
       const restartedSession = yield* startProviderSession(

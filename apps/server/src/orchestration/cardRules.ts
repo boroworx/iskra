@@ -106,6 +106,37 @@ export const NO_ATTENTION_REASON =
 export const NOT_FORWARDABLE_REASON = "Only a comment from outside the repository is forwarded.";
 export const NOT_DISMISSABLE_REASON =
   "This can't be dismissed; it clears once what it asks for is done.";
+export const NOT_ACCESS_REQUEST_REASON = "That isn't a request for network access.";
+
+/** Domains as a sentence names them: "a", "a and b", "a, b and c". */
+export const domainList = (domains: ReadonlyArray<string>): string =>
+  domains.length <= 1
+    ? (domains[0] ?? "")
+    : `${domains.slice(0, -1).join(", ")} and ${domains.at(-1)}`;
+
+/** Whether a network list entry covers a domain; `*.example.com` covers its subdomains. */
+export const domainAllowedBy = (entry: string, domain: string): boolean => {
+  const pattern = entry.toLowerCase();
+  return pattern === domain || (pattern.startsWith("*.") && domain.endsWith(pattern.slice(1)));
+};
+
+/** Refuses asking for domains the project already allows, so the agent tries again. */
+export const accessAlreadyAllowedReason = (domains: ReadonlyArray<string>): string =>
+  `${domainList(domains)} ${domains.length === 1 ? "is" : "are"} already allowed for this project; try again.`;
+
+/** An access request's text: the agent's reason, and which of its domains a person denied. */
+export const accessRequestBody = (reason: string, denied: ReadonlyArray<string>): string =>
+  denied.length === 0
+    ? reason
+    : `${reason}\n\nA person denied ${domainList(denied)} in this project's network settings.`;
+
+/** What wakes the owner once a person allows its request. */
+export const accessAllowedBody = (domains: ReadonlyArray<string>): string =>
+  `A person allowed ${domainList(domains)} for this project; continue.`;
+
+/** What wakes the owner once a person refuses its request. */
+export const accessRefusedBody = (domains: ReadonlyArray<string>): string =>
+  `A person refused access to ${domainList(domains)}. Work without it, or use ask_owner for a real decision; never ask them to run commands for you.`;
 
 /** Why an agent can't run as `role`, or null. Also refuses a `verifyWith` agent that can't verify. */
 export const roleRefusal = (
@@ -872,6 +903,7 @@ export const ATTENTION_ACTIONS: Record<CardAttentionCode, ReadonlyArray<CardAtte
   previewDown: ["restartServices", "dismiss"],
   outcomeFlawed: ["addHoldout", "dismiss"],
   revertConflict: ["assignAgent", "dismiss"],
+  accessRequest: ["allowAccess", "dismiss"],
 };
 
 const isAttentionCode = (code: string): code is CardAttentionCode =>
@@ -891,9 +923,12 @@ const withoutCodes = (
     ? attention.filter((item) => !codes.includes(item.code))
     : attention;
 
+/** Codes where each activity is its own item, rather than replacing the code's older one. */
+const EACH_ITS_OWN: ReadonlyArray<CardAttentionCode> = ["untrustedComment", "accessRequest"];
+
 /**
  * A card's attention after an activity. An activity for no one with an attention code raises an
- * item: each untrusted comment its own, any other code replacing the older one. A response naming
+ * item: each untrusted comment and access request its own, any other code replacing the older one. A response naming
  * an item (forward, dismiss) resolves it, and a reopened pull request resolves its closing.
  * Status moves, landing links and criteria resolve the rest in `cardPatches`.
  */
@@ -905,7 +940,9 @@ export function withCardAttention(
   if (code !== undefined && activity.deliverTo === null && isAttentionCode(code)) {
     return [
       ...attention.filter((item) =>
-        code === "untrustedComment" ? item.activityId !== activity.activityId : item.code !== code,
+        EACH_ITS_OWN.includes(code)
+          ? item.activityId !== activity.activityId
+          : item.code !== code,
       ),
       {
         activityId: activity.activityId,
@@ -913,6 +950,7 @@ export function withCardAttention(
         text: activity.body.slice(0, ATTENTION_TEXT_MAX),
         createdAt: activity.createdAt,
         actions: ATTENTION_ACTIONS[code],
+        ...(activity.domains === undefined ? {} : { domains: activity.domains }),
       },
     ];
   }

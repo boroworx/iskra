@@ -85,6 +85,12 @@ import {
   NO_ATTENTION_REASON,
   NOT_FORWARDABLE_REASON,
   NOT_DISMISSABLE_REASON,
+  NOT_ACCESS_REQUEST_REASON,
+  accessAllowedBody,
+  accessAlreadyAllowedReason,
+  accessRefusedBody,
+  accessRequestBody,
+  domainAllowedBy,
   forwardedCommentBody,
   NO_CRITERIA_REASON,
   OPEN_CHECKPOINT_REASON,
@@ -4153,6 +4159,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       if (!item.actions.includes(forward ? "forward" : "dismiss")) {
         return yield* refuse(command, forward ? NOT_FORWARDABLE_REASON : NOT_DISMISSABLE_REASON);
       }
+      // A refused access request tells the owner, so it stops waiting and works without it.
+      const refusedAccess = item.code === "accessRequest";
       const occurredAt = yield* nowIso;
       return yield* planned(command, "card", card.id, occurredAt, {
         type: "card.activity-recorded",
@@ -4161,12 +4169,110 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           cardId: card.id,
           kind: "response",
           author: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
-          body: forward ? forwardedCommentBody(item.text) : "Dismissed.",
-          ...(forward ? { deliverTo: "builder" as const, delivery: "pending" as const } : {}),
+          body: forward
+            ? forwardedCommentBody(item.text)
+            : refusedAccess
+              ? accessRefusedBody(item.domains ?? [])
+              : "Dismissed.",
+          ...(forward || refusedAccess
+            ? { deliverTo: "builder" as const, delivery: "pending" as const }
+            : {}),
           answers: { questionId: item.activityId, optionId: forward ? "forward" : "dismiss" },
           createdAt: occurredAt,
         }),
       });
+    }
+
+    // Domains a card's work needs beyond the project's network list, waiting on a person.
+    case "card.access.request": {
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        "A card that has landed or been abandoned needs no network access.",
+      );
+      const { egress } = policyOf(readModel, card.projectId);
+      const domains = [...new Set(command.domains.map((domain) => domain.toLowerCase()))];
+      const allowed = (domain: string) =>
+        egress.mode === "allowlist" && egress.allow.some((entry) => domainAllowedBy(entry, domain));
+      const asked = domains.filter((domain) => !allowed(domain));
+      if (asked.length === 0) {
+        return yield* refuse(command, accessAlreadyAllowedReason(domains));
+      }
+      const denied = asked.filter((domain) =>
+        egress.deny.some((entry) => domainAllowedBy(entry, domain)),
+      );
+      return yield* planned(command, "card", card.id, command.createdAt, {
+        type: "card.activity-recorded",
+        payload: cardActivity({
+          activityId: command.activityId,
+          cardId: card.id,
+          kind: "message",
+          author:
+            command.source === "agent" && card.delegateAgentId !== null
+              ? { kind: "agent", id: card.delegateAgentId }
+              : { kind: "system", id: CHANNEL_SYSTEM_AUTHOR_ID },
+          body: accessRequestBody(command.reason, denied),
+          runThreadId: command.runThreadId,
+          reason: { code: "accessRequest", text: command.reason },
+          domains: asked,
+          createdAt: command.createdAt,
+        }),
+      });
+    }
+
+    /**
+     * A person allowing an access request: the project's network list switches on with its domains
+     * (and drops them from the denied list), the item resolves and the owner continues. One command,
+     * so the list never changes without the request resolving and the owner hearing about it.
+     */
+    case "card.access.allow": {
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        "A card that has landed or been abandoned has nothing waiting on you.",
+      );
+      const item = card.attention.find((entry) => entry.activityId === command.activityId);
+      if (item === undefined) {
+        return yield* refuse(command, NO_ATTENTION_REASON);
+      }
+      if (item.code !== "accessRequest" || item.domains === undefined) {
+        return yield* refuse(command, NOT_ACCESS_REQUEST_REASON);
+      }
+      const domains = item.domains;
+      const policy = policyOf(readModel, card.projectId);
+      const occurredAt = yield* nowIso;
+      return [
+        yield* planned(command, "project", card.projectId, occurredAt, {
+          type: "project.orchestration-set",
+          payload: {
+            projectId: card.projectId,
+            orchestration: {
+              ...policy,
+              egress: {
+                mode: "allowlist",
+                allow: [
+                  ...policy.egress.allow,
+                  ...domains.filter((domain) => !policy.egress.allow.includes(domain)),
+                ],
+                deny: policy.egress.deny.filter((entry) => !domains.includes(entry.toLowerCase())),
+              },
+            },
+            updatedAt: occurredAt,
+          },
+        }),
+        yield* planned(command, "card", card.id, occurredAt, {
+          type: "card.activity-recorded",
+          payload: cardActivity({
+            activityId: `${item.activityId}:allowed`,
+            cardId: card.id,
+            kind: "response",
+            author: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
+            body: accessAllowedBody(domains),
+            deliverTo: "builder",
+            delivery: "pending",
+            answers: { questionId: item.activityId, optionId: "allow" },
+            createdAt: occurredAt,
+          }),
+        }),
+      ];
     }
 
     case "card.evidence.record": {

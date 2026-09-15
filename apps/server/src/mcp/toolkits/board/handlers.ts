@@ -476,6 +476,24 @@ const make = Effect.gen(function* () {
         });
         return { requestId };
       }),
+    request_access: (input) =>
+      Effect.gen(function* () {
+        const session = yield* requireOwnerSession;
+        const requestId = `access-request-${yield* uuid}`;
+        // The decider refuses domains the project already allows, so the agent hears to retry.
+        yield* dispatch({
+          type: "card.access.request",
+          commandId: yield* commandId("access-request", session.threadId),
+          cardId: session.cardId,
+          activityId: requestId,
+          source: "agent",
+          domains: input.domains,
+          reason: input.reason,
+          runThreadId: session.threadId,
+          createdAt: yield* nowIso,
+        });
+        return { requestId };
+      }),
     propose_criteria_change: (input) =>
       Effect.gen(function* () {
         const session = yield* requireOwnerSession;
