@@ -204,6 +204,30 @@ export function SettingsLargeTitle({
   );
 }
 
+const SETTINGS_CAPTION_MAX_LENGTH = 84;
+
+/**
+ * A setting's caption fits one secondary line. A longer explanation keeps its
+ * first sentence inline (or an ellipsized line) and moves whole behind the
+ * row's info button. Rich captions render as given.
+ */
+export function splitSettingDescription(description: ReactNode): {
+  readonly inline: ReactNode;
+  readonly full: string | null;
+} {
+  if (typeof description !== "string") return { inline: description, full: null };
+  const text = description.trim();
+  if (text.length <= SETTINGS_CAPTION_MAX_LENGTH) return { inline: text, full: null };
+  const firstSentence = /^.+?[.!?](?=\s)/.exec(text)?.[0];
+  return {
+    inline:
+      firstSentence !== undefined && firstSentence.length <= SETTINGS_CAPTION_MAX_LENGTH
+        ? firstSentence
+        : text,
+    full: text,
+  };
+}
+
 /** Muted section headings have no descriptions; explanatory copy belongs to individual settings. */
 export function SettingsSection({
   title,
@@ -461,6 +485,7 @@ export function SettingsRow({
       />
     ) : null;
   const renderedStatus = status;
+  const caption = splitSettingDescription(description);
 
   return (
     <div
@@ -478,6 +503,25 @@ export function SettingsRow({
         <div className="min-w-0 flex-1 space-y-0.5">
           <div className="flex min-h-5 items-center gap-1.5">
             <h3 className="text-[13px] font-normal text-foreground">{title}</h3>
+            {caption.full ? (
+              <Tooltip>
+                <TooltipTrigger
+                  delay={200}
+                  render={
+                    <Button
+                      size="icon-micro"
+                      variant="ghost-muted"
+                      aria-label={`About ${typeof title === "string" ? title : "this setting"}`}
+                    >
+                      <InfoIcon className="size-3" />
+                    </Button>
+                  }
+                />
+                <TooltipPopup side="top" className="max-w-72">
+                  {caption.full}
+                </TooltipPopup>
+              </Tooltip>
+            ) : null}
             {renderedInheritance ? (
               <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
                 {renderedInheritance}
@@ -487,8 +531,15 @@ export function SettingsRow({
               {renderedReset}
             </span>
           </div>
-          {description ? (
-            <p className="max-w-xl text-xs leading-4 text-muted-foreground">{description}</p>
+          {caption.inline ? (
+            <p
+              className={cn(
+                "max-w-xl text-xs leading-4 text-muted-foreground",
+                typeof caption.inline === "string" && "truncate",
+              )}
+            >
+              {caption.inline}
+            </p>
           ) : null}
           {renderedStatus ? (
             <div className="text-xs text-muted-foreground">{renderedStatus}</div>

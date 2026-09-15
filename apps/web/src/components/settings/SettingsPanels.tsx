@@ -543,7 +543,7 @@ export function useSettingsRestore(onRestored?: () => void) {
         ? ["Time format"]
         : []),
       ...(settings.notificationMode !== DEFAULT_UNIFIED_SETTINGS.notificationMode
-        ? ["Thread notifications"]
+        ? ["Notifications"]
         : []),
       ...(settings.inAppNotificationsEnabled !== DEFAULT_UNIFIED_SETTINGS.inAppNotificationsEnabled
         ? ["In-app notifications"]
@@ -2819,7 +2819,7 @@ function GeneralSettingsSections({ page }: { readonly page: "general" | "agents"
         <NotificationSettings />
         <SettingsRow
           {...searchableSetting("in-app-notifications")}
-          description="Show a toast when another thread finishes, fails, or needs input or approval while this app has focus."
+          description="A toast when an agent finishes, fails, or needs you while Iskra is focused."
           control={
             <Switch
               checked={settings.inAppNotificationsEnabled}

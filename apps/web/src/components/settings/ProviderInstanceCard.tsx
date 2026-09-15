@@ -32,6 +32,7 @@ import {
   toCustomModelSetting,
 } from "@iskra/shared/model";
 import { cn } from "../../lib/utils";
+import { StatusPill } from "../iskra/StatusPill";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { normalizeProviderAccentColor } from "../../providerInstances";
 import { Badge } from "../ui/badge";
@@ -50,7 +51,6 @@ import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 import {
   getProviderVersionAdvisoryPresentation,
-  PROVIDER_STATUS_STYLES,
   getProviderSummary,
   getProviderVersionLabel,
   type ProviderStatusKey,
@@ -402,6 +402,13 @@ interface ProviderInstanceCardProps {
  *     sides resolve through `resolveProviderInstanceEnabled` (an explicit
  *     false wins, then envelope, then config, then the driver default).
  */
+const PROVIDER_STATUS_TONES = {
+  ready: "green",
+  warning: "orange",
+  error: "red",
+  disabled: "gray",
+} as const satisfies Record<ProviderStatusKey, "green" | "orange" | "red" | "gray">;
+
 export function ProviderInstanceCard({
   instanceId,
   instance,
@@ -430,7 +437,6 @@ export function ProviderInstanceCard({
   const statusKey: ProviderStatusKey = enabled
     ? ((liveProvider?.status as ProviderStatusKey | undefined) ?? "warning")
     : "disabled";
-  const statusStyle = PROVIDER_STATUS_STYLES[statusKey];
   const summary = enabled
     ? getProviderSummary(liveProvider)
     : { headline: "Disabled", detail: null };
@@ -566,19 +572,22 @@ export function ProviderInstanceCard({
     <code className="text-xs text-muted-foreground">{versionLabel}</code>
   ) : null;
 
-  // Healthy and disabled rows read fine from their text; only trouble gets a dot.
-  const statusDotNode =
-    statusKey === "warning" || statusKey === "error" ? (
-      <span className={cn("size-1.5 shrink-0 rounded-full", statusStyle.dot)} aria-hidden />
-    ) : null;
   // Trouble states carry the server's explanation (a failed probe, a shadow
   // home entry that is not a symlink, a missing binary). Show it wherever the
   // headline shows so the user can act without opening the editor.
   const needsAttention = statusKey === "warning" || statusKey === "error";
+  // The capsule carries the state; whatever follows the headline's first part reads beside it.
+  const [pillLabel, ...headlineRest] = summary.headline.split(" · ");
+  const statusPillNode = (
+    <StatusPill label={pillLabel ?? summary.headline} tone={PROVIDER_STATUS_TONES[statusKey]} />
+  );
+  const listCaption = [...headlineRest, needsAttention ? summary.detail : null]
+    .filter(Boolean)
+    .join(" · ");
   const editorStatusNode =
     isAuthenticated && authEmail ? (
       <>
-        {needsAttention ? statusDotNode : null}
+        {needsAttention ? statusPillNode : null}
         <span>Authenticated as</span>
         <ProviderAuthEmail email={authEmail} />
         {authLabel ? <span>· {authLabel}</span> : null}
@@ -588,10 +597,10 @@ export function ProviderInstanceCard({
       </>
     ) : (
       <>
-        {statusDotNode}
-        <span>{summary.headline}</span>
+        {statusPillNode}
+        {headlineRest.length > 0 ? <span>{headlineRest.join(" · ")}</span> : null}
         {summary.detail ? (
-          <span className="min-w-0 [overflow-wrap:anywhere]">· {summary.detail}</span>
+          <span className="min-w-0 [overflow-wrap:anywhere]">{summary.detail}</span>
         ) : null}
       </>
     );
@@ -600,8 +609,8 @@ export function ProviderInstanceCard({
       <div
         data-slot="settings-row"
         className={cn(
-          "group flex min-h-18 items-center gap-3 px-3 py-3 transition-colors sm:px-4",
-          selected ? "bg-muted/45" : "hover:bg-muted/25",
+          "group flex min-h-11 items-center gap-3 px-4 py-2 transition-colors",
+          selected ? "bg-accent/60" : "hover:bg-accent/30",
         )}
       >
         <div
@@ -659,14 +668,9 @@ export function ProviderInstanceCard({
                 )
               ) : null}
             </span>
-            <span className="mt-0.5 flex items-start gap-1.5 text-[13px] leading-[1.45] text-muted-foreground/80">
-              {statusDotNode ? (
-                <span className="flex h-[1.45em] shrink-0 items-center">{statusDotNode}</span>
-              ) : null}
-              <span className="line-clamp-2 [overflow-wrap:anywhere]">
-                {summary.headline}
-                {needsAttention && summary.detail ? ` · ${summary.detail}` : null}
-              </span>
+            <span className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+              {statusPillNode}
+              {listCaption ? <span className="min-w-0 truncate">{listCaption}</span> : null}
             </span>
           </span>
         </div>

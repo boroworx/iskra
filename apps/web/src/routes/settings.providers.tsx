@@ -26,7 +26,7 @@ function SettingsProvidersRoute() {
   );
   if (!environment) {
     return (
-      <SettingsPageContainer width="wide">
+      <SettingsPageContainer>
         <p className="text-[13px] text-muted-foreground">
           {scope.kind === "environment"
             ? `Reconnect ${scope.label} to set up its providers.`

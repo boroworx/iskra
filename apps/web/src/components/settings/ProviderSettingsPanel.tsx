@@ -93,6 +93,7 @@ import {
   PROVIDER_HEALTH_INTERVAL_STEP_SECONDS,
 } from "./SettingsPanels.logic";
 import {
+  SETTINGS_GROUP_CLASSNAME,
   PolicyTooltip,
   SettingResetButton,
   SettingsPageContainer,
@@ -274,7 +275,7 @@ export function ProviderSettingsPanel({
   ...target
 }: ProviderSettingsTarget & { readonly children?: ReactNode }) {
   return (
-    <SettingsPageContainer width="wide" className="gap-8">
+    <SettingsPageContainer className="gap-8">
       <ProviderSettingsPanelContent
         key={`${target.environmentId ?? ""}:${target.instanceId ?? ""}`}
         {...target}
@@ -1054,35 +1055,20 @@ export function EnvironmentProviderSettings({
             />
           </div>
         ) : null}
-        <div
-          className={cn(
-            providerCardClassName,
-            providerCardHeightClassName,
-            "overflow-hidden lg:grid lg:grid-cols-[17rem_minmax(0,1fr)]",
-          )}
-        >
-          <div className="border-b border-border/60 bg-muted/10 lg:flex lg:min-h-0 lg:flex-col lg:border-r lg:border-b-0">
-            <ScrollArea scrollFade chainVerticalScroll className="lg:min-h-0 lg:flex-1">
-              <div className="divide-y divide-border/50">
-                {rows.map((row) => renderProviderInstance(row, "list"))}
-              </div>
-            </ScrollArea>
-          </div>
-
-          <div className="min-w-0 lg:min-h-0">
-            {selectedRow ? (
-              <ScrollArea scrollFade chainVerticalScroll className="lg:h-full">
-                <div className="space-y-6 p-4">{renderProviderInstance(selectedRow, "editor")}</div>
-              </ScrollArea>
-            ) : (
-              <div className="p-6 text-sm text-muted-foreground">
-                {targetInstanceMissing
-                  ? "This provider instance is no longer available on this device."
-                  : "No providers configured."}
-              </div>
-            )}
-          </div>
+        <div className={cn(SETTINGS_GROUP_CLASSNAME, "overflow-hidden")}>
+          {rows.map((row) => renderProviderInstance(row, "list"))}
         </div>
+        {selectedRow ? (
+          <div className="min-w-0 space-y-6 pt-5">
+            {renderProviderInstance(selectedRow, "editor")}
+          </div>
+        ) : (
+          <p className="px-4 pt-3 text-[13px] text-muted-foreground">
+            {targetInstanceMissing
+              ? "This provider instance is no longer available on this device."
+              : "No providers configured."}
+          </p>
+        )}
       </SettingsSection>
 
       <UsageProviderSettings

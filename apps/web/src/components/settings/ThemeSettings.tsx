@@ -154,12 +154,11 @@ function ThemeLibraryCard({
         render={
           <div
             className={cn(
-              "cursor-pointer overflow-hidden rounded-xl border border-border/70 bg-card/60 transition-colors hover:bg-accent/10",
-              isActive && "bg-accent/30",
+              "cursor-pointer overflow-hidden rounded-xl bg-card transition-colors hover:bg-accent/40",
+              isActive && "ring-2 ring-primary",
             )}
             data-theme-library-card={theme.id}
             onClick={onUse}
-            style={isActive ? { boxShadow: "inset 0 0 0 1px var(--ring)" } : undefined}
           >
             <div className="relative">
               {variantNavigation ? (
@@ -303,7 +302,7 @@ function ThemeLibraryCard({
                   <button
                     aria-label={`Use ${variantNavigation ? `${variantNavigation.collectionLabel}, ${theme.label} variant` : `${theme.label} theme`}${isActive ? ", currently active" : ""}`}
                     aria-pressed={isActive}
-                    className="min-w-0 cursor-pointer truncate rounded-sm text-left text-sm font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+                    className="min-w-0 cursor-pointer truncate rounded-sm text-left text-[13px] font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
                     type="button"
                     onClick={(event) => {
                       event.stopPropagation();
@@ -727,13 +726,10 @@ export function ThemeLibrary({
             aria-label={mode === "system" ? "Follow the system appearance" : `Use ${mode} mode`}
             aria-pressed={isActive}
             className={cn(
-              "flex cursor-pointer flex-col items-stretch gap-1.5 rounded-xl border p-2 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-              isActive
-                ? "border-transparent bg-accent/30"
-                : "border-border/70 bg-card/60 hover:bg-accent/10",
+              "flex cursor-pointer flex-col items-stretch gap-2 rounded-xl bg-card p-2 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+              isActive ? "ring-2 ring-primary" : "hover:bg-accent/40",
             )}
             key={mode}
-            style={isActive ? { boxShadow: "inset 0 0 0 1px var(--ring)" } : undefined}
             onClick={() => setMode(mode)}
             type="button"
           >
@@ -885,12 +881,12 @@ export function ThemeLibrary({
 
   return (
     <div className="space-y-3">
-      <h3 className="px-3 text-sm font-normal tracking-[-0.005em] text-foreground/70 sm:px-4">
+      <h3 className="px-4 text-[13px] font-semibold text-muted-foreground">
         {searchableSetting("color-scheme").title}
       </h3>
       {renderModeTiles()}
-      <div className="flex min-h-8 flex-wrap items-center justify-between gap-3 px-3 pt-2 sm:px-4">
-        <h3 className="text-sm font-normal tracking-[-0.005em] text-foreground/70">
+      <div className="flex min-h-8 flex-wrap items-center justify-between gap-3 px-4 pt-2">
+        <h3 className="text-[13px] font-semibold text-muted-foreground">
           {searchableSetting("theme").title}
         </h3>
         <div className="flex flex-wrap items-center justify-end gap-2">

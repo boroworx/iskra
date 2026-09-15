@@ -6,6 +6,7 @@ import {
   SettingsRow,
   SettingsSearchTargetProvider,
   SettingsUnavailableGroup,
+  splitSettingDescription,
 } from "./settingsLayout";
 
 afterEach(() => {
@@ -23,6 +24,35 @@ describe("unavailable settings", () => {
     expect(markup).toContain("Only available in the desktop app.");
     expect(markup).toContain("border-border/60");
     expect(markup).toContain("[&amp;_h3]:opacity-64");
+  });
+});
+
+describe("setting captions", () => {
+  it("keeps a short caption inline", () => {
+    expect(splitSettingDescription("Wrap long lines.")).toEqual({
+      inline: "Wrap long lines.",
+      full: null,
+    });
+  });
+
+  it("keeps the first sentence inline and the whole explanation behind the info button", () => {
+    const text =
+      "Settle a thread when its pull request merges. Closed pull requests still settle automatically.";
+    expect(splitSettingDescription(text)).toEqual({
+      inline: "Settle a thread when its pull request merges.",
+      full: text,
+    });
+  });
+
+  it("ellipsizes a long single sentence but still offers all of it", () => {
+    const text =
+      "Pairing links and client-session management require the access:write scope for this backend";
+    expect(splitSettingDescription(text)).toEqual({ inline: text, full: text });
+  });
+
+  it("renders rich captions as given", () => {
+    const rich = <span>Archived today</span>;
+    expect(splitSettingDescription(rich)).toEqual({ inline: rich, full: null });
   });
 });
 

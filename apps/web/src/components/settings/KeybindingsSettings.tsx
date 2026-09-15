@@ -38,7 +38,6 @@ import { formatShortcutLabel } from "../../keybindings";
 import { cn } from "../../lib/utils";
 import { serverEnvironment } from "../../state/server";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Kbd, KbdGroup } from "../ui/kbd";
@@ -64,6 +63,7 @@ import {
   whenAstToExpression,
   whenNodeRemoveLabel,
 } from "./KeybindingsSettings.logic";
+import { StatusPill } from "../iskra/StatusPill";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -975,11 +975,7 @@ function KeybindingRowMenu({
 
 function KeybindingSourceBadge({ source }: { source: KeybindingRow["source"] }) {
   if (source === "Default") return null;
-  return (
-    <Badge variant="outline" size="sm" className="font-normal text-muted-foreground">
-      {source}
-    </Badge>
-  );
+  return <StatusPill label={source} tone="gray" />;
 }
 
 function KeybindingRowTitle({ row }: { row: KeybindingRow }) {
@@ -1039,9 +1035,13 @@ function KeybindingSettingsRow(props: KeybindingRowProps) {
 
   return (
     <SettingsRow
-      className="group/row rounded-none"
-      title={<KeybindingRowTitle row={row} />}
-      description={<KeybindingRowWhen row={row} editor={editor} variables={variables} />}
+      className="group/row min-h-10 rounded-none py-1.5"
+      title={
+        <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5">
+          <KeybindingRowTitle row={row} />
+          <KeybindingRowWhen row={row} editor={editor} variables={variables} />
+        </span>
+      }
       control={
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           <KeybindingConflictWarning labels={editor.conflictLabels} />
@@ -1319,7 +1319,7 @@ function KeybindingsList(props: KeybindingsListProps) {
 /** Shown in the browser build only; the desktop app receives every shortcut. */
 function BrowserKeybindingNotice() {
   return (
-    <div className="flex items-center gap-2 px-3 py-2.5 text-[12px] leading-[1.45] text-muted-foreground sm:px-4">
+    <div className="flex min-h-10 items-center gap-2 px-4 py-2 text-xs text-muted-foreground">
       <TriangleAlertIcon className="size-3.5 shrink-0 text-warning" aria-hidden />
       <span>
         Some shortcuts may be claimed by the browser before Iskra sees them. Use the desktop app for

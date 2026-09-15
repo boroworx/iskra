@@ -274,15 +274,19 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "thread-notifications",
-    title: "Thread notifications",
+    title: "Notifications",
     to: "/settings/general",
-    searchTerms: ["notification sound alert completion input approval desktop"],
+    searchTerms: [
+      "thread notification sound alert agent finishes fails needs you completion input approval desktop",
+    ],
   },
   {
     id: "in-app-notifications",
     title: "In-app notifications",
     to: "/settings/general",
-    searchTerms: ["notification toast popup completion input approval failure"],
+    searchTerms: [
+      "notification toast popup agent finishes fails needs you completion input approval failure",
+    ],
   },
   {
     id: "time-format",

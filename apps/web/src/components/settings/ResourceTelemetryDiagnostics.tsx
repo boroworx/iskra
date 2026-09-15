@@ -193,7 +193,7 @@ function SourceStatusBadge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em]",
+        "inline-flex h-5 items-center gap-1.5 rounded-full px-2 text-[11px] font-semibold",
         tone === "neutral" && "border-border/70 bg-muted/45 text-muted-foreground",
         tone === "default" &&
           "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
@@ -227,7 +227,7 @@ function LastSampleLabel({ sampledAt }: { sampledAt: DateTime.Utc | null }) {
   }
   return (
     <span className="text-[11px] text-muted-foreground/60">
-      Updated <span className="font-mono tabular-nums">{relative.value}</span>
+      Updated <span className="tabular-nums">{relative.value}</span>
       {relative.suffix ? ` ${relative.suffix}` : ""}
     </span>
   );
@@ -248,7 +248,7 @@ function IconStat({
 }) {
   return (
     <div className="group min-w-0 px-4 py-4 sm:px-5">
-      <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.11em] text-muted-foreground/70">
+      <div className="flex items-center gap-2 text-[11px] font-semibold text-muted-foreground/70">
         <span className="text-muted-foreground/55 transition-colors group-hover:text-foreground/65">
           {icon}
         </span>
@@ -256,7 +256,7 @@ function IconStat({
       </div>
       <div
         className={cn(
-          "mt-2.5 truncate font-mono text-2xl font-semibold tracking-[-0.05em] tabular-nums text-foreground",
+          "mt-2.5 truncate text-2xl font-semibold tabular-nums text-foreground",
           tone === "warning" && "text-amber-600 dark:text-amber-300",
           tone === "danger" && "text-destructive",
         )}
@@ -264,7 +264,7 @@ function IconStat({
         {value}
       </div>
       {detail ? (
-        <div className="mt-1.5 truncate text-[10px] text-muted-foreground/60">{detail}</div>
+        <div className="mt-1.5 truncate text-[11px] text-muted-foreground/60">{detail}</div>
       ) : null}
     </div>
   );
@@ -283,10 +283,8 @@ function AggregateCard({
     <div className="relative overflow-hidden border-t border-border/60 px-4 py-4 first:border-t-0 md:border-t-0 md:border-l md:first:border-l-0 sm:px-5">
       <span className={cn("absolute inset-x-5 top-0 h-0.5 rounded-full opacity-75", accentClass)} />
       <div className="flex items-center justify-between gap-3">
-        <div className="text-[10px] font-semibold uppercase tracking-[0.11em] text-muted-foreground/75">
-          {label}
-        </div>
-        <div className="rounded-md bg-muted/55 px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-muted-foreground/70">
+        <div className="text-[11px] font-semibold text-muted-foreground/75">{label}</div>
+        <div className="rounded-md bg-muted/55 px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground/70">
           {aggregate.processCount} {aggregate.processCount === 1 ? "process" : "processes"}
         </div>
       </div>
@@ -303,12 +301,8 @@ function AggregateCard({
 function MetricPair({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <div className="text-[9px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/45">
-        {label}
-      </div>
-      <div className="truncate font-mono text-xs font-medium tabular-nums text-foreground/90">
-        {value}
-      </div>
+      <div className="text-[11px] font-semibold text-muted-foreground/45">{label}</div>
+      <div className="truncate text-xs font-medium tabular-nums text-foreground/90">{value}</div>
     </div>
   );
 }
@@ -360,7 +354,7 @@ function DetailRow({
       <span className="text-[11px] text-muted-foreground/75">{label}</span>
       <span
         className={cn(
-          "min-w-0 truncate text-right font-mono text-[11px] tabular-nums text-foreground/85",
+          "min-w-0 truncate text-right text-[11px] tabular-nums text-foreground/85",
           valueClassName,
         )}
       >
@@ -406,7 +400,7 @@ function ResourceHistoryChart({
 
   return (
     <div className="border-t border-border/60 px-4 py-4 sm:px-5">
-      <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-muted-foreground/65">
+      <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground/65">
         <span className="inline-flex items-center gap-1.5">
           <span className="h-1.5 w-3 rounded-full bg-foreground/70" /> CPU average
         </span>
@@ -531,7 +525,7 @@ function ProcessActions({
   onSignal: (process: ResourceTelemetryProcess, signal: ServerProcessSignal) => void;
 }) {
   if (!canSignalProcess(process)) {
-    return <span className="text-[10px] text-muted-foreground/35">—</span>;
+    return <span className="text-[11px] text-muted-foreground/35">—</span>;
   }
   const isSignaling = signalingKeys.has(processIdentityKey(process));
   return (
@@ -539,7 +533,7 @@ function ProcessActions({
       <button
         type="button"
         disabled={isSignaling}
-        className="cursor-pointer text-[10px] font-semibold text-muted-foreground hover:text-foreground disabled:opacity-50"
+        className="cursor-pointer text-[11px] font-semibold text-muted-foreground hover:text-foreground disabled:opacity-50"
         onClick={() => onSignal(process, "SIGINT")}
       >
         INT
@@ -547,7 +541,7 @@ function ProcessActions({
       <button
         type="button"
         disabled={isSignaling}
-        className="cursor-pointer text-[10px] font-semibold text-destructive hover:underline disabled:opacity-50"
+        className="cursor-pointer text-[11px] font-semibold text-destructive hover:underline disabled:opacity-50"
         onClick={() => onSignal(process, "SIGKILL")}
       >
         KILL
@@ -604,7 +598,7 @@ function ProcessTable({
           <col className="w-[6%]" />
           <col className="w-[4%]" />
         </colgroup>
-        <thead className="sticky top-0 z-10 border-b border-border/60 bg-card text-[10px] uppercase tracking-[0.08em] text-muted-foreground/65">
+        <thead className="sticky top-0 z-10 border-b border-border/60 bg-card text-xs font-medium text-muted-foreground">
           <tr>
             <th className="px-4 py-2 font-semibold sm:pl-5">Process</th>
             <th className="px-3 py-2 font-semibold">Category</th>
@@ -639,31 +633,31 @@ function ProcessTable({
               <td className="truncate px-3 py-2 text-[11px] text-muted-foreground">
                 {categoryLabel(process.category)}
               </td>
-              <td className="px-3 py-2 text-right font-mono tabular-nums">
+              <td className="px-3 py-2 text-right tabular-nums">
                 {process.cpuPercent.toFixed(1)}%
               </td>
-              <td className="px-3 py-2 text-right font-mono tabular-nums">
+              <td className="px-3 py-2 text-right tabular-nums">
                 {formatCpuTime(process.cpuTimeMs)}
               </td>
-              <td className="px-3 py-2 text-right font-mono tabular-nums">
+              <td className="px-3 py-2 text-right tabular-nums">
                 {formatBytes(process.residentBytes)}
               </td>
-              <td className="px-3 py-2 text-right font-mono tabular-nums text-sky-700 dark:text-sky-300">
+              <td className="px-3 py-2 text-right tabular-nums text-sky-700 dark:text-sky-300">
                 {formatRate(process.ioReadBytesPerSecond)}
               </td>
-              <td className="px-3 py-2 text-right font-mono tabular-nums text-amber-700 dark:text-amber-300">
+              <td className="px-3 py-2 text-right tabular-nums text-amber-700 dark:text-amber-300">
                 {formatRate(process.ioWriteBytesPerSecond)}
               </td>
-              <td className="px-3 py-2 text-right font-mono tabular-nums text-muted-foreground">
+              <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
                 {formatBytes(process.ioReadBytes)}
               </td>
-              <td className="px-3 py-2 text-right font-mono tabular-nums text-muted-foreground">
+              <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
                 <Tooltip>
                   <TooltipTrigger render={<span>{formatBytes(process.ioWriteBytes)}</span>} />
                   <TooltipPopup side="top">{ioSemanticsLabel(process.ioSemantics)}</TooltipPopup>
                 </Tooltip>
               </td>
-              <td className="px-3 py-2 text-right font-mono tabular-nums text-muted-foreground">
+              <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
                 {process.identity.pid}
               </td>
               <td className="px-2 py-2 text-right sm:pr-4">
@@ -705,7 +699,7 @@ function HistoryProcessTable({
           <col className="w-[7%]" />
           <col className="w-[5%]" />
         </colgroup>
-        <thead className="sticky top-0 z-10 border-b border-border/60 bg-card text-[10px] uppercase tracking-[0.08em] text-muted-foreground/65">
+        <thead className="sticky top-0 z-10 border-b border-border/60 bg-card text-xs font-medium text-muted-foreground">
           <tr>
             <th className="px-4 py-2 font-semibold sm:pl-5">Process</th>
             <th className="px-3 py-2 font-semibold">Category</th>
@@ -748,25 +742,25 @@ function HistoryProcessTable({
               <td className="truncate px-3 py-2 text-[11px] text-muted-foreground">
                 {categoryLabel(process.category)}
               </td>
-              <td className="px-3 py-2 text-right font-mono tabular-nums">
+              <td className="px-3 py-2 text-right tabular-nums">
                 {formatCpuTime(process.cpuTimeMs)}
               </td>
-              <td className="px-3 py-2 text-right font-mono tabular-nums">
+              <td className="px-3 py-2 text-right tabular-nums">
                 {process.maxCpuPercent.toFixed(1)}%
               </td>
-              <td className="px-3 py-2 text-right font-mono tabular-nums">
+              <td className="px-3 py-2 text-right tabular-nums">
                 {formatBytes(process.peakRssBytes)}
               </td>
-              <td className="px-3 py-2 text-right font-mono tabular-nums text-sky-700 dark:text-sky-300">
+              <td className="px-3 py-2 text-right tabular-nums text-sky-700 dark:text-sky-300">
                 {formatBytes(process.ioReadBytes)}
               </td>
-              <td className="px-3 py-2 text-right font-mono tabular-nums text-amber-700 dark:text-amber-300">
+              <td className="px-3 py-2 text-right tabular-nums text-amber-700 dark:text-amber-300">
                 {formatBytes(process.ioWriteBytes)}
               </td>
-              <td className="px-3 py-2 text-right font-mono tabular-nums text-muted-foreground">
+              <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
                 {process.sampleCount}
               </td>
-              <td className="px-3 py-2 text-right font-mono tabular-nums text-muted-foreground sm:pr-5">
+              <td className="px-3 py-2 text-right tabular-nums text-muted-foreground sm:pr-5">
                 {process.identity.pid}
               </td>
             </tr>
@@ -789,7 +783,7 @@ function AttributionTable({ entries }: { entries: ReadonlyArray<ResourceAttribut
           <col className="w-[10%]" />
           <col className="w-[12%]" />
         </colgroup>
-        <thead className="border-b border-border/60 text-[10px] uppercase tracking-[0.08em] text-muted-foreground/65">
+        <thead className="border-b border-border/60 text-xs font-medium text-muted-foreground">
           <tr>
             <th className="px-4 py-2 font-semibold sm:pl-5">Component</th>
             <th className="px-3 py-2 font-semibold">Operation</th>
@@ -813,14 +807,14 @@ function AttributionTable({ entries }: { entries: ReadonlyArray<ResourceAttribut
                 {entry.component}
               </td>
               <td className="truncate px-3 py-2 text-muted-foreground">{entry.operation}</td>
-              <td className="px-3 py-2 text-right font-mono tabular-nums text-sky-700 dark:text-sky-300">
+              <td className="px-3 py-2 text-right tabular-nums text-sky-700 dark:text-sky-300">
                 {formatBytes(entry.logicalReadBytes)}
               </td>
-              <td className="px-3 py-2 text-right font-mono tabular-nums text-amber-700 dark:text-amber-300">
+              <td className="px-3 py-2 text-right tabular-nums text-amber-700 dark:text-amber-300">
                 {formatBytes(entry.logicalWriteBytes)}
               </td>
-              <td className="px-3 py-2 text-right font-mono tabular-nums">{entry.count}</td>
-              <td className="px-3 py-2 text-right font-mono tabular-nums text-muted-foreground sm:pr-5">
+              <td className="px-3 py-2 text-right tabular-nums">{entry.count}</td>
+              <td className="px-3 py-2 text-right tabular-nums text-muted-foreground sm:pr-5">
                 {(entry.durationMs / 1_000).toFixed(2)}s
               </td>
             </tr>
@@ -1001,10 +995,10 @@ export function ResourceTelemetryDiagnostics({
           </div>
         }
       >
-        <div className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-[0_1px_1px_rgb(0_0_0/0.03),0_8px_30px_rgb(0_0_0/0.035)]">
+        <div className="overflow-hidden rounded-xl bg-card">
           <div className="flex flex-col gap-3 border-b border-border/60 bg-linear-to-r from-muted/45 via-muted/20 to-transparent px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
             <div>
-              <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
+              <div className="text-[11px] font-semibold text-muted-foreground/70">
                 Iskra system footprint
               </div>
               <p className="mt-1 max-w-xl text-xs leading-relaxed text-muted-foreground">
@@ -1012,7 +1006,7 @@ export function ResourceTelemetryDiagnostics({
                 the monitor itself.
               </p>
             </div>
-            <div className="flex items-center gap-2 text-[10px] text-muted-foreground/65">
+            <div className="flex items-center gap-2 text-[11px] text-muted-foreground/65">
               <span className="size-1.5 rounded-full bg-emerald-500" />
               Sampling every {snapshot ? formatSampleInterval(snapshot.sampleIntervalMs) : "..."}
             </div>
@@ -1115,9 +1109,9 @@ export function ResourceTelemetryDiagnostics({
           ) : null
         }
       >
-        <div className="grid overflow-hidden rounded-2xl border border-border/70 bg-card shadow-[0_1px_1px_rgb(0_0_0/0.03)] md:grid-cols-2 md:divide-x md:divide-border/60">
+        <div className="grid overflow-hidden rounded-xl bg-card md:grid-cols-2 md:divide-x md:divide-border/60">
           <div className="px-4 py-4 sm:px-5">
-            <div className="mb-3 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/70">
+            <div className="mb-3 flex items-center gap-2 text-[11px] font-semibold text-muted-foreground/70">
               <span className="flex size-6 items-center justify-center rounded-md bg-muted/60">
                 <BatteryIcon className="size-3.5" />
               </span>
@@ -1173,7 +1167,7 @@ export function ResourceTelemetryDiagnostics({
                 />
               </>
             ) : (
-              <div className="rounded-xl border border-dashed border-border/70 bg-muted/20 px-4 py-5">
+              <div className="rounded-xl bg-card px-4 py-5">
                 <div className="text-[13px] font-medium text-foreground">
                   Desktop host signals not connected
                 </div>
@@ -1185,7 +1179,7 @@ export function ResourceTelemetryDiagnostics({
             )}
           </div>
           <div className="border-t border-border/60 px-4 py-4 md:border-t-0 sm:px-5">
-            <div className="mb-3 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/70">
+            <div className="mb-3 flex items-center gap-2 text-[11px] font-semibold text-muted-foreground/70">
               <span className="flex size-6 items-center justify-center rounded-md bg-muted/60">
                 <GaugeIcon className="size-3.5" />
               </span>
@@ -1252,7 +1246,7 @@ export function ResourceTelemetryDiagnostics({
           </div>
         }
       >
-        <div className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-[0_1px_1px_rgb(0_0_0/0.03)]">
+        <div className="overflow-hidden rounded-xl bg-card">
           {history.error ? (
             <div className="flex items-start gap-2 border-b border-destructive/20 bg-destructive/5 px-4 py-3 text-xs text-destructive sm:px-5">
               <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
@@ -1269,13 +1263,13 @@ export function ResourceTelemetryDiagnostics({
         icon={<CpuIcon className="size-4 text-muted-foreground" />}
         headerAction={
           snapshot ? (
-            <span className="text-[10px] text-muted-foreground/55">
+            <span className="text-[11px] text-muted-foreground/55">
               Identity: <span className="font-mono">PID + start time</span>
             </span>
           ) : null
         }
       >
-        <div className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-[0_1px_1px_rgb(0_0_0/0.03)]">
+        <div className="overflow-hidden rounded-xl bg-card">
           <ProcessTable
             processes={snapshot?.processes ?? []}
             signalingKeys={signalingKeys}
@@ -1288,10 +1282,10 @@ export function ResourceTelemetryDiagnostics({
         title="Instrumented application I/O"
         icon={<DatabaseIcon className="size-4 text-muted-foreground" />}
         headerAction={
-          <span className="text-[10px] text-muted-foreground/55">Logical bytes by operation</span>
+          <span className="text-[11px] text-muted-foreground/55">Logical bytes by operation</span>
         }
       >
-        <div className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-[0_1px_1px_rgb(0_0_0/0.03)]">
+        <div className="overflow-hidden rounded-xl bg-card">
           <div className="bg-muted/15 px-4 py-3 text-[11px] leading-relaxed text-muted-foreground sm:px-5">
             Native counters identify which process is reading or writing. These application-level
             counters identify known Iskra operations so process spikes can be correlated with
