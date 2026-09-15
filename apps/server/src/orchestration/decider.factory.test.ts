@@ -28,6 +28,7 @@ import {
   REVERT_IN_PROGRESS_REASON,
   REVERT_NOT_LANDED_REASON,
   agentBudgetReason,
+  cardBudgetRefusal,
   projectBudgetReason,
   pullRequestDraftOf,
   triggerFireRefusal,
@@ -223,6 +224,30 @@ it.layer(NodeServices.layer)("decider card factory", (it) => {
         waitReason: { code: "heldByCheckpoint" },
       });
       expect(budgetCardOf(approved, c1).id).toBe(planCardId);
+      // A child spends from its plan, so a plan at its cap holds a direct start back too.
+      const startC1: OrchestrationCommand = {
+        type: "card.session.start",
+        commandId: nextCommandId(),
+        cardId: c1.id,
+        createdAt: now,
+      };
+      expect((yield* decide(approved, startC1))[0]?.type).toBe("card.session-requested");
+      const planAtCap = yield* applyTo(approved, [
+        {
+          type: "card.spend.record",
+          commandId: nextCommandId(),
+          cardId: planCardId,
+          threadId: ThreadId.make("thread-coordinator"),
+          agentId: frontend,
+          turnId: TurnId.make("turn-coordinator"),
+          costUsd: planCard!.budgetCapUsd,
+          costSource: "modelPriced",
+          recordedAt: now,
+        },
+      ]);
+      expect(yield* refusal(planAtCap, startC1)).toBe(
+        cardBudgetRefusal(cardIn(planAtCap, planCardId)!),
+      );
       expect(yield* refusal(approved, approvePlan(2))).toBe(PLAN_NOT_PROPOSED_REASON);
 
       // Approving from Needs you is the same approval; redirecting answers the coordinator.

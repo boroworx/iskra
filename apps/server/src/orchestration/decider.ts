@@ -3445,6 +3445,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       if (guardRefusal !== null) {
         return yield* refuse(command, guardRefusal);
       }
+      // A plan or migration child spends from its parent, so the parent's cap holds it back too.
+      yield* refuseIf(command, cardBudgetRefusal(budgetCardOf(readModel, card)));
       yield* refuseAtSessionCap(readModel, command, card.projectId);
       return yield* planned(command, "card", command.cardId, command.createdAt, {
         type: "card.session-requested",

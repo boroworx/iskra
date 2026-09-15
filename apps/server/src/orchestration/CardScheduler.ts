@@ -34,7 +34,7 @@ export const START_RETRY_MINUTES = [1, 5, 30] as const;
 /**
  * Starts card owner (and plan coordinator) sessions from the queue. It re-plans when a card, a policy or a session changes
  * and once a minute, starts what `planStarts` picks with `card.session.start` (the decider re-checks
- * every gate), notes why the rest wait, and stops idle owners of cards in review so their slot frees.
+ * the delegate, plan gate, pause, side-effect guard, budget and session cap), notes why the rest wait, and stops idle owners of cards in review so their slot frees.
  * A start that fails is retried after 1, 5 and 30 minutes, then the card is paused.
  */
 export class CardScheduler extends Context.Service<
