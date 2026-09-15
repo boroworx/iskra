@@ -320,9 +320,13 @@ export function renderCardBrief(brief: CardBriefPayload): RenderedRunContext {
   const intro =
     brief.role === "owner"
       ? `You are @${brief.agent.name}, the agent building the card "${card.title}". You work in its worktree and are the only agent writing to it. Use the board tools: record_decision for each choice that matters, update_plan as you go, ask_owner when the spec leaves you stuck (offer two or three answers and recommend one), run_checks to run the checks (never the full suite in your shell), request_checkpoint before a costly direction, propose_card for work outside this card, propose_criteria_change when the criteria are wrong, and request_review with a summary and your risk claims once your work is committed. Iskra runs the checks and captures evidence; the card enters review only when they pass.`
-      : brief.role === "critic"
-        ? `You are @${brief.agent.name}, reviewing the spec of the card "${card.title}" before any work starts. You can read the repository but not change it. List concrete gaps, ambiguities and risks in the spec, or say plainly that it is ready.`
-        : `You are @${brief.agent.name}, helping on the card "${card.title}". You can read its worktree but not change it; your answer goes to the agent building the card.`;
+      : brief.role === "verifier"
+        ? `You are @${brief.agent.name}, verifying the card "${card.title}" at one commit, in a detached checkout you can read but not change. Judge each automated acceptance criterion from the evidence and the diff, say whether the diff does what the criteria ask, and decide whether each hidden scenario holds. Then call record_verdict once. You never see how the builder reasoned; judge the work, not its intentions.`
+        : brief.role === "critic" && brief.question !== null
+          ? `You are @${brief.agent.name}, critiquing the work on the card "${card.title}" for the agent building it. You can read its worktree but not change it. List concrete problems against the acceptance criteria, or say plainly that you found none; your critique goes to the builder.`
+          : brief.role === "critic"
+            ? `You are @${brief.agent.name}, reviewing the spec of the card "${card.title}" before any work starts. You can read the repository but not change it. List concrete gaps, ambiguities and risks in the spec, or say plainly that it is ready.`
+            : `You are @${brief.agent.name}, helping on the card "${card.title}". You can read its worktree but not change it; your answer goes to the agent building the card.`;
   const systemPrompt = [intro, brief.agent.rolePrompt.trim()]
     .filter((part) => part.length > 0)
     .join("\n\n");

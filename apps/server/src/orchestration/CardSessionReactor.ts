@@ -4,6 +4,7 @@ import {
   MessageId,
   ThreadId,
   type AgentId,
+  type CardCritiqueFocus,
   type CardId,
   type CardMove,
   type CardSessionRole,
@@ -71,8 +72,28 @@ export class CardSessionReactor extends Context.Service<
 
 type SessionStartEvent = Extract<
   OrchestrationEvent,
-  { type: "card.session-requested" | "card.helper-requested" | "card.spec-submitted" }
+  {
+    type:
+      | "card.session-requested"
+      | "card.helper-requested"
+      | "card.critique-requested"
+      | "card.spec-submitted";
+  }
 >;
+
+/** What a critic the builder asked for is told to look at. */
+const CRITIQUE_QUESTION: Record<CardCritiqueFocus, string> = {
+  spec: "Critique the spec: what is missing, ambiguous or risky for the work as it stands?",
+  diff: "Critique the diff: does it meet each acceptance criterion, and what would you change?",
+};
+
+/** The question a started session answers, if it was asked one. */
+const questionOf = (event: SessionStartEvent): string | null =>
+  event.type === "card.helper-requested"
+    ? event.payload.question
+    : event.type === "card.critique-requested"
+      ? CRITIQUE_QUESTION[event.payload.focus]
+      : null;
 
 type CardSessionRequest =
   | { readonly kind: "assigned"; readonly cardId: CardId; readonly key: string }
@@ -376,6 +397,10 @@ const make = Effect.gen(function* () {
       yield* measureDiff(cardId, threadId);
       return yield* deliverToOwner(cardId);
     }
+    // A verifier answers through record_verdict; CardVerifierReactor settles its session.
+    if (role === "verifier") {
+      return;
+    }
     const thread = yield* snapshotQuery.getThreadDetailById(threadId, { activityKinds: [] });
     const turnId = Option.isSome(thread) ? thread.value.latestTurn?.turnId : undefined;
     if (Option.isNone(thread) || turnId === undefined) {
@@ -386,7 +411,11 @@ const make = Effect.gen(function* () {
         message.role === "assistant" && message.turnId === turnId && message.text.trim().length > 0,
     );
     if (reply !== undefined) {
-      // A helper's answer waits for the owner; a critic's findings stay on the card.
+      // A helper's answer waits for the owner, and so does a critique while the owner is at work;
+      // a spec critique before work starts stays on the card.
+      const building =
+        (yield* readModel()).cards?.find((candidate) => candidate.id === cardId)?.status ===
+        "inProgress";
       yield* engine.dispatch({
         type: "card.activity.record",
         commandId: CommandId.make(`card-${role}-reply:${threadId}:${turnId}`),
@@ -396,7 +425,7 @@ const make = Effect.gen(function* () {
         author: { kind: "agent", id: agentId },
         body: reply.text,
         runThreadId: threadId,
-        deliverTo: role === "helper" ? "builder" : null,
+        deliverTo: role === "helper" || building ? "builder" : null,
         elicitation: null,
         answers: null,
         status: null,
@@ -525,7 +554,7 @@ const make = Effect.gen(function* () {
           agentId: event.payload.agentId,
           role: request.role,
           key: event.eventId,
-          question: event.type === "card.helper-requested" ? event.payload.question : null,
+          question: questionOf(event),
         });
       }
       case "deliver":
@@ -570,6 +599,7 @@ const make = Effect.gen(function* () {
         return worker.enqueue({ kind: "session", role: "owner", event });
       case "card.helper-requested":
         return worker.enqueue({ kind: "session", role: "helper", event });
+      case "card.critique-requested":
       case "card.spec-submitted":
         return worker.enqueue({ kind: "session", role: "critic", event });
       case "card.activity-recorded": {

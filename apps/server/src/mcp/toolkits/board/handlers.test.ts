@@ -9,6 +9,7 @@ import {
   type OrchestrationCardShell,
   type OrchestrationChannelShell,
   type OrchestrationCommand,
+  type OrchestrationReadModel,
   type OrchestrationRun,
 } from "@iskra/contracts";
 import { describe, expect, it } from "@effect/vitest";
@@ -21,6 +22,7 @@ import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import type { Tool } from "effect/unstable/ai";
 
+import { BUILDER_ONLY_ASSIST_REASON } from "../../../orchestration/cardRules.ts";
 import * as CardWorkspace from "../../../orchestration/CardWorkspace.ts";
 import { OrchestrationCommandInvariantError } from "../../../orchestration/Errors.ts";
 import * as HostAdmission from "../../../orchestration/HostAdmission.ts";
@@ -113,6 +115,12 @@ const makeHarness = Effect.fn("makeBoardToolkitHarness")(function* (
         Effect.succeed(cardId === CARD_ID ? Option.some(card) : Option.none()),
       getChannelShellById: (channelId) =>
         Effect.succeed(channelId === CHANNEL_ID ? Option.some(channelShell) : Option.none()),
+      getCommandReadModel: () =>
+        Effect.succeed({
+          agents: [
+            { id: AgentId.make("agent-reviewer"), projectId: PROJECT_ID, name: "reviewer", archivedAt: null },
+          ],
+        } as unknown as OrchestrationReadModel),
     }),
     Layer.mock(OrchestrationEngineService)({
       readEvents: () => Stream.empty,
@@ -128,6 +136,7 @@ const makeHarness = Effect.fn("makeBoardToolkitHarness")(function* (
         run: (_job, effect) => effect,
         snapshot: Effect.succeed({ running: [], waiting: [], memoryPressureSince: null }),
         cancelLowestPriority: Effect.succeed(null),
+        cancel: () => Effect.succeed(null),
       }),
     ),
     Layer.mock(CardWorkspace.CardWorkspace)({
@@ -187,6 +196,8 @@ describe("board toolkit handlers", () => {
       "request_checkpoint",
       "ask_owner",
       "propose_criteria_change",
+      "request_help",
+      "request_critique",
       "propose_triage_card",
       "ask_clarification",
     ]);
@@ -206,6 +217,38 @@ describe("board toolkit handlers", () => {
         ).toMatchObject({ _tag: "BoardSessionRequiredError" });
         expect(yield* Ref.get(other.commands)).toEqual([]);
       }
+    }),
+  );
+
+  it.effect("asks for help or a critique only as the builder, naming a project agent or none", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      expect(
+        yield* harness.call("request_help", { question: "Per key or per user?", agentName: "@reviewer" }),
+      ).toEqual({ requested: true });
+      yield* harness.call("request_critique", { focus: "diff" });
+      expect(yield* Ref.get(harness.commands)).toMatchObject([
+        {
+          type: "card.help.request",
+          cardId: CARD_ID,
+          agentId: "agent-reviewer",
+          question: "Per key or per user?",
+        },
+        { type: "card.critique.request", cardId: CARD_ID, agentId: null, focus: "diff" },
+      ]);
+
+      expect(
+        yield* harness.call("request_help", { question: "Who?", agentName: "nobody" }).pipe(Effect.flip),
+      ).toMatchObject({
+        _tag: "BoardCommandRefusedError",
+        detail: "No agent named @nobody works on this project.",
+      });
+
+      const helper = yield* makeHarness({ run: ownerRun("helper") });
+      expect(
+        yield* helper.call("request_critique", { focus: "spec" }).pipe(Effect.flip),
+      ).toMatchObject({ _tag: "BoardCommandRefusedError", detail: BUILDER_ONLY_ASSIST_REASON });
+      expect(yield* Ref.get(helper.commands)).toEqual([]);
     }),
   );
 

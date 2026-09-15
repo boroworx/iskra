@@ -1,4 +1,5 @@
 import {
+  CardCritiqueFocus,
   CardEstimate,
   CardPremise,
   CardRiskClaims,
@@ -234,6 +235,40 @@ const ProposeCriteriaChangeTool = Tool.make("propose_criteria_change", {
   .annotate(Tool.Title, "Propose a criteria change")
   .annotateMerge(boardToolAnnotations);
 
+const AssistantName = TrimmedNonEmptyString.annotate({
+  description: "The agent to ask, by name without the @. Defaults to your own agent template.",
+});
+
+const RequestHelpTool = Tool.make("request_help", {
+  description:
+    "Ask a read-only helper a question about this card, such as how part of the code works or which approach fits. It returns at once; the answer arrives as your next message, so end your turn after asking. A card has at most two helpers or critics open at a time.",
+  parameters: Schema.Struct({
+    question: TrimmedNonEmptyString,
+    agentName: Schema.optional(AssistantName),
+  }),
+  success: Schema.Struct({ requested: Schema.Boolean }),
+  failure: BoardToolError,
+  dependencies,
+})
+  .annotate(Tool.Title, "Ask for help")
+  .annotateMerge(boardToolAnnotations);
+
+const RequestCritiqueTool = Tool.make("request_critique", {
+  description:
+    "Ask a read-only critic to critique this card before you ask for review: its spec, or your diff against the acceptance criteria. It returns at once; the critique arrives as your next message, so end your turn after asking.",
+  parameters: Schema.Struct({
+    focus: CardCritiqueFocus.annotate({
+      description: "spec to critique what the card asks for; diff to critique your changes against the criteria.",
+    }),
+    agentName: Schema.optional(AssistantName),
+  }),
+  success: Schema.Struct({ requested: Schema.Boolean }),
+  failure: BoardToolError,
+  dependencies,
+})
+  .annotate(Tool.Title, "Ask for a critique")
+  .annotateMerge(boardToolAnnotations);
+
 const ProposeTriageCardTool = Tool.make("propose_triage_card", {
   description:
     "Propose a card for work the message you were woken by asks for. It enters triage linked to that message, with your reasoning, acceptance criteria, estimate and the open cards it likely duplicates; a person confirms the criteria and decides what happens to it.",
@@ -301,6 +336,8 @@ export const BoardToolkit = Toolkit.make(
   RequestCheckpointTool,
   AskOwnerTool,
   ProposeCriteriaChangeTool,
+  RequestHelpTool,
+  RequestCritiqueTool,
   ProposeTriageCardTool,
   AskClarificationTool,
 );
@@ -318,6 +355,8 @@ export const BOARD_CLAUDE_TOOL_NAMES = claudeToolNames([
   "request_checkpoint",
   "ask_owner",
   "propose_criteria_change",
+  "request_help",
+  "request_critique",
 ]);
 
 /** A channel lead proposes cards and asks clarifying questions, nothing else. */

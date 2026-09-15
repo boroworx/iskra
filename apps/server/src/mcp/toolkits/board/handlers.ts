@@ -22,6 +22,7 @@ import {
   runChecksJob,
   runChecksRequestBody,
 } from "../../../orchestration/CardEvidence.ts";
+import { BUILDER_ONLY_ASSIST_REASON } from "../../../orchestration/cardRules.ts";
 import * as CardWorkspace from "../../../orchestration/CardWorkspace.ts";
 import * as HostAdmission from "../../../orchestration/HostAdmission.ts";
 import * as OrchestrationEngine from "../../../orchestration/Services/OrchestrationEngine.ts";
@@ -126,6 +127,41 @@ const make = Effect.gen(function* () {
 
   type OwnerSession = Effect.Success<typeof requireOwnerSession>;
 
+  /** Help and critiques are the builder's to ask for; any other session hears why not. */
+  const requireBuilderSession = requireOwnerSession.pipe(
+    Effect.catchTag("BoardSessionRequiredError", () =>
+      Effect.fail(new BoardCommandRefusedError({ detail: BUILDER_ONLY_ASSIST_REASON })),
+    ),
+  );
+
+  /** The project agent a builder names, or null for its own template; the decider checks its role. */
+  const assistantOf = (session: OwnerSession, name: string | undefined) =>
+    Effect.gen(function* () {
+      if (name === undefined) return null;
+      const card = yield* snapshots.getCardShellById(session.cardId).pipe(
+        Effect.mapError(failed),
+        Effect.flatMap(
+          Option.match({ onNone: () => new BoardSessionRequiredError({}), onSome: Effect.succeed }),
+        ),
+      );
+      // ponytail: reads the whole command read model to find one agent; add a by-name query if
+      // assist requests show up in profiles.
+      const model = yield* snapshots.getCommandReadModel().pipe(Effect.mapError(failed));
+      const bare = name.replace(/^@/, "");
+      const agent = (model.agents ?? []).find(
+        (candidate) =>
+          candidate.projectId === card.projectId &&
+          candidate.name === bare &&
+          candidate.archivedAt === null,
+      );
+      if (agent === undefined) {
+        return yield* new BoardCommandRefusedError({
+          detail: `No agent named @${bare} works on this project.`,
+        });
+      }
+      return agent.id;
+    });
+
   /** An entry in the card's activity, written as the session's agent. */
   const recordActivity = (
     session: OwnerSession,
@@ -152,6 +188,36 @@ const make = Effect.gen(function* () {
     });
 
   return BoardToolkit.of({
+    request_help: (input) =>
+      Effect.gen(function* () {
+        const session = yield* requireBuilderSession;
+        const agentId = yield* assistantOf(session, input.agentName);
+        yield* dispatch({
+          type: "card.help.request",
+          commandId: yield* commandId("help", session.threadId),
+          cardId: session.cardId,
+          agentId,
+          messageId: MessageId.make(`help-request:${yield* uuid}`),
+          question: input.question,
+          createdAt: yield* nowIso,
+        });
+        return { requested: true };
+      }),
+    request_critique: (input) =>
+      Effect.gen(function* () {
+        const session = yield* requireBuilderSession;
+        const agentId = yield* assistantOf(session, input.agentName);
+        yield* dispatch({
+          type: "card.critique.request",
+          commandId: yield* commandId("critique", session.threadId),
+          cardId: session.cardId,
+          agentId,
+          messageId: MessageId.make(`critique-request:${yield* uuid}`),
+          focus: input.focus,
+          createdAt: yield* nowIso,
+        });
+        return { requested: true };
+      }),
     // ponytail: a lead run that takes later messages as further turns still links proposals to the
     // message that first woke it; carry each turn's message on the run if that misleads.
     propose_triage_card: (input) =>

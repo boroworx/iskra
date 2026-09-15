@@ -281,6 +281,46 @@ it.layer(layer)("CardSessionReactor", (it) => {
     ),
   );
 
+  it.effect("runs a critique the builder asked for and delivers it as the owner's next turn", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const world = yield* makeWorld("critique");
+        yield* world.assign("backend");
+        const owner = yield* world.nextSession();
+        yield* world.nextEvent("card.status-changed", (event) => event.payload.to === "inProgress");
+        yield* world.setSession(owner.payload.threadId, "ready", null);
+
+        yield* world.engine.dispatch({
+          type: "card.critique.request",
+          commandId: CommandId.make("cmd-critique-request"),
+          cardId: world.cardId,
+          agentId: world.agent("reviewer"),
+          messageId: MessageId.make("message-critique-request"),
+          focus: "diff",
+          createdAt: now,
+        });
+        const critic = yield* world.nextSession();
+        expect(critic.payload).toMatchObject({ role: "critic", capabilities: ["read"] });
+        expect(critic.payload.rendered.systemPrompt).toContain("your critique goes to the builder");
+        expect(critic.payload.rendered.firstMessage).toContain("## Question\n\nCritique the diff");
+
+        yield* world.setSession(critic.payload.threadId, "running", "turn-critic");
+        yield* world.answer(critic.payload.threadId, "turn-critic", "Test the 101st request.");
+        yield* world.setSession(critic.payload.threadId, "ready", null);
+        const critique = yield* world.nextEvent(
+          "card.activity-recorded",
+          (event) => event.payload.kind === "critique",
+        );
+        expect(critique.payload).toMatchObject({ deliverTo: "builder", body: "Test the 101st request." });
+        yield* world.nextEvent("card.delivery-updated", (event) => event.payload.status === "sent");
+        const ownerMessages = yield* world.userMessages(owner.payload.threadId);
+        expect(ownerMessages.map((message) => message.text)).toContainEqual(
+          expect.stringMatching(/@reviewer: Test the 101st request\.$/),
+        );
+      }),
+    ),
+  );
+
   it.effect("holds the owner behind the plan gate and posts a critic's findings to the card", () =>
     Effect.scoped(
       Effect.gen(function* () {
