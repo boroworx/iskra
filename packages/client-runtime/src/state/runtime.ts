@@ -311,6 +311,20 @@ export function squashAtomCommandFailure(result: {
   return Cause.squash(result.cause);
 }
 
+// The server's invariant errors name the refused command before the person-facing sentence.
+const COMMAND_INVARIANT_PREFIX = /^Orchestration command invariant failed \([^)]*\): /;
+
+/** A failed command's reason for a person: its error's sentence without the internal prefix, or the fallback. */
+export function atomCommandFailureMessage(
+  result: { readonly cause: Cause.Cause<unknown> },
+  fallback: string,
+): string {
+  const error = squashAtomCommandFailure(result);
+  return error instanceof Error && error.message.length > 0
+    ? error.message.replace(COMMAND_INVARIANT_PREFIX, "")
+    : fallback;
+}
+
 export async function settleAsyncResult<A, E>(
   execute: () => Promise<Exit.Exit<A, E>>,
 ): Promise<SettledAsyncResult<A, E>> {

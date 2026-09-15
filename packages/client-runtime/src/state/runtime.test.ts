@@ -40,6 +40,7 @@ import {
   settleAsyncResult,
   settlePromise,
   squashAtomCommandFailure,
+  atomCommandFailureMessage,
 } from "./runtime.ts";
 
 const QUERY_ENVIRONMENT = new PrimaryConnectionTarget({
@@ -201,6 +202,25 @@ describe("atom command result helpers", () => {
     expect(isAtomCommandInterrupted(interrupted)).toBe(true);
     expect(isAtomCommandInterrupted(failed)).toBe(false);
     expect(squashAtomCommandFailure(failed)).toBe("nope");
+  });
+
+  it("says a refusal as its sentence, without the server's invariant prefix", () => {
+    const refused = AsyncResult.failure(
+      Cause.fail(
+        new Error(
+          "Orchestration command invariant failed (card.verifier.rerun): The verifier is already checking this commit.",
+        ),
+      ),
+    );
+    expect(atomCommandFailureMessage(refused, "Refused.")).toBe(
+      "The verifier is already checking this commit.",
+    );
+    expect(
+      atomCommandFailureMessage(AsyncResult.failure(Cause.fail(new Error("Offline."))), "Refused."),
+    ).toBe("Offline.");
+    expect(atomCommandFailureMessage(AsyncResult.failure(Cause.fail("nope")), "Refused.")).toBe(
+      "Refused.",
+    );
   });
 
   it("settles raw promise boundaries as successes or defects", async () => {

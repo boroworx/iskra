@@ -1,6 +1,6 @@
 import {
+  atomCommandFailureMessage,
   isAtomCommandInterrupted,
-  squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@iskra/client-runtime/state/runtime";
 
@@ -13,11 +13,10 @@ export function toastCommandFailure(
   fallback: string,
 ): void {
   if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-    const error = squashAtomCommandFailure(result);
     toastManager.add({
       type: "error",
       title,
-      description: error instanceof Error ? error.message : fallback,
+      description: atomCommandFailureMessage(result, fallback),
     });
   }
 }

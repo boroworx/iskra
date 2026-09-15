@@ -14,7 +14,7 @@ import {
 } from "@iskra/client-runtime/cards";
 import {
   isAtomCommandInterrupted,
-  squashAtomCommandFailure,
+  atomCommandFailureMessage,
   type AtomCommandResult,
 } from "@iskra/client-runtime/state/runtime";
 import {
@@ -84,8 +84,7 @@ const refusedWith =
   (result: AtomCommandResult<unknown, unknown>) => {
     toastCommandFailure(result, title, "The request was refused.");
     if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-      const error = squashAtomCommandFailure(result);
-      onRefused(`${title}. ${error instanceof Error ? error.message : "The request was refused."}`);
+      onRefused(`${title}. ${atomCommandFailureMessage(result, "The request was refused.")}`);
     }
   };
 

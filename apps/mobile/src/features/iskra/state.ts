@@ -8,7 +8,7 @@ import { createEnvironmentAgentChannelAtoms } from "@iskra/client-runtime/state/
 import {
   createEnvironmentCommand,
   isAtomCommandInterrupted,
-  squashAtomCommandFailure,
+  atomCommandFailureMessage,
   type AtomCommand,
 } from "@iskra/client-runtime/state/runtime";
 import {
@@ -144,13 +144,7 @@ export function useRefusableCommand<W, A, E>(command: AtomCommand<W, A, E>) {
       const result = await run(value);
       if (result._tag === "Success") return true;
       if (!isAtomCommandInterrupted(result)) {
-        const error = squashAtomCommandFailure(result);
-        Alert.alert(
-          failure,
-          error instanceof Error && error.message.length > 0
-            ? error.message
-            : "The request was refused.",
-        );
+        Alert.alert(failure, atomCommandFailureMessage(result, "The request was refused."));
       }
       return false;
     },
