@@ -91,6 +91,11 @@ import * as AgentDefinitionSync from "./orchestration/AgentDefinitionSync.ts";
 import * as CardLandingReactor from "./orchestration/CardLandingReactor.ts";
 import * as CardReviewReactor from "./orchestration/CardReviewReactor.ts";
 import * as CardVerifierReactor from "./orchestration/CardVerifierReactor.ts";
+import * as CardPlanReactor from "./orchestration/CardPlanReactor.ts";
+import * as CardMigrationReactor from "./orchestration/CardMigrationReactor.ts";
+import * as TriggerReactor from "./orchestration/TriggerReactor.ts";
+import * as OutcomeReactor from "./orchestration/OutcomeReactor.ts";
+import * as CardReversibilityReactor from "./orchestration/CardReversibilityReactor.ts";
 import * as CardSpendReactor from "./orchestration/CardSpendReactor.ts";
 import * as LinearSyncReactor from "./orchestration/LinearSyncReactor.ts";
 import * as LinearClient from "./linear/LinearClient.ts";
@@ -270,9 +275,17 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(CardScheduler.layer),
   Layer.provideMerge(CardWatchdog.layer),
   Layer.provideMerge(
-    Layer.mergeAll(CardReviewReactor.layer, CardLandingReactor.layer, CardVerifierReactor.layer).pipe(
-      Layer.provide(ProcessRunner.layer),
-    ),
+    // Merged so the pipe stays within its 20 arguments; each takes what it needs from below.
+    Layer.mergeAll(
+      CardReviewReactor.layer,
+      CardLandingReactor.layer,
+      CardVerifierReactor.layer,
+      CardPlanReactor.layer,
+      CardMigrationReactor.layer,
+      TriggerReactor.layer,
+      OutcomeReactor.layer,
+      CardReversibilityReactor.layer,
+    ).pipe(Layer.provide(ProcessRunner.layer)),
   ),
   Layer.provideMerge(CardSpendReactor.layer),
   Layer.provideMerge(

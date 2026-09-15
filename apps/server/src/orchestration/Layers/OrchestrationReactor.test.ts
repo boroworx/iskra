@@ -17,6 +17,11 @@ import * as AgentDefinitionSync from "../AgentDefinitionSync.ts";
 import * as CardLandingReactor from "../CardLandingReactor.ts";
 import * as CardReviewReactor from "../CardReviewReactor.ts";
 import * as CardVerifierReactor from "../CardVerifierReactor.ts";
+import * as CardPlanReactor from "../CardPlanReactor.ts";
+import * as CardMigrationReactor from "../CardMigrationReactor.ts";
+import * as TriggerReactor from "../TriggerReactor.ts";
+import * as OutcomeReactor from "../OutcomeReactor.ts";
+import * as CardReversibilityReactor from "../CardReversibilityReactor.ts";
 import * as CardSpendReactor from "../CardSpendReactor.ts";
 import * as LinearSyncReactor from "../LinearSyncReactor.ts";
 import * as CardSessionReactor from "../CardSessionReactor.ts";
@@ -157,6 +162,8 @@ describe("OrchestrationReactor", () => {
             runJourneys: () => Effect.die("not used"),
             serviceHealth: () => Effect.succeed([]),
             withCardLock: (_cardId, effect) => effect,
+            ensureIntegrationBranch: () => Effect.die("not used"),
+            enumerateItems: () => Effect.die("not used"),
           }),
         ),
         Layer.provideMerge(
@@ -234,14 +241,53 @@ describe("OrchestrationReactor", () => {
             drain: Effect.void,
           }),
         ),
+        // Merged so the pipe stays within its 20 arguments.
         Layer.provideMerge(
-          Layer.succeed(LinearSyncReactor.LinearSyncReactor, {
-            start: () => {
-              started.push("linear-sync-reactor");
-              return Effect.void;
-            },
-            syncNow: Effect.void,
-          }),
+          Layer.mergeAll(
+            Layer.succeed(CardPlanReactor.CardPlanReactor, {
+              start: () => {
+                started.push("card-plan-reactor");
+                return Effect.void;
+              },
+              drain: Effect.void,
+            }),
+            Layer.succeed(CardMigrationReactor.CardMigrationReactor, {
+              start: () => {
+                started.push("card-migration-reactor");
+                return Effect.void;
+              },
+              drain: Effect.void,
+            }),
+            Layer.succeed(OutcomeReactor.OutcomeReactor, {
+              start: () => {
+                started.push("outcome-reactor");
+                return Effect.void;
+              },
+              drain: Effect.void,
+            }),
+            Layer.succeed(CardReversibilityReactor.CardReversibilityReactor, {
+              start: () => {
+                started.push("card-reversibility-reactor");
+                return Effect.void;
+              },
+              drain: Effect.void,
+            }),
+            Layer.succeed(TriggerReactor.TriggerReactor, {
+              start: () => {
+                started.push("trigger-reactor");
+                return Effect.void;
+              },
+              pollNow: Effect.void,
+              drain: Effect.void,
+            }),
+            Layer.succeed(LinearSyncReactor.LinearSyncReactor, {
+              start: () => {
+                started.push("linear-sync-reactor");
+                return Effect.void;
+              },
+              syncNow: Effect.void,
+            }),
+          ),
         ),
       ),
     );
@@ -266,8 +312,13 @@ describe("OrchestrationReactor", () => {
       "card-review-reactor",
       "card-landing-reactor",
       "card-verifier-reactor",
+      "card-plan-reactor",
+      "card-migration-reactor",
       "card-spend-reactor",
+      "outcome-reactor",
+      "card-reversibility-reactor",
       "linear-sync-reactor",
+      "trigger-reactor",
       "card-scheduler",
       "card-watchdog",
       "card-ref-guard",

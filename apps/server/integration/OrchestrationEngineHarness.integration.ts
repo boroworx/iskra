@@ -93,6 +93,11 @@ import * as AgentDefinitionSync from "../src/orchestration/AgentDefinitionSync.t
 import * as CardLandingReactor from "../src/orchestration/CardLandingReactor.ts";
 import * as CardReviewReactor from "../src/orchestration/CardReviewReactor.ts";
 import * as CardVerifierReactor from "../src/orchestration/CardVerifierReactor.ts";
+import * as CardPlanReactor from "../src/orchestration/CardPlanReactor.ts";
+import * as CardMigrationReactor from "../src/orchestration/CardMigrationReactor.ts";
+import * as TriggerReactor from "../src/orchestration/TriggerReactor.ts";
+import * as OutcomeReactor from "../src/orchestration/OutcomeReactor.ts";
+import * as CardReversibilityReactor from "../src/orchestration/CardReversibilityReactor.ts";
 import * as CardSpendReactor from "../src/orchestration/CardSpendReactor.ts";
 import * as LinearSyncReactor from "../src/orchestration/LinearSyncReactor.ts";
 import * as CardSessionReactor from "../src/orchestration/CardSessionReactor.ts";
@@ -463,6 +468,9 @@ export const makeOrchestrationIntegrationHarness = (
           runJourneys: () => Effect.die("card workspaces are not used by the engine harness"),
           serviceHealth: () => Effect.succeed([]),
           withCardLock: (_cardId, effect) => effect,
+          ensureIntegrationBranch: () =>
+            Effect.die("card workspaces are not used by the engine harness"),
+          enumerateItems: () => Effect.die("card workspaces are not used by the engine harness"),
         }),
       ),
       Layer.provideMerge(
@@ -517,10 +525,33 @@ export const makeOrchestrationIntegrationHarness = (
         }),
       ),
       Layer.provideMerge(
-        Layer.succeed(LinearSyncReactor.LinearSyncReactor, {
-          start: () => Effect.void,
-          syncNow: Effect.void,
-        }),
+        Layer.mergeAll(
+          Layer.succeed(CardPlanReactor.CardPlanReactor, {
+            start: () => Effect.void,
+            drain: Effect.void,
+          }),
+          Layer.succeed(CardMigrationReactor.CardMigrationReactor, {
+            start: () => Effect.void,
+            drain: Effect.void,
+          }),
+          Layer.succeed(OutcomeReactor.OutcomeReactor, {
+            start: () => Effect.void,
+            drain: Effect.void,
+          }),
+          Layer.succeed(CardReversibilityReactor.CardReversibilityReactor, {
+            start: () => Effect.void,
+            drain: Effect.void,
+          }),
+          Layer.succeed(TriggerReactor.TriggerReactor, {
+            start: () => Effect.void,
+            pollNow: Effect.void,
+            drain: Effect.void,
+          }),
+          Layer.succeed(LinearSyncReactor.LinearSyncReactor, {
+            start: () => Effect.void,
+            syncNow: Effect.void,
+          }),
+        ),
       ),
     );
     const layer = Layer.empty.pipe(
