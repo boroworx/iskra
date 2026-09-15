@@ -60,8 +60,9 @@ editing the agent's settings change the same thing.
 
 Open an agent's settings from the gear on its sidebar row or on its page. There you can set its
 name, model, role, tags, and capabilities. Only Claude models can run agents on cards. Capabilities
-apply to card sessions. Channel conversations and direct messages can read the project but never
-change it.
+apply to card sessions. A new agent can read, write, and run shell commands; network is off. An
+agent without write can't work on cards, so its cards wait until you give it write. Channel
+conversations and direct messages can read the project but never change it.
 
 **Archive** deletes the agent's file. Archived agents are listed under **Archived** in the Agents
 group, and their settings offer **Unarchive**.
@@ -107,6 +108,7 @@ waits:
 - **Waiting for agent pull requests to be reviewed**: the project has as many open agent pull
   requests as it allows.
 - **Waiting for the side-effect guard**: see [Side-effect guard](#side-effect-guard).
+- **Its agent can only read**: give the agent write in its settings. Needs you lists this too.
 
 **Pause** on a card holds it out of the queue until you **Resume** it. Iskra pauses a card itself
 when its session keeps failing, it seems stuck, it runs too long, it spends well past its budget, or
@@ -179,7 +181,8 @@ back on its own, since you may have made them yourself. Choose **Restore** to pu
 ## Needs you
 
 **Needs you** at the top of the sidebar collects everything waiting on you across projects:
-cards to approve, specs to review, questions from agents, comments on a card's pull request from
+cards to approve, specs to review, open cards with no agent or no acceptance criteria, cards whose
+agent can only read, questions from agents, comments on a card's pull request from
 people outside the repository, merges the host refused, and branches or tags that changed outside a
 card while its agent worked. Decide most of them right in the list: answer a question in one click,
 forward a comment to the agent or dismiss it, retry a landing, or restore or keep changed refs and
