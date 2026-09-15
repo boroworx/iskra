@@ -1,6 +1,7 @@
 import {
   AgentId,
   CardId,
+  ChannelId,
   CommandId,
   DEFAULT_PROJECT_ORCHESTRATION,
   EventId,
@@ -9,6 +10,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   TurnId,
+  type OrchestrationCommand,
 } from "@iskra/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
@@ -25,6 +27,7 @@ import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolv
 import { ProviderService } from "../provider/Services/ProviderService.ts";
 import * as UsageService from "../usage/UsageService.ts";
 import * as CardSpendReactor from "./CardSpendReactor.ts";
+import { startChannelRun } from "./decider.testkit.ts";
 import { OrchestrationEngineLive } from "./Layers/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./Layers/ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./Layers/ProjectionSnapshotQuery.ts";
@@ -285,6 +288,80 @@ it.layer(layer)("CardSpendReactor", (it) => {
       const cards = (yield* snapshotQuery.getCommandReadModel()).cards ?? [];
       expect(cards.find((card) => card.id === world.cardId)?.spentUsd).toBe(2);
       expect(cards.find((card) => card.id === attemptId)?.spentUsd).toBe(0);
+    }),
+  );
+
+  it.effect("records a lead's and a conversation's turns against the channel's project, with their roles", () =>
+    Effect.gen(function* () {
+      const world = yield* makeWorld("channels", "any-model");
+      const engine = yield* OrchestrationEngineService;
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const projectId = ProjectId.make("project-channels");
+      const channelId = ChannelId.make("channel-channels");
+      yield* engine.dispatch({
+        type: "channel.create",
+        commandId: CommandId.make("cmd-channel-channels"),
+        channelId,
+        projectId,
+        kind: "channel",
+        name: "general",
+        memberAgentIds: [world.agentId],
+        createdAt: now,
+      });
+      yield* engine.dispatch({
+        type: "channel.update",
+        commandId: CommandId.make("cmd-lead-channels"),
+        channelId,
+        leadAgentId: world.agentId,
+      });
+      for (const [role, costUsd] of [
+        ["lead", 0.5],
+        ["conversation", 0.25],
+      ] as const) {
+        const threadId = ThreadId.make(`run-${role}`);
+        const run = startChannelRun(world.agentId, channelId, threadId) as Extract<
+          OrchestrationCommand,
+          { type: "channel.run.start" }
+        >;
+        yield* engine.dispatch({
+          ...run,
+          commandId: CommandId.make(`cmd-run-${role}`),
+          ...(role === "lead" ? { role } : {}),
+        });
+        yield* engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make(`cmd-thread-run-${role}`),
+          threadId,
+          projectId,
+          title: "Run",
+          modelSelection: { instanceId: ProviderInstanceId.make("claudeAgent"), model: "any-model" },
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt: now,
+        });
+        // Counted once, however often the completion arrives.
+        yield* world.finished(threadId, "turn-1", { totalCostUsd: costUsd });
+        yield* world.finished(threadId, "turn-1", { totalCostUsd: costUsd });
+      }
+      yield* world.finished(world.ownerThreadId, "turn-1", { totalCostUsd: 1 });
+
+      const events = Array.from(yield* Stream.runCollect(engine.readEvents(0)));
+      expect(
+        events.flatMap((event) =>
+          // The suite shares one database: only this world's records.
+          event.type === "project.spend-recorded" && event.payload.projectId === projectId
+            ? [`${event.payload.projectId} ${event.payload.role} ${event.payload.costUsd}`]
+            : event.type === "card.spend-recorded" && event.payload.cardId === world.cardId
+              ? [`${event.payload.cardId} ${event.payload.role} ${event.payload.costUsd}`]
+              : [],
+        ),
+      ).toEqual([`${projectId} lead 0.5`, `${projectId} conversation 0.25`, `${world.cardId} owner 1`]);
+      const project = (yield* snapshotQuery.getCommandReadModel()).projects.find(
+        (candidate) => candidate.id === projectId,
+      );
+      expect(project?.spend).toMatchObject({ totalUsd: 1.75 });
     }),
   );
 

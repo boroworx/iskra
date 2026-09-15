@@ -25,8 +25,8 @@ type FinishedTurnEvent = Extract<
 >;
 
 /**
- * Records what each turn of a card session cost, on the card and against its
- * agent. A turn is priced like the usage page prices it: the provider's reported
+ * Records what each turn of a run cost: a card session's on the card and against its agent, a
+ * conversation's or lead's against its project, so every run counts toward the monthly budgets. A turn is priced like the usage page prices it: the provider's reported
  * cost, else its tokens at the model's rate, else unpriced. A turn is recorded
  * once, however often its completion arrives.
  */
@@ -53,35 +53,49 @@ const make = Effect.gen(function* () {
       return;
     }
     const run = yield* snapshotQuery.getRunByThreadId(event.threadId);
-    if (Option.isNone(run) || run.value.cardId === null) {
+    if (Option.isNone(run)) {
       return;
     }
-    // An attempt spends from its card's budget (invariant 13 over best-of-N).
-    const cards = (yield* snapshotQuery.getCommandReadModel()).cards ?? [];
-    const card = cards.find((candidate) => candidate.id === run.value.cardId);
-    const spendCardId =
-      card !== undefined && card.attemptGroupId !== null && card.parentCardId !== null
-        ? card.parentCardId
-        : run.value.cardId;
+    const { cardId, agentId, role } = run.value;
     const thread = yield* snapshotQuery.getThreadShellById(event.threadId);
-    const model = Option.isSome(thread) ? thread.value.modelSelection.model : "";
     const priced = yield* usage.priceTurn({
-      model,
+      model: Option.isSome(thread) ? thread.value.modelSelection.model : "",
       totals: turnUsageTotals(event.payload.tokenUsage),
       reportedCostUsd:
         event.type === "turn.completed" ? (event.payload.totalCostUsd ?? null) : null,
     });
-    yield* engine.dispatch({
-      type: "card.spend.record",
-      // The turn names the record, so a repeated completion is counted once.
-      commandId: CommandId.make(`card-spend:${event.threadId}:${event.turnId}`),
-      cardId: spendCardId,
+    // The turn names the record, so a repeated completion is counted once.
+    const turn = {
       threadId: event.threadId,
-      agentId: run.value.agentId,
+      agentId,
       turnId: event.turnId,
+      role,
       costUsd: priced.costUsd,
       costSource: priced.costSource,
       recordedAt: yield* nowIso,
+    };
+    if (cardId === null) {
+      // A conversation or lead run: its hidden thread lives in the channel's project.
+      if (Option.isNone(thread)) return;
+      yield* engine.dispatch({
+        type: "project.spend.record",
+        commandId: CommandId.make(`project-spend:${event.threadId}:${event.turnId}`),
+        projectId: thread.value.projectId,
+        ...turn,
+      });
+      return;
+    }
+    // An attempt spends from its card's budget (invariant 13 over best-of-N).
+    const cards = (yield* snapshotQuery.getCommandReadModel()).cards ?? [];
+    const card = cards.find((candidate) => candidate.id === cardId);
+    yield* engine.dispatch({
+      type: "card.spend.record",
+      commandId: CommandId.make(`card-spend:${event.threadId}:${event.turnId}`),
+      cardId:
+        card !== undefined && card.attemptGroupId !== null && card.parentCardId !== null
+          ? card.parentCardId
+          : cardId,
+      ...turn,
     });
   });
 
