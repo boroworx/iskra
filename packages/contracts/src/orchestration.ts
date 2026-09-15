@@ -950,6 +950,8 @@ export const CardLanding = Schema.Struct({
   headSha: Schema.NullOr(TrimmedNonEmptyString),
   draft: Schema.Boolean,
   linkedAt: IsoDateTime,
+  // The pull request a person merged on its host instead of through Iskra.
+  mergedOnHostUrl: Schema.optional(TrimmedNonEmptyString),
 });
 export type CardLanding = typeof CardLanding.Type;
 
@@ -981,10 +983,55 @@ export const CardOpenElicitation = Schema.Struct({
   // Empty for a question answered in a person's own words only.
   optionIds: Schema.Array(TrimmedNonEmptyString),
   askedAt: IsoDateTime,
+  // The question as asked, so it is answered from the card shell without its activity.
+  question: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  options: Schema.Array(Schema.Struct({ id: TrimmedNonEmptyString, label: TrimmedNonEmptyString })).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  recommendedOptionId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  allowText: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   // Set on a refsChanged question: the refs a restore would put back.
   refChanges: Schema.optional(Schema.Array(CardRefChange)),
 });
 export type CardOpenElicitation = typeof CardOpenElicitation.Type;
+
+/** Something on a card that waits on a person, by the reason code of the activity that raised it. */
+export const CardAttentionCode = Schema.Literals([
+  "untrustedComment",
+  "checksMissing",
+  "landingBlocked",
+  "pullRequestOpenFailed",
+  "pullRequestClosed",
+  "criteriaMissing",
+  "ciChecksNeedPullRequest",
+]);
+export type CardAttentionCode = typeof CardAttentionCode.Type;
+
+/**
+ * What a person can do about an attention item. `forward` and `dismiss` are commands; the rest
+ * point at the change that resolves it (a merge approval, project settings, the card's criteria).
+ */
+export const CardAttentionAction = Schema.Literals([
+  "forward",
+  "dismiss",
+  "retryLanding",
+  "openSettings",
+  "addCriteria",
+]);
+export type CardAttentionAction = typeof CardAttentionAction.Type;
+
+/** An activity that waits on a person, until its code's resolution happens. */
+export const CardAttention = Schema.Struct({
+  activityId: TrimmedNonEmptyString,
+  code: CardAttentionCode,
+  // The activity's text, capped.
+  text: Schema.String,
+  createdAt: IsoDateTime,
+  actions: Schema.Array(CardAttentionAction),
+});
+export type CardAttention = typeof CardAttention.Type;
 
 /** Why a card lands without a person approving its merge. */
 export const CardLandingBeginReason = Schema.Literals(["planChild", "autoMergePolicy"]);
@@ -1062,6 +1109,10 @@ export const OrchestrationCard = Schema.Struct({
   openElicitations: Schema.Array(CardOpenElicitation).pipe(
     Schema.withDecodingDefault(Effect.succeed([] as ReadonlyArray<CardOpenElicitation>)),
   ),
+  // Activities waiting on a person that aren't questions, oldest first.
+  attention: Schema.Array(CardAttention).pipe(
+    Schema.withDecodingDefault(Effect.succeed([] as ReadonlyArray<CardAttention>)),
+  ),
   relations: Schema.Array(CardRelation),
   createdBy: CardAuthor,
   createdAt: IsoDateTime,
@@ -1083,6 +1134,7 @@ export const LEGACY_CARD_CONTRACT = {
   waitReason: null,
   queuedAt: null,
   openElicitations: [],
+  attention: [],
 } as const satisfies Partial<OrchestrationCard>;
 
 export const ChannelMessageAuthorKind = Schema.Literals(["human", "agent", "system", "webhook"]);
@@ -2106,6 +2158,8 @@ export const CardStatusChangedPayload = Schema.Struct({
   reason: Schema.optional(TrimmedNonEmptyString),
   // The fix round an automatic return to work used.
   round: Schema.optional(CardFixRound),
+  // Set on a mergedOnHost move: the pull request a person merged on its host.
+  mergedOnHostUrl: Schema.optional(TrimmedNonEmptyString),
   updatedAt: IsoDateTime,
 });
 
@@ -2554,6 +2608,23 @@ const CardRefsRestoreCommand = Schema.Struct({
 /** A person keeping the refs a refsChanged report lists, because they made those changes. */
 const CardRefsKeepCommand = Schema.Struct({
   type: Schema.Literal("card.refs.keep"),
+  commandId: CommandId,
+  cardId: CardId,
+  activityId: TrimmedNonEmptyString,
+});
+
+/** A person sending an untrusted comment (an attention item) to the card's builder as a suggestion. */
+const CardCommentForwardCommand = Schema.Struct({
+  type: Schema.Literal("card.comment.forward"),
+  commandId: CommandId,
+  cardId: CardId,
+  // The comment's activity.
+  activityId: TrimmedNonEmptyString,
+});
+
+/** A person setting aside an attention item whose code allows it, such as a comment not to forward. */
+const CardAttentionDismissCommand = Schema.Struct({
+  type: Schema.Literal("card.attention.dismiss"),
   commandId: CommandId,
   cardId: CardId,
   activityId: TrimmedNonEmptyString,
@@ -3331,6 +3402,8 @@ const IskraClientCommands = [
   CardElicitationAnswerCommand,
   CardRefsRestoreCommand,
   CardRefsKeepCommand,
+  CardCommentForwardCommand,
+  CardAttentionDismissCommand,
   CardFlagsAcknowledgeCommand,
   CardFixRoundsResetCommand,
   CardPauseCommand,

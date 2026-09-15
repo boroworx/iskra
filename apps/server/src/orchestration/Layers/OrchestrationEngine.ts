@@ -133,6 +133,8 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "card.elicitation.answer":
     case "card.refs.restore":
     case "card.refs.keep":
+    case "card.comment.forward":
+    case "card.attention.dismiss":
       return {
         aggregateKind: "card",
         aggregateId: command.cardId,

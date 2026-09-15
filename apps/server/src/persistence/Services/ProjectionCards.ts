@@ -22,6 +22,7 @@ import {
   CardFixRounds,
   CardId,
   CardKind,
+  CardAttention,
   CardLanding,
   CardPause,
   CardPremise,
@@ -97,6 +98,7 @@ export const ProjectionCard = Schema.Struct({
   waitReason: Schema.NullOr(CardWaitReason),
   queuedAt: Schema.NullOr(IsoDateTime),
   openElicitations: Schema.Array(CardOpenElicitation),
+  attention: Schema.Array(CardAttention),
   relations: Schema.Array(CardRelation),
   createdBy: CardAuthor,
   createdAt: IsoDateTime,
@@ -124,6 +126,7 @@ export const ProjectionCardDbRow = ProjectionCard.mapFields(
     paused: Schema.fromJsonString(Schema.NullOr(CardPause)),
     waitReason: Schema.fromJsonString(Schema.NullOr(CardWaitReason)),
     openElicitations: Schema.fromJsonString(Schema.Array(CardOpenElicitation)),
+    attention: Schema.fromJsonString(Schema.Array(CardAttention)),
   }),
 );
 
@@ -175,6 +178,7 @@ export const PROJECTION_CARD_COLUMNS = `
   COALESCE(wait_reason_json, 'null') AS "waitReason",
   queued_at AS "queuedAt",
   COALESCE(open_elicitations_json, '[]') AS "openElicitations",
+  COALESCE(attention_json, '[]') AS "attention",
   relations_json AS "relations",
   created_by_json AS "createdBy",
   created_at AS "createdAt",

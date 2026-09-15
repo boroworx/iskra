@@ -31,7 +31,11 @@ import { ProjectionCardRepository } from "../persistence/Services/ProjectionCard
 import { ProcessRunner } from "../processRunner.ts";
 import { PullRequestService } from "../pullRequest/PullRequestService.ts";
 import { forkParked } from "../serverActivation.ts";
-import { CI_ONLY_NO_PULL_REQUEST_REASON, landsByPullRequest } from "./cardRules.ts";
+import {
+  CI_ONLY_NO_PULL_REQUEST_REASON,
+  PULL_REQUEST_REOPENED_CODE,
+  landsByPullRequest,
+} from "./cardRules.ts";
 import { SourceControlProviderRegistry } from "../sourceControl/SourceControlProviderRegistry.ts";
 import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
 import * as CardWorkspace from "./CardWorkspace.ts";
@@ -476,6 +480,17 @@ const make = Effect.gen(function* () {
         body: `The pull request was closed without merging: ${detail.url}`,
         deliverTo: null,
         reason: { code: "pullRequestClosed", text: "The pull request was closed without merging." },
+      });
+    }
+    // Open again after it was closed: nothing waits on a person any more.
+    const closed = card.attention.find((item) => item.code === "pullRequestClosed");
+    if (closed !== undefined) {
+      // A message: landing entries come only from card.landing-linked.
+      yield* record(card.id, `pr-reopened:${closed.activityId}`, {
+        kind: "message",
+        body: `The pull request was reopened: ${detail.url}`,
+        deliverTo: null,
+        reason: { code: PULL_REQUEST_REOPENED_CODE, text: "The pull request was reopened." },
       });
     }
 

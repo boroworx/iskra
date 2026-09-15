@@ -21,8 +21,12 @@ import {
   ANSWER_OPTION_REASON,
   AUTO_MERGE_OFF_REASON,
   NO_CHECKS_REASON,
+  NO_ATTENTION_REASON,
   NO_CRITERIA_REASON,
   NO_OPEN_QUESTION_REASON,
+  NOT_DISMISSABLE_REASON,
+  NOT_FORWARDABLE_REASON,
+  PULL_REQUEST_REOPENED_CODE,
   NO_OPEN_REF_REPORT_REASON,
   NOT_REF_REPORT_REASON,
   OPEN_CHECKPOINT_REASON,
@@ -48,6 +52,7 @@ import {
   createChannel,
   createProject,
   decide,
+  enterReview as reviewWithEvidence,
   frontend,
   nextCommandId,
   now,
@@ -135,6 +140,38 @@ const refusal = (readModel: OrchestrationReadModel, command: OrchestrationComman
   );
 
 const setup = [createProject(), setPolicy(), createAgent(backend), createAgent(frontend)];
+
+/** An activity for no one with a reason code, as the reactors record what waits on a person. */
+const raise = (
+  activityId: string,
+  code: string,
+  body = "Waits on you.",
+  kind: "error" | "message" | "elicitation" = "error",
+): OrchestrationCommand => ({
+  type: "card.activity.record",
+  commandId: nextCommandId(),
+  activityId,
+  cardId,
+  kind,
+  author:
+    code === "untrustedComment"
+      ? { kind: "github", id: "stranger", trusted: false }
+      : { kind: "system", id: "system" },
+  body,
+  runThreadId: null,
+  deliverTo: null,
+  elicitation: null,
+  answers: null,
+  status: null,
+  evidenceId: null,
+  reason: { code, text: code },
+  createdAt: now,
+});
+
+const onAttention = (
+  type: "card.comment.forward" | "card.attention.dismiss",
+  activityId: string,
+): OrchestrationCommand => ({ type, commandId: nextCommandId(), cardId, activityId });
 
 /** A card proposed with no acceptance criteria written yet. */
 const bareCard = (id: string = cardId): OrchestrationCommand => {
@@ -618,7 +655,19 @@ it.layer(NodeServices.layer)("decider card contract", (it) => {
         ask,
       ]);
       expect(cardIn(asked)?.openElicitations).toEqual([
-        { activityId: "question-1", kind: "question", optionIds: ["redis", "memory"], askedAt: now },
+        {
+          activityId: "question-1",
+          kind: "question",
+          optionIds: ["redis", "memory"],
+          askedAt: now,
+          question: "Which store?",
+          options: [
+            { id: "redis", label: "Redis" },
+            { id: "memory", label: "Memory" },
+          ],
+          recommendedOptionId: "redis",
+          allowText: true,
+        },
       ]);
       expect(yield* refusal(asked, answer("question-2", null))).toBe(NO_OPEN_QUESTION_REASON);
       expect(yield* refusal(asked, answer("question-1", "postgres"))).toBe(ANSWER_OPTION_REASON);
@@ -659,6 +708,14 @@ it.layer(NodeServices.layer)("decider card contract", (it) => {
           kind: "checkpoint",
           optionIds: ["continue", "redirect", "stop"],
           askedAt: now,
+          question: "Is this going the right way?",
+          options: [
+            { id: "continue", label: "Continue" },
+            { id: "redirect", label: "Redirect" },
+            { id: "stop", label: "Stop" },
+          ],
+          recommendedOptionId: "continue",
+          allowText: true,
         },
       ]);
       const stopped = yield* applyTo(checkpointed, [answer("checkpoint-1", "stop")]);
@@ -666,6 +723,135 @@ it.layer(NodeServices.layer)("decider card contract", (it) => {
         checkpoint: null,
         openElicitations: [],
         paused: { reason: { code: "checkpointStopped" } },
+      });
+    }),
+  );
+
+  it.effect("a person forwards or dismisses what waits on them; review and landing again clear the rest", () =>
+    Effect.gen(function* () {
+      expect(isClientCommand(onAttention("card.comment.forward", "comment-1"))).toBe(true);
+      expect(isClientCommand(onAttention("card.attention.dismiss", "comment-1"))).toBe(true);
+      const started = yield* applyCommands([
+        ...setup,
+        createCard(),
+        approveAndStart(cardId, criteria),
+        onCard("card.work.start"),
+      ]);
+      const raised = yield* applyTo(started, [
+        raise("comment-1", "untrustedComment", "stranger on the pull request: Use tabs.", "message"),
+        raise("comment-2", "untrustedComment", "stranger on the pull request: Rename it.", "message"),
+        raise("checks-1", "checksMissing"),
+        raise("checks-2", "checksMissing"),
+        // Not an attention code: nothing waits.
+        raise("stalled-1", "stalled"),
+      ]);
+      expect(
+        cardIn(raised)?.attention.map((item) => [item.activityId, item.code, item.actions]),
+      ).toEqual([
+        ["comment-1", "untrustedComment", ["forward", "dismiss"]],
+        ["comment-2", "untrustedComment", ["forward", "dismiss"]],
+        // The same code again replaces the older item; each comment is its own.
+        ["checks-2", "checksMissing", ["openSettings", "dismiss"]],
+      ]);
+      expect(yield* refusal(raised, onAttention("card.comment.forward", "comment-9"))).toBe(
+        NO_ATTENTION_REASON,
+      );
+      expect(yield* refusal(raised, onAttention("card.comment.forward", "checks-2"))).toBe(
+        NOT_FORWARDABLE_REASON,
+      );
+      expect(yield* decide(raised, onAttention("card.comment.forward", "comment-1"))).toMatchObject([
+        {
+          type: "card.activity-recorded",
+          payload: {
+            activityId: "comment-1:forwarded",
+            kind: "response",
+            author: { kind: "human" },
+            deliverTo: "builder",
+            delivery: "pending",
+            answers: { questionId: "comment-1", optionId: "forward" },
+            body: expect.stringContaining("> stranger on the pull request: Use tabs."),
+          },
+        },
+      ]);
+      const handled = yield* applyTo(raised, [
+        onAttention("card.comment.forward", "comment-1"),
+        onAttention("card.attention.dismiss", "comment-2"),
+      ]);
+      expect(cardIn(handled)?.attention.map((item) => item.activityId)).toEqual(["checks-2"]);
+      expect(yield* refusal(handled, onAttention("card.attention.dismiss", "comment-1"))).toBe(
+        NO_ATTENTION_REASON,
+      );
+
+      // Checks were added (or waived) and the card entered review.
+      const reviewing = yield* applyTo(handled, reviewWithEvidence());
+      expect(cardIn(reviewing)?.attention).toEqual([]);
+      // The host refused the merge, so landing was cancelled; approving it again is the retry.
+      const blocked = yield* applyTo(reviewing, [
+        onCard("card.merge.approve"),
+        raise("blocked-1", "landingBlocked"),
+        onCard("card.merge.cancel"),
+      ]);
+      expect(cardIn(blocked)?.attention.map((item) => item.code)).toEqual(["landingBlocked"]);
+      const retried = yield* applyTo(blocked, [onCard("card.merge.approve")]);
+      expect(cardIn(retried)?.attention).toEqual([]);
+    }),
+  );
+
+  it.effect("a linked or reopened pull request, written criteria and landing clear what they resolve", () =>
+    Effect.gen(function* () {
+      const url = "https://github.com/acme/api/pull/7";
+      const link: OrchestrationCommand = {
+        type: "card.landing.link",
+        commandId: nextCommandId(),
+        cardId,
+        landing: { mode: "pullRequest", url, number: 7, headSha: "abc1234", draft: false, linkedAt: now },
+      };
+      const started = yield* applyCommands([
+        ...setup,
+        createCard(),
+        approveAndStart(cardId, criteria),
+        onCard("card.work.start"),
+      ]);
+      const unopened = yield* applyTo(started, [
+        raise("open-failed", "pullRequestOpenFailed"),
+        raise("ci-only", "ciChecksNeedPullRequest"),
+        raise("criteria-ask", "criteriaMissing", "Which acceptance criteria?", "elicitation"),
+      ]);
+      expect(cardIn(unopened)?.attention.map((item) => item.code)).toEqual([
+        "pullRequestOpenFailed",
+        "ciChecksNeedPullRequest",
+        "criteriaMissing",
+      ]);
+      // Asking for criteria is also a question, answered in words from the shell.
+      expect(cardIn(unopened)?.openElicitations).toMatchObject([
+        { activityId: "criteria-ask", question: "Which acceptance criteria?", options: [], allowText: true },
+      ]);
+      expect(yield* refusal(unopened, onAttention("card.attention.dismiss", "criteria-ask"))).toBe(
+        NOT_DISMISSABLE_REASON,
+      );
+
+      const written = yield* applyTo(unopened, [
+        { type: "card.criteria.set", commandId: nextCommandId(), cardId, criteria },
+        link,
+      ]);
+      expect(cardIn(written)).toMatchObject({ attention: [], openElicitations: [] });
+
+      const closed = yield* applyTo(written, [raise("closed-1", "pullRequestClosed")]);
+      expect(cardIn(closed)?.attention.map((item) => item.code)).toEqual(["pullRequestClosed"]);
+      const reopened = yield* applyTo(closed, [
+        raise("pr-reopened:closed-1", PULL_REQUEST_REOPENED_CODE, `Reopened: ${url}`, "message"),
+      ]);
+      expect(cardIn(reopened)?.attention).toEqual([]);
+
+      const merged = yield* applyTo(reopened, [
+        ...reviewWithEvidence(),
+        raise("closed-2", "pullRequestClosed"),
+        { type: "card.land", commandId: nextCommandId(), cardId, mergedOnHostUrl: url },
+      ]);
+      expect(cardIn(merged)).toMatchObject({
+        status: "landed",
+        landing: { url, mergedOnHostUrl: url },
+        attention: [],
       });
     }),
   );
@@ -734,6 +920,13 @@ it.layer(NodeServices.layer)("decider card contract", (it) => {
           kind: "refsChanged",
           optionIds: ["restore", "keep"],
           askedAt: now,
+          question: "Restore or keep?",
+          options: [
+            { id: "restore", label: "Restore" },
+            { id: "keep", label: "Keep" },
+          ],
+          recommendedOptionId: null,
+          allowText: false,
           refChanges: changes,
         },
       ]);

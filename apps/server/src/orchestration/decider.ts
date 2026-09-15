@@ -74,6 +74,10 @@ import {
   NO_OPEN_REF_REPORT_REASON,
   NOT_REF_REPORT_REASON,
   SYSTEM_REF_REPORT_REASON,
+  NO_ATTENTION_REASON,
+  NOT_FORWARDABLE_REASON,
+  NOT_DISMISSABLE_REASON,
+  forwardedCommentBody,
   NO_CRITERIA_REASON,
   OPEN_CHECKPOINT_REASON,
   PAUSED_REASON,
@@ -292,6 +296,7 @@ const decideCardMove = Effect.fn("decideCardMove")(function* (input: {
   readonly move: CardMove;
   readonly reason?: string;
   readonly round?: CardFixRound;
+  readonly mergedOnHostUrl?: string;
 }): Effect.fn.Return<
   PlannedOrchestrationEvent,
   OrchestrationCommandInvariantError | PlatformError.PlatformError,
@@ -316,6 +321,7 @@ const decideCardMove = Effect.fn("decideCardMove")(function* (input: {
       move: input.move,
       ...(input.reason !== undefined ? { reason: input.reason } : {}),
       ...(input.round !== undefined ? { round: input.round } : {}),
+      ...(input.mergedOnHostUrl !== undefined ? { mergedOnHostUrl: input.mergedOnHostUrl } : {}),
       updatedAt: occurredAt,
     },
   });
@@ -2482,6 +2488,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             command,
             move: "mergedOnHost",
             reason: `Merged on the host: ${command.mergedOnHostUrl}`,
+            mergedOnHostUrl: command.mergedOnHostUrl,
           });
 
     case "card.assign":
@@ -3684,6 +3691,37 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(optionId === "restore" ? { refChanges: restore } : {}),
           createdAt: occurredAt,
         },
+      });
+    }
+
+    // A person forwarding or dismissing an attention item: a response naming it resolves it.
+    case "card.comment.forward":
+    case "card.attention.dismiss": {
+      const card = yield* requireLiveCard(
+        { readModel, command, cardId: command.cardId },
+        "A card that has landed or been abandoned has nothing waiting on you.",
+      );
+      const item = card.attention.find((entry) => entry.activityId === command.activityId);
+      if (item === undefined) {
+        return yield* refuse(command, NO_ATTENTION_REASON);
+      }
+      const forward = command.type === "card.comment.forward";
+      if (!item.actions.includes(forward ? "forward" : "dismiss")) {
+        return yield* refuse(command, forward ? NOT_FORWARDABLE_REASON : NOT_DISMISSABLE_REASON);
+      }
+      const occurredAt = yield* nowIso;
+      return yield* planned(command, "card", card.id, occurredAt, {
+        type: "card.activity-recorded",
+        payload: cardActivity({
+          activityId: `${item.activityId}:${forward ? "forwarded" : "dismissed"}`,
+          cardId: card.id,
+          kind: "response",
+          author: { kind: "human", id: CHANNEL_HUMAN_AUTHOR_ID },
+          body: forward ? forwardedCommentBody(item.text) : "Dismissed.",
+          ...(forward ? { deliverTo: "builder" as const, delivery: "pending" as const } : {}),
+          answers: { questionId: item.activityId, optionId: forward ? "forward" : "dismiss" },
+          createdAt: occurredAt,
+        }),
       });
     }
 
