@@ -35,6 +35,7 @@ import {
   CI_ONLY_NO_PULL_REQUEST_REASON,
   PULL_REQUEST_REOPENED_CODE,
   landsByPullRequest,
+  pullRequestDraftOf,
 } from "./cardRules.ts";
 import { SourceControlProviderRegistry } from "../sourceControl/SourceControlProviderRegistry.ts";
 import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
@@ -50,7 +51,8 @@ import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts"
  * people without write access wait in Needs you, and a conflict sends the owner to rebase. A
  * person approving the merge makes the server merge; a merge on the host lands the card too. After
  * a card lands, what it blocked is freed and open cards touching the same exclusive paths are told
- * to rebase.
+ * to rebase. A plan's or migration's child lands locally into its parent's integration branch; the
+ * parent opens the one pull request against the base. Trigger and unattended work opens as a draft.
  */
 export class CardLandingReactor extends Context.Service<
   CardLandingReactor,
@@ -74,10 +76,18 @@ const PERMISSION_CACHE_MS = 60 * 60 * 1000;
 
 /** The pull request a card links to, as PullRequestService reads it. */
 export const pullRequestRefOf = (card: OrchestrationCard): PullRequestRef | null => {
-  const link = card.landing?.url === undefined || card.landing.url === null ? null : parseChangeRequestUrl(card.landing.url);
+  const link =
+    card.landing?.url === undefined || card.landing.url === null
+      ? null
+      : parseChangeRequestUrl(card.landing.url);
   return link === null
     ? null
-    : { projectId: card.projectId, host: link.host, repository: link.repository, number: link.number };
+    : {
+        projectId: card.projectId,
+        host: link.host,
+        repository: link.repository,
+        number: link.number,
+      };
 };
 
 /** What a pull request says about the card's work: its acceptance criteria and evidence, as text. */
@@ -147,7 +157,12 @@ const make = Effect.gen(function* () {
    * Sends the card back to its owner with a fix round; once the project's rounds are used the
    * card pauses for a person instead.
    */
-  const returnToWork = (card: OrchestrationCard, key: string, round: CardFixRound | null, reason: string) =>
+  const returnToWork = (
+    card: OrchestrationCard,
+    key: string,
+    round: CardFixRound | null,
+    reason: string,
+  ) =>
     engine
       .dispatch({
         type: "card.work.return",
@@ -160,7 +175,10 @@ const make = Effect.gen(function* () {
         Effect.asVoid,
         Effect.catchTag("OrchestrationCommandInvariantError", (refusal) =>
           round === null
-            ? Effect.logWarning("card could not return to work", { cardId: card.id, detail: refusal.detail })
+            ? Effect.logWarning("card could not return to work", {
+                cardId: card.id,
+                detail: refusal.detail,
+              })
             : Effect.gen(function* () {
                 if (card.status === "landing") {
                   yield* engine
@@ -191,11 +209,18 @@ const make = Effect.gen(function* () {
       reason: { code, text: body.split("\n")[0]!.slice(0, 200) },
     });
 
-  const openPullRequest = Effect.fn("CardLandingReactor.openPullRequest")(function* (cardId: CardId) {
+  const openPullRequest = Effect.fn("CardLandingReactor.openPullRequest")(function* (
+    cardId: CardId,
+  ) {
     const model = yield* readModel();
     const card = cardIn(model, cardId);
     const project = model.projects.find((candidate) => candidate.id === card?.projectId);
-    if (card === undefined || project === undefined || card.status !== "inReview" || card.landing !== null) {
+    if (
+      card === undefined ||
+      project === undefined ||
+      card.status !== "inReview" ||
+      card.landing !== null
+    ) {
       return;
     }
     const linkedAt = yield* nowIso;
@@ -205,7 +230,12 @@ const make = Effect.gen(function* () {
       cardId,
       landing: { mode: "local", url: null, number: null, headSha: null, draft: false, linkedAt },
     });
-    const wantsPullRequest = landsByPullRequest(project);
+    const parent = card.parentCardId === null ? undefined : cardIn(model, card.parentCardId);
+    const intoParentBranch =
+      (parent?.kind === "plan" || parent?.kind === "migration") &&
+      card.baseBranch !== null &&
+      (card.baseBranch === parent.branch || card.baseBranch === parent.plan?.integrationBranch);
+    const wantsPullRequest = landsByPullRequest(project) && !intoParentBranch;
     if (!wantsPullRequest || card.worktreePath === null || card.branch === null) {
       return yield* linkLocal;
     }
@@ -263,6 +293,31 @@ const make = Effect.gen(function* () {
       });
       return yield* linkLocal;
     }
+    // Work nobody approved waits as a draft; a host that can't mark one leaves it ready.
+    const draftRef = pullRequestRefOf({
+      ...card,
+      landing: {
+        mode: "pullRequest",
+        url: opened.url,
+        number: opened.number,
+        headSha: null,
+        draft: false,
+        linkedAt,
+      },
+    });
+    const draft =
+      (opened.isDraft ?? false) ||
+      (pullRequestDraftOf(card) &&
+        draftRef !== null &&
+        (yield* pullRequests.runAction({ ...draftRef, action: "draft" }).pipe(
+          Effect.as(true),
+          Effect.catch((error) =>
+            Effect.logWarning("pull request was not marked draft", {
+              cardId,
+              error: error.message,
+            }).pipe(Effect.as(false)),
+          ),
+        )));
     yield* engine.dispatch({
       type: "card.landing.link",
       commandId: CommandId.make(`card-landing-link:pr:${cardId}:${opened.number}`),
@@ -272,7 +327,7 @@ const make = Effect.gen(function* () {
         url: opened.url,
         number: opened.number,
         headSha: card.evidence?.headSha ?? null,
-        draft: opened.isDraft ?? false,
+        draft,
         linkedAt,
       },
     });
@@ -311,7 +366,10 @@ const make = Effect.gen(function* () {
       })
       .pipe(
         Effect.catchTag("OrchestrationCommandInvariantError", (refusal) =>
-          Effect.logInfo("card waits for a person to approve its merge", { cardId, detail: refusal.detail }),
+          Effect.logInfo("card waits for a person to approve its merge", {
+            cardId,
+            detail: refusal.detail,
+          }),
         ),
       );
   });
@@ -328,7 +386,9 @@ const make = Effect.gen(function* () {
       (card) => card.projectId === landed.projectId && card.id !== landed.id,
     );
     for (const blocked of others.filter((card) =>
-      card.relations.some((relation) => relation.kind === "blockedBy" && relation.cardId === landed.id),
+      card.relations.some(
+        (relation) => relation.kind === "blockedBy" && relation.cardId === landed.id,
+      ),
     )) {
       yield* engine.dispatch({
         type: "card.relation.remove",
@@ -358,10 +418,19 @@ const make = Effect.gen(function* () {
       if (other === undefined || shared.length === 0) continue;
       const body = shared
         .map((path_) =>
-          CardWorkspace.exclusivePathReturnMessage({ glob: path_.glob, baseRef, afterRebase: path_.afterRebase }),
+          CardWorkspace.exclusivePathReturnMessage({
+            glob: path_.glob,
+            baseRef,
+            afterRebase: path_.afterRebase,
+          }),
         )
         .join("\n\n");
-      yield* tellBuilder(other.id, `exclusive-path:${key}:${other.id}`, "exclusivePathChanged", body);
+      yield* tellBuilder(
+        other.id,
+        `exclusive-path:${key}:${other.id}`,
+        "exclusivePathChanged",
+        body,
+      );
       if (other.status === "inReview" || other.status === "landing") {
         yield* returnToWork(other, `exclusive-path:${key}:${other.id}`, null, body.split("\n")[0]!);
       }
@@ -369,16 +438,37 @@ const make = Effect.gen(function* () {
   });
 
   /** Lands the card; a merge a person made on the host lands it straight from review. */
-  const landCard = (card: OrchestrationCard, key: string, mergedOnHostUrl: string | null) =>
+  const landCard = (
+    card: OrchestrationCard,
+    key: string,
+    mergedOnHostUrl: string | null,
+    landedSha: string | undefined,
+  ) =>
     engine.dispatch({
       type: "card.land",
       commandId: CommandId.make(`card-land:${key}`),
       cardId: card.id,
       ...(mergedOnHostUrl === null ? {} : { mergedOnHostUrl }),
+      ...(landedSha === undefined ? {} : { landedSha }),
     });
 
+  // ponytail: origin's base tip right after the merge, so a merge landing in between is
+  // misattributed; read the host's merge commit id if reverts start picking the wrong commit.
+  /** The commit a pull request's merge left the base at, or undefined when origin can't say. */
+  const mergedShaOf = (card: OrchestrationCard, cwd: string) =>
+    Effect.gen(function* () {
+      const { baseBranch } = yield* workspace.projectFile(card.id);
+      const git_ = (args: ReadonlyArray<string>) =>
+        runner.run({ command: "git", args: ["-C", cwd, ...args], timeout: "2 minutes" });
+      if ((yield* git_(["fetch", "--quiet", "origin", baseBranch])).code !== 0) return undefined;
+      const head = yield* git_(["rev-parse", "FETCH_HEAD"]);
+      return head.code === 0 && head.stdout.trim().length > 0 ? head.stdout.trim() : undefined;
+    }).pipe(Effect.orElseSucceed(() => undefined));
+
   const land = Effect.fn("CardLandingReactor.land")(function* (cardId: CardId, key: string) {
-    const card = cardIn(yield* readModel(), cardId);
+    const model = yield* readModel();
+    const card = cardIn(model, cardId);
+    const project = model.projects.find((candidate) => candidate.id === card?.projectId);
     if (card === undefined || card.status !== "landing") return;
     const ref = card.landing?.mode === "pullRequest" ? pullRequestRefOf(card) : null;
     if (ref !== null) {
@@ -401,21 +491,35 @@ const make = Effect.gen(function* () {
           })
           .pipe(Effect.ignore);
       }
-      yield* landCard(card, key, null);
+      yield* landCard(
+        card,
+        key,
+        null,
+        yield* mergedShaOf(card, card.worktreePath ?? project?.workspaceRoot ?? "."),
+      );
       const files = yield* workspace.changedFiles(cardId).pipe(Effect.orElseSucceed(() => []));
       return yield* afterLanding(card, files, key);
     }
     const result = yield* workspace
       .land(cardId)
-      .pipe(Effect.catch((error) => Effect.succeed({ kind: "notMerged" as const, message: error.message })));
+      .pipe(
+        Effect.catch((error) =>
+          Effect.succeed({ kind: "notMerged" as const, message: error.message }),
+        ),
+      );
     switch (result.kind) {
       case "landed":
-        yield* landCard(card, key, null);
+        yield* landCard(card, key, null, result.landedSha);
         return yield* afterLanding(card, result.files, key);
       case "conflict": {
         const body = `Landing stopped: rebasing onto \`${result.baseBranch}\` conflicts in ${result.files.join(", ") || "the worktree"}. Rebase, resolve the conflicts, commit, then call request_review again.`;
         yield* tellBuilder(cardId, `landing-conflict:${key}`, "rebaseConflict", body);
-        return yield* returnToWork(card, key, "ci", `Rebasing onto ${result.baseBranch} conflicts.`);
+        return yield* returnToWork(
+          card,
+          key,
+          "ci",
+          `Rebasing onto ${result.baseBranch} conflicts.`,
+        );
       }
       case "checksFailed": {
         const body = `Landing stopped: the checks failed after rebasing.\n\n${result.summary}`;
@@ -430,7 +534,11 @@ const make = Effect.gen(function* () {
           reason: { code: "landingBlocked", text: "The card couldn't be merged into its base." },
         });
         return yield* engine
-          .dispatch({ type: "card.merge.cancel", commandId: CommandId.make(`card-landing-cancel:${key}`), cardId })
+          .dispatch({
+            type: "card.merge.cancel",
+            commandId: CommandId.make(`card-landing-cancel:${key}`),
+            cardId,
+          })
           .pipe(Effect.ignore);
     }
   });
@@ -449,14 +557,17 @@ const make = Effect.gen(function* () {
     const cached = permissions.get(key);
     if (cached !== undefined && now - cached.at < PERMISSION_CACHE_MS) return cached.trusted;
     const gh = (args: ReadonlyArray<string>) =>
-      runner
-        .run({ command: "gh", args, cwd, timeout: "30 seconds" })
-        .pipe(
-          Effect.map((output) => (output.code === 0 ? output.stdout.trim() : null)),
-          Effect.orElseSucceed(() => null),
-        );
+      runner.run({ command: "gh", args, cwd, timeout: "30 seconds" }).pipe(
+        Effect.map((output) => (output.code === 0 ? output.stdout.trim() : null)),
+        Effect.orElseSucceed(() => null),
+      );
     const permission = hostName.endsWith("github.com")
-      ? yield* gh(["api", `repos/${ref.repository}/collaborators/${login}/permission`, "--jq", ".permission"])
+      ? yield* gh([
+          "api",
+          `repos/${ref.repository}/collaborators/${login}/permission`,
+          "--jq",
+          ".permission",
+        ])
       : null;
     // A host that can't say trusts only the account Iskra itself is signed in as.
     const trusted =
@@ -467,7 +578,10 @@ const make = Effect.gen(function* () {
     return trusted;
   });
 
-  const pollCard = Effect.fn("CardLandingReactor.pollCard")(function* (card: OrchestrationCard, cwd: string) {
+  const pollCard = Effect.fn("CardLandingReactor.pollCard")(function* (
+    card: OrchestrationCard,
+    cwd: string,
+  ) {
     const ref = pullRequestRefOf(card);
     if (ref === null || card.landing === null) return;
     const detail = yield* pullRequests.detail(ref);
@@ -475,7 +589,12 @@ const make = Effect.gen(function* () {
 
     if (detail.state === "merged") {
       // A person merging on the host is their approval.
-      yield* landCard(card, `host-merge:${card.id}`, card.status === "inReview" ? detail.url : null);
+      yield* landCard(
+        card,
+        `host-merge:${card.id}`,
+        card.status === "inReview" ? detail.url : null,
+        yield* mergedShaOf(card, cwd),
+      );
       const files = yield* workspace.changedFiles(card.id).pipe(Effect.orElseSucceed(() => []));
       return yield* afterLanding(card, files, `host-merge:${card.id}`);
     }
@@ -500,7 +619,9 @@ const make = Effect.gen(function* () {
     }
 
     // CI-sourced checks become evidence once the host has a result for every one of them.
-    const project = (yield* readModel()).projects.find((candidate) => candidate.id === card.projectId);
+    const project = (yield* readModel()).projects.find(
+      (candidate) => candidate.id === card.projectId,
+    );
     const { checks } = yield* workspace.projectFile(card.id);
     const ciChecks = checks.filter((check) => check.source !== "local" && check.ciName !== null);
     const hostChecks = ciChecks.map((check) => ({
@@ -522,14 +643,20 @@ const make = Effect.gen(function* () {
           // The host's results replace the pending CI items review entered with.
           ...local
             .filter((item) => item.source !== "ci")
-            .map(({ evidenceId: _e, cardId: _c, headSha: _h, purpose: _p, createdAt: _t, ...item }) => item),
+            .map(
+              ({ evidenceId: _e, cardId: _c, headSha: _h, purpose: _p, createdAt: _t, ...item }) =>
+                item,
+            ),
           ...hostChecks.map(({ check, host }) => ({
             itemId: `ci:${check.id}`,
             kind: "check" as const,
             source: "ci" as const,
             name: check.name,
             criterionId: null,
-            exitCode: host!.status === "success" || host!.status === "skipped" || host!.status === "neutral" ? 0 : 1,
+            exitCode:
+              host!.status === "success" || host!.status === "skipped" || host!.status === "neutral"
+                ? 0
+                : 1,
             timedOut: false,
             durationMs: null,
             logTail: host!.description ?? "",
@@ -563,10 +690,18 @@ const make = Effect.gen(function* () {
         "ciFailed",
         [
           `CI failed on the pull request: ${names}. Fix it, commit, then call request_review again.`,
-          ...failing.map((check) => `- ${check.name}: ${check.description ?? check.status}${check.url === null ? "" : ` (${check.url})`}`),
+          ...failing.map(
+            (check) =>
+              `- ${check.name}: ${check.description ?? check.status}${check.url === null ? "" : ` (${check.url})`}`,
+          ),
         ].join("\n"),
       );
-      return yield* returnToWork(card, `pr-ci-failed:${card.id}:${head}`, "ci", `CI failed: ${names}.`);
+      return yield* returnToWork(
+        card,
+        `pr-ci-failed:${card.id}:${head}`,
+        "ci",
+        `CI failed: ${names}.`,
+      );
     }
     if (detail.mergeability === "conflicting") {
       const { baseRef } = yield* workspace.projectFile(card.id);
@@ -576,17 +711,36 @@ const make = Effect.gen(function* () {
         "rebaseConflict",
         `The pull request conflicts with its base. Rebase onto ${baseRef}, resolve the conflicts, commit, then call request_review again.`,
       );
-      return yield* returnToWork(card, `pr-conflict:${card.id}:${head}`, "ci", "The pull request conflicts with its base.");
+      return yield* returnToWork(
+        card,
+        `pr-conflict:${card.id}:${head}`,
+        "ci",
+        "The pull request conflicts with its base.",
+      );
     }
 
     const activity = yield* pullRequests.activity(ref);
     const remarks = [
-      ...activity.comments.map((comment) => ({ id: comment.id, author: comment.author, body: comment.body, createdAt: comment.createdAt, url: comment.url })),
+      ...activity.comments.map((comment) => ({
+        id: comment.id,
+        author: comment.author,
+        body: comment.body,
+        createdAt: comment.createdAt,
+        url: comment.url,
+      })),
       ...activity.reviewThreads
         .filter((thread) => !thread.isResolved)
-        .flatMap((thread) => thread.comments.map((comment) => ({ ...comment, body: `${thread.path}: ${comment.body}` }))),
+        .flatMap((thread) =>
+          thread.comments.map((comment) => ({
+            ...comment,
+            body: `${thread.path}: ${comment.body}`,
+          })),
+        ),
     ].filter(
-      (remark) => remark.author !== null && remark.body.trim().length > 0 && remark.createdAt > card.landing!.linkedAt,
+      (remark) =>
+        remark.author !== null &&
+        remark.body.trim().length > 0 &&
+        remark.createdAt > card.landing!.linkedAt,
     );
     let trustedKey: string | null = null;
     for (const remark of remarks) {
@@ -608,26 +762,41 @@ const make = Effect.gen(function* () {
           body,
           deliverTo: null,
           author: { kind: "github", id: login, trusted: false },
-          reason: { code: "untrustedComment", text: `${login} can't direct work on this repository; forward it if it should.` },
+          reason: {
+            code: "untrustedComment",
+            text: `${login} can't direct work on this repository; forward it if it should.`,
+          },
         });
       }
     }
     if (trustedKey !== null && card.status === "inReview") {
-      yield* returnToWork(card, `pr-review:${card.id}:${trustedKey}`, "review", "Review comments on the pull request.");
+      yield* returnToWork(
+        card,
+        `pr-review:${card.id}:${trustedKey}`,
+        "review",
+        "Review comments on the pull request.",
+      );
     }
   });
 
   const poll = Effect.fn("CardLandingReactor.poll")(function* () {
     const model = yield* readModel();
     for (const card of model.cards ?? []) {
-      if ((card.status !== "inReview" && card.status !== "landing") || card.landing?.mode !== "pullRequest") continue;
+      if (
+        (card.status !== "inReview" && card.status !== "landing") ||
+        card.landing?.mode !== "pullRequest"
+      )
+        continue;
       const project = model.projects.find((candidate) => candidate.id === card.projectId);
       if (project === undefined) continue;
       yield* pollCard(card, card.worktreePath ?? project.workspaceRoot).pipe(
         Effect.catchCause((cause) =>
           Cause.hasInterruptsOnly(cause)
             ? Effect.failCause(cause)
-            : Effect.logWarning("card pull request poll failed", { cardId: card.id, cause: Cause.pretty(cause) }),
+            : Effect.logWarning("card pull request poll failed", {
+                cardId: card.id,
+                cause: Cause.pretty(cause),
+              }),
         ),
       );
     }
@@ -678,11 +847,13 @@ const make = Effect.gen(function* () {
     // ponytail: one pass a minute over every card being landed; back off per card when host rate
     // limits start refusing the reads.
     yield* forkParked(
-      worker.enqueue({ kind: "poll" }).pipe(
-        Effect.andThen(worker.drain),
-        Effect.repeat(Schedule.spaced("1 minute")),
-        Effect.asVoid,
-      ),
+      worker
+        .enqueue({ kind: "poll" })
+        .pipe(
+          Effect.andThen(worker.drain),
+          Effect.repeat(Schedule.spaced("1 minute")),
+          Effect.asVoid,
+        ),
     );
   });
 

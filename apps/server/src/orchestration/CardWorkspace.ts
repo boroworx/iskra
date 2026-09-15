@@ -48,7 +48,7 @@ import { forkParked } from "../serverActivation.ts";
 import * as ServerSettingsService from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import { CardRefGuard } from "./CardRefGuard.ts";
-import { isFinishedCardStatus } from "./cardRules.ts";
+import { isFinishedCardStatus, landsByPullRequest } from "./cardRules.ts";
 import { HostAdmission } from "./HostAdmission.ts";
 import {
   projectChecks,
@@ -128,8 +128,18 @@ export interface CardChecksRun {
 
 /** Where landing a card ended: merged into its base, or stopped with why. */
 export type CardLandResult =
-  | { readonly kind: "landed"; readonly baseBranch: string; readonly files: ReadonlyArray<string> }
-  | { readonly kind: "conflict"; readonly baseBranch: string; readonly files: ReadonlyArray<string> }
+  | {
+      readonly kind: "landed";
+      readonly baseBranch: string;
+      readonly files: ReadonlyArray<string>;
+      // The commit the base now points at.
+      readonly landedSha: string;
+    }
+  | {
+      readonly kind: "conflict";
+      readonly baseBranch: string;
+      readonly files: ReadonlyArray<string>;
+    }
   | {
       readonly kind: "checksFailed";
       readonly summary: string;
@@ -180,6 +190,18 @@ export class CardWorkspace extends Context.Service<
   {
     readonly start: () => Effect.Effect<void, never, Scope.Scope>;
     readonly ensure: (cardId: CardId) => Effect.Effect<CardWorkspaceInfo, CardWorkspaceError>;
+    /**
+     * A plan's or migration's workspace on its integration branch, made from the base and pushed to
+     * origin when the project lands by pull request. Idempotent. Its children start from this
+     * branch and land into it; the card's own pull request later takes it to the base.
+     */
+    readonly ensureIntegrationBranch: (
+      cardId: CardId,
+    ) => Effect.Effect<CardWorkspaceInfo, CardWorkspaceError>;
+    /** A migration's items: its enumerate command's output lines, run in a snapshot of its branch. */
+    readonly enumerateItems: (
+      cardId: CardId,
+    ) => Effect.Effect<ReadonlyArray<string>, CardWorkspaceError>;
     /** A detached checkout of `headSha` on its own ports with services up; see CardSnapshot. */
     readonly snapshot: (
       cardId: CardId,
@@ -342,7 +364,9 @@ export const renderEnvTemplate = (
     readonly ports: Readonly<Record<string, number>>;
     readonly secrets: ReadonlyArray<CardSecret>;
   },
-): { readonly ok: true; readonly text: string } | { readonly ok: false; readonly message: string } => {
+):
+  | { readonly ok: true; readonly text: string }
+  | { readonly ok: false; readonly message: string } => {
   const problems: Array<string> = [];
   const text = template.replaceAll(
     /\$\{(port|card|secret):([A-Za-z0-9_]+)\}/g,
@@ -625,19 +649,21 @@ const make = Effect.gen(function* () {
   });
 
   /** The project's declared secrets with their values from the secret store. */
-  const projectSecrets = (cardId: CardId, project: OrchestrationProject, settings: ServerSettings) =>
+  const projectSecrets = (
+    cardId: CardId,
+    project: OrchestrationProject,
+    settings: ServerSettings,
+  ) =>
     Effect.forEach(settings.cardRuntime.secrets[project.id] ?? [], (declared) =>
       (PROJECT_SECRET_NAME_PATTERN.test(declared.name) && /^[A-Za-z0-9_-]+$/.test(project.id)
         ? secretStore.get(cardSecretStoreName(project.id, declared.name))
         : Effect.succeed(Option.none<Uint8Array>())
       ).pipe(
-        Effect.map(
-          (value): CardSecret => ({
-            name: declared.name,
-            exposure: declared.exposure,
-            value: Option.isSome(value) ? new TextDecoder().decode(value.value) : null,
-          }),
-        ),
+        Effect.map((value): CardSecret => ({
+          name: declared.name,
+          exposure: declared.exposure,
+          value: Option.isSome(value) ? new TextDecoder().decode(value.value) : null,
+        })),
         Effect.mapError(toError(cardId, `Could not read secret ${declared.name}.`)),
       ),
     );
@@ -846,11 +872,18 @@ const make = Effect.gen(function* () {
           }
           const template = yield* fileSystem
             .readFileString(path.join(worktreePath, envFile.template))
-            .pipe(Effect.mapError(toError(cardId, `Could not read the env template ${envFile.template}.`)));
+            .pipe(
+              Effect.mapError(
+                toError(cardId, `Could not read the env template ${envFile.template}.`),
+              ),
+            );
           const rendered = renderEnvTemplate(template, {
             cardId,
             ports: Object.fromEntries(
-              Object.entries(input.file.ports).map(([name, offset]) => [name, input.portBase + offset]),
+              Object.entries(input.file.ports).map(([name, offset]) => [
+                name,
+                input.portBase + offset,
+              ]),
             ),
             secrets: input.secrets,
           });
@@ -1121,9 +1154,17 @@ const make = Effect.gen(function* () {
         input.snapshot ??
         (card.worktreePath === null || card.portBase === null
           ? null
-          : { path: card.worktreePath, portBase: card.portBase, ensureServices: ensureServices(cardId) });
+          : {
+              path: card.worktreePath,
+              portBase: card.portBase,
+              ensureServices: ensureServices(cardId),
+            });
       if (at === null) {
-        return { passed: false, summary: "The card has no worktree to run journeys in.", results: [] };
+        return {
+          passed: false,
+          summary: "The card has no worktree to run journeys in.",
+          results: [],
+        };
       }
       // Journeys drive the running app, so its services must answer first.
       yield* at.ensureServices;
@@ -1172,12 +1213,20 @@ const make = Effect.gen(function* () {
         })),
         ...(preview === undefined
           ? []
-          : [{ kind: "preview" as const, name: preview, port: portBase + (file?.ports["web"] ?? 0) }]),
+          : [
+              {
+                kind: "preview" as const,
+                name: preview,
+                port: portBase + (file?.ports["web"] ?? 0),
+              },
+            ]),
       ];
       return yield* Effect.forEach(
         entries,
         (entry) =>
-          net.hasListenerOnHost(entry.port, "127.0.0.1").pipe(Effect.map((up) => ({ ...entry, up }))),
+          net
+            .hasListenerOnHost(entry.port, "127.0.0.1")
+            .pipe(Effect.map((up) => ({ ...entry, up }))),
         { concurrency: "unbounded" },
       );
     });
@@ -1231,11 +1280,32 @@ const make = Effect.gen(function* () {
     return null;
   };
 
+  /** Pushes a plan's or migration's branch to origin, when its project lands by pull request. */
+  const pushIntegrationBranch = (
+    cardId: string,
+    project: OrchestrationProject,
+    root: string,
+    branch: string,
+  ) =>
+    Effect.gen(function* () {
+      if (!landsByPullRequest(project)) return;
+      if ((yield* gitRun(cardId, root, ["remote", "get-url", "origin"])).code !== 0) return;
+      yield* git(cardId, root, [
+        "push",
+        "--quiet",
+        "origin",
+        `refs/heads/${branch}:refs/heads/${branch}`,
+      ]);
+    });
+
   const landUnlocked = (cardId: CardId) =>
     Effect.gen(function* () {
       const { model, card, project } = yield* readCard(cardId);
       if (card.worktreePath === null || card.branch === null) {
-        return yield* new CardWorkspaceError({ cardId, message: "The card has no worktree to land." });
+        return yield* new CardWorkspaceError({
+          cardId,
+          message: "The card has no worktree to land.",
+        });
       }
       const root = project.workspaceRoot;
       const worktree = card.worktreePath;
@@ -1299,12 +1369,17 @@ const make = Effect.gen(function* () {
           runJourneys({ cardId }),
         );
         if (!journeys.passed) {
-          return { kind: "checksFailed" as const, summary: journeys.summary, results: journeys.results };
+          return {
+            kind: "checksFailed" as const,
+            summary: journeys.summary,
+            results: journeys.results,
+          };
         }
         const files = lines(yield* git(cardId, worktree, ["diff", "--name-only", baseRef, "HEAD"]));
+        const landedSha = yield* git(cardId, worktree, ["rev-parse", "HEAD"]);
 
         // Fast-forward the base where it is checked out, so that checkout moves with it; else move the ref.
-        return yield* withLock(`project:${project.id}`)(
+        const landed = yield* withLock(`project:${project.id}`)(
           Effect.gen(function* () {
             const checkedOutAt = worktreeOfBranch(
               yield* git(cardId, root, ["worktree", "list", "--porcelain"]),
@@ -1323,13 +1398,30 @@ const make = Effect.gen(function* () {
                 message: `Fast-forwarding ${baseBranch} failed: ${merge.stderr.trim().slice(-SCRIPT_OUTPUT_TAIL)}`,
               };
             }
-            return { kind: "landed" as const, baseBranch, files };
+            return { kind: "landed" as const, baseBranch, files, landedSha };
           }),
         );
+        // A child landed into its plan's or migration's branch: origin's copy follows, for its pull request.
+        const parent = (model.cards ?? []).find((candidate) => candidate.id === card.parentCardId);
+        if (
+          landed.kind === "landed" &&
+          (parent?.kind === "plan" || parent?.kind === "migration") &&
+          parent.branch === baseBranch
+        ) {
+          // The merge already happened, so a failed push only waits for the next landing to retry it.
+          yield* pushIntegrationBranch(cardId, project, root, baseBranch).pipe(
+            Effect.catch((error) =>
+              Effect.logWarning("integration branch push failed", { cardId, error: error.message }),
+            ),
+          );
+        }
+        return landed;
       });
 
       // One card at a time lands changes to an exclusive path; locks are taken in a stable order.
-      const touched = lines(yield* git(cardId, worktree, ["diff", "--name-only", `${baseRef}...HEAD`]));
+      const touched = lines(
+        yield* git(cardId, worktree, ["diff", "--name-only", `${baseRef}...HEAD`]),
+      );
       let serialized: Effect.Effect<CardLandResult, CardWorkspaceError> = rebaseCheckAndMerge;
       for (const { glob } of exclusivePathConflicts(touched, policy).toSorted((a, b) =>
         a.glob.localeCompare(b.glob),
@@ -1355,7 +1447,8 @@ const make = Effect.gen(function* () {
       yield* fetchBase(cardId, root, yield* resolveBaseBranch(cardId, model, card, root));
       const { baseRef, file } = yield* loadProjectFile(cardId, model, card, project);
       const settings = yield* readSettings(cardId);
-      const branch = cardBranchName(card);
+      // A plan works on the integration branch its approval named.
+      const branch = card.plan?.integrationBranch ?? cardBranchName(card);
       const worktreePath = path.join(
         serverConfig.worktreesDir,
         path.basename(root),
@@ -1395,7 +1488,9 @@ const make = Effect.gen(function* () {
         if (setup !== null) {
           // Only setup sees secret values; later scripts run code the agent may have changed.
           const secretEnv = Object.fromEntries(
-            secrets.flatMap((secret) => (secret.value === null ? [] : [[secret.name, secret.value]])),
+            secrets.flatMap((secret) =>
+              secret.value === null ? [] : [[secret.name, secret.value]],
+            ),
           );
           yield* admission.run(
             {
@@ -1465,7 +1560,10 @@ const make = Effect.gen(function* () {
   const snapshot: CardWorkspace["Service"]["snapshot"] = (cardId, headSha) =>
     Effect.gen(function* () {
       if (!/^[0-9a-f]{7,64}$/i.test(headSha)) {
-        return yield* new CardWorkspaceError({ cardId, message: `'${headSha}' isn't a commit sha.` });
+        return yield* new CardWorkspaceError({
+          cardId,
+          message: `'${headSha}' isn't a commit sha.`,
+        });
       }
       const { model, card, project } = yield* readCard(cardId);
       const root = project.workspaceRoot;
@@ -1548,6 +1646,103 @@ const make = Effect.gen(function* () {
         ensureServices: ensureSnapshotServices,
         release,
       } satisfies CardSnapshot;
+    });
+
+  const ensureIntegrationBranch: CardWorkspace["Service"]["ensureIntegrationBranch"] = (cardId) =>
+    Effect.gen(function* () {
+      const { card, project } = yield* readCard(cardId);
+      if (card.kind !== "plan" && card.kind !== "migration") {
+        return yield* new CardWorkspaceError({
+          cardId,
+          message: "Only a plan or migration card has an integration branch.",
+        });
+      }
+      if (card.kind === "plan" && (card.plan?.integrationBranch ?? null) === null) {
+        return yield* new CardWorkspaceError({
+          cardId,
+          message: "A plan gets its integration branch when it is approved.",
+        });
+      }
+      const info = yield* withLock(`card:${cardId}`)(ensureUnlocked(cardId));
+      yield* pushIntegrationBranch(cardId, project, project.workspaceRoot, info.branch);
+      return info;
+    });
+
+  /** A plan child starts from its plan's integration branch, so that branch is made first. */
+  const ensure: CardWorkspace["Service"]["ensure"] = (cardId) =>
+    Effect.gen(function* () {
+      const { model, card } = yield* readCard(cardId);
+      const parent = (model.cards ?? []).find((candidate) => candidate.id === card.parentCardId);
+      if (
+        card.worktreePath === null &&
+        parent !== undefined &&
+        parent.worktreePath === null &&
+        card.baseBranch !== null &&
+        card.baseBranch === parent.plan?.integrationBranch
+      ) {
+        yield* ensureIntegrationBranch(parent.id);
+      }
+      return yield* withLock(`card:${cardId}`)(ensureUnlocked(cardId));
+    });
+
+  const enumerateItems: CardWorkspace["Service"]["enumerateItems"] = (cardId) =>
+    Effect.gen(function* () {
+      const info = yield* ensureIntegrationBranch(cardId);
+      const { model, card, project } = yield* readCard(cardId);
+      if (card.migration === null) {
+        return yield* new CardWorkspaceError({
+          cardId,
+          message: "Only a migration card has items to list.",
+        });
+      }
+      const command = card.migration.enumerateCommand;
+      const headSha = yield* git(cardId, info.worktreePath, ["rev-parse", "HEAD"]);
+      const { file } = yield* loadProjectFile(cardId, model, card, project);
+      const settings = yield* readSettings(cardId);
+      // A snapshot, so whatever the script writes never reaches the branch children land into.
+      const output = yield* Effect.acquireUseRelease(
+        snapshot(cardId, headSha),
+        (listing) =>
+          admission.run(
+            {
+              cardId,
+              projectId: project.id,
+              priority: card.priority,
+              label: `Listing the items of ${card.title}`,
+              kind: "setup",
+            },
+            processRunner
+              .run({
+                ...shellFor(command),
+                cwd: listing.path,
+                env: scriptEnv({
+                  cardId,
+                  project,
+                  worktreePath: listing.path,
+                  portBase: listing.portBase,
+                  file,
+                  settings,
+                }),
+                timeout: SCRIPT_TIMEOUT,
+                maxOutputBytes: 1_048_576,
+                outputMode: "truncate",
+                timeoutBehavior: "timedOutResult",
+              })
+              .pipe(Effect.mapError(toError(cardId, "The enumerate command could not start."))),
+          ),
+        (listing) => listing.release,
+      );
+      if (output.code !== 0 || output.timedOut) {
+        return yield* new CardWorkspaceError({
+          cardId,
+          message: output.timedOut
+            ? "The enumerate command timed out."
+            : `The enumerate command failed: ${(output.stderr || output.stdout).trim().slice(-SCRIPT_OUTPUT_TAIL)}`,
+        });
+      }
+      return lines(output.stdout)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
     });
 
   const teardownUnlocked = (cardId: CardId) =>
@@ -1671,7 +1866,9 @@ const make = Effect.gen(function* () {
 
   return {
     start,
-    ensure: (cardId) => withLock(`card:${cardId}`)(ensureUnlocked(cardId)),
+    ensure,
+    ensureIntegrationBranch,
+    enumerateItems,
     snapshot,
     ensureServices,
     diff,

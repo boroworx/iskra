@@ -60,11 +60,23 @@ const host = {
   >,
   mergeRefusal: null as string | null,
   merges: 0,
-  created: [] as Array<{ readonly baseRefName: string; readonly headSelector: string; readonly title: string }>,
+  created: [] as Array<{
+    readonly baseRefName: string;
+    readonly headSelector: string;
+    readonly title: string;
+  }>,
   pushes: 0,
   permissions: {} as Record<string, string>,
-  landResult: { kind: "landed", baseBranch: "main", files: [] } as CardWorkspace.CardLandResult,
-  openCards: [] as ReadonlyArray<{ readonly cardId: CardId; readonly files: ReadonlyArray<string> }>,
+  landResult: {
+    kind: "landed",
+    baseBranch: "main",
+    files: [],
+    landedSha: "abc1234",
+  } as CardWorkspace.CardLandResult,
+  openCards: [] as ReadonlyArray<{
+    readonly cardId: CardId;
+    readonly files: ReadonlyArray<string>;
+  }>,
   checks: [] as CardWorkspace.CardProjectFile["checks"],
 };
 
@@ -77,7 +89,7 @@ const resetHost = () =>
     created: [],
     pushes: 0,
     permissions: {},
-    landResult: { kind: "landed", baseBranch: "main", files: [] },
+    landResult: { kind: "landed", baseBranch: "main", files: [], landedSha: "abc1234" },
     openCards: [],
     checks: [],
   });
@@ -142,14 +154,18 @@ const fakes = Layer.mergeAll(
         ? Effect.sync(() => {
             host.merges += 1;
           })
-        : Effect.fail(new PullRequestOperationError({ operation: "merge", detail: host.mergeRefusal })),
+        : Effect.fail(
+            new PullRequestOperationError({ operation: "merge", detail: host.mergeRefusal }),
+          ),
   }),
   Layer.mock(ProcessRunner)({ run: (input) => Effect.sync(() => ghOutput(input.args)) }),
 );
 
 const layer = CardLandingReactor.layer.pipe(
   Layer.provide(fakes),
-  Layer.provideMerge(OrchestrationEngineLive.pipe(Layer.provide(OrchestrationProjectionPipelineLive))),
+  Layer.provideMerge(
+    OrchestrationEngineLive.pipe(Layer.provide(OrchestrationProjectionPipelineLive)),
+  ),
   Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
   Layer.provide(ThreadBackgroundLiveness.layer),
   Layer.provide(ThreadPlanProgress.layer),
@@ -172,7 +188,10 @@ const makeWorld = Effect.fn("makeWorld")(function* (
     readonly landing?: "pullRequest" | "local";
     readonly autoMerge?: boolean;
     readonly ciFixRounds?: number;
-    readonly exclusivePaths?: ReadonlyArray<{ readonly glob: string; readonly afterRebase: string | null }>;
+    readonly exclusivePaths?: ReadonlyArray<{
+      readonly glob: string;
+      readonly afterRebase: string | null;
+    }>;
   } = {},
 ) {
   resetHost();
@@ -216,7 +235,10 @@ const makeWorld = Effect.fn("makeWorld")(function* (
     name,
     roleTags: [],
     rolePrompt: "",
-    modelSelection: { instanceId: ProviderInstanceId.make("claudeAgent"), model: "claude-haiku-4-5" },
+    modelSelection: {
+      instanceId: ProviderInstanceId.make("claudeAgent"),
+      model: "claude-haiku-4-5",
+    },
     capabilities: ["read", "write"],
     createdAt: now,
   });
@@ -288,7 +310,9 @@ const makeWorld = Effect.fn("makeWorld")(function* (
       .getCommandReadModel()
       .pipe(Effect.map((model) => (model.cards ?? []).find((card) => card.id === cardId)!));
   const activitiesOf = (cardId: CardId) =>
-    snapshotQuery.getCardActivity(cardId, { limit: 200 }).pipe(Effect.map((stream) => stream.activities));
+    snapshotQuery
+      .getCardActivity(cardId, { limit: 200 })
+      .pipe(Effect.map((stream) => stream.activities));
   const withReason = (cardId: CardId, code: string) =>
     activitiesOf(cardId).pipe(
       Effect.map((activities) => activities.filter((activity) => activity.reason?.code === code)),
@@ -335,7 +359,9 @@ it.layer(layer)("CardLandingReactor", (it) => {
       const { cardId } = yield* world.cardInReview("api");
       host.detail = {
         ...host.detail,
-        checks: [{ name: "build", status: "failure", description: "tsc failed", url: "https://ci/1" }],
+        checks: [
+          { name: "build", status: "failure", description: "tsc failed", url: "https://ci/1" },
+        ],
       };
       yield* world.reactor.pollNow;
 
@@ -393,7 +419,11 @@ it.layer(layer)("CardLandingReactor", (it) => {
         recordedAt: now,
       });
       const early = yield* engine
-        .dispatch({ type: "card.merge.approve", commandId: CommandId.make("cmd-cipending-early"), cardId })
+        .dispatch({
+          type: "card.merge.approve",
+          commandId: CommandId.make("cmd-cipending-early"),
+          cardId,
+        })
         .pipe(Effect.flip);
       expect(early).toMatchObject({ detail: PENDING_CI_REASON });
 
@@ -452,101 +482,112 @@ it.layer(layer)("CardLandingReactor", (it) => {
     }),
   );
 
-  it.effect("merges on a person's approval, lands a merge made on the host, and backs out of a refused merge", () =>
-    Effect.gen(function* () {
-      const world = yield* makeWorld("merge");
-      const approved = yield* world.cardInReview("approved");
-      yield* world.approveMerge(approved.cardId);
-      expect(host.merges).toBe(1);
-      expect((yield* world.cardOf(approved.cardId)).status).toBe("landed");
+  it.effect(
+    "merges on a person's approval, lands a merge made on the host, and backs out of a refused merge",
+    () =>
+      Effect.gen(function* () {
+        const world = yield* makeWorld("merge");
+        const approved = yield* world.cardInReview("approved");
+        yield* world.approveMerge(approved.cardId);
+        expect(host.merges).toBe(1);
+        expect((yield* world.cardOf(approved.cardId)).status).toBe("landed");
 
-      const onHost = yield* world.cardInReview("onhost");
-      host.detail = { ...host.detail, state: "merged" };
-      yield* world.reactor.pollNow;
-      expect((yield* world.cardOf(onHost.cardId)).status).toBe("landed");
-      expect(yield* world.withReason(onHost.cardId, "mergedOnHost")).toHaveLength(1);
+        const onHost = yield* world.cardInReview("onhost");
+        host.detail = { ...host.detail, state: "merged" };
+        yield* world.reactor.pollNow;
+        expect((yield* world.cardOf(onHost.cardId)).status).toBe("landed");
+        expect(yield* world.withReason(onHost.cardId, "mergedOnHost")).toHaveLength(1);
 
-      host.detail = { ...host.detail, state: "open" };
-      const blocked = yield* world.cardInReview("blocked");
-      host.mergeRefusal = "Required status check is expected.";
-      yield* world.approveMerge(blocked.cardId);
-      const [refused] = yield* world.withReason(blocked.cardId, "landingBlocked");
-      expect(refused?.body).toContain("Required status check is expected.");
-      expect((yield* world.cardOf(blocked.cardId)).status).toBe("inReview");
-    }),
+        host.detail = { ...host.detail, state: "open" };
+        const blocked = yield* world.cardInReview("blocked");
+        host.mergeRefusal = "Required status check is expected.";
+        yield* world.approveMerge(blocked.cardId);
+        const [refused] = yield* world.withReason(blocked.cardId, "landingBlocked");
+        expect(refused?.body).toContain("Required status check is expected.");
+        expect((yield* world.cardOf(blocked.cardId)).status).toBe("inReview");
+      }),
   );
 
-  it.effect("lands a card with passing evidence on its own only when the project turned on auto-merge", () =>
-    Effect.gen(function* () {
-      const manual = yield* makeWorld("manual-merge", { landing: "local" });
-      const waiting = yield* manual.cardInReview("waits");
-      yield* manual.reactor.drain;
-      expect((yield* manual.cardOf(waiting.cardId)).status).toBe("inReview");
+  it.effect(
+    "lands a card with passing evidence on its own only when the project turned on auto-merge",
+    () =>
+      Effect.gen(function* () {
+        const manual = yield* makeWorld("manual-merge", { landing: "local" });
+        const waiting = yield* manual.cardInReview("waits");
+        yield* manual.reactor.drain;
+        expect((yield* manual.cardOf(waiting.cardId)).status).toBe("inReview");
 
-      const auto = yield* makeWorld("auto-merge", { landing: "local", autoMerge: true });
-      const landed = yield* auto.cardInReview("lands");
-      yield* auto.reactor.drain;
-      // It lands once a verifier passed its commit with a hidden scenario satisfied.
-      const engine = yield* OrchestrationEngineService;
-      yield* engine.dispatch({
-        type: "card.verifier.select",
-        commandId: CommandId.make("cmd-auto-merge-verifier"),
-        cardId: landed.cardId,
-        headSha: "abc1234",
-        verifier: {
-          agentId: AgentId.make("agent-auto-merge"),
-          instanceId: ProviderInstanceId.make("claudeAgent"),
-          model: "claude-haiku-4-5",
-          reason: { code: "sameModelVerifier", text: "Only the builder's model can check it." },
-        },
-      });
-      yield* engine.dispatch({
-        type: "card.verdict.record",
-        commandId: CommandId.make("cmd-auto-merge-verdict"),
-        verdictId: "verdict-auto-merge",
-        cardId: landed.cardId,
-        headSha: "abc1234",
-        criteria: [{ criterionId: "c1", pass: true, evidence: "test", note: "" }],
-        diffJudge: { matchesCriteria: true, concerns: [] },
-        scenarios: [{ scenarioId: "holdout-1", satisfied: true }],
-        recordedAt: now,
-      });
-      // The verdict queues the landing check, which enters landing and queues the local land.
-      yield* auto.reactor.drain;
-      // Entering landing queues the local land as its own job.
-      yield* auto.reactor.drain;
-      expect((yield* auto.cardOf(landed.cardId)).status).toBe("landed");
-    }),
+        const auto = yield* makeWorld("auto-merge", { landing: "local", autoMerge: true });
+        const landed = yield* auto.cardInReview("lands");
+        yield* auto.reactor.drain;
+        // It lands once a verifier passed its commit with a hidden scenario satisfied.
+        const engine = yield* OrchestrationEngineService;
+        yield* engine.dispatch({
+          type: "card.verifier.select",
+          commandId: CommandId.make("cmd-auto-merge-verifier"),
+          cardId: landed.cardId,
+          headSha: "abc1234",
+          verifier: {
+            agentId: AgentId.make("agent-auto-merge"),
+            instanceId: ProviderInstanceId.make("claudeAgent"),
+            model: "claude-haiku-4-5",
+            reason: { code: "sameModelVerifier", text: "Only the builder's model can check it." },
+          },
+        });
+        yield* engine.dispatch({
+          type: "card.verdict.record",
+          commandId: CommandId.make("cmd-auto-merge-verdict"),
+          verdictId: "verdict-auto-merge",
+          cardId: landed.cardId,
+          headSha: "abc1234",
+          criteria: [{ criterionId: "c1", pass: true, evidence: "test", note: "" }],
+          diffJudge: { matchesCriteria: true, concerns: [] },
+          scenarios: [{ scenarioId: "holdout-1", satisfied: true }],
+          recordedAt: now,
+        });
+        // The verdict queues the landing check, which enters landing and queues the local land.
+        yield* auto.reactor.drain;
+        // Entering landing queues the local land as its own job.
+        yield* auto.reactor.drain;
+        expect((yield* auto.cardOf(landed.cardId)).status).toBe("landed");
+      }),
   );
 
-  it.effect("pauses a locally landing card once its rounds are used, and returns cards sharing an exclusive path", () =>
-    Effect.gen(function* () {
-      const world = yield* makeWorld("local", {
-        landing: "local",
-        ciFixRounds: 0,
-        exclusivePaths: [{ glob: "db/migrations/**", afterRebase: "pnpm db:generate" }],
-      });
-      const stuck = yield* world.cardInReview("stuck");
-      expect(stuck.link.payload.landing.mode).toBe("local");
-      host.landResult = { kind: "conflict", baseBranch: "staging", files: ["a.ts"] };
-      yield* world.approveMerge(stuck.cardId);
-      expect(yield* world.cardOf(stuck.cardId)).toMatchObject({
-        status: "inReview",
-        paused: { reason: { code: "fixRoundsExhausted" } },
-      });
+  it.effect(
+    "pauses a locally landing card once its rounds are used, and returns cards sharing an exclusive path",
+    () =>
+      Effect.gen(function* () {
+        const world = yield* makeWorld("local", {
+          landing: "local",
+          ciFixRounds: 0,
+          exclusivePaths: [{ glob: "db/migrations/**", afterRebase: "pnpm db:generate" }],
+        });
+        const stuck = yield* world.cardInReview("stuck");
+        expect(stuck.link.payload.landing.mode).toBe("local");
+        host.landResult = { kind: "conflict", baseBranch: "staging", files: ["a.ts"] };
+        yield* world.approveMerge(stuck.cardId);
+        expect(yield* world.cardOf(stuck.cardId)).toMatchObject({
+          status: "inReview",
+          paused: { reason: { code: "fixRoundsExhausted" } },
+        });
 
-      const other = yield* world.cardInReview("other");
-      const migrating = yield* world.cardInReview("migrating");
-      host.landResult = { kind: "landed", baseBranch: "staging", files: ["db/migrations/002.sql"] };
-      host.openCards = [{ cardId: other.cardId, files: ["db/migrations/003.sql"] }];
-      yield* world.approveMerge(migrating.cardId);
+        const other = yield* world.cardInReview("other");
+        const migrating = yield* world.cardInReview("migrating");
+        host.landResult = {
+          kind: "landed",
+          baseBranch: "staging",
+          files: ["db/migrations/002.sql"],
+          landedSha: "abc1234",
+        };
+        host.openCards = [{ cardId: other.cardId, files: ["db/migrations/003.sql"] }];
+        yield* world.approveMerge(migrating.cardId);
 
-      expect((yield* world.cardOf(migrating.cardId)).status).toBe("landed");
-      const [told] = yield* world.withReason(other.cardId, "exclusivePathChanged");
-      expect(told?.body).toBe(
-        "Another card changed db/migrations/**. Rebase onto origin/staging, then run `pnpm db:generate` before asking for review.",
-      );
-      expect((yield* world.cardOf(other.cardId)).status).toBe("inProgress");
-    }),
+        expect((yield* world.cardOf(migrating.cardId)).status).toBe("landed");
+        const [told] = yield* world.withReason(other.cardId, "exclusivePathChanged");
+        expect(told?.body).toBe(
+          "Another card changed db/migrations/**. Rebase onto origin/staging, then run `pnpm db:generate` before asking for review.",
+        );
+        expect((yield* world.cardOf(other.cardId)).status).toBe("inProgress");
+      }),
   );
 });
