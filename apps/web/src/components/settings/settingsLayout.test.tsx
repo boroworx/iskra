@@ -36,9 +36,9 @@ describe("setting captions", () => {
 
   it("keeps the first sentence inline and the whole explanation behind the info button", () => {
     const text =
-      "Settle a thread when its pull request merges. Closed pull requests still settle automatically.";
+      "Settle a conversation when its pull request merges. Closed pull requests still settle automatically.";
     expect(splitSettingDescription(text)).toEqual({
-      inline: "Settle a thread when its pull request merges.",
+      inline: "Settle a conversation when its pull request merges.",
       full: text,
     });
   });

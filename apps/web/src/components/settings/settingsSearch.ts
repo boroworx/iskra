@@ -245,7 +245,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "auto-settle-inactive-threads",
-    title: "Auto-settle inactive threads",
+    title: "Auto-settle inactive conversations",
     to: "/settings/archived",
     searchTerms: ["conversation inactivity days no activity automatically"],
     requiresThreadAutoSettlement: true,
@@ -253,7 +253,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "auto-settle-merged-threads",
-    title: "Auto-settle merged threads",
+    title: "Auto-settle merged conversations",
     to: "/settings/archived",
     searchTerms: ["pull request merge closed automatically conversation"],
     requiresThreadAutoSettlement: true,
@@ -805,7 +805,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "archive",
-    title: "Archived threads",
+    title: "Archived conversations",
     to: "/settings/archived",
     searchTerms: ["restore reopen deleted history projects"],
   },

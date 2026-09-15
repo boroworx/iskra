@@ -559,10 +559,10 @@ export function useSettingsRestore(onRestored?: () => void) {
         : []),
       ...(settings.sidebarAutoSettleAfterDays !==
       DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays
-        ? ["Auto-settle inactive threads"]
+        ? ["Auto-settle inactive conversations"]
         : []),
       ...(settings.sidebarAutoSettleOnMerge !== DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge
-        ? ["Auto-settle merged threads"]
+        ? ["Auto-settle merged conversations"]
         : []),
       ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ["Word wrap"] : []),
       ...getChangedTypographySettingLabels(settings),
@@ -2467,7 +2467,7 @@ function GeneralSettingsSections({ page }: { readonly page: "general" | "agents"
                   serverScoped
                   settingKeys={["sidebarAutoSettleOnMerge"]}
                   {...searchableSetting("auto-settle-merged-threads")}
-                  description="Settle a thread when its pull request merges. Closed pull requests still settle automatically."
+                  description="Settle a conversation when its pull request merges. Closed pull requests still settle automatically."
                   resetAction={
                     settings.sidebarAutoSettleOnMerge !==
                     DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge ? (
@@ -2489,7 +2489,7 @@ function GeneralSettingsSections({ page }: { readonly page: "general" | "agents"
                       onCheckedChange={(checked) =>
                         updateSettings({ sidebarAutoSettleOnMerge: Boolean(checked) })
                       }
-                      aria-label="Auto-settle merged threads"
+                      aria-label="Auto-settle merged conversations"
                     />
                   }
                 />
@@ -2498,7 +2498,7 @@ function GeneralSettingsSections({ page }: { readonly page: "general" | "agents"
                   serverScoped
                   settingKeys={["sidebarAutoSettleAfterDays"]}
                   {...searchableSetting("auto-settle-inactive-threads")}
-                  description="Settle threads that have had no activity for a while."
+                  description="Settle conversations that have had no activity for a while."
                   resetAction={
                     settings.sidebarAutoSettleAfterDays !==
                     DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays ? (
@@ -2522,7 +2522,7 @@ function GeneralSettingsSections({ page }: { readonly page: "general" | "agents"
                           sidebarAutoSettleAfterDays: checked ? AUTO_SETTLE_DEFAULT_DAYS : null,
                         })
                       }
-                      aria-label="Auto-settle inactive threads"
+                      aria-label="Auto-settle inactive conversations"
                     />
                   }
                 />
@@ -2531,7 +2531,7 @@ function GeneralSettingsSections({ page }: { readonly page: "general" | "agents"
                     serverScoped
                     settingKeys={["sidebarAutoSettleAfterDays"]}
                     title={searchableSetting("days-before-auto-settle").title}
-                    description="Any new activity un-settles a thread automatically."
+                    description="Any new activity un-settles a conversation automatically."
                     control={
                       <AutoSettleDaysInput
                         value={settings.sidebarAutoSettleAfterDays}
@@ -2547,7 +2547,7 @@ function GeneralSettingsSections({ page }: { readonly page: "general" | "agents"
         <SettingsSection id="confirmations" title="Confirmations">
           <SettingsRow
             {...searchableSetting("unpin-confirmation")}
-            description="Ask before unpinning a thread."
+            description="Ask before unpinning a conversation."
             resetAction={
               settings.confirmThreadUnpin !== DEFAULT_UNIFIED_SETTINGS.confirmThreadUnpin ? (
                 <SettingResetButton
@@ -2572,7 +2572,7 @@ function GeneralSettingsSections({ page }: { readonly page: "general" | "agents"
           />
           <SettingsRow
             {...searchableSetting("archive-confirmation")}
-            description="Require a second click before archiving a thread."
+            description="Require a second click before archiving a conversation."
             resetAction={
               settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive ? (
                 <SettingResetButton
@@ -2597,7 +2597,7 @@ function GeneralSettingsSections({ page }: { readonly page: "general" | "agents"
           />
           <SettingsRow
             {...searchableSetting("delete-confirmation")}
-            description="Ask before deleting a thread and its messages."
+            description="Ask before deleting a conversation and its messages."
             resetAction={
               settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete ? (
                 <SettingResetButton
@@ -3225,7 +3225,7 @@ export function ArchivedThreadsPanel() {
               ? "Loading archived threads…"
               : archiveError
                 ? `Could not load archived threads. ${archiveError}`
-                : "No archived threads."}
+                : "No archived conversations."}
           </SettingsEmptyRow>
         </SettingsSection>
       ) : (
