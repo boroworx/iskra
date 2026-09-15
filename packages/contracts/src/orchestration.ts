@@ -56,6 +56,10 @@ export const ORCHESTRATION_WS_METHODS = {
   listArchivedChannels: "orchestration.listArchivedChannels",
   setProjectSecret: "project.secrets.set",
   removeProjectSecret: "project.secrets.remove",
+  listProjectHoldouts: "project.holdouts.list",
+  getProjectHoldout: "project.holdouts.get",
+  setProjectHoldout: "project.holdouts.set",
+  removeProjectHoldout: "project.holdouts.remove",
 } as const;
 
 export const ProviderApprovalPolicy = Schema.Literals([
@@ -499,6 +503,30 @@ export const Reason = Schema.Struct({
 });
 export type Reason = typeof Reason.Type;
 
+/**
+ * Reason codes recorded for verifier selections and verdicts, runtime waits and failures, and wakes.
+ * `Reason.code` stays a free string; clients label each of these.
+ */
+export const AUTOMATION_REASON_CODES = [
+  "differentProvider",
+  "sameProviderVerifier",
+  "sameModelVerifier",
+  "verifierFailed",
+  "verifierError",
+  "verdictStale",
+  "verifierOverridden",
+  "journeyFailed",
+  "serviceDown",
+  "previewDown",
+  "setupTimedOut",
+  "checksHung",
+  "reactorFailed",
+  "waitingForSlot",
+  "exclusivePathBusy",
+  "previewHostConnected",
+] as const;
+export type AutomationReasonCode = (typeof AUTOMATION_REASON_CODES)[number];
+
 /** How a card's work lands: a pull request on the host, or a local fast-forward. */
 export const ProjectLandingMode = Schema.Literals(["pullRequest", "local"]);
 export type ProjectLandingMode = typeof ProjectLandingMode.Type;
@@ -567,6 +595,10 @@ export const ProjectOrchestration = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
   builderSubCardsMax: PositiveInt.pipe(Schema.withDecodingDefault(Effect.succeed(8))),
+  // A second agent checks each card in review against its criteria before it can merge.
+  verifier: Schema.Struct({
+    mode: Schema.Literals(["off", "on"]).pipe(Schema.withDecodingDefault(Effect.succeed("off" as const))),
+  }).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 });
 export type ProjectOrchestration = typeof ProjectOrchestration.Type;
 
@@ -620,6 +652,35 @@ export const AgentName = TrimmedNonEmptyString.check(
   Schema.isPattern(/^[a-z0-9-]+$/),
 );
 
+/** What an agent template may run as. Each wake or card session is its own run of the template. */
+export const AgentRole = Schema.Literals(["builder", "lead", "helper", "critic", "verifier"]);
+export type AgentRole = typeof AgentRole.Type;
+export const AgentRoles = Schema.Array(AgentRole);
+
+/** Agents from before roles keep the powers they had; verifying is opted into. */
+export const DEFAULT_AGENT_ROLES: ReadonlyArray<AgentRole> = ["builder", "lead", "helper", "critic"];
+
+/**
+ * Steps a template adds to the card blueprint. Every field only adds work: none drops checks,
+ * journeys, the scope judge or evidence, and `uiCapture: "never"` still flags UI criteria.
+ */
+export const AgentBlueprint = Schema.Struct({
+  preflight: Schema.Literals(["none", "targeted"]).pipe(
+    Schema.withDecodingDefault(Effect.succeed("none" as const)),
+  ),
+  uiCapture: Schema.Literals(["auto", "always", "never"]).pipe(
+    Schema.withDecodingDefault(Effect.succeed("auto" as const)),
+  ),
+  uiPaths: Schema.Array(TrimmedNonEmptyString).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  // `always` verifies this template's cards even when the project's verifier is off.
+  verify: Schema.Literals(["project", "always"]).pipe(
+    Schema.withDecodingDefault(Effect.succeed("project" as const)),
+  ),
+});
+export type AgentBlueprint = typeof AgentBlueprint.Type;
+
+export const DEFAULT_AGENT_BLUEPRINT: AgentBlueprint = Schema.decodeSync(AgentBlueprint)({});
+
 export const OrchestrationAgent = Schema.Struct({
   id: AgentId,
   projectId: ProjectId,
@@ -630,6 +691,10 @@ export const OrchestrationAgent = Schema.Struct({
   modelSelection: ModelSelection,
   // Ceiling for card-scoped runs; conversation runs are always read-only.
   capabilities: RunCapabilities,
+  roles: AgentRoles.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_AGENT_ROLES))),
+  // The agent that verifies cards this template builds, before any other candidate.
+  verifyWith: Schema.NullOr(AgentName).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  blueprint: AgentBlueprint.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime),
@@ -910,7 +975,7 @@ export type CardRiskClaims = typeof CardRiskClaims.Type;
 /** One piece of captured evidence: a check's result, or a screenshot or recording of the preview. */
 export const CardEvidenceItem = Schema.Struct({
   itemId: TrimmedNonEmptyString,
-  kind: Schema.Literals(["check", "screenshot", "recording"]),
+  kind: Schema.Literals(["check", "screenshot", "recording", "journey"]),
   source: Schema.Literals(["local", "ci", "preview"]),
   name: TrimmedNonEmptyString,
   criterionId: Schema.NullOr(TrimmedNonEmptyString),
@@ -1010,6 +1075,9 @@ export const CardAttentionCode = Schema.Literals([
   "pullRequestClosed",
   "criteriaMissing",
   "ciChecksNeedPullRequest",
+  "verifierError",
+  "serviceDown",
+  "previewDown",
 ]);
 export type CardAttentionCode = typeof CardAttentionCode.Type;
 
@@ -1023,6 +1091,7 @@ export const CardAttentionAction = Schema.Literals([
   "retryLanding",
   "openSettings",
   "addCriteria",
+  "rerunVerifier",
 ]);
 export type CardAttentionAction = typeof CardAttentionAction.Type;
 
@@ -1040,6 +1109,90 @@ export type CardAttention = typeof CardAttention.Type;
 /** Why a card lands without a person approving its merge. */
 export const CardLandingBeginReason = Schema.Literals(["planChild", "autoMergePolicy"]);
 export type CardLandingBeginReason = typeof CardLandingBeginReason.Type;
+
+/** The agent and model checking a card, and why that one was chosen (`Reason.code` names the fallback). */
+export const CardVerifierSelection = Schema.Struct({
+  agentId: AgentId,
+  instanceId: ProviderInstanceId,
+  model: TrimmedNonEmptyString,
+  reason: Reason,
+});
+export type CardVerifierSelection = typeof CardVerifierSelection.Type;
+
+/**
+ * Where a card's verification stands for commit `headSha`. `off` until a verifier is first
+ * selected; new evidence for another commit sends a started verification back to `pending`.
+ */
+export const CardVerification = Schema.Struct({
+  state: Schema.Literals(["off", "pending", "running", "passed", "failed", "overridden"]),
+  headSha: Schema.NullOr(TrimmedNonEmptyString),
+  verdictId: Schema.NullOr(TrimmedNonEmptyString),
+  verifier: Schema.NullOr(CardVerifierSelection),
+  // Hidden scenarios the verdict satisfied, as counts only; null when none ran.
+  satisfaction: Schema.NullOr(Schema.Struct({ satisfied: NonNegativeInt, total: NonNegativeInt })),
+  override: Schema.NullOr(Schema.Struct({ reason: TrimmedNonEmptyString, at: IsoDateTime })),
+});
+export type CardVerification = typeof CardVerification.Type;
+
+export const CARD_VERIFICATION_OFF: CardVerification = {
+  state: "off",
+  headSha: null,
+  verdictId: null,
+  verifier: null,
+  satisfaction: null,
+  override: null,
+};
+
+/** The verifier's judgement of one criterion, with the evidence it relied on. */
+export const CardVerdictCriterion = Schema.Struct({
+  criterionId: TrimmedNonEmptyString,
+  pass: Schema.Boolean,
+  evidence: Schema.String,
+  note: Schema.String,
+});
+export type CardVerdictCriterion = typeof CardVerdictCriterion.Type;
+
+/** Whether the diff does what the criteria ask, and what worries the verifier. */
+export const CardVerdictDiffJudge = Schema.Struct({
+  matchesCriteria: Schema.Boolean,
+  concerns: Schema.Array(Schema.String),
+});
+export type CardVerdictDiffJudge = typeof CardVerdictDiffJudge.Type;
+
+/** A hidden scenario's result. Its text never leaves the holdout store. */
+export const CardVerdictScenario = Schema.Struct({
+  scenarioId: TrimmedNonEmptyString,
+  satisfied: Schema.Boolean,
+});
+export type CardVerdictScenario = typeof CardVerdictScenario.Type;
+
+/** A verifier's verdict on a card's commit; `passed` is decided when it is recorded. */
+export const CardVerdict = Schema.Struct({
+  verdictId: TrimmedNonEmptyString,
+  cardId: CardId,
+  headSha: TrimmedNonEmptyString,
+  verifier: CardVerifierSelection,
+  criteria: Schema.Array(CardVerdictCriterion),
+  diffJudge: CardVerdictDiffJudge,
+  scenarios: Schema.Array(CardVerdictScenario),
+  passed: Schema.Boolean,
+  recordedAt: IsoDateTime,
+});
+export type CardVerdict = typeof CardVerdict.Type;
+
+/**
+ * A scenario only the verifier reads, stored on the server under the Iskra home and never in the
+ * repository or the event log. A `command` scenario is run by the server in the verifier's snapshot.
+ */
+export const HoldoutScenario = Schema.Struct({
+  scenarioId: TrimmedNonEmptyString,
+  title: TrimmedNonEmptyString,
+  kind: Schema.Literals(["text", "command"]),
+  body: Schema.String,
+  command: Schema.NullOr(TrimmedNonEmptyString),
+  timeoutMinutes: PositiveInt.check(Schema.isLessThanOrEqualTo(30)),
+});
+export type HoldoutScenario = typeof HoldoutScenario.Type;
 
 export const OrchestrationCard = Schema.Struct({
   id: CardId,
@@ -1117,6 +1270,7 @@ export const OrchestrationCard = Schema.Struct({
   attention: Schema.Array(CardAttention).pipe(
     Schema.withDecodingDefault(Effect.succeed([] as ReadonlyArray<CardAttention>)),
   ),
+  verification: CardVerification.pipe(Schema.withDecodingDefault(Effect.succeed(CARD_VERIFICATION_OFF))),
   relations: Schema.Array(CardRelation),
   createdBy: CardAuthor,
   createdAt: IsoDateTime,
@@ -1139,6 +1293,7 @@ export const LEGACY_CARD_CONTRACT = {
   queuedAt: null,
   openElicitations: [],
   attention: [],
+  verification: CARD_VERIFICATION_OFF,
 } as const satisfies Partial<OrchestrationCard>;
 
 export const ChannelMessageAuthorKind = Schema.Literals(["human", "agent", "system", "webhook"]);
@@ -1226,6 +1381,7 @@ export const CardActivityKind = Schema.Literals([
   "error",
   "critique",
   "help",
+  "verdict",
 ]);
 export type CardActivityKind = typeof CardActivityKind.Type;
 
@@ -1329,10 +1485,17 @@ export type RenderedRunContext = typeof RenderedRunContext.Type;
  * What a run is for: a conversation in a channel, the one session writing a
  * card (its owner), or a read-only helper answering a question on a card.
  */
-export const RunRole = Schema.Literals(["conversation", "owner", "helper", "critic", "lead"]);
+export const RunRole = Schema.Literals([
+  "conversation",
+  "owner",
+  "helper",
+  "critic",
+  "lead",
+  "verifier",
+]);
 export type RunRole = typeof RunRole.Type;
 
-export const CardSessionRole = Schema.Literals(["owner", "helper", "critic"]);
+export const CardSessionRole = Schema.Literals(["owner", "helper", "critic", "verifier"]);
 export type CardSessionRole = typeof CardSessionRole.Type;
 
 /** A decision on a card as a session is handed it, with its author named. */
@@ -1875,6 +2038,9 @@ export const OrchestrationAgentShell = Schema.Struct({
   spentUsd: Schema.optional(Schema.Number),
   // Its card sessions' ceiling, so starting a card can warn when it can't write. Optional for older servers.
   capabilities: Schema.optional(RunCapabilities),
+  // What the agent may run as and the steps it adds to its cards. Optional for older servers.
+  roles: Schema.optional(AgentRoles),
+  blueprint: Schema.optional(AgentBlueprint),
 });
 export type OrchestrationAgentShell = typeof OrchestrationAgentShell.Type;
 
@@ -2091,6 +2257,10 @@ export const AgentCreatedPayload = Schema.Struct({
   rolePrompt: Schema.String,
   modelSelection: ModelSelection,
   capabilities: RunCapabilities,
+  // Optional so agents from before roles still decode; absent reads as the defaults.
+  roles: Schema.optional(AgentRoles),
+  verifyWith: Schema.optional(Schema.NullOr(AgentName)),
+  blueprint: Schema.optional(AgentBlueprint),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -2103,6 +2273,9 @@ export const AgentUpdatedPayload = Schema.Struct({
   rolePrompt: Schema.optional(Schema.String),
   modelSelection: Schema.optional(ModelSelection),
   capabilities: Schema.optional(RunCapabilities),
+  roles: Schema.optional(AgentRoles),
+  verifyWith: Schema.optional(Schema.NullOr(AgentName)),
+  blueprint: Schema.optional(AgentBlueprint),
   updatedAt: IsoDateTime,
 });
 
@@ -2162,6 +2335,8 @@ export const CardStatusChangedPayload = Schema.Struct({
   move: CardMove,
   // Set when something returned the card to work: failed checks, a review comment, a conflict.
   reason: Schema.optional(TrimmedNonEmptyString),
+  // Why, as a reason code (such as `verifierFailed`); absent reads as the move.
+  reasonCode: Schema.optional(TrimmedNonEmptyString),
   // The fix round an automatic return to work used.
   round: Schema.optional(CardFixRound),
   // Set on a mergedOnHost move: the pull request a person merged on its host.
@@ -2222,6 +2397,44 @@ export const CardHelperRequestedPayload = Schema.Struct({
   agentId: AgentId,
   messageId: MessageId,
   question: TrimmedNonEmptyString,
+  // Who asked: a person on the card, or its builder through `request_help`. Absent reads as a person.
+  requestedBy: Schema.optional(Schema.Literals(["human", "builder"])),
+  requestedAt: IsoDateTime,
+});
+
+/** What a critic looks at: the card's spec or its diff. */
+export const CardCritiqueFocus = Schema.Literals(["spec", "diff"]);
+export type CardCritiqueFocus = typeof CardCritiqueFocus.Type;
+
+/** The builder asking a read-only critic to look at its work; the critique goes back to it. */
+export const CardCritiqueRequestedPayload = Schema.Struct({
+  cardId: CardId,
+  agentId: AgentId,
+  messageId: MessageId,
+  focus: CardCritiqueFocus,
+  requestedAt: IsoDateTime,
+});
+
+export const CardVerifierSelectedPayload = Schema.Struct({
+  cardId: CardId,
+  headSha: TrimmedNonEmptyString,
+  verifier: CardVerifierSelection,
+  selectedAt: IsoDateTime,
+});
+
+export const CardVerdictRecordedPayload = Schema.Struct({
+  cardId: CardId,
+  verdict: CardVerdict,
+});
+
+export const CardVerifierOverriddenPayload = Schema.Struct({
+  cardId: CardId,
+  reason: TrimmedNonEmptyString,
+  overriddenAt: IsoDateTime,
+});
+
+export const CardVerifierRerunRequestedPayload = Schema.Struct({
+  cardId: CardId,
   requestedAt: IsoDateTime,
 });
 
@@ -2509,6 +2722,9 @@ const AgentCreateCommand = Schema.Struct({
   rolePrompt: Schema.String,
   modelSelection: ModelSelection,
   capabilities: RunCapabilities,
+  roles: Schema.optional(AgentRoles),
+  verifyWith: Schema.optional(Schema.NullOr(AgentName)),
+  blueprint: Schema.optional(AgentBlueprint),
   createdAt: IsoDateTime,
 });
 
@@ -2921,6 +3137,62 @@ const CardHelperRequestCommand = Schema.Struct({
   question: TrimmedNonEmptyString,
   createdAt: IsoDateTime,
 });
+
+// Server-only: the builder's owner tools. A null agent asks the builder's own template.
+const CardHelpRequestCommand = Schema.Struct({
+  type: Schema.Literal("card.help.request"),
+  commandId: CommandId,
+  cardId: CardId,
+  agentId: Schema.NullOr(AgentId),
+  messageId: MessageId,
+  question: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
+const CardCritiqueRequestCommand = Schema.Struct({
+  type: Schema.Literal("card.critique.request"),
+  commandId: CommandId,
+  cardId: CardId,
+  agentId: Schema.NullOr(AgentId),
+  messageId: MessageId,
+  focus: CardCritiqueFocus,
+  createdAt: IsoDateTime,
+});
+
+// Server-only: the verifier reactor picks who checks the card's commit, and the verifier's tool
+// records its verdict. The decider decides whether the verdict passed.
+const CardVerifierSelectCommand = Schema.Struct({
+  type: Schema.Literal("card.verifier.select"),
+  commandId: CommandId,
+  cardId: CardId,
+  headSha: TrimmedNonEmptyString,
+  verifier: CardVerifierSelection,
+});
+
+const CardVerdictRecordCommand = Schema.Struct({
+  type: Schema.Literal("card.verdict.record"),
+  commandId: CommandId,
+  ...Struct.pick(CardVerdict.fields, [
+    "verdictId",
+    "cardId",
+    "headSha",
+    "criteria",
+    "diffJudge",
+    "scenarios",
+    "recordedAt",
+  ]),
+});
+
+/** A person letting a card past a failed or pending verification, saying why. */
+const CardVerifierOverrideCommand = Schema.Struct({
+  type: Schema.Literal("card.verifier.override"),
+  commandId: CommandId,
+  cardId: CardId,
+  reason: Schema.String,
+});
+
+/** A person asking the verifier to check the card's commit again. */
+const CardVerifierRerunCommand = cardStatusCommand("card.verifier.rerun");
 
 /** A person's message for the card's owner session, delivered as its next turn. */
 const CardMessagePostCommand = Schema.Struct({
@@ -3413,6 +3685,8 @@ const IskraClientCommands = [
   CardRefsKeepCommand,
   CardCommentForwardCommand,
   CardAttentionDismissCommand,
+  CardVerifierOverrideCommand,
+  CardVerifierRerunCommand,
   CardFlagsAcknowledgeCommand,
   CardFixRoundsResetCommand,
   CardPauseCommand,
@@ -3608,6 +3882,10 @@ const ThreadPullRequestLinkSyncCommand = Schema.Struct({
 
 const InternalOrchestrationCommand = Schema.Union([
   CardActivityRecordCommand,
+  CardHelpRequestCommand,
+  CardCritiqueRequestCommand,
+  CardVerifierSelectCommand,
+  CardVerdictRecordCommand,
   CardCheckpointRequestCommand,
   CardEvidenceRecordCommand,
   CardReviewEnterCommand,
@@ -3677,6 +3955,11 @@ export const OrchestrationEventType = Schema.Literals([
   "card.session-requested",
   "card.session-started",
   "card.helper-requested",
+  "card.critique-requested",
+  "card.verifier-selected",
+  "card.verdict-recorded",
+  "card.verifier-overridden",
+  "card.verifier-rerun-requested",
   "card.message-posted",
   "card.delivery-updated",
   "card.spec-submitted",
@@ -4151,6 +4434,31 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("card.helper-requested"),
     payload: CardHelperRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.critique-requested"),
+    payload: CardCritiqueRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.verifier-selected"),
+    payload: CardVerifierSelectedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.verdict-recorded"),
+    payload: CardVerdictRecordedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.verifier-overridden"),
+    payload: CardVerifierOverriddenPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("card.verifier-rerun-requested"),
+    payload: CardVerifierRerunRequestedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,
@@ -4677,6 +4985,10 @@ export const AgentDefinitionInput = Schema.Struct({
   tags: Schema.Array(Schema.String),
   modelSelection: ModelSelection,
   capabilities: RunCapabilities,
+  // Optional so clients from before roles still save; absent keeps the defaults.
+  roles: Schema.optional(AgentRoles),
+  verifyWith: Schema.optional(Schema.NullOr(AgentName)),
+  blueprint: Schema.optional(AgentBlueprint),
   rolePrompt: Schema.String,
 });
 export type AgentDefinitionInput = typeof AgentDefinitionInput.Type;
@@ -4711,6 +5023,20 @@ export const OrchestrationRemoveProjectSecretInput = Schema.Struct({
   name: ProjectSecretName,
 });
 export type OrchestrationRemoveProjectSecretInput = typeof OrchestrationRemoveProjectSecretInput.Type;
+
+/** A project's hidden scenarios as listed: never their bodies or commands. */
+export const ProjectHoldoutsListInput = Schema.Struct({ projectId: ProjectId });
+export const ProjectHoldoutsListResult = Schema.Struct({
+  scenarios: Schema.Array(Schema.Struct(Struct.pick(HoldoutScenario.fields, ["scenarioId", "title", "kind"]))),
+});
+export const ProjectHoldoutGetInput = Schema.Struct({ projectId: ProjectId, scenarioId: TrimmedNonEmptyString });
+export const ProjectHoldoutGetResult = Schema.Struct({ scenario: HoldoutScenario });
+/** Adds or replaces one scenario by its id. */
+export const ProjectHoldoutSetInput = Schema.Struct({ projectId: ProjectId, scenario: HoldoutScenario });
+export const ProjectHoldoutRemoveInput = Schema.Struct({
+  projectId: ProjectId,
+  scenarioId: TrimmedNonEmptyString,
+});
 
 export const OrchestrationImportAgentDefinitionsInput = Schema.Struct({
   projectId: ProjectId,
@@ -4836,6 +5162,12 @@ export const OrchestrationCardStreamItem = Schema.Union([
     kind: Schema.Literal("snapshot"),
     activities: Schema.Array(CardActivity),
     evidence: Schema.NullOr(CardEvidenceRecording),
+    // Optional so snapshots from servers without the verifier still decode.
+    verdict: Schema.optional(Schema.NullOr(CardVerdict)),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("verdict"),
+    verdict: CardVerdict,
   }),
   Schema.Struct({
     kind: Schema.Literal("activity"),
@@ -4930,6 +5262,10 @@ export const OrchestrationRpcSchemas = {
     input: OrchestrationRemoveProjectSecretInput,
     output: Schema.Struct({}),
   },
+  listProjectHoldouts: { input: ProjectHoldoutsListInput, output: ProjectHoldoutsListResult },
+  getProjectHoldout: { input: ProjectHoldoutGetInput, output: ProjectHoldoutGetResult },
+  setProjectHoldout: { input: ProjectHoldoutSetInput, output: Schema.Struct({}) },
+  removeProjectHoldout: { input: ProjectHoldoutRemoveInput, output: Schema.Struct({}) },
 } as const;
 
 export class OrchestrationGetSnapshotError extends Schema.TaggedError<OrchestrationGetSnapshotError>()(
