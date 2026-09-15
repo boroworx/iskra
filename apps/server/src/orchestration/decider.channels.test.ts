@@ -442,7 +442,7 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
     Effect.gen(function* () {
       const builderOnly = AgentId.make("agent-builder-only");
       const base = [...setup, createAgent(builderOnly, { roles: ["builder"] })];
-      const refusal = "@builder-only can't lead a channel; give it the lead role first.";
+      const refusal = "@builder-only can't lead; give it the lead role first.";
       const updateLead = (leadAgentId: AgentId): OrchestrationCommand => ({
         type: "channel.update",
         commandId: nextCommandId(),
@@ -520,7 +520,7 @@ it.layer(NodeServices.layer)("decider channels", (it) => {
       });
 
       const roleless = yield* Effect.flip(applyCommands([...base, createRequests(builderOnly)]));
-      expect(roleless.message).toContain("@builder-only can't lead a channel");
+      expect(roleless.message).toContain("@builder-only can't lead; give it the lead role first");
 
       const created = [...base, createRequests()];
       const updated = yield* applyCommands([

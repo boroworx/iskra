@@ -131,7 +131,7 @@ export const channelLeadRoleRefusal = (
 ): string | null =>
   agent.roles.includes("lead")
     ? null
-    : `@${agent.name} can't lead a channel; give it the lead role first.`;
+    : `@${agent.name} can't lead; give it the lead role first.`;
 
 /** Helper and critic runs one card may have open at once. */
 export const MAX_OPEN_ASSIST_RUNS = 2;
