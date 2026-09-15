@@ -466,6 +466,9 @@ exports[`card, agent and channel projection > projects every card, agent and cha
     "_tag": "Some",
     "value": {
       "avatar": "W",
+      "capabilities": [
+        "read",
+      ],
       "id": "agent-web",
       "modelSelection": {
         "instanceId": "codex",
@@ -1718,6 +1721,10 @@ exports[`card, agent and channel projection > projects every card, agent and cha
     "agents": [
       {
         "avatar": null,
+        "capabilities": [
+          "read",
+          "write",
+        ],
         "id": "agent-api",
         "modelSelection": {
           "instanceId": "codex",
@@ -1734,6 +1741,9 @@ exports[`card, agent and channel projection > projects every card, agent and cha
       },
       {
         "avatar": "W",
+        "capabilities": [
+          "read",
+        ],
         "id": "agent-web",
         "modelSelection": {
           "instanceId": "codex",

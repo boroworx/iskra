@@ -48,16 +48,22 @@ const makeQueue = Effect.gen(function* () {
       readonly runs?: ReadonlyArray<ReturnType<typeof ownerRun>>;
       readonly sessionCap?: number | null;
       readonly openAgentPrCap?: number;
+      readonly guardAcknowledged?: boolean;
+      readonly agents?: OrchestrationReadModel["agents"];
     } = {},
   ) => {
     const readModel: OrchestrationReadModel = {
       ...base,
+      agents: options.agents ?? base.agents,
       projects: base.projects.map((project) => ({
         ...project,
         orchestration: {
           ...project.orchestration!,
           sessionCap: options.sessionCap ?? null,
           openAgentPrCap: options.openAgentPrCap ?? 5,
+          ...(options.guardAcknowledged === false
+            ? { sideEffectGuard: { acknowledgedAt: null, killSwitchEnv: null } }
+            : {}),
         },
       })),
       cards,
@@ -260,6 +266,39 @@ it.layer(NodeServices.layer)("planStarts", (it) => {
         waitReason: { code: "waitingForCapacity", text: "Waiting for machine capacity", since: now },
       });
       expect(plan([checks]).waits).toEqual([]);
+    }),
+  );
+
+  it.effect("says a card waits for the side-effect guard or for its agent to get write access, and clears it once fixed", () =>
+    Effect.gen(function* () {
+      const { card, plan } = yield* makeQueue;
+      const guarded = plan([card("go")], { guardAcknowledged: false });
+      expect(guarded.started).toEqual([]);
+      expect(guarded.waits.map((wait) => wait.reason)).toEqual([
+        {
+          code: "sideEffectGuard",
+          text: "Review this project's side-effect guard in project settings before agents start work.",
+        },
+      ]);
+
+      const readOnlyAgents = (yield* applyCommands([
+        createProject(),
+        createAgent(backend, { capabilities: ["read"] }),
+      ])).agents;
+      const readOnly = plan([card("go")], { agents: readOnlyAgents });
+      expect(readOnly.started).toEqual([]);
+      expect(readOnly.waits.map((wait) => wait.reason)).toEqual([
+        {
+          code: "delegateReadOnly",
+          text: "@backend can only read; give it write access in its agent settings to work on cards.",
+        },
+      ]);
+
+      // Once the guard is reviewed and the agent can write, the card starts and its wait clears.
+      const waiting = card("go", { waitReason: { ...readOnly.waits[0]!.reason!, since: now } });
+      const fixed = plan([waiting]);
+      expect(fixed.started).toEqual(["go"]);
+      expect(fixed.reasons).toEqual({ go: null });
     }),
   );
 });

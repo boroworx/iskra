@@ -776,6 +776,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           agents.avatar,
           agents.role_tags_json AS "roleTags",
           agents.model_selection_json AS "modelSelection",
+          agents.capabilities_json AS "capabilities",
           CASE
             WHEN EXISTS (
               SELECT 1

@@ -1,5 +1,9 @@
 import { cardPreview } from "@iskra/client-runtime/card-preview";
-import { CARD_QUESTION_KINDS, elicitationAnswer } from "@iskra/client-runtime/cards";
+import {
+  CARD_QUESTION_KINDS,
+  delegateReadOnlyWarning,
+  elicitationAnswer,
+} from "@iskra/client-runtime/cards";
 import {
   MessageId,
   type CardCriterion,
@@ -127,19 +131,27 @@ export function CriteriaEditor(props: {
  */
 export function CardPreviewPanel(props: {
   readonly estimate: CardEstimate | null;
-  readonly agent: Pick<OrchestrationAgentShell, "name" | "modelSelection"> | null;
+  readonly agent: Pick<OrchestrationAgentShell, "name" | "modelSelection" | "capabilities"> | null;
 }) {
   const preview = cardPreview(props);
+  // A warning, not a refusal: the card waits in the queue until the agent can write.
+  const readOnly = delegateReadOnlyWarning(props.agent);
+  const readOnlyWarning =
+    readOnly === null ? null : <p className="text-xs text-warning-foreground">{readOnly}</p>;
   if (preview === null) {
     return (
-      <p className="text-xs text-muted-foreground">
-        No estimate for this card.{" "}
-        {props.agent === null ? "" : `@${props.agent.name} on ${props.agent.modelSelection.model}.`}
-      </p>
+      <div className="flex flex-col gap-1">
+        <p className="text-xs text-muted-foreground">
+          No estimate for this card.{" "}
+          {props.agent === null ? "" : `@${props.agent.name} on ${props.agent.modelSelection.model}.`}
+        </p>
+        {readOnlyWarning}
+      </div>
     );
   }
   return (
     <div className="flex flex-col gap-1.5 rounded-md border border-border px-3 py-2 text-xs">
+      {readOnlyWarning}
       <p className="text-muted-foreground">The lead's estimate</p>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
         <dt className="text-muted-foreground">Size</dt>

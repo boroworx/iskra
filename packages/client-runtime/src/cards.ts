@@ -1,6 +1,8 @@
 import {
   CARD_AUTOFIX_ATTEMPTS,
+  delegateReadOnlyText,
   projectOrchestrationOf,
+  type OrchestrationAgentShell,
   type CardActivity,
   type CardId,
   type CardRelationKind,
@@ -204,6 +206,10 @@ export const REASON_LABEL: Readonly<Record<string, ReasonLabel>> = {
     label: "Waiting for the side-effect guard",
     hint: "Someone must review this project's side-effect guard in project settings first.",
   },
+  delegateReadOnly: {
+    label: "Its agent can only read",
+    hint: "A card's agent needs write access to change files. Give it write access in its agent settings.",
+  },
   // Pauses: the card is held until a person resumes it.
   startFailed: {
     label: "Couldn't start",
@@ -341,6 +347,18 @@ export const REASON_LABEL: Readonly<Record<string, ReasonLabel>> = {
     hint: "A person merged its pull request on the host, which counts as approving it.",
   },
 };
+
+/**
+ * The warning a card's start shows when the chosen agent can't write, in the scheduler's words;
+ * null when it can, or when an older server doesn't say.
+ */
+export function delegateReadOnlyWarning(
+  agent: Pick<OrchestrationAgentShell, "name" | "capabilities"> | null,
+): string | null {
+  return agent?.capabilities === undefined || agent.capabilities.includes("write")
+    ? null
+    : delegateReadOnlyText(agent.name);
+}
 
 /** A reason's short words and tooltip; an unknown code reads as its own text. */
 export function reasonLabel(reason: Pick<Reason, "code" | "text">): ReasonLabel {
@@ -564,6 +582,8 @@ export type NeedsYouKind =
   | "triage"
   | "spec"
   | "criteria"
+  | "needsAgent"
+  | "delegateReadOnly"
   | "awaitingInput"
   | "criteriaChange"
   | "checkpoint"
@@ -611,6 +631,8 @@ export const NEEDS_YOU_LABEL: Record<NeedsYouKind, string> = {
   triage: "Approve or drop this proposal",
   spec: "Approve or skip the spec",
   criteria: "Confirm the acceptance criteria",
+  needsAgent: "Assign an agent to start",
+  delegateReadOnly: "Its agent can only read; give it write access",
   awaitingInput: "Its agent is waiting on you",
   criteriaChange: "Its agent proposes a change to the acceptance criteria",
   checkpoint: "Its agent wants you to check its work before going on",
@@ -636,6 +658,15 @@ export function needsYouLabel(item: Pick<NeedsYouItem, "kind" | "code" | "reason
 
 const CRITERIA_REASON =
   "Work starts only once a person confirms them; they are what checks and review hold the work to.";
+const NO_CRITERIA_CODE = "criteriaMissing";
+const NO_CRITERIA_REASON =
+  "It has no acceptance criteria. Add some, so checks and review have something to hold the work to.";
+/** The scheduler's wait when a card's agent lacks write access; it waits on a person. */
+const DELEGATE_READ_ONLY_CODE = "delegateReadOnly";
+const PERSON_WAIT_CODES: ReadonlySet<string> = new Set([
+  DELEGATE_READ_ONLY_CODE,
+  "sideEffectGuard",
+]);
 const SIDE_EFFECT_GUARD_REASON =
   "Agents don't start work until someone checks this project's scheduled jobs and outbound APIs in project settings.";
 
@@ -700,6 +731,35 @@ export function needsYouItems(input: {
         since: card.updatedAt,
         reason: CRITERIA_REASON,
       });
+    } else if (
+      card.status !== "triage" &&
+      card.acceptance.criteria.length === 0 &&
+      // A Linear issue without criteria already says so as its own attention item.
+      !card.attention.some((item) => item.code === NO_CRITERIA_CODE)
+    ) {
+      // Cards from before criteria were confirmed with none; starting work needs some.
+      add({
+        ...base,
+        key: `criteria:${card.id}`,
+        kind: "criteria",
+        since: card.updatedAt,
+        reason: NO_CRITERIA_REASON,
+        code: NO_CRITERIA_CODE,
+      });
+    }
+    if ((card.status === "ready" || card.status === "inProgress") && card.paused === null) {
+      if (card.delegateAgentId === null) {
+        add({ ...base, key: `agent:${card.id}`, kind: "needsAgent", since: card.updatedAt });
+      } else if (card.waitReason?.code === DELEGATE_READ_ONLY_CODE) {
+        add({
+          ...base,
+          key: `readOnly:${card.id}`,
+          kind: "delegateReadOnly",
+          since: card.waitReason.since,
+          reason: card.waitReason.text,
+          code: DELEGATE_READ_ONLY_CODE,
+        });
+      }
     }
     if (card.checkpoint !== null) {
       add({
@@ -898,7 +958,8 @@ export function cardWaitItems(
       const base = { cardId: card.id, projectId: card.projectId, title: card.title };
       const pendingCi = card.evidence?.pendingCi ?? [];
       return [
-        ...(card.waitReason === null
+        // A wait only a person can end is a Needs you item instead.
+        ...(card.waitReason === null || PERSON_WAIT_CODES.has(card.waitReason.code)
           ? []
           : [
               {

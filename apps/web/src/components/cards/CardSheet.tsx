@@ -24,7 +24,7 @@ import {
 } from "@iskra/contracts";
 import { Link } from "@tanstack/react-router";
 import { XIcon } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { randomUUID } from "~/lib/utils";
 import { cardEnvironment } from "~/state/cards";
@@ -71,6 +71,8 @@ export function CardSheet(props: {
   readonly agents: ReadonlyArray<OrchestrationAgentShell>;
   /** When the board was opened, for the snoozed state. */
   readonly now: number;
+  /** The section to scroll to and focus when the sheet opens. */
+  readonly focus?: "agent" | "criteria" | undefined;
   readonly onClose: () => void;
 }) {
   return (
@@ -89,6 +91,7 @@ export function CardSheet(props: {
             cards={props.cards}
             agents={props.agents}
             now={props.now}
+            focus={props.focus}
           />
         )}
       </SheetPopup>
@@ -102,8 +105,22 @@ function CardSheetBody(props: {
   readonly cards: ReadonlyArray<OrchestrationCardShell>;
   readonly agents: ReadonlyArray<OrchestrationAgentShell>;
   readonly now: number;
+  readonly focus?: "agent" | "criteria" | undefined;
 }) {
   const { card, environmentId } = props;
+  // Needs you opens the sheet at what it asks for: once, when the body mounts for this card.
+  const agentSection = useRef<HTMLDivElement>(null);
+  const criteriaSection = useRef<HTMLDivElement>(null);
+  const initialFocus = useRef(props.focus);
+  useEffect(() => {
+    const section = (initialFocus.current === "agent" ? agentSection : criteriaSection).current;
+    if (initialFocus.current === undefined || section === null) return;
+    const frame = requestAnimationFrame(() => {
+      section.scrollIntoView({ block: "center" });
+      section.querySelector<HTMLElement>("button, textarea, input")?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
   const update = useAtomCommand(cardEnvironment.update);
   const decide = useAtomCommand(cardEnvironment.decide);
   const assign = useAtomCommand(cardEnvironment.assign);
@@ -408,9 +425,11 @@ function CardSheetBody(props: {
           </Section>
         ) : null}
 
-        <Section label="Acceptance criteria">
-          <CardCriteria card={card} environmentId={environmentId} />
-        </Section>
+        <div ref={criteriaSection} className="contents">
+          <Section label="Acceptance criteria">
+            <CardCriteria card={card} environmentId={environmentId} />
+          </Section>
+        </div>
 
         {card.status === "triage" || card.status === "ready" ? (
           <Section label="Before it starts">
@@ -426,6 +445,7 @@ function CardSheetBody(props: {
         ) : null}
 
         {open ? (
+          <div ref={agentSection} className="contents">
           <Section label="Agent">
             <div className="flex flex-wrap items-center gap-1.5">
               <Select
@@ -501,6 +521,7 @@ function CardSheetBody(props: {
               ) : null}
             </div>
           </Section>
+          </div>
         ) : null}
 
         <Section label="Relations">

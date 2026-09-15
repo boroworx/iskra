@@ -18,6 +18,7 @@ import {
   cardDropDecision,
   cardMoveActions,
   cardWaitItems,
+  delegateReadOnlyWarning,
   elicitationAnswer,
   isCardSnoozed,
   needsYouItems,
@@ -43,7 +44,6 @@ const card = (id: string, overrides: Partial<OrchestrationCard> = {}): Orchestra
   tags: [],
   status: "ready",
   ownerHumanId: "human",
-  delegateAgentId: null,
   baseBranch: null,
   branch: null,
   worktreePath: null,
@@ -69,6 +69,12 @@ const card = (id: string, overrides: Partial<OrchestrationCard> = {}): Orchestra
   suggestedAgentId: null,
   priority: 0,
   ...LEGACY_CARD_CONTRACT,
+  // Owned and held to a confirmed criterion, so nothing asks for an agent or criteria by default.
+  delegateAgentId: AgentId.make("agent-default"),
+  acceptance: {
+    state: "confirmed",
+    criteria: [{ id: "default", text: "Works.", verification: "automated" }],
+  },
   ...overrides,
 });
 
@@ -303,6 +309,90 @@ describe("needsYouItems", () => {
   });
 });
 
+describe("needsYouItems before work starts", () => {
+  const confirmed = (criteria: number) => ({
+    acceptance: {
+      state: "confirmed" as const,
+      criteria: Array.from({ length: criteria }, (_, index) => ({
+        id: `c${index}`,
+        text: "Works.",
+        verification: "automated" as const,
+      })),
+    },
+    specState: "skipped" as const,
+  });
+  const kinds = (cards: ReadonlyArray<OrchestrationCard>) =>
+    needsYouItems({ cards, sessions: [], now: Date.parse(at(30)) }).map((item) => [
+      item.kind,
+      item.cardId,
+    ]);
+
+  it("asks for an agent on an open card with none, unless a person paused it", () => {
+    const agent = AgentId.make("agent-1");
+    const unowned = { ...confirmed(1), delegateAgentId: null };
+    expect(
+      kinds([
+        card("ready", unowned),
+        card("restart", { ...unowned, status: "inProgress" }),
+        card("owned", { ...confirmed(1), delegateAgentId: agent }),
+        card("proposal", { ...unowned, status: "triage" }),
+        card("held", {
+          ...unowned,
+          paused: { reason: { code: "pausedByPerson", text: "Paused." }, by: "human", pausedAt: at(1) },
+        }),
+      ]),
+    ).toEqual([
+      ["needsAgent", "ready"],
+      ["needsAgent", "restart"],
+      ["triage", "proposal"],
+    ]);
+  });
+
+  it("asks for criteria on an unfinished card confirmed with none", () => {
+    const agent = AgentId.make("agent-1");
+    const items = needsYouItems({
+      cards: [
+        card("legacy", { ...confirmed(0), delegateAgentId: agent }),
+        card("fine", { ...confirmed(1), delegateAgentId: agent }),
+        card("done", { ...confirmed(0), status: "landed" }),
+      ],
+      sessions: [],
+      now: Date.parse(at(30)),
+    });
+    expect(items.map((item) => [item.kind, item.cardId])).toEqual([["criteria", "legacy"]]);
+    expect(needsYouLabel(items[0]!)).toBe("No acceptance criteria");
+  });
+
+  it("asks for write access when the queue says the card's agent can only read", () => {
+    const readOnly = card("reader", {
+      ...confirmed(1),
+      delegateAgentId: AgentId.make("agent-1"),
+      waitReason: {
+        code: "delegateReadOnly",
+        text: "@reader can only read; give it write access in its agent settings to work on cards.",
+        since: at(3),
+      },
+    });
+    const guarded = card("guarded", {
+      ...confirmed(1),
+      delegateAgentId: AgentId.make("agent-1"),
+      waitReason: { code: "sideEffectGuard", text: "Review the guard.", since: at(4) },
+    });
+    const items = needsYouItems({ cards: [readOnly], sessions: [], now: Date.parse(at(30)) });
+    expect(items.map((item) => [item.kind, item.reason])).toEqual([
+      ["delegateReadOnly", readOnly.waitReason!.text],
+    ]);
+    expect(needsYouLabel(items[0]!)).toBe("Its agent can only read");
+    // Approve & start warns in the queue's own words, and says nothing for an older server.
+    const reader = { name: "reader", capabilities: ["read" as const] };
+    expect(delegateReadOnlyWarning(reader)).toBe(readOnly.waitReason!.text);
+    expect(delegateReadOnlyWarning({ ...reader, capabilities: ["read", "write"] })).toBeNull();
+    expect(delegateReadOnlyWarning({ name: "reader" })).toBeNull();
+    // Both wait on a person, so neither is listed as waiting on Iskra.
+    expect(cardWaitItems([readOnly, guarded])).toEqual([]);
+  });
+});
+
 describe("needsYouItems in review", () => {
   it("asks for a merge once checks pass, and for a person once the agent's retries run out", () => {
     const checks = (state: "passed" | "failed", failedRuns: number) => ({
@@ -364,11 +454,14 @@ describe("needsYouItems on the card contract", () => {
       cards: [
         card("criteria", {
           status: "ready",
+          delegateAgentId: null,
           acceptance: { criteria: [], state: "draft" },
           updatedAt: at(1),
         }),
         card("checkpoint", {
           status: "inProgress",
+          // Another project's, so the side-effect guard item below stays with "unguarded".
+          projectId: ProjectId.make("project-other"),
           checkpoint: {
             checkpointId: "k1",
             whatToTry: "Split the form",
@@ -379,6 +472,7 @@ describe("needsYouItems on the card contract", () => {
         }),
         card("exhausted", {
           status: "inProgress",
+          projectId: ProjectId.make("project-other"),
           paused: {
             reason: { code: "fixRoundsExhausted", text: "CI failed twice." },
             by: "system",
@@ -387,6 +481,7 @@ describe("needsYouItems on the card contract", () => {
         }),
         card("mine", {
           status: "inProgress",
+          projectId: ProjectId.make("project-other"),
           paused: {
             reason: { code: "pausedByPerson", text: "Paused." },
             by: "human",
@@ -471,6 +566,7 @@ describe("needsYouItems on the card contract", () => {
         "criteria",
         "Work starts only once a person confirms them; they are what checks and review hold the work to.",
       ],
+      ["needsAgent", "criteria", null],
       ["checkpoint", "checkpoint", "Keep the old layout?"],
       ["fixRoundsExhausted", "exhausted", "CI failed twice."],
       ["scopeFlags", "flagged", "a.test.ts: deleted"],

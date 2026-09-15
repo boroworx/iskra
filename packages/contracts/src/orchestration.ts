@@ -609,6 +609,10 @@ export type RunCapability = typeof RunCapability.Type;
 export const RunCapabilities = Schema.Array(RunCapability);
 export type RunCapabilities = typeof RunCapabilities.Type;
 
+/** Why a card waits on a person when its agent can't write: card work changes files. */
+export const delegateReadOnlyText = (agentName: string) =>
+  `@${agentName} can only read; give it write access in its agent settings to work on cards.`;
+
 const AGENT_NAME_MAX_CHARS = 64;
 /** Agents are addressed as `@name`, so names are lowercase slugs. */
 export const AgentName = TrimmedNonEmptyString.check(
@@ -1869,6 +1873,8 @@ export const OrchestrationAgentShell = Schema.Struct({
   presence: AgentPresence,
   // What the agent's card sessions have cost across every card. Optional for older servers.
   spentUsd: Schema.optional(Schema.Number),
+  // Its card sessions' ceiling, so starting a card can warn when it can't write. Optional for older servers.
+  capabilities: Schema.optional(RunCapabilities),
 });
 export type OrchestrationAgentShell = typeof OrchestrationAgentShell.Type;
 

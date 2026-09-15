@@ -272,6 +272,39 @@ export function NeedsYouView() {
                       actionButton("Resume", () =>
                         decideOn(item.cardId, "card.resume", "The card was not resumed"),
                       )
+                    ) : (item.kind === "needsAgent" || item.kind === "criteria") &&
+                      environmentId !== null ? (
+                      <Button
+                        size="sm"
+                        variant="ghost-muted"
+                        render={
+                          <Link
+                            to="/board/$environmentId/$projectId"
+                            params={{ environmentId, projectId: item.projectId }}
+                            search={{
+                              card: item.cardId,
+                              focus: item.kind === "needsAgent" ? "agent" : "criteria",
+                            }}
+                          />
+                        }
+                      >
+                        {item.kind === "needsAgent" ? "Assign an agent" : "Open the criteria"}
+                      </Button>
+                    ) : item.kind === "delegateReadOnly" &&
+                      environmentId !== null &&
+                      itemCard?.delegateAgentId != null ? (
+                      <Button
+                        size="sm"
+                        variant="ghost-muted"
+                        render={
+                          <Link
+                            to="/agents/$environmentId/$agentId"
+                            params={{ environmentId, agentId: itemCard.delegateAgentId }}
+                          />
+                        }
+                      >
+                        Open its agent
+                      </Button>
                     ) : item.kind === "sideEffectGuard" ? (
                       <GuardLink search={orchestrationSettingsSearch(item.projectId)} />
                     ) : item.kind === "unpricedModel" ? (

@@ -1,6 +1,7 @@
 import * as DateTime from "effect/DateTime";
 
 import {
+  delegateReadOnlyText,
   projectOrchestrationOf,
   type CardId,
   type OrchestrationCard,
@@ -31,12 +32,19 @@ export const SCHEDULER_WAIT_CODES = [
   "waitingForMemory",
   "blocked",
   "startFailed",
+  "sideEffectGuard",
+  "delegateReadOnly",
 ] as const;
 export type SchedulerWaitCode = (typeof SCHEDULER_WAIT_CODES)[number];
 
 export const WAITING_FOR_MEMORY: Reason = {
   code: "waitingForMemory",
   text: "Waiting for the machine to free memory",
+};
+
+const SIDE_EFFECT_GUARD_WAIT: Reason = {
+  code: "sideEffectGuard",
+  text: "Review this project's side-effect guard in project settings before agents start work.",
 };
 
 /** Sessions this machine runs at once: a third of its cores or one per 8 GB, between 1 and 6. */
@@ -94,6 +102,7 @@ export function planStarts(input: PlanStartsInput): StartPlan {
   const desired = new Map<CardId, Reason>();
   const candidates: Array<OrchestrationCard> = [];
   for (const card of cards) {
+    // Every other hold already shows on the card and in Needs you, so it needs no wait reason.
     const runnable =
       // A ready card can already have its owner: work starts only once the session records.
       (card.status === "ready" || card.status === "inProgress") &&
@@ -105,9 +114,18 @@ export function planStarts(input: PlanStartsInput): StartPlan {
       card.checkpoint === null &&
       card.openElicitations.length === 0 &&
       !input.starting.has(card.id) &&
-      sideEffectGuardRefusal(policyOf(card.projectId)) === null &&
       cardBudgetRefusal(budgetCardOf(readModel, card)) === null;
     if (!runnable) continue;
+    if (sideEffectGuardRefusal(policyOf(card.projectId)) !== null) {
+      desired.set(card.id, SIDE_EFFECT_GUARD_WAIT);
+      continue;
+    }
+    // A session that can't write can't do card work, so it isn't started at all.
+    const delegate = (readModel.agents ?? []).find((agent) => agent.id === card.delegateAgentId);
+    if (delegate !== undefined && !delegate.capabilities.includes("write")) {
+      desired.set(card.id, { code: "delegateReadOnly", text: delegateReadOnlyText(delegate.name) });
+      continue;
+    }
     if (cardFactsOf(cards, card).openBlockerCount > 0) {
       desired.set(card.id, { code: "blocked", text: BLOCKED_REASON });
       continue;

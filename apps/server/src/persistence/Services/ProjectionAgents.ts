@@ -52,6 +52,7 @@ export const ProjectionAgentShellDbRow = OrchestrationAgentShell.mapFields(
   Struct.assign({
     roleTags: Schema.fromJsonString(Schema.Array(TrimmedNonEmptyString)),
     modelSelection: Schema.fromJsonString(ModelSelection),
+    capabilities: Schema.fromJsonString(RunCapabilities),
   }),
 );
 

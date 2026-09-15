@@ -85,6 +85,8 @@ export function BoardView(props: {
   readonly openCardId: CardId | null;
   /** Opens the New card dialog, from the route's `new` search param. */
   readonly openNewCard: boolean;
+  /** The control the open card's sheet moves to, from the route's `focus` search param. */
+  readonly focus?: "agent" | "criteria" | undefined;
 }) {
   const navigate = useNavigate();
   const [newCardOpen, setNewCardOpen] = useState(false);
@@ -205,6 +207,7 @@ export function BoardView(props: {
           cards={cards}
           agents={projectAgents}
           now={now}
+          focus={props.focus}
           onClose={closeCard}
         />
         <Tooltip handle={badgeHint}>
